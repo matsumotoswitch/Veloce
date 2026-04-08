@@ -89,4 +89,9 @@ npx tauri build
 
 ## 📄 ライセンス
 
-MIT License
+本ソフトウェアは **PolyForm Noncommercial License 1.0.0** の下で公開されています。
+
+個人の学習、趣味、非営利目的での利用・改変は自由に行っていただけますが、**いかなる形態であっても商用利用（営利目的での利用、組み込み、販売など）は固く禁止されています。**
+
+詳細な条文については、リポジトリ内の `LICENSE` ファイル、または以下のリンクをご参照ください。
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)
