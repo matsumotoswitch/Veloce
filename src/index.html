@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Velox - AI Image Manager</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* アプリ全体のフォントを統一 (Windows 8.1 向け) */
+    :root {
+      font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
+    }
+    /* フォーム要素も親のフォントを継承するように強制 */
+    body, input, textarea, button, select, table {
+      font-family: inherit;
+      font-size: 1em;
+    }
+    
+    /* ファイル一覧の罫線を設定 */
+    #file-table {
+      border-collapse: collapse;
+      font-size: 0.9em;
+    }
+    #file-table th, #file-table td {
+      border-right: 1px dotted #444;
+      border-bottom: 1px solid #444;
+    }
+    #file-table th {
+      font-weight: normal;
+    }
+    #file-table th:last-child, #file-table td:last-child {
+      border-right: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- 左ペイン: ディレクトリツリー等 -->
+  <div id="left-pane">
+	<div id="dir-tree"></div>
+  </div>
+
+  <div class="resizer" id="resizer-left"></div>
+
+  <!-- 中央ペイン: リストとグリッド -->
+  <div id="center-pane">
+	<div id="center-top">
+	  <table id="file-table">
+		<thead>
+		  <tr>
+			<th data-sort="name">名前</th>
+			<th data-sort="ext">拡張子</th>
+			<th data-sort="width">幅</th>
+			<th data-sort="height">高さ</th>
+			<th data-sort="size">サイズ</th>
+			<th data-sort="mtime">更新日時</th>
+		  </tr>
+		</thead>
+		<tbody id="file-list-body"></tbody>
+	  </table>
+	</div>
+	<div class="resizer-h" id="resizer-center"></div>
+	<div id="thumbnail-controls">
+	  <label for="thumbnail-size-slider">Size:</label>
+	  <input type="range" id="thumbnail-size-slider" min="50" max="400" value="120">
+	</div>
+	<div id="center-bottom" class="thumbnail-grid"></div>
+  </div>
+
+  <div class="resizer" id="resizer-right"></div>
+
+  <!-- 右ペイン: インスペクター -->
+  <div id="right-pane">
+	<div class="inspector-data">
+	  <label>Prompt:</label>
+	  <textarea id="prompt-text" readonly></textarea>
+	  <label>Negative Prompt:</label>
+	  <textarea id="negative-prompt-text" readonly></textarea>
+	</div>
+  </div>
+
+  <script src="preload.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
