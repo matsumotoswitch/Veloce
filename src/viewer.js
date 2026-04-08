@@ -305,7 +305,8 @@ let startX = 0, startY = 0; // ドラッグ開始時の座標
 let scrollLeftStart = 0, scrollTopStart = 0; // ドラッグ開始時のスクロール位置
 let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
 let clickTimeout = null; // シングルクリックとダブルクリックを区別するためのタイマー
-const CLICK_DETECTION_DELAY = 300; // ダブルクリックと判定するための待機時間 (ms)
+let lastClickTime = 0; // 最後にクリックされた時刻
+const STRICT_DBLCLICK_DELAY = 200; // 厳格なダブルクリック判定時間 (ms)
 
 // --- ウィンドウコントロールボタンの作成 ---
 // OS標準のタイトルバーのホバーバグを回避するため、HTMLで自前のコントロールを右上に描画する
@@ -423,23 +424,20 @@ window.addEventListener('mouseup', (e) => {
     }
     isDragging = false;
     if (!hasMoved && !ignoreNextClick) {
-      if (e.detail === 1) {
-        // 1回目のクリック時にタイマー開始
+      const now = Date.now();
+      if (now - lastClickTime < STRICT_DBLCLICK_DELAY) {
+        // 指定時間以内ならダブルクリックとして判定（フルスクリーン切り替え）
+        clearTimeout(clickTimeout);
+        window.veloxAPI.toggleViewerFullscreen();
+        lastClickTime = 0; // 連続発火を防ぐためリセット
+      } else {
+        // シングルクリック判定（2回目のクリックが来るのを指定時間だけ待機して、前の画像に戻る）
+        lastClickTime = now;
         clickTimeout = setTimeout(() => {
           showPrev();
-        }, CLICK_DETECTION_DELAY);
-      } else if (e.detail === 2) {
-        // 2回目のクリック（ダブルクリック時）にタイマーを即座にキャンセル
-        clearTimeout(clickTimeout);
+        }, STRICT_DBLCLICK_DELAY);
       }
     }
-  }
-});
-
-window.addEventListener('dblclick', (e) => {
-  if (e.button === 0) {
-    clearTimeout(clickTimeout); 
-    window.veloxAPI.toggleViewerFullscreen(); 
   }
 });
 
