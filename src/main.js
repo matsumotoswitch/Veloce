@@ -4,7 +4,7 @@ let greetInputEl;
 let greetMsgEl;
 
 async function greet() {
-  // Learn more about Tauri commands at https://v1.tauri.app/v1/guides/features/command
+  // メインプロセスに対して "greet" コマンドを呼び出す
   greetMsgEl.textContent = await invoke("greet", { name: greetInputEl.value });
 }
 

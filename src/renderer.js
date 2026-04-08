@@ -1,9 +1,9 @@
 // --- グローバル状態管理 ---
-let currentFiles = [];
-let currentSort = { key: 'name', asc: true };
-let selectedIndex = -1;
-let selectedIndices = new Set(); // 複数選択用のセットを追加
-let currentDirectory = '';
+let currentFiles = []; // 現在のディレクトリ内の画像ファイルリスト
+let currentSort = { key: 'name', asc: true }; // 現在のソート条件
+let selectedIndex = -1; // 最後に選択された画像のインデックス
+let selectedIndices = new Set(); // 複数選択された画像のインデックスセット
+let currentDirectory = ''; // 現在表示しているディレクトリパス
 let thumbnailObserver;
 let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
 let currentMetaRequestId = 0; // 非同期パースの競合対策用
@@ -39,6 +39,12 @@ contextMenu.style.zIndex = '10001';
 contextMenu.style.boxShadow = '0 2px 10px rgba(0,0,0,0.5)';
 contextMenu.style.minWidth = '150px';
 
+/**
+ * コンテキストメニューのオプション要素を作成する
+ * @param {string} text - メニュー項目のテキスト
+ * @param {function} onClick - クリック時のコールバック
+ * @returns {HTMLDivElement}
+ */
 const createMenuOption = (text, onClick) => {
   const option = document.createElement('div');
   option.textContent = text;
@@ -57,36 +63,66 @@ const createMenuOption = (text, onClick) => {
 };
 
 /**
- * カスタムプロンプトダイアログを表示する
+ * カスタムダイアログのベース要素を構築する内部関数
+ * @param {string} message - ダイアログに表示するメッセージ
+ * @param {HTMLElement} [contentElement] - メッセージの下に配置する追加要素
+ * @returns {object} { buttonsDiv, cleanup } ボタンを追加するコンテナと破棄関数
+ */
+function createCustomDialogBase(message, contentElement) {
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.top = '0';
+  overlay.style.left = '0';
+  overlay.style.width = '100vw';
+  overlay.style.height = '100vh';
+  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+  overlay.style.zIndex = '10002'; // コンテキストメニューより上に表示
+  overlay.style.display = 'flex';
+  overlay.style.justifyContent = 'center';
+  overlay.style.alignItems = 'center';
+
+  const dialog = document.createElement('div');
+  dialog.style.backgroundColor = '#2d2d2d';
+  dialog.style.border = '1px solid #444';
+  dialog.style.borderRadius = '4px';
+  dialog.style.padding = '20px';
+  dialog.style.minWidth = '300px';
+  dialog.style.boxShadow = '0 4px 15px rgba(0,0,0,0.5)';
+  dialog.style.color = '#ccc';
+  dialog.style.fontFamily = 'inherit';
+
+  const messageEl = document.createElement('div');
+  messageEl.textContent = message;
+  messageEl.style.marginBottom = contentElement ? '10px' : '20px';
+
+  const buttonsDiv = document.createElement('div');
+  buttonsDiv.style.display = 'flex';
+  buttonsDiv.style.justifyContent = 'flex-end';
+  buttonsDiv.style.gap = '10px';
+
+  dialog.appendChild(messageEl);
+  if (contentElement) dialog.appendChild(contentElement);
+  dialog.appendChild(buttonsDiv);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  const cleanup = () => {
+    if (document.body.contains(overlay)) {
+      document.body.removeChild(overlay);
+    }
+  };
+
+  return { buttonsDiv, cleanup };
+}
+
+/**
+ * ユーザー入力を求めるカスタムプロンプトダイアログを表示する
+ * @param {string} message - 表示するメッセージ
+ * @param {string} [defaultValue=''] - 入力欄の初期値
+ * @returns {Promise<string|null>} 入力された文字列。キャンセルされた場合は null
  */
 function showCustomPrompt(message, defaultValue = '') {
   return new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100vw';
-    overlay.style.height = '100vh';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    overlay.style.zIndex = '10002'; // コンテキストメニューより上に表示
-    overlay.style.display = 'flex';
-    overlay.style.justifyContent = 'center';
-    overlay.style.alignItems = 'center';
-
-    const dialog = document.createElement('div');
-    dialog.style.backgroundColor = '#2d2d2d';
-    dialog.style.border = '1px solid #444';
-    dialog.style.borderRadius = '4px';
-    dialog.style.padding = '20px';
-    dialog.style.minWidth = '300px';
-    dialog.style.boxShadow = '0 4px 15px rgba(0,0,0,0.5)';
-    dialog.style.color = '#ccc';
-    dialog.style.fontFamily = 'inherit';
-
-    const messageEl = document.createElement('div');
-    messageEl.textContent = message;
-    messageEl.style.marginBottom = '10px';
-
     const inputEl = document.createElement('input');
     inputEl.type = 'text';
     inputEl.value = defaultValue;
@@ -102,17 +138,12 @@ function showCustomPrompt(message, defaultValue = '') {
     inputEl.style.fontFamily = 'inherit';
     inputEl.style.outline = 'none';
 
-    const buttonsDiv = document.createElement('div');
-    buttonsDiv.style.display = 'flex';
-    buttonsDiv.style.justifyContent = 'flex-end';
-    buttonsDiv.style.gap = '10px';
+    const { buttonsDiv, cleanup } = createCustomDialogBase(message, inputEl);
 
     const btnStyle = 'padding: 6px 16px; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: 1em;';
-
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'キャンセル';
     cancelBtn.style.cssText = btnStyle + 'background-color: #444; color: #fff;';
-
     const okBtn = document.createElement('button');
     okBtn.textContent = 'OK';
     okBtn.style.cssText = btnStyle + 'background-color: #3a7afe; color: #fff;';
@@ -120,18 +151,8 @@ function showCustomPrompt(message, defaultValue = '') {
     buttonsDiv.appendChild(cancelBtn);
     buttonsDiv.appendChild(okBtn);
 
-    dialog.appendChild(messageEl);
-    dialog.appendChild(inputEl);
-    dialog.appendChild(buttonsDiv);
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-
     inputEl.focus();
     inputEl.select();
-
-    const cleanup = () => {
-      document.body.removeChild(overlay);
-    };
 
     okBtn.addEventListener('click', () => {
       cleanup();
@@ -156,66 +177,29 @@ function showCustomPrompt(message, defaultValue = '') {
 }
 
 /**
- * カスタム確認ダイアログを表示する
+ * 確認を求めるカスタムダイアログを表示する
+ * @param {string} message - 表示するメッセージ
+ * @returns {Promise<boolean>} OKが押された場合は true、キャンセル時は false
  */
 function showCustomConfirm(message) {
   return new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100vw';
-    overlay.style.height = '100vh';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    overlay.style.zIndex = '10002'; // コンテキストメニューより上に表示
-    overlay.style.display = 'flex';
-    overlay.style.justifyContent = 'center';
-    overlay.style.alignItems = 'center';
-
-    const dialog = document.createElement('div');
-    dialog.style.backgroundColor = '#2d2d2d';
-    dialog.style.border = '1px solid #444';
-    dialog.style.borderRadius = '4px';
-    dialog.style.padding = '20px';
-    dialog.style.minWidth = '300px';
-    dialog.style.boxShadow = '0 4px 15px rgba(0,0,0,0.5)';
-    dialog.style.color = '#ccc';
-    dialog.style.fontFamily = 'inherit';
-
-    const messageEl = document.createElement('div');
-    messageEl.textContent = message;
-    messageEl.style.marginBottom = '20px';
-
-    const buttonsDiv = document.createElement('div');
-    buttonsDiv.style.display = 'flex';
-    buttonsDiv.style.justifyContent = 'flex-end';
-    buttonsDiv.style.gap = '10px';
+    const { buttonsDiv, cleanup } = createCustomDialogBase(message);
 
     const btnStyle = 'padding: 6px 16px; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: 1em;';
-
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'キャンセル';
     cancelBtn.style.cssText = btnStyle + 'background-color: #444; color: #fff;';
-
     const okBtn = document.createElement('button');
     okBtn.textContent = '削除';
     okBtn.style.cssText = btnStyle + 'background-color: #e81123; color: #fff;'; // 削除アクションなので目立つ赤色
 
     buttonsDiv.appendChild(cancelBtn);
     buttonsDiv.appendChild(okBtn);
-    dialog.appendChild(messageEl);
-    dialog.appendChild(buttonsDiv);
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-
-    const cleanup = () => {
-      document.removeEventListener('keydown', keydownHandler);
-      document.body.removeChild(overlay);
-    };
 
     const keydownHandler = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        document.removeEventListener('keydown', keydownHandler);
         cleanup();
         resolve(false);
       }
@@ -223,8 +207,16 @@ function showCustomConfirm(message) {
 
     document.addEventListener('keydown', keydownHandler);
 
-    okBtn.addEventListener('click', () => { cleanup(); resolve(true); });
-    cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
+    okBtn.addEventListener('click', () => { 
+      document.removeEventListener('keydown', keydownHandler);
+      cleanup(); 
+      resolve(true); 
+    });
+    cancelBtn.addEventListener('click', () => { 
+      document.removeEventListener('keydown', keydownHandler);
+      cleanup(); 
+      resolve(false); 
+    });
 
     cancelBtn.focus(); // 誤操作(Enter連打)を防ぐためデフォルトでキャンセルにフォーカス
   });

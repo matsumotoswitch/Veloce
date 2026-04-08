@@ -27,13 +27,13 @@ window.veloxAPI = {
   /**
    * 指定されたパス内のサブフォルダのリストを取得します。
    * @param {string} path - 調査するディレクトリのパス。
-   * @returns {Promise<Array<object>>} フォルダ名のリスト。
+   * @returns {Promise<Array<object>>} サブフォルダ情報のリスト。
    */
   getFolders: (path) => invoke('get_folders', { dirPath: path }),
   /**
    * 複数の画像ファイルのメタデータ（幅・高さ）を一括で取得します。
    * @param {string[]} filePaths - 解析する画像ファイルパスの配列。
-   * @returns {Promise<Array<object>>} 各ファイルのパスとメタデータを含むオブジェクトの配列。
+   * @returns {Promise<Array<object>>} 各ファイルのパスとメタデータ（幅・高さなど）を含むオブジェクトの配列。
    */
   getImageMetadataBatch: (filePaths) => invoke('get_image_metadata_batch', { filePaths }),
   /**

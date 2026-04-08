@@ -83,7 +83,7 @@ document.body.appendChild(borderOverlay);
 imgElement.style.maxWidth = '100%';
 imgElement.style.maxHeight = '100%';
 
-window.addEventListener('DOMContentLoaded', async () => {
+window.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const indexParam = urlParams.get('index');
     if (indexParam !== null) {
@@ -123,6 +123,7 @@ function setZoomState(zoomed) {
     imgElement.style.height = `${imgElement.naturalHeight}px`;
     imgElement.style.cursor = 'grab';
   } else {
+    // 画面フィットまたはデフォルト表示に切り替え
     applyFitState();
   }
   updateFullscreenStyles();

@@ -1,7 +1,92 @@
-# Tauri + Vanilla
+# Veloce 🏎️💨
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Javascript.
+Veloce（ヴェローチェ）は、画像に埋め込まれたAI生成メタデータを解析・表示できる、超軽量・高速な画像マネージャー＆ビューアーです。
+前身となるElectron製アプリ「Velox」のアーキテクチャを根本から見直し、**Rust + Tauri** をバックエンドに採用することで、劇的な起動速度の向上とリソース消費の削減を実現しました。
 
-## Recommended IDE Setup
+イタリア語で「速い」を意味するその名の通り、スポーツカーのような鋭いレスポンスで大量の画像ディレクトリを快適にブラウジングできます。
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## ✨ 主な機能
+
+* **🚀 圧倒的な起動速度と軽量動作**
+  * Tauri + Rustの採用により、Electron特有の重さを排除。一瞬で起動し、すぐに作業を開始できます。
+* **🔍 AIメタデータの自動解析**
+  * PNG, WebP, JPEGファイルに埋め込まれたプロンプト、ネガティブプロンプト、生成パラメータ（NovelAI, Automatic1111形式など）を瞬時に抽出・表示します。
+* **🖼️ 独立した高機能ビューアー**
+  * 別ウィンドウで起動するビューアー。拡大縮小、回転、ウィンドウサイズへの自動フィット、フルスクリーン表示にネイティブ対応。
+  * 低解像度画像向けのシャープネスフィルター機能（`S`キー）を搭載。
+* **📁 快適なファイル管理**
+  * フォルダツリーによる直感的なナビゲーション。
+  * ドラッグ＆ドロップによる別フォルダ・ドライブへのファイル移動/コピー。
+  * ソート機能付きのリスト表示と、サイズ変更可能なサムネイルグリッド表示。
+
+## 🛠️ 技術スタック
+
+* **Frontend:** HTML5, CSS3, Vanilla JavaScript (No Framework)
+* **Backend:** Rust, Tauri v1
+* **Image Processing:** `image` (Rust crate)
+* **Metadata Parsing:** 独自実装のバイナリチャンクパーサー (PNG/WebP/JPEG)
+
+## 📦 インストールとビルド方法
+
+### 開発環境のセットアップ
+Node.js および Rust (Cargo) がインストールされている必要があります。
+
+~~~bash
+# リポジトリのクローン
+git clone [https://github.com/yourusername/veloce.git](https://github.com/yourusername/veloce.git)
+cd veloce
+
+# パッケージのインストール
+npm install
+
+# 開発モードで起動
+npx tauri dev
+~~~
+
+### アプリケーションのビルド
+
+~~~bash
+npx tauri build
+~~~
+
+ビルドが成功すると、`src-tauri/target/release` 配下に実行ファイル（`veloce.exe` 等）が生成されます。
+
+## ⌨️ キーボードショートカット
+
+いつでも `F1` または `H` キーを押すことで、ショートカット一覧（ヘルプ）を表示できます。
+
+### メイン画面
+
+| キー | アクション |
+| :--- | :--- |
+| `矢印キー` | 画像の選択を移動 |
+| `Ctrl / Shift + クリック` | 画像の複数選択 |
+| `ダブルクリック` | ビューアーを開く |
+| `F5` | 最新の情報に更新 |
+| `Delete` | 選択中の画像をゴミ箱に移動 |
+| `Ctrl + C` | 選択中の画像をクリップボードにコピー |
+
+### ビューアー画面
+
+| キー | アクション |
+| :--- | :--- |
+| `←` / `→` | 前 / 次の画像を表示 |
+| `↑` / `↓` | 右 / 左に90度回転 |
+| `Enter` | ズーム解除 / 強制フィット切替 |
+| `W` | ウィンドウを画像サイズにフィット |
+| `F11` | フルスクリーン切替 |
+| `B` | ウィンドウ枠の表示 / 非表示 |
+| `S` | 画像のシャープ / 滑らか表示切替 |
+| `Delete` | 画像をゴミ箱に移動 |
+| `Ctrl + C` | 画像をクリップボードにコピー |
+| `Esc` | ビューアーを閉じる |
+
+## 📝 開発の背景 (From Velox to Veloce)
+
+本アプリは元々、Electronを使用して「Velox」という名前で開発されていました。しかし、画像ビューアーとしての「サッと開いてサッと閉じる」という用途において、Chromiumプロセスを内包するElectronの起動オーバーヘッドやメモリ消費がネックとなっていました。
+
+そこで、OSネイティブのWebViewを利用するTauri（Rust）へコアエンジンを完全移行。メインスレッドのデッドロックやCSP（Content Security Policy）の壁を乗り越え、ラテン語の「Velox」から、現代的で洗練されたイタリア語の「Veloce」へと進化を遂げました。
+
+## 📄 ライセンス
+
+MIT License
