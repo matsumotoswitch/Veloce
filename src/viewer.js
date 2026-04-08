@@ -332,33 +332,35 @@ function createWindowControls() {
     justify-content: center;
     align-items: center;
     cursor: default;
-    background-color: transparent;
     transition: background-color 0.1s;
   `;
 
   // 最小化ボタン
   const minBtn = document.createElement('div');
   minBtn.style.cssText = buttonStyle;
+  minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
   minBtn.innerHTML = `<svg viewBox="0 0 10 1" width="10" height="1"><rect width="10" height="1" fill="#fff"/></svg>`;
   minBtn.onmouseenter = () => minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  minBtn.onmouseleave = () => minBtn.style.backgroundColor = 'transparent';
+  minBtn.onmouseleave = () => minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
   minBtn.onclick = () => window.veloxAPI.minimizeViewer();
 
   // 最大化/元に戻すボタン
   const maxBtn = document.createElement('div');
   maxBtn.id = 'window-max-btn';
   maxBtn.style.cssText = buttonStyle;
+  maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
   maxBtn.innerHTML = MAXIMIZE_ICON;
   maxBtn.onmouseenter = () => maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  maxBtn.onmouseleave = () => maxBtn.style.backgroundColor = 'transparent';
+  maxBtn.onmouseleave = () => maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
   maxBtn.onclick = () => window.veloxAPI.maximizeViewer();
 
   // 閉じるボタン
   const closeBtn = document.createElement('div');
   closeBtn.style.cssText = buttonStyle;
+  closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.2)';
   closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="#fff" stroke-width="1"/></svg>`;
   closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.5)'; // Windowsの閉じるボタンの赤色（半透明）
-  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'transparent';
+  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.2)';
   closeBtn.onclick = () => {
     if (window.veloxAPI && window.veloxAPI.closeWindow) window.veloxAPI.closeWindow();
   };
