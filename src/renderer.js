@@ -226,10 +226,28 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
   if (!contextMenu.targetFolder) return;
   const folderName = await showCustomPrompt('新しいフォルダ名を入力してください:');
   if (folderName) {
-    const result = await window.veloxAPI.createFolder(contextMenu.targetFolder.path, folderName);
+    const parentPath = contextMenu.targetFolder.path;
+    const result = await window.veloxAPI.createFolder(parentPath, folderName);
     if (result && result.success) {
       await refreshTree();
-      await expandTreeToPath(result.path); // 新規作成したフォルダを展開
+
+      // 親フォルダまで展開し、親フォルダ自身も展開状態（サブフォルダ表示）にする
+      await expandTreeToPath(parentPath, true);
+      const escapedParentPath = CSS.escape(parentPath);
+      const parentDiv = document.querySelector(`.tree-item[data-path="${escapedParentPath}"]`);
+      if (parentDiv && parentDiv.expandNode) {
+        await parentDiv.expandNode();
+      }
+
+      // ツリーの選択状態（フォーカス）を、現在開いているディレクトリに戻す
+      if (currentDirectory) {
+        const escapedCurrent = CSS.escape(currentDirectory);
+        const currentDiv = document.querySelector(`.tree-item[data-path="${escapedCurrent}"]`);
+        if (currentDiv) {
+          document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+          currentDiv.classList.add('selected');
+        }
+      }
     } else {
       alert('フォルダの作成に失敗しました:\n' + (result ? result.error : 'Unknown error'));
     }
