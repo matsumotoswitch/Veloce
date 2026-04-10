@@ -1,11 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use std::io::Read; // flate2のread_to_string用
 use std::sync::Mutex;
+use rayon::prelude::*;
 use tauri::Manager;
 
 // --- データ構造の定義 ---
@@ -15,10 +19,6 @@ pub struct ImageFile {
     name: String,
     ext: String,
     path: String,
-    size: u64,
-    mtime: u64,
-    width: u32,
-    height: u32,
 }
 
 #[derive(Serialize)]
@@ -29,10 +29,13 @@ pub struct LoadDirectoryResult {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImageMetadata {
     path: String,
     width: u32,
     height: u32,
+    size: u64,
+    mtime: u64,
 }
 
 #[derive(Serialize)]
@@ -124,42 +127,35 @@ async fn load_directory(
         let mut image_files = Vec::new();
         let mut paths = Vec::new();
 
-        if let Ok(entries) = fs::read_dir(&actual_dir) {
-            for entry in entries.filter_map(Result::ok) {
+        if let Ok(read_dir) = fs::read_dir(&actual_dir) {
+            let entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
+            
+            let mut results: Vec<_> = entries.into_par_iter().filter_map(|entry| {
                 let entry_path = entry.path();
                 if entry_path.is_file() {
                     if let Some(ext_os) = entry_path.extension() {
                         let ext = format!(".{}", ext_os.to_string_lossy().to_lowercase());
                         let supported = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
                         if supported.contains(&ext.as_str()) {
-                            if let Ok(metadata) = entry.metadata() {
-                                let size = metadata.len();
-                                let mtime = metadata
-                                    .modified()
-                                    .unwrap_or(UNIX_EPOCH)
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_millis() as u64;
-
-                                let absolute_path = match std::fs::canonicalize(&entry_path) {
-                                    Ok(p) => p.to_string_lossy().to_string(),
-                                    Err(_) => entry_path.to_string_lossy().to_string(),
-                                };
-                                let clean_path = absolute_path.replace("\\\\?\\", "");
-                                paths.push(clean_path.clone());
-                                image_files.push(ImageFile {
-                                    name: entry.file_name().to_string_lossy().to_string(),
-                                    ext,
-                                    path: clean_path,
-                                    size,
-                                    mtime,
-                                    width: 0,
-                                    height: 0,
-                                });
-                            }
+                            // 重い canonicalize() と metadata() を完全に排除（第一段階ロード）
+                            let clean_path = entry_path.to_string_lossy().replace("\\\\?\\", "");
+                            return Some((clean_path.clone(), ImageFile {
+                                name: entry.file_name().to_string_lossy().into_owned(),
+                                ext,
+                                path: clean_path,
+                            }));
                         }
                     }
                 }
+                None
+            }).collect();
+
+            // ファイル名の順番を安定させるためソート
+            results.sort_by(|a, b| a.0.cmp(&b.0));
+
+            for (path, file) in results {
+                paths.push(path);
+                image_files.push(file);
             }
         }
         Some((actual_dir, image_files, paths))
@@ -182,17 +178,31 @@ async fn load_directory(
 #[tauri::command]
 async fn get_image_metadata_batch(file_paths: Vec<String>) -> Result<Vec<ImageMetadata>, String> {
     Ok(tokio::task::spawn_blocking(move || {
-        let mut results = Vec::with_capacity(file_paths.len());
-        for path in file_paths {
-            // image::image_dimensions はファイル全体ではなくヘッダのみを読み込むため高速です
+        // rayonによるマルチスレッド並列処理で全コアを使い切る（第二段階ロード）
+        file_paths.into_par_iter().map(|path| {
+            // 1. 画像の解像度（ヘッダのみ読み込みでファイルハンドルは即解放される）
             let (width, height) = image::image_dimensions(&path).unwrap_or((0, 0));
-            results.push(ImageMetadata {
+            
+            // 2. ファイルサイズと更新日時（第一段階から移行）
+            let mut size = 0;
+            let mut mtime = 0;
+            if let Ok(metadata) = fs::metadata(&path) {
+                size = metadata.len();
+                mtime = metadata.modified()
+                    .unwrap_or(UNIX_EPOCH)
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+            }
+
+            ImageMetadata {
                 path,
                 width,
                 height,
-            });
-        }
-        results
+                size,
+                mtime,
+            }
+        }).collect()
     }).await.unwrap_or_default())
 }
 

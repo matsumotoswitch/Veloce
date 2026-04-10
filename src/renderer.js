@@ -4,7 +4,6 @@ let currentSort = { key: 'name', asc: true }; // 現在のソート条件
 let selectedIndex = -1; // 最後に選択された画像のインデックス
 let selectedIndices = new Set(); // 複数選択された画像のインデックスセット
 let currentDirectory = ''; // 現在表示しているディレクトリパス
-let thumbnailObserver;
 let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
 let currentMetaRequestId = 0; // 非同期パースの競合対策用
 
@@ -451,29 +450,6 @@ async function refreshFileList() {
 }
 
 /**
- * サムネイルの遅延読み込みのためのIntersectionObserverを初期化する
- */
-function initializeThumbnailObserver() {
-    const options = {
-        root: document.getElementById('center-pane'), // スクロールするコンテナ
-        rootMargin: '0px 0px 400px 0px', // ビューポートの400px下までを先行読み込みの対象とする
-    };
-    thumbnailObserver = new IntersectionObserver((entries, observer) => {
-        for (const entry of entries) {
-            if (entry.isIntersecting) {
-                const img = entry.target;
-                const filePath = img.dataset.filepath;
-                const mtime = parseInt(img.dataset.mtime, 10);
-                if (filePath && !img.src) {
-                    // TauriのAssetプロトコルを使って、オリジナル画像を直接・高速・高画質で読み込む
-                    img.src = window.veloxAPI.convertFileSrc(filePath);
-                    observer.unobserve(img); // 一度読み込んだら監視を解除
-                }
-            }
-        }
-    }, options);
-}
-/**
  * アプリケーションの初期化処理。DOMの読み込み完了後に実行される。
  */
 window.addEventListener('DOMContentLoaded', async () => {
@@ -511,8 +487,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       child.style.display = 'none';
     });
   }
-
-  initializeThumbnailObserver();
 
   // --- ディレクトリツリーの初期化を先に実行（UIを即座に表示させるため） ---
   await refreshTree();
@@ -926,8 +900,8 @@ function sortFiles() {
   const selectedPaths = new Set(Array.from(selectedIndices).map(i => currentFiles[i] ? currentFiles[i].path : null).filter(Boolean));
 
   currentFiles.sort((a, b) => {
-	let valA = a[currentSort.key];
-	let valB = b[currentSort.key];
+	let valA = a[currentSort.key] !== undefined ? a[currentSort.key] : 0;
+	let valB = b[currentSort.key] !== undefined ? b[currentSort.key] : 0;
 	if (valA < valB) return currentSort.asc ? -1 : 1;
 	if (valA > valB) return currentSort.asc ? 1 : -1;
 	return 0;
@@ -997,6 +971,7 @@ function formatDate(timestamp) {
  */
 function renderTable() {
   fileListBody.innerHTML = '';
+  const fragment = document.createDocumentFragment();
   currentFiles.forEach((file, index) => {
 	const tr = document.createElement('tr');
 	tr.innerHTML = `
@@ -1004,8 +979,8 @@ function renderTable() {
 	  <td>${file.ext}</td>
 	  <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
 	  <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
-	  <td style="text-align: right;">${formatSize(file.size)}</td>
-	  <td>${formatDate(file.mtime)}</td>
+	  <td style="text-align: right;">${file.size ? formatSize(file.size) : '-'}</td>
+	  <td>${file.mtime ? formatDate(file.mtime) : '-'}</td>
 	`;
 	
 	// リスト行からのドラッグを有効にする
@@ -1024,19 +999,15 @@ function renderTable() {
 	});
 
 	tr.addEventListener('click', (e) => selectImage(index, e));
-	fileListBody.appendChild(tr);
+	fragment.appendChild(tr);
   });
+  fileListBody.appendChild(fragment);
 }
 
 /**
  * 中央ペインのサムネイルグリッドを描画する。
  */
 function renderGrid() {
-  // 既存の画像の監視をすべて停止
-  if (thumbnailObserver) {
-      thumbnailObserver.disconnect();
-  }
-  
   // 画面サイズ変更時にサムネイルや余白が間延びしないようレイアウトを調整
   thumbnailGrid.style.display = 'flex';
   thumbnailGrid.style.flexWrap = 'wrap';
@@ -1050,9 +1021,9 @@ function renderGrid() {
 	const img = document.createElement('img');
 	// メモリ効率のため非同期デコードを指定
 	img.decoding = "async";
-	// 遅延読み込みのため、実際のパスと更新日時をデータ属性に格納
-	img.dataset.filepath = file.path;
-	img.dataset.mtime = file.mtime;
+	// ブラウザネイティブの遅延読み込みを利用し、画面外の画像のメモリ解放をOSに任せる
+	img.loading = "lazy";
+	img.src = window.veloxAPI.convertFileSrc(file.path);
 	img.className = 'thumbnail-item';
 	
 	// 画像全体を切り取らずに正方形の枠内に収める
@@ -1077,7 +1048,6 @@ function renderGrid() {
 	img.addEventListener('click', (e) => selectImage(index, e));
 	img.addEventListener('dblclick', () => openViewer(index));
 	fragment.appendChild(img);
-	thumbnailObserver.observe(img);
   });
   thumbnailGrid.appendChild(fragment);
 }
@@ -1089,13 +1059,13 @@ function renderGrid() {
 async function loadMetadataInBackground() {
   if (!window.veloxAPI.getImageMetadataBatch) return;
 
-  // まだ幅・高さが読み込まれていないファイルだけを抽出
-  const filesToLoad = currentFiles.filter(f => f.width === 0 && f.height === 0);
+  // まだメタデータ（幅・高さ・サイズ・日時）が読み込まれていないファイルだけを抽出
+  const filesToLoad = currentFiles.filter(f => !f.width && !f.height);
   if (filesToLoad.length === 0) return;
 
   const batchId = ++currentMetaBatchId;
   const pathsToLoad = filesToLoad.map(f => f.path);
-  const CHUNK_SIZE = 50; // 一度に問い合わせるファイル数
+  const CHUNK_SIZE = 200; // 並列処理されているため、チャンクサイズを増やして通信回数を減らす
 
   const processNextChunk = (chunkIndex) => {
     if (chunkIndex >= pathsToLoad.length || currentMetaBatchId !== batchId) return;
@@ -1116,12 +1086,16 @@ async function loadMetadataInBackground() {
           if (fileIndex > -1) {
             currentFiles[fileIndex].width = meta.width;
             currentFiles[fileIndex].height = meta.height;
+            currentFiles[fileIndex].size = meta.size;
+            currentFiles[fileIndex].mtime = meta.mtime;
 
-            // 対応するテーブル行を更新（幅は3列目、高さは4列目）
+            // 対応するテーブル行を更新
             const row = fileListBody.rows[fileIndex];
             if (row) {
               row.cells[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
               row.cells[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
+              row.cells[4].textContent = meta.size ? formatSize(meta.size) : '-';
+              row.cells[5].textContent = meta.mtime ? formatDate(meta.mtime) : '-';
             }
           }
         });
