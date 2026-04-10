@@ -10,12 +10,6 @@ use tauri::Manager;
 
 // --- データ構造の定義 ---
 #[derive(Serialize)]
-pub struct FolderInfo {
-    name: String,
-    path: String,
-}
-
-#[derive(Serialize)]
 #[serde(rename_all = "camelCase")] // フロントエンドのJSがキャメルケースを期待しているため変換
 pub struct ImageFile {
     name: String,
@@ -99,27 +93,6 @@ fn get_drives() -> Vec<String> {
     }
 
     drives
-}
-
-#[tauri::command]
-async fn get_folders(dir_path: String) -> Result<Vec<FolderInfo>, String> {
-    Ok(tokio::task::spawn_blocking(move || {
-        let mut folders = Vec::new();
-        if let Ok(entries) = fs::read_dir(&dir_path) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.is_dir() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        folders.push(FolderInfo {
-                            name: name.to_string(),
-                            path: path.to_string_lossy().to_string(),
-                        });
-                    }
-                }
-            }
-        }
-        folders
-    }).await.unwrap_or_default())
 }
 
 #[tauri::command]
@@ -590,77 +563,6 @@ async fn open_viewer(
 }
 
 #[tauri::command]
-fn toggle_viewer_fullscreen(window: tauri::Window) {
-    let is_fs = window.is_fullscreen().unwrap_or(false);
-    let _ = window.set_fullscreen(!is_fs);
-}
-
-#[tauri::command]
-fn minimize_viewer(window: tauri::Window) {
-    let _ = window.minimize();
-}
-
-#[tauri::command]
-fn maximize_viewer(window: tauri::Window) {
-    let is_max = window.is_maximized().unwrap_or(false);
-    if is_max {
-        let _ = window.unmaximize();
-    } else {
-        let _ = window.maximize();
-    }
-}
-
-#[tauri::command]
-fn start_viewer_dragging(window: tauri::Window) {
-    let _ = window.start_dragging();
-}
-
-#[tauri::command]
-fn resize_viewer_window(window: tauri::Window, width: f64, height: f64) {
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        let scale_factor = monitor.scale_factor();
-        let work_area = monitor.size().to_logical::<f64>(scale_factor);
-        let mut new_width = width;
-        let mut new_height = height;
-
-        if new_width > work_area.width || new_height > work_area.height {
-            let scale = (work_area.width / new_width).min(work_area.height / new_height);
-            new_width *= scale;
-            new_height *= scale;
-        }
-
-        if let Ok(current_pos) = window.outer_position() {
-            let size = tauri::Size::Logical(tauri::LogicalSize { width: new_width, height: new_height });
-            let _ = window.set_size(size);
-            // Wキー等での単発のサイズ変更時に、原点（左上）が移動してしまうOSの挙動を防ぐ
-            let _ = window.set_position(current_pos);
-        }
-    }
-}
-
-#[tauri::command]
-fn move_viewer_window(window: tauri::Window, x: f64, y: f64) {
-    // 過剰な連続呼び出しを防ぐため、現在の位置と比較して変化が1px未満の場合は無視する
-    if let Ok(current_pos) = window.outer_position() {
-        if let Ok(Some(monitor)) = window.current_monitor() {
-            let scale_factor = monitor.scale_factor();
-            let current_logical = current_pos.to_logical::<f64>(scale_factor);
-            if (current_logical.x - x).abs() < 1.0 && (current_logical.y - y).abs() < 1.0 {
-                return;
-            }
-        }
-    }
-
-    let new_pos = tauri::Position::Logical(tauri::LogicalPosition { x, y });
-    let _ = window.set_position(new_pos);
-}
-
-#[tauri::command]
-fn close_viewer(window: tauri::Window) {
-    let _ = window.close();
-}
-
-#[tauri::command]
 fn sync_image_paths(state: tauri::State<'_, AppState>, paths: Vec<String>) {
     if let Ok(mut lock) = state.image_paths.lock() {
         *lock = paths;
@@ -689,33 +591,6 @@ async fn trash_file(app: tauri::AppHandle, file_path: String) -> Result<bool, St
 }
 
 #[tauri::command]
-async fn create_folder(parent_dir: String, folder_name: String) -> Result<FolderOperationResult, String> {
-    Ok(tokio::task::spawn_blocking(move || {
-        let target_path = Path::new(&parent_dir).join(&folder_name);
-        match fs::create_dir(&target_path) {
-            Ok(_) => FolderOperationResult { success: true, path: Some(target_path.to_string_lossy().to_string()), error: None },
-            Err(e) => FolderOperationResult { success: false, path: None, error: Some(e.to_string()) },
-        }
-    }).await.unwrap_or_else(|e| FolderOperationResult { success: false, path: None, error: Some(e.to_string()) }))
-}
-
-#[tauri::command]
-async fn rename_folder(old_path: String, new_name: String) -> Result<FolderOperationResult, String> {
-    Ok(tokio::task::spawn_blocking(move || {
-        let old_p = Path::new(&old_path);
-        if let Some(parent) = old_p.parent() {
-            let target_path = parent.join(&new_name);
-            match fs::rename(old_p, &target_path) {
-                Ok(_) => FolderOperationResult { success: true, path: Some(target_path.to_string_lossy().to_string()), error: None },
-                Err(e) => FolderOperationResult { success: false, path: None, error: Some(e.to_string()) },
-            }
-        } else {
-            FolderOperationResult { success: false, path: None, error: Some("Invalid path".into()) }
-        }
-    }).await.unwrap_or_else(|e| FolderOperationResult { success: false, path: None, error: Some(e.to_string()) }))
-}
-
-#[tauri::command]
 async fn trash_folder(folder_path: String) -> Result<FolderOperationResult, String> {
     Ok(tokio::task::spawn_blocking(move || {
         match trash::delete(&folder_path) {
@@ -723,35 +598,6 @@ async fn trash_folder(folder_path: String) -> Result<FolderOperationResult, Stri
             Err(e) => FolderOperationResult { success: false, path: None, error: Some(e.to_string()) },
         }
     }).await.unwrap_or_else(|e| FolderOperationResult { success: false, path: None, error: Some(e.to_string()) }))
-}
-
-#[tauri::command]
-async fn move_or_copy_file(source_path: String, target_dir: String) -> Result<MoveOrCopyResult, String> {
-    Ok(tokio::task::spawn_blocking(move || {
-        let source = Path::new(&source_path);
-        let target_d = Path::new(&target_dir);
-
-        if let (Some(source_parent), Some(file_name)) = (source.parent(), source.file_name()) {
-            if source_parent == target_d {
-                return MoveOrCopyResult { success: false, action: String::new(), reason: Some("same_directory".into()) };
-            }
-
-            let target_path = target_d.join(file_name);
-
-            // ドライブレター等の比較で移動かコピーかを判定 (Windowsの場合は C:\ など)
-            let source_root = source.components().next();
-            let target_root = target_d.components().next();
-            let is_move = source_root == target_root;
-            let action = if is_move { "move" } else { "copy" };
-
-            // 同一ドライブなら rename、異なれば copy を使用
-            let result = if is_move { fs::rename(&source, &target_path).is_ok() } else { fs::copy(&source, &target_path).is_ok() };
-
-            MoveOrCopyResult { success: result, action: action.into(), reason: None }
-        } else {
-            MoveOrCopyResult { success: false, action: String::new(), reason: Some("invalid_path".into()) }
-        }
-    }).await.unwrap_or_else(|e| MoveOrCopyResult { success: false, action: String::new(), reason: Some(e.to_string()) }))
 }
 
 #[tauri::command]
@@ -797,25 +643,14 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_drives,
-            get_folders,
             load_directory,
             get_image_metadata_batch,
             parse_metadata,
             get_viewer_image,
             open_viewer,
-            toggle_viewer_fullscreen,
-            minimize_viewer,
-            maximize_viewer,
-            resize_viewer_window,
-            start_viewer_dragging,
-            move_viewer_window,
-            close_viewer,
             sync_image_paths,
             trash_file,
-            create_folder,
-            rename_folder,
             trash_folder,
-            move_or_copy_file,
             copy_image_to_clipboard,
             toggle_devtools
         ])

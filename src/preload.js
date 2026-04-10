@@ -1,6 +1,6 @@
 const { invoke, convertFileSrc } = window.__TAURI__.tauri;
 const { listen } = window.__TAURI__.event;
-const { appWindow } = window.__TAURI__.window;
+const { appWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
 
 /**
  * @description
@@ -29,7 +29,19 @@ window.veloxAPI = {
    * @param {string} path - 調査するディレクトリのパス。
    * @returns {Promise<Array<object>>} サブフォルダ情報のリスト。
    */
-  getFolders: (path) => invoke('get_folders', { dirPath: path }),
+  getFolders: async (dirPath) => {
+    const { fs } = window.__TAURI__;
+    try {
+      const entries = await fs.readDir(dirPath);
+      // Tauri v1では、ディレクトリの場合のみ children プロパティが（空でも）付与されます
+      return entries
+        .filter(entry => entry.children !== undefined)
+        .map(entry => ({ name: entry.name, path: entry.path }));
+    } catch (error) {
+      console.warn("Failed to get folders:", error);
+      return [];
+    }
+  },
   /**
    * 複数の画像ファイルのメタデータ（幅・高さ）を一括で取得します。
    * @param {string[]} filePaths - 解析する画像ファイルパスの配列。
@@ -64,31 +76,34 @@ window.veloxAPI = {
   /**
    * ビューアウィンドウのフルスクリーン状態をトグルするようメインプロセスに要求します。
    */
-  toggleViewerFullscreen: () => invoke('toggle_viewer_fullscreen'),
+  toggleViewerFullscreen: async () => {
+    const isFs = await appWindow.isFullscreen();
+    return appWindow.setFullscreen(!isFs);
+  },
   /**
    * ビューアウィンドウを最小化するようメインプロセスに要求します。
    */
-  minimizeViewer: () => invoke('minimize_viewer'),
+  minimizeViewer: () => appWindow.minimize(),
   /**
    * ビューアウィンドウを最大化するようメインプロセスに要求します。
    */
-  maximizeViewer: () => invoke('maximize_viewer'),
+  maximizeViewer: () => appWindow.toggleMaximize(),
   /**
    * ビューアウィンドウのサイズを変更するようメインプロセスに要求します。
    * @param {number} width - 変更後の幅。
    * @param {number} height - 変更後の高さ。
    */
-  resizeViewerWindow: (width, height) => invoke('resize_viewer_window', { width, height }),
+  resizeViewerWindow: (width, height) => appWindow.setSize(new LogicalSize(width, height)),
   /**
    * ビューアウィンドウのドラッグ移動をOSネイティブに委譲します。
    */
-  startViewerDragging: () => invoke('start_viewer_dragging'),
+  startViewerDragging: () => appWindow.startDragging(),
   /**
    * ビューアウィンドウを移動するようメインプロセスに要求します。
    * @param {number} x - 移動先の画面X座標。
    * @param {number} y - 移動先の画面Y座標。
    */
-  moveViewerWindow: (x, y) => invoke('move_viewer_window', { x, y }),
+  moveViewerWindow: (x, y) => appWindow.setPosition(new LogicalPosition(x, y)),
   /**
    * 画像をクリップボードにコピーするようメインプロセスに要求します。
    * @param {string} filePath - コピーする画像ファイルのパス。
@@ -110,13 +125,32 @@ window.veloxAPI = {
    * @param {string} parentDir - 親ディレクトリのパス。
    * @param {string} folderName - 新しいフォルダ名。
    */
-  createFolder: (parentDir, folderName) => invoke('create_folder', { parentDir, folderName }),
+  createFolder: async (parentDir, folderName) => {
+    const { fs, path } = window.__TAURI__;
+    try {
+      const newPath = await path.join(parentDir, folderName);
+      await fs.createDir(newPath);
+      return { success: true, path: newPath };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  },
   /**
    * フォルダ名を変更するようメインプロセスに要求します。
    * @param {string} oldPath - 変更前のフォルダのパス。
    * @param {string} newName - 新しいフォルダ名。
    */
-  renameFolder: (oldPath, newName) => invoke('rename_folder', { oldPath, newName }),
+  renameFolder: async (oldPath, newName) => {
+    const { fs, path } = window.__TAURI__;
+    try {
+      const parent = await path.dirname(oldPath);
+      const newPath = await path.join(parent, newName);
+      await fs.renameFile(oldPath, newPath);
+      return { success: true, path: newPath };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  },
   /**
    * フォルダをゴミ箱に移動するようメインプロセスに要求します。
    * @param {string} folderPath - 削除するフォルダのパス。
@@ -128,7 +162,30 @@ window.veloxAPI = {
    * @param {string} targetDir - ドロップ先のディレクトリパス。
    * @returns {Promise<object>} 処理結果 { success, action }。
    */
-  moveOrCopyFile: (sourcePath, targetDir) => invoke('move_or_copy_file', { sourcePath, targetDir }),
+  moveOrCopyFile: async (sourcePath, targetDir) => {
+    const { fs, path } = window.__TAURI__;
+    try {
+      const fileName = await path.basename(sourcePath);
+      const targetPath = await path.join(targetDir, fileName);
+      const sourceDir = await path.dirname(sourcePath);
+
+      if (sourceDir === targetDir) {
+        return { success: false, action: '', reason: 'same_directory' };
+      }
+
+      let action = 'move';
+      try {
+        // まず rename (移動) を試み、ドライブ跨ぎ等でOSから拒否されたら copy にフォールバックする
+        await fs.renameFile(sourcePath, targetPath);
+      } catch (e) {
+        action = 'copy';
+        await fs.copyFile(sourcePath, targetPath);
+      }
+      return { success: true, action, reason: null };
+    } catch (error) {
+      return { success: false, action: '', reason: String(error) };
+    }
+  },
   /**
    * ローカルファイルパスをTauriのAssetプロトコルURLに変換します。
    * @param {string} filePath - ローカルファイルのパス
@@ -142,7 +199,7 @@ window.veloxAPI = {
   /**
    * ウィンドウを安全に閉じます。
    */
-  closeWindow: () => invoke('close_viewer'),
+  closeWindow: () => appWindow.close(),
   /**
    * Rust側の画像パス配列をフロントエンドのソート結果と同期します。
    * @param {string[]} paths - ソート済みの画像パス配列
