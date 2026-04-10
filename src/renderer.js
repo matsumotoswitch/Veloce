@@ -789,14 +789,13 @@ function createTreeNode(folder, isRoot = false) {
     e.preventDefault(); // ドロップを許可するために必要
     
     // ドライブレターが同じか判定（Windows想定。その他は常に'/'）
-    let actionStr = '移動';
+    let actionStr = 'コピー'; // 外部からのドロップのデフォルト
     if (dragState.paths.length > 0) {
       const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
       actionStr = getRoot(dragState.paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
-      e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
-    } else {
-      e.dataTransfer.dropEffect = 'copyMove';
     }
+    // ブラウザの仕様に準拠した dropEffect を設定（copyMoveは無効な値のため除外）
+    e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
 
     const folderName = isRoot ? folder.path : folder.name;
     const countStr = dragState.paths.length > 1 ? `${dragState.paths.length}個のファイルを ` : '';
