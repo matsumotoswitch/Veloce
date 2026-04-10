@@ -273,7 +273,24 @@ async function loadImage() {
     document.title = `Velox Viewer - ${currentIndex + 1} / ${totalImages}`;
     imgElement.onload = () => {
       setZoomState(isZoomed);
+      // 現在の画像の読み込みが完了したら、前後1枚ずつをプリロード（先読み）する
+      preloadImage(currentIndex - 1);
+      preloadImage(currentIndex + 1);
     };
+  }
+}
+
+/**
+ * 指定されたインデックスの画像をブラウザのキャッシュに先読みする
+ * @param {number} index - 先読みする画像のインデックス
+ */
+async function preloadImage(index) {
+  if (index >= 0 && index < totalImages) {
+    const result = await window.veloxAPI.getViewerImage(index);
+    if (result) {
+      const img = new Image();
+      img.src = window.veloxAPI.convertFileSrc(result.path);
+    }
   }
 }
 
