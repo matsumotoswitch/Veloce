@@ -475,9 +475,6 @@ window.addEventListener('contextmenu', (e) => {
 
 // --- マウスホイールによる画像送り ---
 window.addEventListener('wheel', (e) => {
-  // ズーム中（100%表示でスクロールが必要な状態）はブラウザの標準スクロールを優先
-  if (isZoomed) return;
-  
   if (e.deltaY > 0) {
     showNext(); // 下スクロールで次へ
   } else if (e.deltaY < 0) {
