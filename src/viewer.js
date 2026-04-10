@@ -374,6 +374,13 @@ function createWindowControls() {
 createWindowControls();
 
 window.addEventListener('mousedown', (e) => {
+  // ウィンドウがフォーカスを取得した直後のクリック（フォーカス目的のクリック）を画像送りとして扱わない
+  if (Date.now() - lastFocusTime < 200) {
+    ignoreNextClick = true;
+  } else {
+    ignoreNextClick = false;
+  }
+
   if (e.button === 0) { // 左クリック
     isDragging = true;
     hasMoved = false;
@@ -445,6 +452,7 @@ window.addEventListener('mouseup', (e) => {
 
 window.addEventListener('contextmenu', (e) => {
   e.preventDefault(); 
+  if (ignoreNextClick) return; // フォーカス目的の右クリックを無視
   showNext(); // 右クリックで次の画像へ
 });
 
