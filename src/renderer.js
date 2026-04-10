@@ -1410,6 +1410,7 @@ function toggleHelpOverlay(forceShow) {
           <tr><td style="padding: 6px 15px; font-weight: bold;">矢印キー</td><td style="padding: 6px 15px;">画像の選択を移動</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">F5</td><td style="padding: 6px 15px;">最新の情報に更新</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl / Shift + クリック</td><td style="padding: 6px 15px;">画像の複数選択</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているビューワーを横一列に並べる</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">選択中の画像をゴミ箱に移動</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をコピー</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">ダブルクリック</td><td style="padding: 6px 15px;">サムネイルからビューワーを開く</td></tr>
@@ -1470,6 +1471,12 @@ window.addEventListener('keydown', async (e) => {
     e.preventDefault();
     toggleHelpOverlay(false);
     return;
+  }
+
+  // Aでビューワーを横に並べる
+  if (e.key === 'a' || e.key === 'A') {
+    e.preventDefault();
+    if (window.veloxAPI.arrangeViewers) window.veloxAPI.arrangeViewers();
   }
 
   // F5で最新の情報に更新

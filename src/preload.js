@@ -201,6 +201,10 @@ window.veloxAPI = {
    */
   closeWindow: () => appWindow.close(),
   /**
+   * 開いているすべてのビューアーウィンドウを横一列に並べます。
+   */
+  arrangeViewers: () => invoke('arrange_viewers'),
+  /**
    * Rust側の画像パス配列をフロントエンドのソート結果と同期します。
    * @param {string[]} paths - ソート済みの画像パス配列
    */

@@ -563,6 +563,41 @@ async fn open_viewer(
 }
 
 #[tauri::command]
+fn arrange_viewers(app: tauri::AppHandle) {
+    let windows = app.windows();
+    let mut viewers: Vec<_> = windows
+        .into_values()
+        .filter(|w| w.label().starts_with("viewer_"))
+        .collect();
+
+    let count = viewers.len();
+    if count == 0 { return; }
+
+    // ラベル名のタイムスタンプ（作成順）でソートして、左から古い順に並べる
+    viewers.sort_by_key(|w| w.label().to_string());
+
+    if let Some(first_viewer) = viewers.first() {
+        if let Ok(Some(monitor)) = first_viewer.current_monitor() {
+            let scale_factor = monitor.scale_factor();
+            let work_area = monitor.size().to_logical::<f64>(scale_factor);
+            let position = monitor.position().to_logical::<f64>(scale_factor);
+
+            let target_width = work_area.width / count as f64;
+            let target_height = work_area.height;
+
+            for (i, window) in viewers.iter().enumerate() {
+                let x = position.x + (i as f64 * target_width);
+                let y = position.y;
+
+                let _ = window.unmaximize(); // 最大化されていると移動できないため解除
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: target_width, height: target_height }));
+                let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+            }
+        }
+    }
+}
+
+#[tauri::command]
 fn sync_image_paths(state: tauri::State<'_, AppState>, paths: Vec<String>) {
     if let Ok(mut lock) = state.image_paths.lock() {
         *lock = paths;
@@ -648,6 +683,7 @@ fn main() {
             parse_metadata,
             get_viewer_image,
             open_viewer,
+            arrange_viewers,
             sync_image_paths,
             trash_file,
             trash_folder,
