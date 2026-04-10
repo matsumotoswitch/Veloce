@@ -456,6 +456,18 @@ window.addEventListener('contextmenu', (e) => {
   showNext(); // 右クリックで次の画像へ
 });
 
+// --- マウスホイールによる画像送り ---
+window.addEventListener('wheel', (e) => {
+  // ズーム中（100%表示でスクロールが必要な状態）はブラウザの標準スクロールを優先
+  if (isZoomed) return;
+  
+  if (e.deltaY > 0) {
+    showNext(); // 下スクロールで次へ
+  } else if (e.deltaY < 0) {
+    showPrev(); // 上スクロールで前へ
+  }
+});
+
 /**
  * ヘルプ（ショートカット一覧）をオーバーレイ表示/非表示する
  */
@@ -514,13 +526,14 @@ function toggleHelpOverlay(forceShow) {
         <table style="border-collapse: collapse; width: 100%;">
           <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプの表示/非表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">← / →</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">↑ / ↓</td><td style="padding: 6px 15px;">右 / 左に90度回転</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Enter</td><td style="padding: 6px 15px;">ズーム解除 / 強制フィット切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">フルスクリーン切替</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">W</td><td style="padding: 6px 15px;">ウィンドウを画像にフィット (トグル)</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">W</td><td style="padding: 6px 15px;">ウィンドウを画像にフィット</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">B</td><td style="padding: 6px 15px;">ウィンドウ枠の表示/非表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">S</td><td style="padding: 6px 15px;">画像のシャープ / 滑らか表示切替</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">画像をゴミ箱に移動</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">画像をゴミ箱に移動して次へ</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">画像をクリップボードにコピー</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ビューワーを閉じる (ヘルプ表示時は閉じる)</td></tr>
         </table>
@@ -637,7 +650,18 @@ window.addEventListener('keydown', async (e) => {
 	if (currentImagePath) {
 	  const success = await window.veloxAPI.trashFile(currentImagePath);
 	  if (success) {
-		if (window.veloxAPI && window.veloxAPI.closeWindow) window.veloxAPI.closeWindow();
+        // 削除成功時、ビューアーを閉じずに次の画像（最後なら前の画像）へ移動する
+        if (currentIndex < totalImages - 1) {
+          totalImages--; // 全体枚数を減らす
+          loadImage(); // currentIndexを維持したままロード＝次の画像になる
+        } else if (currentIndex > 0) {
+          totalImages--;
+          currentIndex--; // 最後の画像だった場合は1つ前に戻る
+          loadImage();
+        } else {
+          // 画像が1枚もなくなった場合はウィンドウを閉じる
+          if (window.veloxAPI && window.veloxAPI.closeWindow) window.veloxAPI.closeWindow();
+        }
 	  }
 	}
   }
