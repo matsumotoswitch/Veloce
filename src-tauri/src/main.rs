@@ -394,7 +394,7 @@ async fn parse_metadata(file_path: String) -> Result<ParseMetadataResult, String
             raw_description = chunks.get("Description").or(chunks.get("ImageDescription")).cloned().unwrap_or_default();
             raw_comment = chunks.get("Comment").cloned().unwrap_or_default();
             raw_parameters = chunks.get("parameters").or(chunks.get("Parameters")).cloned().unwrap_or_default();
-            source = chunks.get("Software").cloned().unwrap_or_default();
+            source = chunks.get("Source").or(chunks.get("Software")).cloned().unwrap_or_default();
         } else {
             let exif_data = if lower_path.ends_with(".webp") { parse_webp_exif(&file_path) } else { parse_jpeg_exif(&file_path) };
 
@@ -420,12 +420,14 @@ async fn parse_metadata(file_path: String) -> Result<ParseMetadataResult, String
             if let Some(end) = comment_string.rfind('}') {
                 let json_text = &comment_string[start..=end];
                 if let Ok(mut comment_obj) = serde_json::from_str::<serde_json::Value>(json_text) {
+                    let mut json_source = None;
+
                     // WebP等の二重エンコードJSON対応
                     if let Some(inner_str) = comment_obj.get("Comment").and_then(|v| v.as_str()) {
                         if let Ok(inner_obj) = serde_json::from_str::<serde_json::Value>(inner_str) {
                             if let Some(p) = comment_obj.get("Description").and_then(|v| v.as_str()) { prompt = p.to_string(); }
                             else if let Some(p) = inner_obj.get("prompt").and_then(|v| v.as_str()) { prompt = p.to_string(); }
-                            if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) { source = s.to_string(); }
+                            if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) { json_source = Some(s.to_string()); }
 
                             if let serde_json::Value::Object(ref mut map) = comment_obj {
                                 if let serde_json::Value::Object(inner_map) = inner_obj {
@@ -434,6 +436,21 @@ async fn parse_metadata(file_path: String) -> Result<ParseMetadataResult, String
                                 map.remove("Comment");
                                 map.remove("Description");
                             }
+                        }
+                    }
+
+                    // 通常のJSON直下のSourceも取得
+                    if json_source.is_none() {
+                        if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) {
+                            json_source = Some(s.to_string());
+                        }
+                    }
+
+                    // 「NovelAI Diffusion V4.5 ...」のようなSoftwareの文字列を優先し、
+                    // 空の場合のみJSON内のSourceをフォールバックとして使用する
+                    if source.is_empty() {
+                        if let Some(s) = json_source {
+                            source = s;
                         }
                     }
 
