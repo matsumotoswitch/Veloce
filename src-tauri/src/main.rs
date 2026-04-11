@@ -19,6 +19,8 @@ pub struct ImageFile {
     name: String,
     ext: String,
     path: String,
+    size: u64,
+    mtime: u64,
 }
 
 #[derive(Serialize)]
@@ -34,8 +36,6 @@ pub struct ImageMetadata {
     path: String,
     width: u32,
     height: u32,
-    size: u64,
-    mtime: u64,
 }
 
 #[derive(Serialize)]
@@ -72,6 +72,7 @@ pub struct ViewerImageResult {
 // --- 状態管理 ---
 pub struct AppState {
     image_paths: Mutex<Vec<String>>,
+    current_dir: Mutex<String>,
 }
 
 // --- Tauri コマンド ---
@@ -137,12 +138,24 @@ async fn load_directory(
                         let ext = format!(".{}", ext_os.to_string_lossy().to_lowercase());
                         let supported = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
                         if supported.contains(&ext.as_str()) {
-                            // 重い canonicalize() と metadata() を完全に排除（第一段階ロード）
                             let clean_path = entry_path.to_string_lossy().replace("\\\\?\\", "");
+                            // サイズと更新日時の取得は高速なため、第一段階で取得して即座にソートに反映させる
+                            let mut size = 0;
+                            let mut mtime = 0;
+                            if let Ok(metadata) = entry.metadata() {
+                                size = metadata.len();
+                                mtime = metadata.modified()
+                                    .unwrap_or(UNIX_EPOCH)
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as u64;
+                            }
                             return Some((clean_path.clone(), ImageFile {
                                 name: entry.file_name().to_string_lossy().into_owned(),
                                 ext,
                                 path: clean_path,
+                                size,
+                                mtime,
                             }));
                         }
                     }
@@ -166,6 +179,10 @@ async fn load_directory(
         let mut lock = state.image_paths.lock().unwrap();
         *lock = paths;
 
+        if let Ok(mut dir_lock) = state.current_dir.lock() {
+            *dir_lock = actual_dir.to_string_lossy().to_string();
+        }
+
         Ok(Some(LoadDirectoryResult {
             path: actual_dir.to_string_lossy().to_string(),
             image_files,
@@ -183,24 +200,10 @@ async fn get_image_metadata_batch(file_paths: Vec<String>) -> Result<Vec<ImageMe
             // 1. 画像の解像度（ヘッダのみ読み込みでファイルハンドルは即解放される）
             let (width, height) = image::image_dimensions(&path).unwrap_or((0, 0));
             
-            // 2. ファイルサイズと更新日時（第一段階から移行）
-            let mut size = 0;
-            let mut mtime = 0;
-            if let Ok(metadata) = fs::metadata(&path) {
-                size = metadata.len();
-                mtime = metadata.modified()
-                    .unwrap_or(UNIX_EPOCH)
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-            }
-
             ImageMetadata {
                 path,
                 width,
                 height,
-                size,
-                mtime,
             }
         }).collect()
     }).await.unwrap_or_default())
@@ -589,8 +592,22 @@ async fn open_viewer(
     Ok(())
 }
 
+// --- サムネイル生成コマンド ---
+
 #[tauri::command]
-async fn get_thumbnail(file_path: String) -> Result<Vec<u8>, String> {
+async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> Result<Vec<u8>, String> {
+    // フォルダ移動済みの場合は無駄な処理（画像読み込み・リサイズ）をスキップする
+    if let Ok(current_dir) = state.current_dir.lock() {
+        let parent_dir = Path::new(&file_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        
+        if !current_dir.is_empty() && current_dir.to_lowercase() != parent_dir.to_lowercase() {
+            return Err("Cancelled".to_string());
+        }
+    }
+
     tokio::task::spawn_blocking(move || {
         let img = image::open(&file_path).map_err(|e| e.to_string())?;
         // FilterType::Nearest を使用して最速で縮小する (最大512x512)
@@ -707,6 +724,7 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState { 
             image_paths: Mutex::new(Vec::new()),
+            current_dir: Mutex::new(String::new()),
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event.event() {

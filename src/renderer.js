@@ -522,7 +522,11 @@ function initializeThumbnailObserver() {
                     } else {
                         // プレースホルダーを入れて二重リクエストを防止
                         img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                        
+                        const requestRenderId = currentRenderId;
                         window.veloxAPI.getThumbnail(filePath).then(url => {
+                            if (currentRenderId !== requestRenderId) return; // フォルダ移動等で不要になった場合は破棄
+                            
                             if (url) {
                                 thumbnailBlobUrls.set(filePath, url);
                                 if (img.dataset.isVisible === 'true') {
@@ -1244,7 +1248,7 @@ async function loadMetadataInBackground() {
 
     if (chunkIndex >= pathsToLoad.length) {
       // すべてのメタデータ取得完了後、メタデータに依存するキーでソート中の場合は再ソートして再描画する
-      if (['width', 'height', 'size', 'mtime'].includes(currentSort.key)) {
+      if (['width', 'height'].includes(currentSort.key)) {
         sortFiles();
         renderAll();
       }
@@ -1271,16 +1275,12 @@ async function loadMetadataInBackground() {
           if (fileIndex !== undefined && fileIndex > -1) {
             currentFiles[fileIndex].width = meta.width;
             currentFiles[fileIndex].height = meta.height;
-            currentFiles[fileIndex].size = meta.size;
-            currentFiles[fileIndex].mtime = meta.mtime;
 
             // 対応するテーブル行を更新
-            const row = fileListBody.rows[fileIndex];
+            const row = fileListBody.children[fileIndex];
             if (row) {
-              row.cells[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
-              row.cells[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
-              row.cells[4].textContent = meta.size ? formatSize(meta.size) : '-';
-              row.cells[5].textContent = meta.mtime ? formatDate(meta.mtime) : '-';
+              row.children[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
+              row.children[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
             }
           }
         });
