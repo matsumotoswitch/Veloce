@@ -461,7 +461,7 @@ window.addEventListener('beforeunload', () => {
  */
 function initializeThumbnailObserver() {
     const options = {
-        root: document.getElementById('center-bottom'), // スクロールするコンテナ
+        root: document.getElementById('center-pane'), // 正しいスクロールコンテナを指定
         rootMargin: '200px 0px 200px 0px', // ビューポートの上下200pxを先行読み込み/遅延解放の対象とする
     };
     thumbnailObserver = new IntersectionObserver((entries) => {
@@ -470,12 +470,12 @@ function initializeThumbnailObserver() {
             if (entry.isIntersecting) {
                 // 画面内に入ったら、データ属性からパスを取得して読み込む
                 const filePath = img.dataset.filepath;
-                if (filePath && !img.src) {
+                if (filePath && !img.hasAttribute('src')) {
                     img.src = window.veloxAPI.convertFileSrc(filePath);
                 }
             } else {
                 // 画面外に出たら、srcをクリアしてメモリを解放する
-                img.src = '';
+                img.removeAttribute('src');
             }
         }
     }, options);
