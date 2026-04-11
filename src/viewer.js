@@ -522,7 +522,7 @@ function toggleHelpOverlay(forceShow) {
   
   content.innerHTML = `
     <h2 style="margin-top: 0; text-align: center; color: #ebc06d;">ヘルプ・ショートカット一覧</h2>
-    <div style="display: flex; gap: 40px; font-size: 1em;">
+    <div style="display: flex; gap: 40px; font-size: inherit;">
       <div>
         <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
         <table style="border-collapse: collapse; width: 100%;">

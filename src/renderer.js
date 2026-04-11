@@ -52,7 +52,6 @@ const createMenuOption = (text, onClick) => {
   option.textContent = text;
   option.style.padding = '8px 16px';
   option.style.cursor = 'pointer';
-  option.style.fontSize = '1em';
   option.style.color = '#ccc';
   option.onmouseenter = () => option.style.backgroundColor = '#3a7afe';
   option.onmouseleave = () => option.style.backgroundColor = 'transparent';
@@ -138,11 +137,12 @@ function showCustomPrompt(message, defaultValue = '') {
     inputEl.style.borderRadius = '4px';
     inputEl.style.marginBottom = '15px';
     inputEl.style.fontFamily = 'inherit';
+    inputEl.style.fontSize = 'inherit';
     inputEl.style.outline = 'none';
 
     const { buttonsDiv, cleanup } = createCustomDialogBase(message, inputEl);
 
-    const btnStyle = 'padding: 6px 16px; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: 1em;';
+    const btnStyle = 'padding: 6px 16px; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: inherit;';
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'キャンセル';
     cancelBtn.style.cssText = btnStyle + 'background-color: #444; color: #fff;';
@@ -187,7 +187,7 @@ function showCustomConfirm(message) {
   return new Promise((resolve) => {
     const { buttonsDiv, cleanup } = createCustomDialogBase(message);
 
-    const btnStyle = 'padding: 6px 16px; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: 1em;';
+    const btnStyle = 'padding: 6px 16px; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: inherit;';
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'キャンセル';
     cancelBtn.style.cssText = btnStyle + 'background-color: #444; color: #fff;';
@@ -321,7 +321,6 @@ dragTooltip.style.backgroundColor = 'rgba(0, 0, 0, 1.0)'; // 背景を完全に�
 dragTooltip.style.color = '#ffffff'; // 文字色を真っ白にする
 dragTooltip.style.border = '1px solid #555'; // 視認性を高めるために薄い枠線を追加
 dragTooltip.style.borderRadius = '4px';
-dragTooltip.style.fontSize = '1em';
 dragTooltip.style.display = 'none';
 dragTooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5)';
 document.body.appendChild(dragTooltip);
@@ -1424,7 +1423,6 @@ function renderMetadata(meta) {
     
     const labelEl = document.createElement('label');
     labelEl.textContent = label;
-    labelEl.style.fontSize = '1em';
     labelEl.style.marginBottom = '4px';
     labelEl.style.color = '#ccc';
     
@@ -1448,7 +1446,7 @@ function renderMetadata(meta) {
     inputEl.style.border = '1px solid #333';
     inputEl.style.borderRadius = '4px';
     inputEl.style.fontFamily = 'inherit';
-    inputEl.style.fontSize = '1.0em';
+    inputEl.style.fontSize = 'inherit';
     inputEl.style.outline = 'none'; // フォーカス時の枠線を消して読み取り専用感を出す
     
     // クリックした位置にスムーズにカーソルを置けるよう、フォーカス時の全選択処理を削除
@@ -1558,7 +1556,7 @@ function toggleHelpOverlay(forceShow) {
   
   content.innerHTML = `
     <h2 style="margin-top: 0; text-align: center; color: #ebc06d;">ヘルプ・ショートカット一覧</h2>
-    <div style="display: flex; gap: 40px; font-size: 1em;">
+    <div style="display: flex; gap: 40px; font-size: inherit;">
       <div>
         <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
         <table style="border-collapse: collapse; width: 100%;">
