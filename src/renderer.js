@@ -1203,12 +1203,12 @@ async function renderAll() {
 }
 
 /**
- * ファイルサイズをKB単位の文字列にフォーマットする。
+ * ファイルサイズをバイト単位の文字列にフォーマットする。
  * @param {number} bytes - バイト単位のファイルサイズ。
- * @returns {string} フォーマットされた文字列 (例: "123.4 KB")。
+ * @returns {string} フォーマットされた文字列 (例: "123,456")。
  */
 function formatSize(bytes) {
-  return (bytes / 1024).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' KB';
+  return bytes.toLocaleString();
 }
 
 /**
