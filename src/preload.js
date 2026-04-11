@@ -49,6 +49,21 @@ window.veloxAPI = {
    */
   getImageMetadataBatch: (filePaths) => invoke('get_image_metadata_batch', { filePaths }),
   /**
+   * 指定された画像パスから軽量なサムネイル画像を生成して取得します。
+   * @param {string} filePath - オリジナル画像のパス。
+   * @returns {Promise<string|null>} サムネイル画像のBlob URL。
+   */
+  getThumbnail: async (filePath) => {
+    try {
+      const bytes = await invoke('get_thumbnail', { filePath });
+      const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
+      return URL.createObjectURL(blob);
+    } catch (error) {
+      console.warn("Failed to generate thumbnail:", error);
+      return null;
+    }
+  },
+  /**
    * 画像ファイルからプロンプトなどのメタデータを解析します。
    * @param {string} filePath - 解析する画像ファイルのパス。
    * @returns {Promise<object>} 抽出されたメタデータ。

@@ -590,6 +590,18 @@ async fn open_viewer(
 }
 
 #[tauri::command]
+async fn get_thumbnail(file_path: String) -> Result<Vec<u8>, String> {
+    tokio::task::spawn_blocking(move || {
+        let img = image::open(&file_path).map_err(|e| e.to_string())?;
+        // FilterType::Nearest を使用して最速で縮小する (最大512x512)
+        let thumb = img.resize(512, 512, image::imageops::FilterType::Nearest);
+        let mut buf = std::io::Cursor::new(Vec::new());
+        thumb.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+        Ok(buf.into_inner())
+    }).await.unwrap_or_else(|e| Err(e.to_string()))
+}
+
+#[tauri::command]
 fn arrange_viewers(app: tauri::AppHandle) {
     let windows = app.windows();
     let mut viewers: Vec<_> = windows
@@ -710,6 +722,7 @@ fn main() {
             parse_metadata,
             get_viewer_image,
             open_viewer,
+            get_thumbnail,
             arrange_viewers,
             sync_image_paths,
             trash_file,

@@ -8,6 +8,7 @@ let thumbnailObserver;
 let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
 let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
+let thumbnailBlobUrls = new Map(); // filepath -> blobUrl (サムネイルのキャッシュ)
 
 // --- ドラッグ＆ドロップ状態管理 ---
 const dragState = {
@@ -493,23 +494,51 @@ window.addEventListener('beforeunload', () => {
 });
 
 /**
+ * フォルダ移動時に不要になったサムネイルのBlob URLキャッシュを解放する
+ */
+function clearThumbnailCache() {
+  thumbnailBlobUrls.forEach(url => URL.revokeObjectURL(url));
+  thumbnailBlobUrls.clear();
+}
+
+/**
  * サムネイルの遅延読み込みとメモリ解放のためのIntersectionObserverを初期化する
  */
 function initializeThumbnailObserver() {
     const options = {
         root: document.getElementById('center-pane'), // 正しいスクロールコンテナを指定
-        rootMargin: '200px 0px 200px 0px', // ビューポートの上下200pxを先行読み込み/遅延解放の対象とする
+        rootMargin: '400px 0px 400px 0px', // 少し広めに範囲を取る
     };
     thumbnailObserver = new IntersectionObserver((entries) => {
         for (const entry of entries) {
             const img = entry.target;
+            const filePath = img.dataset.filepath;
             if (entry.isIntersecting) {
-                // 画面内に入ったら、データ属性からパスを取得して読み込む
-                const filePath = img.dataset.filepath;
+                img.dataset.isVisible = 'true';
                 if (filePath && !img.hasAttribute('src')) {
-                    img.src = window.veloxAPI.convertFileSrc(filePath);
+                    if (thumbnailBlobUrls.has(filePath)) {
+                        // すでにキャッシュがあればそれを使う
+                        img.src = thumbnailBlobUrls.get(filePath);
+                    } else {
+                        // プレースホルダーを入れて二重リクエストを防止
+                        img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                        window.veloxAPI.getThumbnail(filePath).then(url => {
+                            if (url) {
+                                thumbnailBlobUrls.set(filePath, url);
+                                if (img.dataset.isVisible === 'true') {
+                                    img.src = url;
+                                }
+                            } else {
+                                // サムネイル生成失敗時はオリジナル画像をフォールバック表示
+                                const fallbackUrl = window.veloxAPI.convertFileSrc(filePath);
+                                thumbnailBlobUrls.set(filePath, fallbackUrl);
+                                if (img.dataset.isVisible === 'true') img.src = fallbackUrl;
+                            }
+                        });
+                    }
                 }
             } else {
+                img.dataset.isVisible = 'false';
                 // 画面外に出たら、srcをクリアしてメモリを解放する
                 img.removeAttribute('src');
             }
@@ -564,6 +593,8 @@ async function refreshFileList() {
   selectedIndex = -1;
   selectedIndices.clear();
   
+  clearThumbnailCache(); // フォルダ移動時にキャッシュをクリーンアップ
+
   sortFiles();
   
   // ソート後の currentFiles に対して選択状態を復元する
