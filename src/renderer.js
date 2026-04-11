@@ -396,15 +396,42 @@ window.addEventListener('mouseup', () => {
 });
 
 // --- サムネイルサイズ変更機能 ---
-thumbnailSizeSlider.addEventListener('input', (e) => {
-  // スライダーを動かしている最中にリアルタイムでサムネイルサイズをCSSカスタムプロパティ経由で更新
-  document.body.style.setProperty('--thumbnail-size', `${e.target.value}px`);
+thumbnailSizeSlider.min = 0;
+thumbnailSizeSlider.max = 100;
+
+function updateThumbnailSize() {
+  const centerPane = document.getElementById('center-pane');
+  const containerWidth = centerPane ? centerPane.clientWidth : (thumbnailGrid ? thumbnailGrid.clientWidth : 0);
+  if (!containerWidth) return;
+
+  const sliderVal = parseFloat(thumbnailSizeSlider.value) || 0;
+  const gap = 8; // サムネイル間の余白
+  
+  // 最小サイズ：横に10枚並ぶサイズ
+  const minW = Math.max(20, (containerWidth - gap * 9) / 10);
+  // 最大サイズ：横に1枚（全体）のサイズ
+  const maxW = Math.max(minW, containerWidth - 24); // スクロールバー等の余白を考慮
+
+  // 人間の感覚に近い、自然で滑らかなズーム感にするために対数補間を使用
+  const logMin = Math.log(minW);
+  const logMax = Math.log(maxW);
+  const size = Math.exp(logMin + (logMax - logMin) * (sliderVal / 100));
+
+  document.body.style.setProperty('--thumbnail-size', `${size}px`);
+}
+
+thumbnailSizeSlider.addEventListener('input', () => {
+  updateThumbnailSize();
 });
 
 thumbnailSizeSlider.addEventListener('change', (e) => {
-  // スライダーの操作が確定したら、値をlocalStorageに保存して永続化
-  localStorage.setItem('thumbnailSize', e.target.value);
+  localStorage.setItem('thumbnailScale', e.target.value);
 });
+
+const paneResizeObserver = new ResizeObserver(() => updateThumbnailSize());
+if (document.getElementById('center-pane')) {
+  paneResizeObserver.observe(document.getElementById('center-pane'));
+}
 
 /**
  * 現在表示しているディレクトリのファイルリストを再読み込みし、UIを更新する。
@@ -462,12 +489,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (savedRightWidth) document.body.style.setProperty('--right-width', savedRightWidth);
   if (savedTopHeight) document.body.style.setProperty('--top-height', savedTopHeight);
 
-  // localStorageから前回のサムネイルサイズを復元
-  const savedThumbSize = localStorage.getItem('thumbnailSize');
-  if (savedThumbSize) {
-    document.body.style.setProperty('--thumbnail-size', `${savedThumbSize}px`);
-    thumbnailSizeSlider.value = savedThumbSize;
+  // localStorageから前回のサムネイルスケール(0〜100)を復元
+  const savedThumbScale = localStorage.getItem('thumbnailScale');
+  if (savedThumbScale !== null) {
+    thumbnailSizeSlider.value = savedThumbScale;
+  } else {
+    thumbnailSizeSlider.value = 30; // 初期値（程よいサイズ感）
   }
+  updateThumbnailSize();
 
   // ソート順の復元
   const savedSort = localStorage.getItem('currentSort');
