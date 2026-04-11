@@ -1421,10 +1421,47 @@ function renderMetadata(meta) {
     fieldDiv.style.display = 'flex';
     fieldDiv.style.flexDirection = 'column';
     
+    const labelWrapper = document.createElement('div');
+    labelWrapper.style.display = 'flex';
+    labelWrapper.style.justifyContent = 'space-between';
+    labelWrapper.style.alignItems = 'center';
+    labelWrapper.style.marginBottom = '4px';
+
     const labelEl = document.createElement('label');
     labelEl.textContent = label;
-    labelEl.style.marginBottom = '4px';
     labelEl.style.color = '#ccc';
+
+    // コピー用アイコン (SVG)
+    const copyBtn = document.createElement('span');
+    copyBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+    copyBtn.style.cursor = 'pointer';
+    copyBtn.style.color = '#888';
+    copyBtn.title = 'クリップボードにコピー';
+    copyBtn.style.transition = 'color 0.1s, filter 0.1s';
+    copyBtn.style.display = 'inline-flex';
+    copyBtn.style.alignItems = 'center';
+    
+    copyBtn.onmouseenter = () => { if (copyBtn.style.color === 'rgb(136, 136, 136)' || copyBtn.style.color === '#888') copyBtn.style.color = '#4caf50'; };
+    copyBtn.onmouseleave = () => { if (copyBtn.style.color === 'rgb(76, 175, 80)' || copyBtn.style.color === '#4caf50') copyBtn.style.color = '#888'; };
+    
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(String(value));
+        copyBtn.style.transition = 'none'; // 光るときは一瞬で
+        copyBtn.style.color = '#fff'; // 芯を白く発光させる
+        copyBtn.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
+        setTimeout(() => { 
+          copyBtn.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out'; // スッと早くフェードアウト
+          copyBtn.style.color = copyBtn.matches(':hover') ? '#4caf50' : '#888'; 
+          copyBtn.style.filter = 'none';
+        }, 100); // 100msだけ最高輝度を維持
+      } catch (err) {
+        console.error('Failed to copy: ', err);
+      }
+    });
+    
+    labelWrapper.appendChild(labelEl);
+    labelWrapper.appendChild(copyBtn);
     
     const inputEl = document.createElement(isMultiline ? 'textarea' : 'input');
     if (isMultiline) {
@@ -1452,7 +1489,7 @@ function renderMetadata(meta) {
     // クリックした位置にスムーズにカーソルを置けるよう、フォーカス時の全選択処理を削除
     // inputEl.addEventListener('focus', () => inputEl.select());
     
-    fieldDiv.appendChild(labelEl);
+    fieldDiv.appendChild(labelWrapper);
     fieldDiv.appendChild(inputEl);
     container.appendChild(fieldDiv);
   };
