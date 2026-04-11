@@ -428,6 +428,33 @@ thumbnailSizeSlider.addEventListener('change', (e) => {
   localStorage.setItem('thumbnailScale', e.target.value);
 });
 
+// --- ウィンドウサイズ・位置の保存 ---
+let windowStateTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(windowStateTimer);
+  // リサイズ中に連続で保存処理が走らないよう、操作後500ms待機して保存
+  windowStateTimer = setTimeout(async () => {
+    if (window.veloxAPI && window.veloxAPI.isViewerMaximized) {
+      const isMax = await window.veloxAPI.isViewerMaximized();
+      localStorage.setItem('mainWinMaximized', isMax);
+      if (!isMax) {
+        localStorage.setItem('mainWinWidth', window.outerWidth);
+        localStorage.setItem('mainWinHeight', window.outerHeight);
+        localStorage.setItem('mainWinX', window.screenX);
+        localStorage.setItem('mainWinY', window.screenY);
+      }
+    }
+  }, 500);
+});
+
+window.addEventListener('beforeunload', () => {
+  // 終了時、最大化されていなければ最終的な位置を確実に保存する
+  if (localStorage.getItem('mainWinMaximized') !== 'true') {
+    localStorage.setItem('mainWinX', window.screenX);
+    localStorage.setItem('mainWinY', window.screenY);
+  }
+});
+
 const paneResizeObserver = new ResizeObserver(() => updateThumbnailSize());
 if (document.getElementById('center-pane')) {
   paneResizeObserver.observe(document.getElementById('center-pane'));
@@ -481,6 +508,25 @@ async function refreshFileList() {
  * アプリケーションの初期化処理。DOMの読み込み完了後に実行される。
  */
 window.addEventListener('DOMContentLoaded', async () => {
+  // localStorageから前回のウィンドウサイズ・位置・最大化状態を復元
+  const savedWinW = localStorage.getItem('mainWinWidth');
+  const savedWinH = localStorage.getItem('mainWinHeight');
+  const savedWinX = localStorage.getItem('mainWinX');
+  const savedWinY = localStorage.getItem('mainWinY');
+  const savedWinMax = localStorage.getItem('mainWinMaximized');
+
+  if (savedWinW && savedWinH && window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
+    window.veloxAPI.resizeViewerWindow(parseInt(savedWinW, 10), parseInt(savedWinH, 10));
+  }
+  if (savedWinX && savedWinY && window.veloxAPI && window.veloxAPI.moveViewerWindow) {
+    window.veloxAPI.moveViewerWindow(parseInt(savedWinX, 10), parseInt(savedWinY, 10));
+  }
+  if (savedWinMax === 'true' && window.veloxAPI && window.veloxAPI.isViewerMaximized && window.veloxAPI.maximizeViewer) {
+    window.veloxAPI.isViewerMaximized().then(isMax => {
+      if (!isMax) window.veloxAPI.maximizeViewer();
+    });
+  }
+
   // localStorageから前回のペインサイズを復元
   const savedLeftWidth = localStorage.getItem('leftWidth');
   const savedRightWidth = localStorage.getItem('rightWidth');
