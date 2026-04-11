@@ -353,6 +353,42 @@ const resizerLeft = document.getElementById('resizer-left');
 const resizerRight = document.getElementById('resizer-right');
 const resizerCenter = document.getElementById('resizer-center');
 
+// --- イベントデリゲーション ---
+// 数千件の要素に対して個別にイベントを登録するのを防ぎ、メモリ消費とレンダリング速度を改善
+function handleItemClick(e, isGrid) {
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  selectImage(parseInt(item.dataset.index, 10), e);
+}
+
+function handleItemDblClick(e, isGrid) {
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  openViewer(parseInt(item.dataset.index, 10));
+}
+
+function handleItemDragStart(e, isGrid) {
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  const index = parseInt(item.dataset.index, 10);
+  
+  if (!selectedIndices.has(index)) selectImage(index);
+  const paths = Array.from(selectedIndices).map(idx => currentFiles[idx].path);
+  e.dataTransfer.setData('application/json', JSON.stringify(paths));
+  e.dataTransfer.setData('text/plain', paths[0]);
+  e.dataTransfer.effectAllowed = 'copyMove';
+  e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
+  dragState.paths = paths;
+  dragState.isAppDragging = true;
+}
+
+thumbnailGrid.addEventListener('click', (e) => handleItemClick(e, true));
+thumbnailGrid.addEventListener('dblclick', (e) => handleItemDblClick(e, true));
+thumbnailGrid.addEventListener('dragstart', (e) => handleItemDragStart(e, true));
+
+fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
+fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
+
 // --- UIリサイズ機能 ---
 // 各リザイザー（ペイン間の境界線）のドラッグ状態を管理するフラグ
 let isResizingLeft = false;
@@ -487,6 +523,27 @@ if (document.getElementById('center-pane')) {
 }
 
 /**
+ * 選択状態のUI（クラス）を一括更新する。
+ * querySelectorAllを使用せず、直接子要素を参照してパフォーマンスを劇的に向上させる。
+ */
+function updateSelectionUI() {
+  // 全要素をループするのではなく、既に選択されている要素のクラスを外す
+  const currentSelectedRows = fileListBody.querySelectorAll('.selected');
+  for (let i = 0; i < currentSelectedRows.length; i++) currentSelectedRows[i].classList.remove('selected');
+  
+  const currentSelectedThumbs = thumbnailGrid.querySelectorAll('.selected');
+  for (let i = 0; i < currentSelectedThumbs.length; i++) currentSelectedThumbs[i].classList.remove('selected');
+
+  // 新たに選択された要素のみにクラスを付与する
+  const rows = fileListBody.children;
+  const thumbs = thumbnailGrid.children;
+  for (const i of selectedIndices) {
+    if (rows[i]) rows[i].classList.add('selected');
+    if (thumbs[i]) thumbs[i].classList.add('selected');
+  }
+}
+
+/**
  * 現在表示しているディレクトリのファイルリストを再読み込みし、UIを更新する。
  * ファイルの削除や追加があった場合に呼び出される。
  */
@@ -519,12 +576,14 @@ async function refreshFileList() {
   loadMetadataInBackground();
   
   // 選択状態のUIを復元、またはリセット
+  updateSelectionUI();
   if (selectedIndex > -1) {
-    selectImage(selectedIndex);
+    // selectImageを使うと複数選択が解除されるため、個別にメタデータのみ更新する
+    const requestId = ++currentMetaRequestId;
+    const meta = await window.veloxAPI.parseMetadata(currentFiles[selectedIndex].path);
+    if (currentMetaRequestId === requestId) renderMetadata(meta);
   } else {
     // 完全に選択が失われた場合（フォルダが空になった場合など）
-    document.querySelectorAll('#file-list-body tr').forEach(el => el.classList.remove('selected'));
-    document.querySelectorAll('.thumbnail-item').forEach(el => el.classList.remove('selected'));
     const container = document.getElementById('metadata-container');
     if (container) container.innerHTML = '';
   }
@@ -1072,6 +1131,7 @@ async function renderAll() {
       // --- テーブル行の作成 ---
       const tr = document.createElement('tr');
       if (isSelected) tr.classList.add('selected');
+      tr.dataset.index = index;
       tr.innerHTML = `
         <td>${file.name}</td>
         <td>${file.ext}</td>
@@ -1082,17 +1142,6 @@ async function renderAll() {
       `;
       
       tr.draggable = true;
-      tr.addEventListener('dragstart', (e) => {
-        if (!selectedIndices.has(index)) selectImage(index);
-        const paths = Array.from(selectedIndices).map(idx => currentFiles[idx].path);
-        e.dataTransfer.setData('application/json', JSON.stringify(paths));
-        e.dataTransfer.setData('text/plain', paths[0]);
-        e.dataTransfer.effectAllowed = 'copyMove';
-        e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
-        dragState.paths = paths;
-        dragState.isAppDragging = true;
-      });
-      tr.addEventListener('click', (e) => selectImage(index, e));
       tableFragment.appendChild(tr);
 
       // --- サムネイルの作成 ---
@@ -1100,24 +1149,13 @@ async function renderAll() {
       if (isSelected) img.classList.add('selected');
       img.decoding = "async";
       img.dataset.filepath = file.path;
+      img.dataset.index = index;
       img.className = 'thumbnail-item';
       img.style.objectFit = 'contain';
       img.style.width = 'var(--thumbnail-size)';
       img.style.height = 'var(--thumbnail-size)';
       
       img.draggable = true;
-      img.addEventListener('dragstart', (e) => {
-        if (!selectedIndices.has(index)) selectImage(index);
-        const paths = Array.from(selectedIndices).map(idx => currentFiles[idx].path);
-        e.dataTransfer.setData('application/json', JSON.stringify(paths));
-        e.dataTransfer.setData('text/plain', paths[0]);
-        e.dataTransfer.effectAllowed = 'copyMove';
-        e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
-        dragState.paths = paths;
-        dragState.isAppDragging = true;
-      });
-      img.addEventListener('click', (e) => selectImage(index, e));
-      img.addEventListener('dblclick', () => openViewer(index));
       gridFragment.appendChild(img);
       thumbnailObserver.observe(img);
     });
@@ -1261,8 +1299,7 @@ async function selectImage(index, event = null) {
   }
 
   if (selectedIndex === -1) {
-    document.querySelectorAll('#file-list-body tr').forEach(el => el.classList.remove('selected'));
-    document.querySelectorAll('.thumbnail-item').forEach(el => el.classList.remove('selected'));
+    updateSelectionUI();
     const container = document.getElementById('metadata-container');
     if (container) container.innerHTML = '';
     return;
@@ -1270,12 +1307,10 @@ async function selectImage(index, event = null) {
 
   const file = currentFiles[index];
   
-  // 選択UIの更新
-  document.querySelectorAll('#file-list-body tr').forEach((el, i) => el.classList.toggle('selected', selectedIndices.has(i)));
-  document.querySelectorAll('.thumbnail-item').forEach((el, i) => el.classList.toggle('selected', selectedIndices.has(i)));
+  updateSelectionUI();
 
   // 選択した画像やリスト行が画面内に表示されるように自動スクロール
-  const items = document.querySelectorAll('.thumbnail-item');
+  const items = thumbnailGrid.children;
   if (items[index]) {
     if (items[index].scrollIntoViewIfNeeded) {
       items[index].scrollIntoViewIfNeeded(false);
@@ -1283,7 +1318,7 @@ async function selectImage(index, event = null) {
       items[index].scrollIntoView({ block: 'nearest' });
     }
   }
-  const rows = document.querySelectorAll('#file-list-body tr');
+  const rows = fileListBody.children;
   if (rows[index]) {
     // テーブルのヘッダーの裏に行が隠れてしまうのを防ぐため、
     // ヘッダーの高さを取得して行のスクロール時の余白（マージン）として設定する
@@ -1605,7 +1640,7 @@ window.addEventListener('keydown', async (e) => {
       newIndex = 0;
     } else {
       // 現在のウィンドウ幅におけるサムネイルグリッドの「1行あたりのカラム数」を計算
-      const items = document.querySelectorAll('.thumbnail-item');
+      const items = thumbnailGrid.children;
       let columns = 1;
       if (items.length > 1) {
         const firstTop = items[0].getBoundingClientRect().top;
