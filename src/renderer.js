@@ -4,6 +4,7 @@ let currentSort = { key: 'name', asc: true }; // 現在のソート条件
 let selectedIndex = -1; // 最後に選択された画像のインデックス
 let selectedIndices = new Set(); // 複数選択された画像のインデックスセット
 let currentDirectory = ''; // 現在表示しているディレクトリパス
+let thumbnailObserver;
 let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
 let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
@@ -455,6 +456,31 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
+/**
+ * サムネイルの遅延読み込みとメモリ解放のためのIntersectionObserverを初期化する
+ */
+function initializeThumbnailObserver() {
+    const options = {
+        root: document.getElementById('center-bottom'), // スクロールするコンテナ
+        rootMargin: '200px 0px 200px 0px', // ビューポートの上下200pxを先行読み込み/遅延解放の対象とする
+    };
+    thumbnailObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            const img = entry.target;
+            if (entry.isIntersecting) {
+                // 画面内に入ったら、データ属性からパスを取得して読み込む
+                const filePath = img.dataset.filepath;
+                if (filePath && !img.src) {
+                    img.src = window.veloxAPI.convertFileSrc(filePath);
+                }
+            } else {
+                // 画面外に出たら、srcをクリアしてメモリを解放する
+                img.src = '';
+            }
+        }
+    }, options);
+}
+
 const paneResizeObserver = new ResizeObserver(() => updateThumbnailSize());
 if (document.getElementById('center-pane')) {
   paneResizeObserver.observe(document.getElementById('center-pane'));
@@ -526,6 +552,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (!isMax) window.veloxAPI.maximizeViewer();
     });
   }
+
+  initializeThumbnailObserver();
 
   // localStorageから前回のペインサイズを復元
   const savedLeftWidth = localStorage.getItem('leftWidth');
@@ -1005,6 +1033,11 @@ function sortFiles() {
 async function renderAll() {
   const renderId = ++currentRenderId;
 
+  // 既存の画像の監視をすべて停止
+  if (thumbnailObserver) {
+      thumbnailObserver.disconnect();
+  }
+
   fileListBody.innerHTML = '';
   thumbnailGrid.innerHTML = '';
 
@@ -1066,8 +1099,7 @@ async function renderAll() {
       const img = document.createElement('img');
       if (isSelected) img.classList.add('selected');
       img.decoding = "async";
-      img.loading = "lazy";
-      img.src = window.veloxAPI.convertFileSrc(file.path);
+      img.dataset.filepath = file.path;
       img.className = 'thumbnail-item';
       img.style.objectFit = 'contain';
       img.style.width = 'var(--thumbnail-size)';
@@ -1087,6 +1119,7 @@ async function renderAll() {
       img.addEventListener('click', (e) => selectImage(index, e));
       img.addEventListener('dblclick', () => openViewer(index));
       gridFragment.appendChild(img);
+      thumbnailObserver.observe(img);
     });
 
     fileListBody.appendChild(tableFragment);
@@ -1138,7 +1171,16 @@ async function loadMetadataInBackground() {
   const CHUNK_SIZE = 200; // 並列処理されているため、チャンクサイズを増やして通信回数を減らす
 
   const processNextChunk = (chunkIndex) => {
-    if (chunkIndex >= pathsToLoad.length || currentMetaBatchId !== batchId) return;
+    if (currentMetaBatchId !== batchId) return;
+
+    if (chunkIndex >= pathsToLoad.length) {
+      // すべてのメタデータ取得完了後、メタデータに依存するキーでソート中の場合は再ソートして再描画する
+      if (['width', 'height', 'size', 'mtime'].includes(currentSort.key)) {
+        sortFiles();
+        renderAll();
+      }
+      return;
+    }
 
     // ブラウザがアイドル状態のときまで処理を遅延させる
     requestIdleCallback(async () => {
