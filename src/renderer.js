@@ -22,7 +22,9 @@ const dragState = {
 const ICONS = {
   DRIVE: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="#a0a0a0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"></line><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line></svg>`,
   FOLDER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="#ebc06d" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+  CHEVRON_LEFT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>`,
   CHEVRON_RIGHT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`,
+  CHEVRON_UP: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
   CHEVRON_DOWN: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
   SORT_ASC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
   SORT_DESC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`
@@ -395,9 +397,147 @@ let isResizingLeft = false;
 let isResizingRight = false;
 let isResizingCenter = false;
 
-resizerLeft.addEventListener('mousedown', () => { isResizingLeft = true; resizerLeft.classList.add('resizing'); document.body.style.cursor = 'col-resize'; });
-resizerRight.addEventListener('mousedown', () => { isResizingRight = true; resizerRight.classList.add('resizing'); document.body.style.cursor = 'col-resize'; });
-resizerCenter.addEventListener('mousedown', () => { isResizingCenter = true; resizerCenter.classList.add('resizing'); document.body.style.cursor = 'row-resize'; });
+// ペインの折りたたみ状態を管理するフラグ
+let isLeftCollapsed = false;
+let isRightCollapsed = false;
+let isCenterCollapsed = false;
+
+let preCollapseLeftWidth = '';
+let preCollapseRightWidth = '';
+let preCollapseTopHeight = '';
+
+resizerLeft.addEventListener('mousedown', () => { 
+  isResizingLeft = true; 
+  resizerLeft.classList.add('resizing'); 
+  document.body.style.cursor = 'col-resize'; 
+  if (isLeftCollapsed) {
+    isLeftCollapsed = false;
+    const btn = resizerLeft.querySelector('.resizer-toggle');
+    if (btn) btn.innerHTML = ICONS.CHEVRON_LEFT;
+  }
+});
+resizerRight.addEventListener('mousedown', () => { 
+  isResizingRight = true; 
+  resizerRight.classList.add('resizing'); 
+  document.body.style.cursor = 'col-resize'; 
+  if (isRightCollapsed) {
+    isRightCollapsed = false;
+    const btn = resizerRight.querySelector('.resizer-toggle');
+    if (btn) btn.innerHTML = ICONS.CHEVRON_RIGHT;
+  }
+});
+resizerCenter.addEventListener('mousedown', () => { 
+  isResizingCenter = true; 
+  resizerCenter.classList.add('resizing'); 
+  document.body.style.cursor = 'row-resize'; 
+  if (isCenterCollapsed) {
+    isCenterCollapsed = false;
+    const btn = resizerCenter.querySelector('.resizer-toggle');
+    if (btn) btn.innerHTML = ICONS.CHEVRON_UP;
+  }
+});
+
+function createResizerToggle(resizer, type) {
+  resizer.style.position = 'relative';
+
+  const btn = document.createElement('div');
+  btn.className = 'resizer-toggle';
+  btn.style.position = 'absolute';
+  btn.style.display = 'flex';
+  btn.style.justifyContent = 'center';
+  btn.style.alignItems = 'center';
+  btn.style.backgroundColor = '#333';
+  btn.style.border = '1px solid #555';
+  btn.style.borderRadius = '2px';
+  btn.style.cursor = 'pointer';
+  btn.style.zIndex = '1000';
+  
+  btn.addEventListener('mouseenter', () => btn.style.backgroundColor = '#444');
+  btn.addEventListener('mouseleave', () => btn.style.backgroundColor = '#333');
+
+  if (type === 'left') {
+    btn.style.width = '14px';
+    btn.style.height = '30px';
+    btn.style.top = '50%';
+    btn.style.left = '50%';
+    btn.style.transform = 'translate(-50%, -50%)';
+    btn.innerHTML = ICONS.CHEVRON_LEFT;
+    
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isLeftCollapsed) {
+        document.body.style.setProperty('--left-width', preCollapseLeftWidth || '250px');
+        btn.innerHTML = ICONS.CHEVRON_LEFT;
+        isLeftCollapsed = false;
+        localStorage.setItem('leftWidth', preCollapseLeftWidth || '250px');
+      } else {
+        preCollapseLeftWidth = document.body.style.getPropertyValue('--left-width') || getComputedStyle(document.body).getPropertyValue('--left-width').trim();
+        if (!preCollapseLeftWidth || preCollapseLeftWidth === '0px') preCollapseLeftWidth = '250px';
+        document.body.style.setProperty('--left-width', '0px');
+        btn.innerHTML = ICONS.CHEVRON_RIGHT;
+        isLeftCollapsed = true;
+        localStorage.setItem('leftWidth', '0px');
+      }
+    });
+  } else if (type === 'right') {
+    btn.style.width = '14px';
+    btn.style.height = '30px';
+    btn.style.top = '50%';
+    btn.style.left = '50%';
+    btn.style.transform = 'translate(-50%, -50%)';
+    btn.innerHTML = ICONS.CHEVRON_RIGHT;
+    
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isRightCollapsed) {
+        document.body.style.setProperty('--right-width', preCollapseRightWidth || '250px');
+        btn.innerHTML = ICONS.CHEVRON_RIGHT;
+        isRightCollapsed = false;
+        localStorage.setItem('rightWidth', preCollapseRightWidth || '250px');
+      } else {
+        preCollapseRightWidth = document.body.style.getPropertyValue('--right-width') || getComputedStyle(document.body).getPropertyValue('--right-width').trim();
+        if (!preCollapseRightWidth || preCollapseRightWidth === '0px') preCollapseRightWidth = '250px';
+        document.body.style.setProperty('--right-width', '0px');
+        btn.innerHTML = ICONS.CHEVRON_LEFT;
+        isRightCollapsed = true;
+        localStorage.setItem('rightWidth', '0px');
+      }
+    });
+  } else if (type === 'center') {
+    btn.style.width = '30px';
+    btn.style.height = '14px';
+    btn.style.left = '50%';
+    btn.style.top = '50%';
+    btn.style.transform = 'translate(-50%, -50%)';
+    btn.innerHTML = ICONS.CHEVRON_UP;
+    
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isCenterCollapsed) {
+        document.body.style.setProperty('--top-height', preCollapseTopHeight || '250px');
+        btn.innerHTML = ICONS.CHEVRON_UP;
+        isCenterCollapsed = false;
+        localStorage.setItem('topHeight', preCollapseTopHeight || '250px');
+      } else {
+        preCollapseTopHeight = document.body.style.getPropertyValue('--top-height') || getComputedStyle(document.body).getPropertyValue('--top-height').trim();
+        if (!preCollapseTopHeight || preCollapseTopHeight === '0px') preCollapseTopHeight = '250px';
+        document.body.style.setProperty('--top-height', '0px');
+        btn.innerHTML = ICONS.CHEVRON_DOWN;
+        isCenterCollapsed = true;
+        localStorage.setItem('topHeight', '0px');
+      }
+    });
+  }
+
+  // ドラッグ操作と干渉しないようイベント伝播を防止
+  btn.addEventListener('mousedown', (e) => e.stopPropagation());
+  
+  resizer.appendChild(btn);
+}
+
+if (resizerLeft) createResizerToggle(resizerLeft, 'left');
+if (resizerRight) createResizerToggle(resizerRight, 'right');
+if (resizerCenter) createResizerToggle(resizerCenter, 'center');
 
 window.addEventListener('mousemove', (e) => {
   // いずれかのリサイズがアクティブな場合、マウスの動きに合わせてペインの幅/高さを更新
@@ -688,9 +828,30 @@ window.addEventListener('DOMContentLoaded', async () => {
   const savedLeftWidth = localStorage.getItem('leftWidth');
   const savedRightWidth = localStorage.getItem('rightWidth');
   const savedTopHeight = localStorage.getItem('topHeight');
-  if (savedLeftWidth) document.body.style.setProperty('--left-width', savedLeftWidth);
-  if (savedRightWidth) document.body.style.setProperty('--right-width', savedRightWidth);
-  if (savedTopHeight) document.body.style.setProperty('--top-height', savedTopHeight);
+  if (savedLeftWidth) {
+    document.body.style.setProperty('--left-width', savedLeftWidth);
+    if (savedLeftWidth === '0px') {
+      isLeftCollapsed = true;
+      const btn = resizerLeft.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = ICONS.CHEVRON_RIGHT;
+    }
+  }
+  if (savedRightWidth) {
+    document.body.style.setProperty('--right-width', savedRightWidth);
+    if (savedRightWidth === '0px') {
+      isRightCollapsed = true;
+      const btn = resizerRight.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = ICONS.CHEVRON_LEFT;
+    }
+  }
+  if (savedTopHeight) {
+    document.body.style.setProperty('--top-height', savedTopHeight);
+    if (savedTopHeight === '0px') {
+      isCenterCollapsed = true;
+      const btn = resizerCenter.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = ICONS.CHEVRON_DOWN;
+    }
+  }
 
   // localStorageから前回のサムネイルスケール(0〜100)を復元
   const savedThumbScale = localStorage.getItem('thumbnailScale');
