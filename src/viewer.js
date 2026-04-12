@@ -130,6 +130,36 @@ function setZoomState(zoomed) {
 }
 
 /**
+ * 現在の回転角度から、縦横が入れ替わっているかどうかを判定します。
+ * @returns {boolean} 縦横が入れ替わっている場合は true
+ */
+function isRotationSwapped() {
+  return Math.abs(currentRotation) % 360 === 90 || Math.abs(currentRotation) % 360 === 270;
+}
+
+/**
+ * 現在の回転角度を考慮した画像の本来のサイズを取得します。
+ * @returns {{width: number, height: number}} 回転を考慮した幅と高さ
+ */
+function getNaturalDimensions() {
+  const swapped = isRotationSwapped();
+  return {
+    width: swapped ? imgElement.naturalHeight : imgElement.naturalWidth,
+    height: swapped ? imgElement.naturalWidth : imgElement.naturalHeight
+  };
+}
+
+/**
+ * ズーム状態とフィット状態を解除し、デフォルトの表示状態に戻します。
+ */
+function resetZoomAndFit() {
+  isZoomed = false;
+  isFitToWindow = false;
+  applyFitState();
+  updateFullscreenStyles();
+}
+
+/**
  * 非ズーム時の表示状態（強制フィット拡大 か デフォルトの縮小のみ か）を適用する。
  */
 function applyFitState() {
@@ -137,8 +167,7 @@ function applyFitState() {
 
   if (isFitToWindow) {
     // 回転時のアスペクト比崩れを防ぐため、回転角度に応じて縦横の100%基準を入れ替える
-    const absRot = Math.abs(currentRotation) % 360;
-    const isSwapped = absRot === 90 || absRot === 270;
+    const isSwapped = isRotationSwapped();
     imgElement.style.maxWidth = 'none';
     imgElement.style.maxHeight = 'none';
     imgElement.style.width = isSwapped ? '100vh' : '100vw';
@@ -214,8 +243,7 @@ function updateFullscreenStyles() {
   document.body.style.overflow = 'hidden';
 
   // 回転による視覚的サイズとレイアウトサイズのズレを margin で補正する
-  const absRot = Math.abs(currentRotation) % 360;
-  const isSwapped = absRot === 90 || absRot === 270;
+  const isSwapped = isRotationSwapped();
   
   if (isSwapped) {
     const marginY = (imgElement.naturalWidth - imgElement.naturalHeight) / 2;
@@ -226,8 +254,7 @@ function updateFullscreenStyles() {
   }
 
   // 補正後のサイズ（レイアウト上のサイズ＝視覚的なサイズ）
-  const imgWidth = isSwapped ? imgElement.naturalHeight : imgElement.naturalWidth;
-  const imgHeight = isSwapped ? imgElement.naturalWidth : imgElement.naturalHeight;
+  const { width: imgWidth, height: imgHeight } = getNaturalDimensions();
 
   const winW = window.innerWidth;
   const winH = window.innerHeight;
@@ -483,6 +510,37 @@ window.addEventListener('wheel', (e) => {
 });
 
 /**
+ * ライセンス情報を表示するための簡易Markdownパーサー
+ * @param {string} text - Markdown形式のテキスト
+ * @returns {string} HTML文字列
+ */
+function parseLicenseMarkdown(text) {
+  return text.split('\n').map(line => {
+    let l = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (l.startsWith('### ')) return `<h3 style="color: #ebc06d; margin: 1em 0 0 0;">${l.substring(4)}</h3>`;
+    if (l.startsWith('## ')) return `<h2 style="color: #ebc06d; margin: 1em 0 0 0; border-bottom: 1px solid #555; padding-bottom: 4px;">${l.substring(3)}</h2>`;
+    if (l.startsWith('# ')) return `<h1 style="color: #ebc06d; margin: 0 0 0.5em 0; border-bottom: 1px solid #555; padding-bottom: 4px;">${l.substring(2)}</h1>`;
+    if (l.startsWith('---')) return `<hr style="border: 0; border-top: 1px solid #555; margin: 1em 0;">`;
+    if (l.startsWith('&gt; ')) return `<blockquote style="border-left: 4px solid #555; padding-left: 10px; margin: 0; color: #ebc06d;">${l.substring(5)}</blockquote>`;
+    
+    const links = [];
+    l = l.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, (match, text, url) => {
+      links.push(`<a href="${url}" target="_blank" style="color: #3a7afe; text-decoration: underline;">${text}</a>`);
+      return `__LINK_${links.length - 1}__`;
+    });
+    
+    l = l.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #3a7afe; text-decoration: underline;">$1</a>');
+    
+    links.forEach((linkHtml, index) => {
+      l = l.replace(`__LINK_${index}__`, linkHtml);
+    });
+
+    l = l.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #fff;">$1</strong>');
+    return l;
+  }).join('\n');
+}
+
+/**
  * オープンソースライセンスを表示するダイアログを生成
  */
 async function showLicenseDialog() {
@@ -711,11 +769,7 @@ window.addEventListener('keydown', async (e) => {
       break;
     case '0': {
       e.preventDefault();
-      
-      const absRot = Math.abs(currentRotation) % 360;
-      const isSwapped = absRot === 90 || absRot === 270;
-      const natW = isSwapped ? imgElement.naturalHeight : imgElement.naturalWidth;
-      const natH = isSwapped ? imgElement.naturalWidth : imgElement.naturalHeight;
+      const { width: natW, height: natH } = getNaturalDimensions();
 
       const monitorW = window.screen.availWidth;
       const monitorH = window.screen.availHeight;
@@ -734,28 +788,18 @@ window.addEventListener('keydown', async (e) => {
         window.veloxAPI.resizeViewerWindow(targetW, targetH);
       }
 
-      isZoomed = false; // 100%ズーム（はみ出し）状態を解除
-      isFitToWindow = false; // 強制拡大フィット状態を解除
-      applyFitState();
-      updateFullscreenStyles();
+      resetZoomAndFit();
       break;
     }
     case '1': {
       e.preventDefault();
-      
-      const absRot = Math.abs(currentRotation) % 360;
-      const isSwapped = absRot === 90 || absRot === 270;
-      const natW = isSwapped ? imgElement.naturalHeight : imgElement.naturalWidth;
-      const natH = isSwapped ? imgElement.naturalWidth : imgElement.naturalHeight;
+      const { width: natW, height: natH } = getNaturalDimensions();
 
       if (window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
         window.veloxAPI.resizeViewerWindow(natW, natH);
       }
 
-      isZoomed = false; // 100%ズーム（はみ出し）状態を解除
-      isFitToWindow = false; // 強制拡大フィット状態を解除
-      applyFitState();
-      updateFullscreenStyles();
+      resetZoomAndFit();
       break;
     }
     case 'Escape':
@@ -784,10 +828,7 @@ window.addEventListener('keydown', async (e) => {
           previousWindowSize = null;
         } else { // 現在のサイズを保存し、画像サイズに合わせてリサイズする
           previousWindowSize = { width: window.innerWidth, height: window.innerHeight };
-          const absRot = Math.abs(currentRotation) % 360;
-          const isSwapped = absRot === 90 || absRot === 270;
-          const natW = isSwapped ? imgElement.naturalHeight : imgElement.naturalWidth;
-          const natH = isSwapped ? imgElement.naturalWidth : imgElement.naturalHeight;
+          const { width: natW, height: natH } = getNaturalDimensions();
           
           let targetW = natW;
           let targetH = natH;
