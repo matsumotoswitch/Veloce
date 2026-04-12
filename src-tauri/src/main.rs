@@ -723,17 +723,9 @@ fn sync_image_paths(state: tauri::State<'_, AppState>, paths: Vec<String>) {
 // --- ファイル・システム操作コマンド ---
 
 #[tauri::command]
-async fn trash_file(app: tauri::AppHandle, file_path: String) -> Result<bool, String> {
+async fn trash_file(file_path: String) -> Result<bool, String> {
     Ok(tokio::task::spawn_blocking(move || {
         if trash::delete(&file_path).is_ok() {
-            // フロントエンドにリスト更新を促すためのイベントを送信
-            if let Some(parent) = Path::new(&file_path).parent() {
-                let dir_path = parent.to_string_lossy().to_string();
-                let mut payload = std::collections::HashMap::new();
-                payload.insert("filePath", file_path);
-                payload.insert("dirPath", dir_path);
-                let _ = app.emit_all("file-trashed", payload);
-            }
             true
         } else {
             false

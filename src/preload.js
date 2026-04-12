@@ -131,11 +131,6 @@ window.veloxAPI = {
    */
   trashFile: (filePath) => invoke('trash_file', { filePath }),
   /**
-   * ファイルがゴミ箱に移動されたときにメインプロセスから通知を受け取るためのコールバックを登録します。
-   * @param {function} callback - 通知を受け取ったときに実行される関数。
-   */
-  onFileTrashed: (callback) => listen('file-trashed', (event) => callback(event.payload)),
-  /**
    * ファイルが追加または更新されたときの通知を受け取ります。
    */
   onFileChanged: (callback) => listen('file-changed', (event) => callback(event.payload)),

@@ -729,19 +729,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // メインプロセスからファイルがゴミ箱に移動された通知を受け取る
-  if (window.veloxAPI.onFileTrashed) {
-    let trashRefreshTimer = null;
-    window.veloxAPI.onFileTrashed(({ dirPath }) => {
-      if (dirPath === currentDirectory) {
-        clearTimeout(trashRefreshTimer);
-        trashRefreshTimer = setTimeout(() => {
-          refreshFileList();
-        }, 100);
-      }
-    });
-  }
-
   if (window.veloxAPI.onFileChanged) {
     window.veloxAPI.onFileChanged((newFile) => {
       const index = currentFiles.findIndex(f => f.path === newFile.path);
