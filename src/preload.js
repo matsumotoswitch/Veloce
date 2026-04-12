@@ -226,5 +226,9 @@ window.veloxAPI = {
    * Rust側の画像パス配列をフロントエンドのソート結果と同期します。
    * @param {string[]} paths - ソート済みの画像パス配列
    */
-  syncImagePaths: (paths) => invoke('sync_image_paths', { paths })
+  syncImagePaths: (paths) => invoke('sync_image_paths', { paths }),
+  /**
+   * ライセンス情報を取得します。
+   */
+  getLicenseText: () => invoke('get_license_text')
 };

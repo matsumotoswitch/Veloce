@@ -772,6 +772,13 @@ fn toggle_devtools(window: tauri::Window) {
     }
 }
 
+#[tauri::command]
+fn get_license_text() -> String {
+    let app_license = include_str!("../../LICENSE.md");
+    let credits = include_str!("../../CREDITS.md");
+    format!("{}\n\n{}", app_license, credits)
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState { 
@@ -799,7 +806,8 @@ fn main() {
             trash_file,
             trash_folder,
             copy_image_to_clipboard,
-            toggle_devtools
+            toggle_devtools,
+            get_license_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -483,6 +483,105 @@ window.addEventListener('wheel', (e) => {
 });
 
 /**
+ * オープンソースライセンスを表示するダイアログを生成
+ */
+async function showLicenseDialog() {
+  const overlay = document.createElement('div');
+  overlay.id = 'license-overlay';
+  overlay.style.position = 'fixed';
+  overlay.style.top = '0';
+  overlay.style.left = '0';
+  overlay.style.width = '100vw';
+  overlay.style.height = '100vh';
+  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  overlay.style.zIndex = '10000'; // ヘルプ画面より上に表示
+  overlay.style.display = 'flex';
+  overlay.style.justifyContent = 'center';
+  overlay.style.alignItems = 'center';
+  
+  const content = document.createElement('div');
+  content.style.backgroundColor = '#1e1e1e';
+  content.style.padding = '20px';
+  content.style.borderRadius = '8px';
+  content.style.border = '1px solid #555';
+  content.style.width = '80%';
+  content.style.maxWidth = '800px';
+  content.style.height = '80%';
+  content.style.display = 'flex';
+  content.style.flexDirection = 'column';
+  content.style.boxShadow = '0 4px 20px rgba(0,0,0,0.8)';
+  content.style.cursor = 'default';
+  
+  let licenseText = "ライセンス情報を読み込み中...";
+  try {
+    // Rust側に定義したコマンドを呼び出して、LICENSE.md と CREDITS.md の内容を取得する
+    if (window.__TAURI__ && window.__TAURI__.invoke) {
+      licenseText = await window.__TAURI__.invoke('get_license_text');
+    } else if (window.veloxAPI && window.veloxAPI.getLicenseText) {
+      licenseText = await window.veloxAPI.getLicenseText();
+    }
+  } catch (e) {
+    console.error("Failed to load licenses:", e);
+    licenseText = "ライセンス情報の読み込みに失敗しました。";
+  }
+
+  const combinedText = [
+    "# Veloce",
+    "**Copyright (c) 2026 Veloce**",
+    "License: [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)",
+    "",
+    "> ※本ソフトウェアの商用利用（営利目的での利用、組み込み、販売など）は固く禁止されています。",
+    "",
+    "---",
+    "",
+    licenseText
+  ].join('\n');
+
+  const parsedText = combinedText.split('\n').map(line => {
+    let l = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (l.startsWith('### ')) return '<h3 style="color: #ebc06d; margin: 1em 0 0 0;">' + l.substring(4) + '</h3>';
+    if (l.startsWith('## ')) return '<h2 style="color: #ebc06d; margin: 1em 0 0 0; border-bottom: 1px solid #555; padding-bottom: 4px;">' + l.substring(3) + '</h2>';
+    if (l.startsWith('# ')) return '<h1 style="color: #ebc06d; margin: 0 0 0.5em 0; border-bottom: 1px solid #555; padding-bottom: 4px;">' + l.substring(2) + '</h1>';
+    if (l.startsWith('---')) return '<hr style="border: 0; border-top: 1px solid #555; margin: 1em 0;">';
+    if (l.startsWith('&gt; ')) return '<blockquote style="border-left: 4px solid #555; padding-left: 10px; margin: 0; color: #ebc06d;">' + l.substring(5) + '</blockquote>';
+    
+    const links = [];
+    l = l.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, (match, text, url) => {
+      links.push('<a href="' + url + '" target="_blank" style="color: #3a7afe; text-decoration: underline;">' + text + '</a>');
+      return '__LINK_' + (links.length - 1) + '__';
+    });
+    
+    l = l.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #3a7afe; text-decoration: underline;">$1</a>');
+    
+    links.forEach((linkHtml, index) => {
+      l = l.replace('__LINK_' + index + '__', linkHtml);
+    });
+
+    l = l.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #fff;">$1</strong>');
+    return l;
+  }).join('\n');
+
+  content.innerHTML = `
+    <h2 style="margin-top: 0; color: #ebc06d;">ライセンス情報</h2>
+    <div style="flex: 1; overflow-y: auto; background-color: #2d2d2d; padding: 20px; border: 1px solid #444; border-radius: 4px; color: #ccc; font-family: sans-serif; white-space: pre-wrap; font-size: 14px; line-height: 1.6;">${parsedText}</div>
+    <div style="text-align: right; margin-top: 15px;">
+      <button id="close-license-btn" style="padding: 8px 24px; background-color: #3a7afe; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">閉じる</button>
+    </div>
+  `;
+  
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+  
+  overlay.appendChild(content);
+  document.body.appendChild(overlay);
+  
+  document.getElementById('close-license-btn').addEventListener('click', () => {
+    overlay.remove();
+  });
+}
+
+/**
  * ヘルプ（ショートカット一覧）をオーバーレイ表示/非表示する
  */
 function toggleHelpOverlay(forceShow) {
@@ -523,17 +622,22 @@ function toggleHelpOverlay(forceShow) {
   content.innerHTML = `
     <h2 style="margin-top: 0; text-align: center; color: #ebc06d;">ヘルプ・ショートカット一覧</h2>
     <div style="display: flex; gap: 40px; font-size: inherit;">
-      <div>
-        <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
-        <table style="border-collapse: collapse; width: 100%;">
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプの表示/非表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">矢印キー</td><td style="padding: 6px 15px;">画像の選択を移動</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F5</td><td style="padding: 6px 15px;">最新の情報に更新</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">選択中の画像をゴミ箱に移動</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をコピー</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">ダブルクリック</td><td style="padding: 6px 15px;">サムネイルからビューワーを開く</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ヘルプを閉じる</td></tr>
-        </table>
+      <div style="display: flex; flex-direction: column; justify-content: space-between;">
+        <div>
+          <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
+          <table style="border-collapse: collapse; width: 100%;">
+            <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプの表示/非表示</td></tr>
+            <tr><td style="padding: 6px 15px; font-weight: bold;">矢印キー</td><td style="padding: 6px 15px;">画像の選択を移動</td></tr>
+            <tr><td style="padding: 6px 15px; font-weight: bold;">F5</td><td style="padding: 6px 15px;">最新の情報に更新</td></tr>
+            <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">選択中の画像をゴミ箱に移動</td></tr>
+            <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をコピー</td></tr>
+            <tr><td style="padding: 6px 15px; font-weight: bold;">ダブルクリック</td><td style="padding: 6px 15px;">サムネイルからビューワーを開く</td></tr>
+            <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ヘルプを閉じる</td></tr>
+          </table>
+        </div>
+        <div style="text-align: center; padding-bottom: 6px;">
+          <span id="license-link" style="color: #3a7afe; text-decoration: underline; cursor: pointer; font-size: 0.9em;">ライセンスについて</span>
+        </div>
       </div>
       <div>
         <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">ビューワー画面</h3>
@@ -556,7 +660,13 @@ function toggleHelpOverlay(forceShow) {
     </div>
   `;
   
-  overlay.addEventListener('click', () => toggleHelpOverlay(false));
+  overlay.addEventListener('click', (e) => {
+    if (e.target.id === 'license-link') {
+      showLicenseDialog();
+      return;
+    }
+    toggleHelpOverlay(false);
+  });
   
   overlay.appendChild(content);
   document.body.appendChild(overlay);
