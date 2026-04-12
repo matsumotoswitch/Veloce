@@ -555,6 +555,17 @@ if (document.getElementById('center-pane')) {
 }
 
 /**
+ * プロンプト情報（メタデータ）の表示をクリアして非表示にする。
+ */
+function clearMetadataUI() {
+  const container = document.getElementById('metadata-container');
+  if (container) {
+    container.innerHTML = '';
+    container.style.display = 'none';
+  }
+}
+
+/**
  * 選択状態のUI（クラス）を一括更新する。
  * querySelectorAllを使用せず、直接子要素を参照してパフォーマンスを劇的に向上させる。
  */
@@ -595,6 +606,9 @@ function scheduleRefresh() {
     renderAll();
     loadMetadataInBackground();
     updateSelectionUI();
+    if (selectedIndex === -1) {
+      clearMetadataUI();
+    }
   }, 300); // バッチ処理等を考慮し、300ms間更新が止まったタイミングで描画する
 }
 
@@ -641,8 +655,7 @@ async function refreshFileList() {
     if (currentMetaRequestId === requestId) renderMetadata(meta);
   } else {
     // 完全に選択が失われた場合（フォルダが空になった場合など）
-    const container = document.getElementById('metadata-container');
-    if (container) container.innerHTML = '';
+    clearMetadataUI();
   }
 }
 
@@ -723,6 +736,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       sortFiles();
       renderAll();
       loadMetadataInBackground(); // バックグラウンドでメタデータ読み込みを開始
+      clearMetadataUI();
 
       // ツリーを保存されていたディレクトリの階層まで自動展開する
       await expandTreeToPath(currentDirectory);
@@ -937,6 +951,7 @@ function createTreeNode(folder, isRoot = false) {
         sortFiles();
         renderAll();
         loadMetadataInBackground(); // ディレクトリ変更後もバックグラウンド読み込み
+        clearMetadataUI();
       }
     }
 
@@ -1366,8 +1381,7 @@ async function selectImage(index, event = null) {
 
   if (selectedIndex === -1) {
     updateSelectionUI();
-    const container = document.getElementById('metadata-container');
-    if (container) container.innerHTML = '';
+    clearMetadataUI();
     return;
   }
 
