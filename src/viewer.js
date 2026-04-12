@@ -685,9 +685,26 @@ window.addEventListener('keydown', async (e) => {
 	}
   }
 
-  if (e.ctrlKey && e.key === 'c') {
+  if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
 	if (currentImagePath) {
 	  window.veloxAPI.copyImageToClipboard(currentImagePath);
+      
+      // コピー成功時に画像をピカッと光らせるエフェクト
+      const originalTransition = imgElement.style.transition;
+      const originalFilter = imgElement.style.filter;
+      const baseFilter = originalFilter && originalFilter !== 'none' ? originalFilter + ' ' : '';
+      
+      imgElement.style.transition = 'none';
+      imgElement.style.filter = baseFilter + 'drop-shadow(0 0 4px #ebc06d) drop-shadow(0 0 10px #ebc06d) brightness(1.05)';
+      
+      setTimeout(() => {
+        imgElement.style.transition = 'filter 0.4s ease-out';
+        imgElement.style.filter = originalFilter || 'none';
+        setTimeout(() => {
+          imgElement.style.transition = originalTransition;
+          if (!originalFilter) imgElement.style.removeProperty('filter');
+        }, 400);
+      }, 100);
 	}
   }
 });

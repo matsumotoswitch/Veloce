@@ -1490,8 +1490,8 @@ function renderMetadata(meta) {
     copyBtn.style.display = 'inline-flex';
     copyBtn.style.alignItems = 'center';
     
-    copyBtn.onmouseenter = () => { if (copyBtn.style.color === 'rgb(136, 136, 136)' || copyBtn.style.color === '#888') copyBtn.style.color = '#4caf50'; };
-    copyBtn.onmouseleave = () => { if (copyBtn.style.color === 'rgb(76, 175, 80)' || copyBtn.style.color === '#4caf50') copyBtn.style.color = '#888'; };
+    copyBtn.onmouseenter = () => { if (copyBtn.style.color === 'rgb(136, 136, 136)' || copyBtn.style.color === '#888') copyBtn.style.color = '#3a7afe'; };
+    copyBtn.onmouseleave = () => { if (copyBtn.style.color === 'rgb(58, 122, 254)' || copyBtn.style.color === '#3a7afe') copyBtn.style.color = '#888'; };
     
     copyBtn.addEventListener('click', async () => {
       try {
@@ -1501,7 +1501,7 @@ function renderMetadata(meta) {
         copyBtn.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
         setTimeout(() => { 
           copyBtn.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out'; // スッと早くフェードアウト
-          copyBtn.style.color = copyBtn.matches(':hover') ? '#4caf50' : '#888'; 
+          copyBtn.style.color = copyBtn.matches(':hover') ? '#3a7afe' : '#888'; 
           copyBtn.style.filter = 'none';
         }, 100); // 100msだけ最高輝度を維持
       } catch (err) {
@@ -1738,6 +1738,28 @@ window.addEventListener('keydown', async (e) => {
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
     if (selectedIndex > -1 && currentFiles[selectedIndex]) {
       window.veloxAPI.copyImageToClipboard(currentFiles[selectedIndex].path);
+
+      // コピー成功時に選択中の画像をピカッと光らせるエフェクト
+      const applyFlash = (el) => {
+        if (!el) return;
+        const originalTransition = el.style.transition;
+        const originalFilter = el.style.filter;
+        
+        el.style.transition = 'none';
+        el.style.filter = 'drop-shadow(0 0 3px #ebc06d) drop-shadow(0 0 6px #ebc06d) brightness(1.1)';
+        
+        setTimeout(() => {
+          el.style.transition = 'filter 0.4s ease-out';
+          el.style.filter = originalFilter || 'none';
+          setTimeout(() => {
+            el.style.transition = originalTransition;
+            if (!originalFilter) el.style.removeProperty('filter');
+          }, 400);
+        }, 100);
+      };
+
+      applyFlash(thumbnailGrid.children[selectedIndex]);
+      applyFlash(fileListBody.children[selectedIndex]);
     }
   }
 
