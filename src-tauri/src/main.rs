@@ -11,9 +11,10 @@ use std::io::Read; // flate2のread_to_string用
 use std::sync::Mutex;
 use rayon::prelude::*;
 use tauri::Manager;
+use notify::{Watcher, RecursiveMode, EventKind};
 
 // --- データ構造の定義 ---
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")] // フロントエンドのJSがキャメルケースを期待しているため変換
 pub struct ImageFile {
     name: String,
@@ -73,6 +74,7 @@ pub struct ViewerImageResult {
 pub struct AppState {
     image_paths: Mutex<Vec<String>>,
     current_dir: Mutex<String>,
+    watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
 
 // --- Tauri コマンド ---
@@ -101,6 +103,7 @@ fn get_drives() -> Vec<String> {
 
 #[tauri::command]
 async fn load_directory(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     target_path: String,
 ) -> Result<Option<LoadDirectoryResult>, String> {
@@ -182,6 +185,63 @@ async fn load_directory(
         if let Ok(mut dir_lock) = state.current_dir.lock() {
             *dir_lock = actual_dir.to_string_lossy().to_string();
         }
+
+        // --- フォルダ監視 (File Watching) の設定 ---
+        if let Ok(mut watcher_lock) = state.watcher.lock() {
+            let app_handle = app.clone();
+            *watcher_lock = None; // 別のフォルダに移動した際、古いウォッチャーを破棄する
+            
+            let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if let Ok(event) = res {
+                    match event.kind {
+                        EventKind::Create(_) | EventKind::Modify(_) => {
+                            for path in event.paths {
+                                if path.is_file() {
+                                    if let Some(ext_os) = path.extension() {
+                                        let ext = format!(".{}", ext_os.to_string_lossy().to_lowercase());
+                                        let supported = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+                                        if supported.contains(&ext.as_str()) {
+                                            let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
+                                            let mut size = 0;
+                                            let mut mtime = 0;
+                                            if let Ok(metadata) = std::fs::metadata(&path) {
+                                                size = metadata.len();
+                                                mtime = metadata.modified()
+                                                    .unwrap_or(UNIX_EPOCH)
+                                                    .duration_since(UNIX_EPOCH)
+                                                    .unwrap_or_default()
+                                                    .as_millis() as u64;
+                                            }
+                                            let img_file = ImageFile {
+                                                name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                                                ext,
+                                                path: clean_path,
+                                                size,
+                                                mtime,
+                                            };
+                                            let _ = app_handle.emit_all("file-changed", img_file);
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        EventKind::Remove(_) => {
+                            for path in event.paths {
+                                let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
+                                let _ = app_handle.emit_all("file-removed", clean_path);
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            }).ok();
+
+            if let Some(w) = watcher.as_mut() {
+                let _ = w.watch(actual_dir.as_path(), RecursiveMode::NonRecursive);
+            }
+            *watcher_lock = watcher;
+        }
+        // --- 監視設定ここまで ---
 
         Ok(Some(LoadDirectoryResult {
             path: actual_dir.to_string_lossy().to_string(),
@@ -725,6 +785,7 @@ fn main() {
         .manage(AppState { 
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
+            watcher: Mutex::new(None),
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event.event() {

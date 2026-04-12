@@ -575,6 +575,29 @@ function updateSelectionUI() {
   }
 }
 
+// AI等による連続したファイル生成に追従するための差分更新ロジック
+let autoRefreshTimer = null;
+function scheduleRefresh() {
+  clearTimeout(autoRefreshTimer);
+  autoRefreshTimer = setTimeout(() => {
+    const selectedPath = selectedIndex > -1 && currentFiles[selectedIndex] ? currentFiles[selectedIndex].path : null;
+    const selectedPaths = new Set(Array.from(selectedIndices).map(i => currentFiles[i] ? currentFiles[i].path : null).filter(Boolean));
+
+    sortFiles();
+    
+    selectedIndices.clear();
+    selectedIndex = -1;
+    currentFiles.forEach((f, i) => {
+      if (selectedPaths.has(f.path)) selectedIndices.add(i);
+      if (f.path === selectedPath) selectedIndex = i;
+    });
+
+    renderAll();
+    loadMetadataInBackground();
+    updateSelectionUI();
+  }, 300); // バッチ処理等を考慮し、300ms間更新が止まったタイミングで描画する
+}
+
 /**
  * 現在表示しているディレクトリのファイルリストを再読み込みし、UIを更新する。
  * ファイルの削除や追加があった場合に呼び出される。
@@ -715,6 +738,32 @@ window.addEventListener('DOMContentLoaded', async () => {
         trashRefreshTimer = setTimeout(() => {
           refreshFileList();
         }, 100);
+      }
+    });
+  }
+
+  if (window.veloxAPI.onFileChanged) {
+    window.veloxAPI.onFileChanged((newFile) => {
+      const index = currentFiles.findIndex(f => f.path === newFile.path);
+      if (index > -1) {
+        const oldFile = currentFiles[index];
+        if (oldFile.size !== newFile.size || oldFile.mtime !== newFile.mtime) {
+          currentFiles[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0 };
+          scheduleRefresh();
+        }
+      } else {
+        currentFiles.push(newFile);
+        scheduleRefresh();
+      }
+    });
+  }
+
+  if (window.veloxAPI.onFileRemoved) {
+    window.veloxAPI.onFileRemoved((path) => {
+      const index = currentFiles.findIndex(f => f.path === path);
+      if (index > -1) {
+        currentFiles.splice(index, 1);
+        scheduleRefresh();
       }
     });
   }

@@ -136,6 +136,14 @@ window.veloxAPI = {
    */
   onFileTrashed: (callback) => listen('file-trashed', (event) => callback(event.payload)),
   /**
+   * ファイルが追加または更新されたときの通知を受け取ります。
+   */
+  onFileChanged: (callback) => listen('file-changed', (event) => callback(event.payload)),
+  /**
+   * ファイルが削除されたときの通知を受け取ります。
+   */
+  onFileRemoved: (callback) => listen('file-removed', (event) => callback(event.payload)),
+  /**
    * フォルダを作成するようメインプロセスに要求します。
    * @param {string} parentDir - 親ディレクトリのパス。
    * @param {string} folderName - 新しいフォルダ名。
