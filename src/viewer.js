@@ -646,6 +646,7 @@ function toggleHelpOverlay(forceShow) {
           <tr><td style="padding: 6px 15px; font-weight: bold;">← / →</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">↑ / ↓</td><td style="padding: 6px 15px;">右 / 左に90度回転</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">0</td><td style="padding: 6px 15px;">100%表示 (大きい画像はフィット)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Enter</td><td style="padding: 6px 15px;">ズーム解除 / 強制フィット切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">フルスクリーン切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">W</td><td style="padding: 6px 15px;">ウィンドウを画像にフィット</td></tr>
@@ -707,6 +708,37 @@ window.addEventListener('keydown', async (e) => {
       applyFitState();
       updateFullscreenStyles();
       break;
+    case '0': {
+      e.preventDefault();
+      
+      const absRot = Math.abs(currentRotation) % 360;
+      const isSwapped = absRot === 90 || absRot === 270;
+      const natW = isSwapped ? imgElement.naturalHeight : imgElement.naturalWidth;
+      const natH = isSwapped ? imgElement.naturalWidth : imgElement.naturalHeight;
+
+      const monitorW = window.screen.availWidth;
+      const monitorH = window.screen.availHeight;
+
+      let targetW = natW;
+      let targetH = natH;
+
+      // モニターより大きい場合は画面に収まるように縮小
+      if (targetW > monitorW || targetH > monitorH) {
+        const scale = Math.min(monitorW / targetW, monitorH / targetH);
+        targetW = Math.floor(targetW * scale);
+        targetH = Math.floor(targetH * scale);
+      }
+
+      if (window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
+        window.veloxAPI.resizeViewerWindow(targetW, targetH);
+      }
+
+      isZoomed = false; // 100%ズーム（はみ出し）状態を解除
+      isFitToWindow = false; // 強制拡大フィット状態を解除
+      applyFitState();
+      updateFullscreenStyles();
+      break;
+    }
     case 'Escape':
       if (document.getElementById('help-overlay')) {
         toggleHelpOverlay(false);
