@@ -647,6 +647,7 @@ function toggleHelpOverlay(forceShow) {
           <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">↑ / ↓</td><td style="padding: 6px 15px;">右 / 左に90度回転</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">0</td><td style="padding: 6px 15px;">100%表示 (大きい画像はフィット)</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">1</td><td style="padding: 6px 15px;">完全な100%表示 (画面外にはみ出す)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Enter</td><td style="padding: 6px 15px;">ズーム解除 / 強制フィット切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">フルスクリーン切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">W</td><td style="padding: 6px 15px;">ウィンドウを画像にフィット</td></tr>
@@ -731,6 +732,24 @@ window.addEventListener('keydown', async (e) => {
 
       if (window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
         window.veloxAPI.resizeViewerWindow(targetW, targetH);
+      }
+
+      isZoomed = false; // 100%ズーム（はみ出し）状態を解除
+      isFitToWindow = false; // 強制拡大フィット状態を解除
+      applyFitState();
+      updateFullscreenStyles();
+      break;
+    }
+    case '1': {
+      e.preventDefault();
+      
+      const absRot = Math.abs(currentRotation) % 360;
+      const isSwapped = absRot === 90 || absRot === 270;
+      const natW = isSwapped ? imgElement.naturalHeight : imgElement.naturalWidth;
+      const natH = isSwapped ? imgElement.naturalWidth : imgElement.naturalHeight;
+
+      if (window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
+        window.veloxAPI.resizeViewerWindow(natW, natH);
       }
 
       isZoomed = false; // 100%ズーム（はみ出し）状態を解除
