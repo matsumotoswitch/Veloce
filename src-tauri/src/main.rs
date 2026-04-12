@@ -706,6 +706,7 @@ fn arrange_viewers(app: tauri::AppHandle) {
                 let y = position.y;
 
                 let _ = window.unmaximize(); // 最大化されていると移動できないため解除
+                let _ = window.set_always_on_top(true); // タスクバーより前面に表示するために最前面に設定
                 let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: target_width, height: target_height }));
                 let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
             }
