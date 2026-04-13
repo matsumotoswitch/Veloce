@@ -450,6 +450,7 @@ window.addEventListener('mousedown', (e) => {
   }
 });
 
+let dragRafId = null;
 window.addEventListener('mousemove', (e) => {
   if (isDragging) {
     if (!hasMoved) {
@@ -460,12 +461,15 @@ window.addEventListener('mousemove', (e) => {
       }
     }
     if (hasMoved) {
-      if (isZoomed) {
-        document.body.scrollLeft = scrollLeftStart - (e.pageX - startX);
-        document.body.scrollTop = scrollTopStart - (e.pageY - startY);
-      } else {
-        window.veloxAPI.moveViewerWindow(e.screenX - windowX, e.screenY - windowY);
-      }
+      if (dragRafId) cancelAnimationFrame(dragRafId);
+      dragRafId = requestAnimationFrame(() => {
+        if (isZoomed) {
+          document.body.scrollLeft = scrollLeftStart - (e.pageX - startX);
+          document.body.scrollTop = scrollTopStart - (e.pageY - startY);
+        } else {
+          window.veloxAPI.moveViewerWindow(e.screenX - windowX, e.screenY - windowY);
+        }
+      });
     }
   }
 });

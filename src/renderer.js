@@ -251,7 +251,8 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
         const escapedCurrent = CSS.escape(currentDirectory);
         const currentDiv = document.querySelector(`.tree-item[data-path="${escapedCurrent}"]`);
         if (currentDiv) {
-          document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+          const activeItem = document.querySelector('.tree-item.selected');
+          if (activeItem) activeItem.classList.remove('selected');
           currentDiv.classList.add('selected');
         }
       }
@@ -474,20 +475,26 @@ setupResizer(resizerLeft, 'left', 'col-resize');
 setupResizer(resizerRight, 'right', 'col-resize');
 setupResizer(resizerCenter, 'center', 'row-resize');
 
+let resizerRafId = null;
 window.addEventListener('mousemove', (e) => {
   // いずれかのリサイズがアクティブな場合、マウスの動きに合わせてペインの幅/高さを更新
-  if (resizingState.left) {
-	const newWidth = Math.max(100, Math.min(e.clientX, window.innerWidth - 400));
-	document.body.style.setProperty('--left-width', `${newWidth}px`);
-  } else if (resizingState.right) {
-	const newWidth = Math.max(150, Math.min(window.innerWidth - e.clientX, window.innerWidth - 400));
-	document.body.style.setProperty('--right-width', `${newWidth}px`);
-  } else if (resizingState.center) {
-	const centerPane = document.getElementById('center-pane');
-	const rect = centerPane.getBoundingClientRect();
-	const newHeight = Math.max(50, Math.min(e.clientY - rect.top, rect.height - 50));
-	document.body.style.setProperty('--top-height', `${newHeight}px`);
-  }
+  if (!resizingState.left && !resizingState.right && !resizingState.center) return;
+
+  if (resizerRafId) cancelAnimationFrame(resizerRafId);
+  resizerRafId = requestAnimationFrame(() => {
+    if (resizingState.left) {
+      const newWidth = Math.max(100, Math.min(e.clientX, window.innerWidth - 400));
+      document.body.style.setProperty('--left-width', `${newWidth}px`);
+    } else if (resizingState.right) {
+      const newWidth = Math.max(150, Math.min(window.innerWidth - e.clientX, window.innerWidth - 400));
+      document.body.style.setProperty('--right-width', `${newWidth}px`);
+    } else if (resizingState.center) {
+      const centerPane = document.getElementById('center-pane');
+      const rect = centerPane.getBoundingClientRect();
+      const newHeight = Math.max(50, Math.min(e.clientY - rect.top, rect.height - 50));
+      document.body.style.setProperty('--top-height', `${newHeight}px`);
+    }
+  });
 });
 
 window.addEventListener('mouseup', () => {
@@ -892,7 +899,8 @@ async function expandTreeToPath(targetPath, disableScroll = false, rootElement =
       if (itemDiv) {
           if (i === pathsToExpand.length - 1) {
               // 最後の目的のフォルダを選択状態にする
-              rootElement.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+              const activeItem = rootElement.querySelector('.tree-item.selected');
+              if (activeItem) activeItem.classList.remove('selected');
               itemDiv.classList.add('selected');
               if (!disableScroll) {
                   itemDiv.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -1028,7 +1036,8 @@ function createTreeNode(folder, isRoot = false) {
     }
     
     // クリックされた項目を選択状態にし、他の項目は非選択にする
-    document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+    const activeItem = document.querySelector('.tree-item.selected');
+    if (activeItem) activeItem.classList.remove('selected');
     itemDiv.classList.add('selected');
   });
 
@@ -1037,7 +1046,8 @@ function createTreeNode(folder, isRoot = false) {
     e.preventDefault();
     e.stopPropagation();
 
-    document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('selected'));
+    const activeItem = document.querySelector('.tree-item.selected');
+    if (activeItem) activeItem.classList.remove('selected');
     itemDiv.classList.add('selected');
 
     contextMenu.targetFolder = folder;
