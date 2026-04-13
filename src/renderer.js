@@ -1959,8 +1959,8 @@ window.addEventListener('keydown', async (e) => {
         }, 100);
       };
 
-      applyFlash(thumbnailGrid.children[selectedIndex]);
-      applyFlash(fileListBody.children[selectedIndex]);
+      applyFlash(thumbnailGrid.querySelector(`.thumbnail-item[data-index="${selectedIndex}"]`));
+      applyFlash(fileListBody.querySelector(`tr[data-index="${selectedIndex}"]`));
     }
   }
 
@@ -1977,21 +1977,12 @@ window.addEventListener('keydown', async (e) => {
     if (newIndex === -1) {
       newIndex = 0;
     } else {
-      // 現在のウィンドウ幅におけるサムネイルグリッドの「1行あたりのカラム数」を計算
-      const items = thumbnailGrid.children;
-      let columns = 1;
-      if (items.length > 1) {
-        const firstTop = items[0].getBoundingClientRect().top;
-        for (let i = 1; i < items.length; i++) {
-          if (items[i].getBoundingClientRect().top > firstTop) {
-            columns = i;
-            break;
-          }
-        }
-        if (columns === 1 && items[items.length - 1].getBoundingClientRect().top === firstTop) {
-          columns = items.length; // 1行しかない場合
-        }
-      }
+      const containerWidth = thumbnailGrid.clientWidth;
+      const itemSize = parseFloat(thumbnailSizeSlider.value) || 120;
+      const gap = 8;
+      const padding = 10;
+      const availableWidth = Math.max(1, containerWidth - padding * 2);
+      const columns = Math.max(1, Math.floor((availableWidth + gap) / (itemSize + gap)));
 
       // 移動先インデックスの計算
       if (e.key === 'ArrowLeft') newIndex = Math.max(0, selectedIndex - 1);

@@ -86,14 +86,33 @@ body {
   /* flexコンテナ内ではheightよりもflex-basisでサイズ指定する方が確実 */
   flex: 0 0 var(--top-height, 50%);
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
 }
 
-table { width: 100%; border-collapse: collapse; text-align: left; }
+table#file-table { 
+  width: 100%; 
+  border-collapse: collapse; 
+  text-align: left; 
+  table-layout: fixed;
+}
+#file-table th:nth-child(1) { width: 35%; }
+#file-table th:nth-child(2) { width: 10%; }
+#file-table th:nth-child(3) { width: 10%; }
+#file-table th:nth-child(4) { width: 10%; }
+#file-table th:nth-child(5) { width: 10%; }
+#file-table th:nth-child(6) { width: 25%; }
+
 th, td { padding: 4px 8px; border-bottom: 1px solid #333; cursor: pointer; }
-th { background: #2d2d30; position: sticky; top: 0; }
+th { background: #2d2d30; position: sticky; top: 0; z-index: 2; }
 tr:hover { background: #2a2d2e; }
 tr.selected { background: var(--accent-color); color: #fff; }
+
+#file-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* Center Bottom: Thumbnails */
 #thumbnail-controls {
@@ -111,19 +130,14 @@ tr.selected { background: var(--accent-color); color: #fff; }
 #center-bottom {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
-  padding: 10px;
-}
-
-.thumbnail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--thumbnail-size, 120px), 1fr));
-  gap: 10px;
+  padding: 0;
+  position: relative;
+  display: block;
 }
 
 .thumbnail-item {
-  width: 100%;
-  aspect-ratio: 1;
   object-fit: contain;
   border: 2px solid transparent;
   cursor: pointer;
