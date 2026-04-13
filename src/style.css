@@ -128,6 +128,9 @@ tr.selected { background: var(--accent-color); color: #fff; }
   border: 2px solid transparent;
   cursor: pointer;
   border-radius: 4px;
+  content-visibility: auto;
+  contain-intrinsic-size: var(--thumbnail-size);
+  will-change: border-color;
 }
 
 .thumbnail-item:hover { border-color: #555; }
