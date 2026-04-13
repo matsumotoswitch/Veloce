@@ -506,33 +506,14 @@ window.addEventListener('mouseup', () => {
 });
 
 // --- サムネイルサイズ変更機能 ---
-thumbnailSizeSlider.min = 0;
-thumbnailSizeSlider.max = 100;
 
 function updateThumbnailSize() {
-  const centerPane = document.getElementById('center-pane');
-  const containerWidth = centerPane ? centerPane.clientWidth : (thumbnailGrid ? thumbnailGrid.clientWidth : 0);
-  if (!containerWidth) return;
-
-  const sliderVal = parseFloat(thumbnailSizeSlider.value) || 0;
-  const gap = 8; // サムネイル間の余白
-  
-  // 最小サイズ：横に10枚並ぶサイズ
-  const minW = Math.max(20, (containerWidth - gap * 9) / 10);
-  // 最大サイズ：横に1枚（全体）のサイズ
-  const maxW = Math.max(minW, containerWidth - 24); // スクロールバー等の余白を考慮
-
-  // 人間の感覚に近い、自然で滑らかなズーム感にするために対数補間を使用
-  const logMin = Math.log(minW);
-  const logMax = Math.log(maxW);
-  const size = Math.exp(logMin + (logMax - logMin) * (sliderVal / 100));
-
+  // index.htmlで設定された min="100" max="500" の値をそのままピクセルサイズとして使用
+  const size = parseFloat(thumbnailSizeSlider.value) || 120;
   document.body.style.setProperty('--thumbnail-size', `${size}px`);
 }
 
-thumbnailSizeSlider.addEventListener('input', () => {
-  updateThumbnailSize();
-});
+thumbnailSizeSlider.addEventListener('input', updateThumbnailSize);
 
 thumbnailSizeSlider.addEventListener('change', (e) => {
   localStorage.setItem('thumbnailScale', e.target.value);
@@ -620,11 +601,6 @@ function initializeThumbnailObserver() {
             }
         }
     }, options);
-}
-
-const paneResizeObserver = new ResizeObserver(() => updateThumbnailSize());
-if (document.getElementById('center-pane')) {
-  paneResizeObserver.observe(document.getElementById('center-pane'));
 }
 
 /**
@@ -772,12 +748,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // localStorageから前回のサムネイルスケール(0〜100)を復元
+  // localStorageから前回のサムネイルサイズ(100〜500)を復元
   const savedThumbScale = localStorage.getItem('thumbnailScale');
-  if (savedThumbScale !== null) {
+  if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {
+    // 古いバージョン(0〜100)の値でない場合のみ復元する
     thumbnailSizeSlider.value = savedThumbScale;
   } else {
-    thumbnailSizeSlider.value = 30; // 初期値（程よいサイズ感）
+    thumbnailSizeSlider.value = 120; // 初期値（120px）
   }
   updateThumbnailSize();
 
