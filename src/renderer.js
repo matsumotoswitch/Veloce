@@ -234,7 +234,7 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
   const folderName = await showCustomPrompt('新しいフォルダ名を入力してください:');
   if (folderName) {
     const parentPath = contextMenu.targetFolder.path;
-    const result = await window.veloxAPI.createFolder(parentPath, folderName);
+    const result = await window.veloceAPI.createFolder(parentPath, folderName);
     if (result && result.success) {
       await refreshTree();
 
@@ -267,7 +267,7 @@ const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
   const oldPath = contextMenu.targetFolder.path;
   const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
   if (newName && newName !== contextMenu.targetFolder.name) {
-    const result = await window.veloxAPI.renameFolder(oldPath, newName);
+    const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
       if (currentDirectory.startsWith(oldPath)) {
         currentDirectory = currentDirectory.replace(oldPath, result.path);
@@ -285,7 +285,7 @@ const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
   const oldPath = contextMenu.targetFolder.path;
   const isConfirmed = await showCustomConfirm(`本当にフォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しますか？`);
   if (isConfirmed) {
-    const result = await window.veloxAPI.trashFolder(oldPath);
+    const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
       if (currentDirectory.startsWith(oldPath)) {
         // 削除したフォルダ以下を表示していた場合、親フォルダに移動してリストを更新する
@@ -532,8 +532,8 @@ window.addEventListener('resize', () => {
   clearTimeout(windowStateTimer);
   // リサイズ中に連続で保存処理が走らないよう、操作後500ms待機して保存
   windowStateTimer = setTimeout(async () => {
-    if (window.veloxAPI && window.veloxAPI.isViewerMaximized) {
-      const isMax = await window.veloxAPI.isViewerMaximized();
+    if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
+      const isMax = await window.veloceAPI.isViewerMaximized();
       localStorage.setItem('mainWinMaximized', isMax);
       if (!isMax) {
         localStorage.setItem('mainWinWidth', window.outerWidth);
@@ -584,7 +584,7 @@ function initializeThumbnailObserver() {
                         img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
                         
                         const requestRenderId = currentRenderId;
-                        window.veloxAPI.getThumbnail(filePath).then(url => {
+                        window.veloceAPI.getThumbnail(filePath).then(url => {
                             if (currentRenderId !== requestRenderId) return; // フォルダ移動等で不要になった場合は破棄
                             
                             if (url) {
@@ -594,7 +594,7 @@ function initializeThumbnailObserver() {
                                 }
                             } else {
                                 // サムネイル生成失敗時はオリジナル画像をフォールバック表示
-                                const fallbackUrl = window.veloxAPI.convertFileSrc(filePath);
+                                const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
                                 thumbnailBlobUrls.set(filePath, fallbackUrl);
                                 if (img.dataset.isVisible === 'true') img.src = fallbackUrl;
                             }
@@ -673,14 +673,14 @@ function scheduleRefresh() {
  * ファイルの削除や追加があった場合に呼び出される。
  */
 async function refreshFileList() {
-  if (!currentDirectory || !window.veloxAPI.loadDirectory) return;
+  if (!currentDirectory || !window.veloceAPI.loadDirectory) return;
 
   // 更新前に選択されていたファイルのパスを保持
   const oldSelectedPath = selectedIndex > -1 && currentFiles[selectedIndex] ? currentFiles[selectedIndex].path : null;
   const oldSelectedPaths = new Set(Array.from(selectedIndices).map(i => currentFiles[i] ? currentFiles[i].path : null).filter(Boolean));
   
   // メインプロセスにディレクトリの再読み込みを要求
-  const result = await window.veloxAPI.loadDirectory(currentDirectory);
+  const result = await window.veloceAPI.loadDirectory(currentDirectory);
   if (!result) return;
 
   currentFiles = result.imageFiles || [];
@@ -707,7 +707,7 @@ async function refreshFileList() {
   if (selectedIndex > -1) {
     // selectImageを使うと複数選択が解除されるため、個別にメタデータのみ更新する
     const requestId = ++currentMetaRequestId;
-    const meta = await window.veloxAPI.parseMetadata(currentFiles[selectedIndex].path);
+    const meta = await window.veloceAPI.parseMetadata(currentFiles[selectedIndex].path);
     if (currentMetaRequestId === requestId) renderMetadata(meta);
   } else {
     // 完全に選択が失われた場合（フォルダが空になった場合など）
@@ -726,15 +726,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   const savedWinY = localStorage.getItem('mainWinY');
   const savedWinMax = localStorage.getItem('mainWinMaximized');
 
-  if (savedWinW && savedWinH && window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
-    window.veloxAPI.resizeViewerWindow(parseInt(savedWinW, 10), parseInt(savedWinH, 10));
+  if (savedWinW && savedWinH && window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
+    window.veloceAPI.resizeViewerWindow(parseInt(savedWinW, 10), parseInt(savedWinH, 10));
   }
-  if (savedWinX && savedWinY && window.veloxAPI && window.veloxAPI.moveViewerWindow) {
-    window.veloxAPI.moveViewerWindow(parseInt(savedWinX, 10), parseInt(savedWinY, 10));
+  if (savedWinX && savedWinY && window.veloceAPI && window.veloceAPI.moveViewerWindow) {
+    window.veloceAPI.moveViewerWindow(parseInt(savedWinX, 10), parseInt(savedWinY, 10));
   }
-  if (savedWinMax === 'true' && window.veloxAPI && window.veloxAPI.isViewerMaximized && window.veloxAPI.maximizeViewer) {
-    window.veloxAPI.isViewerMaximized().then(isMax => {
-      if (!isMax) window.veloxAPI.maximizeViewer();
+  if (savedWinMax === 'true' && window.veloceAPI && window.veloceAPI.isViewerMaximized && window.veloceAPI.maximizeViewer) {
+    window.veloceAPI.isViewerMaximized().then(isMax => {
+      if (!isMax) window.veloceAPI.maximizeViewer();
     });
   }
 
@@ -789,10 +789,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   await refreshTree();
 
   // --- ツリー構築後にディレクトリの読み込みを行う ---
-  if (window.veloxAPI.loadDirectory) {
+  if (window.veloceAPI.loadDirectory) {
     // localStorageから前回のディレクトリを復元、なければ 'PC'（ホームディレクトリ）
     const savedDirectory = localStorage.getItem('currentDirectory') || 'PC';
-    const result = await window.veloxAPI.loadDirectory(savedDirectory);
+    const result = await window.veloceAPI.loadDirectory(savedDirectory);
     if (result) {
       currentDirectory = result.path;
       localStorage.setItem('currentDirectory', currentDirectory); // 有効なパスを保存
@@ -807,8 +807,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  if (window.veloxAPI.onFileChanged) {
-    window.veloxAPI.onFileChanged((newFile) => {
+  if (window.veloceAPI.onFileChanged) {
+    window.veloceAPI.onFileChanged((newFile) => {
       const index = currentFiles.findIndex(f => f.path === newFile.path);
       if (index > -1) {
         const oldFile = currentFiles[index];
@@ -823,8 +823,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (window.veloxAPI.onFileRemoved) {
-    window.veloxAPI.onFileRemoved((path) => {
+  if (window.veloceAPI.onFileRemoved) {
+    window.veloceAPI.onFileRemoved((path) => {
       const index = currentFiles.findIndex(f => f.path === path);
       if (index > -1) {
         currentFiles.splice(index, 1);
@@ -838,7 +838,7 @@ window.addEventListener('DOMContentLoaded', async () => {
  * フォルダツリー全体を再構築し、現在のディレクトリを展開する。
  */
 async function refreshTree() {
-  if (!window.veloxAPI.getDrives) return;
+  if (!window.veloceAPI.getDrives) return;
 
   const scrollTop = dirTree.scrollTop;
   const scrollLeft = dirTree.scrollLeft;
@@ -847,7 +847,7 @@ async function refreshTree() {
   const tempContainer = document.createElement('div');
   const ul = document.createElement('ul');
   ul.className = 'tree-root';
-  const drives = await window.veloxAPI.getDrives();
+  const drives = await window.veloceAPI.getDrives();
   for (const drive of drives) {
     ul.appendChild(createTreeNode({ name: drive, path: drive }, true));
   }
@@ -967,7 +967,7 @@ function createTreeNode(folder, isRoot = false) {
   // ノードを展開してサブフォルダを遅延読み込みする処理
   const expandNode = async () => {
     if (!isLoaded) {
-      const subFolders = await window.veloxAPI.getFolders(folder.path);
+      const subFolders = await window.veloceAPI.getFolders(folder.path);
       subFolders.forEach(subFolder => {
         childrenUl.appendChild(createTreeNode(subFolder));
       });
@@ -1006,9 +1006,9 @@ function createTreeNode(folder, isRoot = false) {
     e.stopPropagation();
     if (e.target === toggleIcon) return; // トグルクリック時は全体の選択・ロード処理をスキップ
     
-    if (window.veloxAPI.loadDirectory) {
+    if (window.veloceAPI.loadDirectory) {
       // クリックされたフォルダの画像一覧を中央ペインに表示
-      const result = await window.veloxAPI.loadDirectory(folder.path);
+      const result = await window.veloceAPI.loadDirectory(folder.path);
       if (result) {
         currentDirectory = result.path;
         localStorage.setItem('currentDirectory', currentDirectory); // フォルダ移動時にパスを保存
@@ -1109,13 +1109,13 @@ function createTreeNode(folder, isRoot = false) {
     
     const paths = getPathsFromDragEvent(e);
 
-    if (paths.length > 0 && window.veloxAPI.moveOrCopyFile) {
+    if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
       // ブラウザのドラッグ終了処理がフリーズするバグを完全に防ぐため、
       // ファイルの移動自体はすぐに行うが、UIの更新はドラッグ終了イベントまで待機する
       setTimeout(async () => {
         let moved = false;
         for (const p of paths) {
-          const result = await window.veloxAPI.moveOrCopyFile(p, folder.path);
+          const result = await window.veloceAPI.moveOrCopyFile(p, folder.path);
           if (result && result.success && result.action === 'move') {
             moved = true;
           }
@@ -1229,9 +1229,9 @@ function sortFiles() {
     if (f.path === selectedPath) selectedIndex = i;
   });
 
-  if (window.veloxAPI && window.veloxAPI.syncImagePaths) {
+  if (window.veloceAPI && window.veloceAPI.syncImagePaths) {
     const sortedPaths = currentFiles.map(f => f.path);
-    window.veloxAPI.syncImagePaths(sortedPaths);
+    window.veloceAPI.syncImagePaths(sortedPaths);
   }
 }
 
@@ -1350,7 +1350,7 @@ function formatDate(timestamp) {
  * UIの応答性を維持するため、requestIdleCallbackを使用し、処理をチャンクに分割する。
  */
 async function loadMetadataInBackground() {
-  if (!window.veloxAPI.getImageMetadataBatch) return;
+  if (!window.veloceAPI.getImageMetadataBatch) return;
 
   // まだメタデータ（幅・高さ・サイズ・日時）が読み込まれていないファイルだけを抽出
   const filesToLoad = currentFiles.filter(f => !f.width && !f.height);
@@ -1378,7 +1378,7 @@ async function loadMetadataInBackground() {
       
       try {
         const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
-        const metadataList = await window.veloxAPI.getImageMetadataBatch(chunkPaths);
+        const metadataList = await window.veloceAPI.getImageMetadataBatch(chunkPaths);
 
         if (currentMetaBatchId !== batchId) return;
 
@@ -1483,7 +1483,7 @@ async function selectImage(index, event = null) {
   const requestId = ++currentMetaRequestId;
 
   // インスペクターの更新
-  const meta = await window.veloxAPI.parseMetadata(file.path);
+  const meta = await window.veloceAPI.parseMetadata(file.path);
   
   // 非同期処理中に別の画像が選択された場合は、古い結果を破棄して上書きを防ぐ
   if (currentMetaRequestId !== requestId) return;
@@ -1660,7 +1660,7 @@ function renderMetadata(meta) {
 function openViewer(index) {
   const file = currentFiles[index];
 
-  window.veloxAPI.openViewer({ 
+  window.veloceAPI.openViewer({ 
     currentIndex: index,
     width: file ? file.width : 0,
     height: file ? file.height : 0,
@@ -1735,8 +1735,8 @@ async function showLicenseDialog() {
     // Rust側に定義したコマンドを呼び出して、LICENSE.md と CREDITS.md の内容を取得する
     if (window.__TAURI__ && window.__TAURI__.invoke) {
       licenseText = await window.__TAURI__.invoke('get_license_text');
-    } else if (window.veloxAPI && window.veloxAPI.getLicenseText) {
-      licenseText = await window.veloxAPI.getLicenseText();
+    } else if (window.veloceAPI && window.veloceAPI.getLicenseText) {
+      licenseText = await window.veloceAPI.getLicenseText();
     }
   } catch (e) {
     console.error("Failed to load licenses:", e);
@@ -1900,7 +1900,7 @@ window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
   if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
     e.preventDefault();
-    if (window.veloxAPI.toggleDevtools) window.veloxAPI.toggleDevtools();
+    if (window.veloceAPI.toggleDevtools) window.veloceAPI.toggleDevtools();
     return;
   }
 
@@ -1927,7 +1927,7 @@ window.addEventListener('keydown', async (e) => {
   // Aでビューワーを横に並べる
   if (e.key === 'a' || e.key === 'A') {
     e.preventDefault();
-    if (window.veloxAPI.arrangeViewers) window.veloxAPI.arrangeViewers();
+    if (window.veloceAPI.arrangeViewers) window.veloceAPI.arrangeViewers();
   }
 
   // F5で最新の情報に更新
@@ -1940,7 +1940,7 @@ window.addEventListener('keydown', async (e) => {
   if (e.key === 'Delete') {
     if (selectedIndices.size > 0) {
       for (const i of selectedIndices) {
-        if (currentFiles[i]) await window.veloxAPI.trashFile(currentFiles[i].path);
+        if (currentFiles[i]) await window.veloceAPI.trashFile(currentFiles[i].path);
       }
     }
   }
@@ -1948,7 +1948,7 @@ window.addEventListener('keydown', async (e) => {
   // Ctrl+Cで選択中の画像をクリップボードにコピー
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
     if (selectedIndex > -1 && currentFiles[selectedIndex]) {
-      window.veloxAPI.copyImageToClipboard(currentFiles[selectedIndex].path);
+      window.veloceAPI.copyImageToClipboard(currentFiles[selectedIndex].path);
 
       // コピー成功時に選択中の画像をピカッと光らせるエフェクト
       const applyFlash = (el) => {

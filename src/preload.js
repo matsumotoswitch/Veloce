@@ -5,9 +5,9 @@ const { appWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
 /**
  * @description
  * フロントエンド（Webページ）とTauriバックエンド（Rust）間の通信を確立します。
- * `window.veloxAPI` というグローバルオブジェクトにTauriの `invoke` と `listen` をラップして公開します。
+ * `window.veloceAPI` というグローバルオブジェクトにTauriの `invoke` と `listen` をラップして公開します。
  */
-window.veloxAPI = {
+window.veloceAPI = {
   /**
    * 利用可能なドライブ文字（またはルートディレクトリ）のリストを取得します。
    * @returns {Promise<Array<string>>} ドライブパスの配列

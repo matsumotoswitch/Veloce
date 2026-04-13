@@ -91,7 +91,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     // ウィンドウが最大化されているかを非同期で確認しアイコンを更新する
-    window.veloxAPI.isViewerMaximized().then(isMax => {
+    window.veloceAPI.isViewerMaximized().then(isMax => {
       if (isMax) {
         const maxBtn = document.getElementById('window-max-btn');
         if (maxBtn) maxBtn.innerHTML = RESTORE_ICON;
@@ -291,13 +291,13 @@ function updateFullscreenStyles() {
  */
 async function loadImage() {
   // RustのStateから現在表示すべき画像のパスと全体枚数を取得
-  const result = await window.veloxAPI.getViewerImage(currentIndex);
+  const result = await window.veloceAPI.getViewerImage(currentIndex);
   if (result) {
     currentImagePath = result.path;
     totalImages = result.total;
     previousWindowSize = null; // トグル状態をリセット
-    imgElement.src = window.veloxAPI.convertFileSrc(currentImagePath);
-    document.title = `Velox Viewer - ${currentIndex + 1} / ${totalImages}`;
+    imgElement.src = window.veloceAPI.convertFileSrc(currentImagePath);
+    document.title = `Veloce Viewer - ${currentIndex + 1} / ${totalImages}`;
     imgElement.onload = () => {
       setZoomState(isZoomed);
       // 現在の画像の読み込みが完了したら、前後1枚ずつをプリロード（先読み）する
@@ -313,10 +313,10 @@ async function loadImage() {
  */
 async function preloadImage(index) {
   if (index >= 0 && index < totalImages) {
-    const result = await window.veloxAPI.getViewerImage(index);
+    const result = await window.veloceAPI.getViewerImage(index);
     if (result) {
       const img = new Image();
-      img.src = window.veloxAPI.convertFileSrc(result.path);
+      img.src = window.veloceAPI.convertFileSrc(result.path);
     }
   }
 }
@@ -386,7 +386,7 @@ function createWindowControls() {
   minBtn.innerHTML = `<svg viewBox="0 0 10 1" width="10" height="1"><rect width="10" height="1" fill="#fff"/></svg>`;
   minBtn.onmouseenter = () => minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
   minBtn.onmouseleave = () => minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
-  minBtn.onclick = () => window.veloxAPI.minimizeViewer();
+  minBtn.onclick = () => window.veloceAPI.minimizeViewer();
 
   // 最大化/元に戻すボタン
   const maxBtn = document.createElement('div');
@@ -396,7 +396,7 @@ function createWindowControls() {
   maxBtn.innerHTML = MAXIMIZE_ICON;
   maxBtn.onmouseenter = () => maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
   maxBtn.onmouseleave = () => maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
-  maxBtn.onclick = () => window.veloxAPI.maximizeViewer();
+  maxBtn.onclick = () => window.veloceAPI.maximizeViewer();
 
   // 閉じるボタン
   const closeBtn = document.createElement('div');
@@ -406,7 +406,7 @@ function createWindowControls() {
   closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.5)'; // Windowsの閉じるボタンの赤色（半透明）
   closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.2)';
   closeBtn.onclick = () => {
-    if (window.veloxAPI && window.veloxAPI.closeWindow) window.veloxAPI.closeWindow();
+    if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };
 
   controlsContainer.appendChild(minBtn);
@@ -467,7 +467,7 @@ window.addEventListener('mousemove', (e) => {
           document.body.scrollLeft = scrollLeftStart - (e.pageX - startX);
           document.body.scrollTop = scrollTopStart - (e.pageY - startY);
         } else {
-          window.veloxAPI.moveViewerWindow(e.screenX - windowX, e.screenY - windowY);
+          window.veloceAPI.moveViewerWindow(e.screenX - windowX, e.screenY - windowY);
         }
       });
     }
@@ -485,7 +485,7 @@ window.addEventListener('mouseup', (e) => {
       if (now - lastClickTime < STRICT_DBLCLICK_DELAY) {
         // 指定時間以内ならダブルクリックとして判定（フルスクリーン切り替え）
         clearTimeout(clickTimeout);
-        window.veloxAPI.toggleViewerFullscreen();
+        window.veloceAPI.toggleViewerFullscreen();
         lastClickTime = 0; // 連続発火を防ぐためリセット
       } else {
         // シングルクリック判定（2回目のクリックが来るのを指定時間だけ待機して、前の画像に戻る）
@@ -579,8 +579,8 @@ async function showLicenseDialog() {
     // Rust側に定義したコマンドを呼び出して、LICENSE.md と CREDITS.md の内容を取得する
     if (window.__TAURI__ && window.__TAURI__.invoke) {
       licenseText = await window.__TAURI__.invoke('get_license_text');
-    } else if (window.veloxAPI && window.veloxAPI.getLicenseText) {
-      licenseText = await window.veloxAPI.getLicenseText();
+    } else if (window.veloceAPI && window.veloceAPI.getLicenseText) {
+      licenseText = await window.veloceAPI.getLicenseText();
     }
   } catch (e) {
     console.error("Failed to load licenses:", e);
@@ -741,7 +741,7 @@ window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
   if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
     e.preventDefault();
-    if (window.veloxAPI.toggleDevtools) window.veloxAPI.toggleDevtools();
+    if (window.veloceAPI.toggleDevtools) window.veloceAPI.toggleDevtools();
     return;
   }
 
@@ -788,8 +788,8 @@ window.addEventListener('keydown', async (e) => {
         targetH = Math.floor(targetH * scale);
       }
 
-      if (window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
-        window.veloxAPI.resizeViewerWindow(targetW, targetH);
+      if (window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
+        window.veloceAPI.resizeViewerWindow(targetW, targetH);
       }
 
       resetZoomAndFit();
@@ -799,8 +799,8 @@ window.addEventListener('keydown', async (e) => {
       e.preventDefault();
       const { width: natW, height: natH } = getNaturalDimensions();
 
-      if (window.veloxAPI && window.veloxAPI.resizeViewerWindow) {
-        window.veloxAPI.resizeViewerWindow(natW, natH);
+      if (window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
+        window.veloceAPI.resizeViewerWindow(natW, natH);
       }
 
       resetZoomAndFit();
@@ -810,7 +810,7 @@ window.addEventListener('keydown', async (e) => {
       if (document.getElementById('help-overlay')) {
         toggleHelpOverlay(false);
       } else {
-        if (window.veloxAPI && window.veloxAPI.closeWindow) window.veloxAPI.closeWindow();
+        if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
       }
       break;
     case 'Enter':
@@ -822,13 +822,13 @@ window.addEventListener('keydown', async (e) => {
       break;
     case 'F11':
       e.preventDefault(); // ブラウザ標準のフルスクリーン動作を防ぐ
-      window.veloxAPI.toggleViewerFullscreen();
+      window.veloceAPI.toggleViewerFullscreen();
       break;
     case 'w':
     case 'W':
       if (!isFullscreen) {
         if (previousWindowSize) { // 既にフィットしている場合は元のサイズに戻す
-          window.veloxAPI.resizeViewerWindow(previousWindowSize.width, previousWindowSize.height);
+          window.veloceAPI.resizeViewerWindow(previousWindowSize.width, previousWindowSize.height);
           previousWindowSize = null;
         } else { // 現在のサイズを保存し、画像サイズに合わせてリサイズする
           previousWindowSize = { width: window.innerWidth, height: window.innerHeight };
@@ -846,13 +846,13 @@ window.addEventListener('keydown', async (e) => {
             targetH = Math.round(natH * scale);
           }
 
-          window.veloxAPI.resizeViewerWindow(targetW, targetH);
+          window.veloceAPI.resizeViewerWindow(targetW, targetH);
         }
       }
       break;
     case 'a':
     case 'A':
-      if (window.veloxAPI.arrangeViewers) window.veloxAPI.arrangeViewers();
+      if (window.veloceAPI.arrangeViewers) window.veloceAPI.arrangeViewers();
       break;
     case 'b':
     case 'B':
@@ -873,7 +873,7 @@ window.addEventListener('keydown', async (e) => {
   
   if (e.key === 'Delete') {
 	if (currentImagePath) {
-	  const success = await window.veloxAPI.trashFile(currentImagePath);
+	  const success = await window.veloceAPI.trashFile(currentImagePath);
 	  if (success) {
         // 削除成功時、ビューアーを閉じずに次の画像（最後なら前の画像）へ移動する
         if (currentIndex < totalImages - 1) {
@@ -885,7 +885,7 @@ window.addEventListener('keydown', async (e) => {
           loadImage();
         } else {
           // 画像が1枚もなくなった場合はウィンドウを閉じる
-          if (window.veloxAPI && window.veloxAPI.closeWindow) window.veloxAPI.closeWindow();
+          if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
         }
 	  }
 	}
@@ -893,7 +893,7 @@ window.addEventListener('keydown', async (e) => {
 
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
 	if (currentImagePath) {
-	  window.veloxAPI.copyImageToClipboard(currentImagePath);
+	  window.veloceAPI.copyImageToClipboard(currentImagePath);
       
       // コピー成功時に画像をピカッと光らせるエフェクト
       const originalTransition = imgElement.style.transition;
