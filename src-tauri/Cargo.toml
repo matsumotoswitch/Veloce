@@ -1,8 +1,8 @@
 [package]
 name = "veloce"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Veloce Image Viewer"
+authors = ["matsumotoswitch"]
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -12,7 +12,24 @@ rust-version = "1.77.2"
 tauri-build = { version = "1", features = [] }
 
 [dependencies]
-tauri = { version = "1", features = [ "fs-copy-file", "fs-read-dir", "window-unmaximize", "fs-rename-file", "fs-create-dir", "window-close", "window-minimize", "window-start-dragging", "window-set-fullscreen", "window-set-size", "window-set-position", "path-all", "window-maximize", "protocol-asset", "shell-open", "devtools" ] }
+tauri = { version = "1", features = [
+    "devtools",
+    "fs-copy-file",
+    "fs-create-dir",
+    "fs-read-dir",
+    "fs-rename-file",
+    "path-all",
+    "protocol-asset",
+    "shell-open",
+    "window-close",
+    "window-maximize",
+    "window-minimize",
+    "window-set-fullscreen",
+    "window-set-position",
+    "window-set-size",
+    "window-start-dragging",
+    "window-unmaximize"
+] }
 serde = { version = "1", features = ["derive"] }
 flate2 = "1.0"
 trash = "3.3"
