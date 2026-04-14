@@ -643,9 +643,13 @@ async fn open_viewer(
 
     let label = format!("viewer_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
 
+    let mut data_dir = tauri::api::path::local_data_dir().unwrap_or_default();
+    data_dir.push("Veloce");
+
     tauri::WindowBuilder::new(&app, label, tauri::WindowUrl::App(format!("/viewer.html?index={}", current_index).into()))
-        .title("Velox Viewer")
+        .title("Veloce Viewer")
         .inner_size(win_width as f64, win_height as f64)
+        .data_directory(data_dir)
         .decorations(false)
         .build()
         .map_err(|e| e.to_string())?;
@@ -656,7 +660,7 @@ async fn open_viewer(
 // --- サムネイル生成コマンド ---
 
 #[tauri::command]
-async fn get_thumbnail(app: tauri::AppHandle, state: tauri::State<'_, AppState>, file_path: String) -> Result<Vec<u8>, String> {
+async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> Result<Vec<u8>, String> {
     // フォルダ移動済みの場合は無駄な処理（画像読み込み・リサイズ）をスキップする
     if let Ok(current_dir) = state.current_dir.lock() {
         let parent_dir = Path::new(&file_path)
@@ -669,7 +673,8 @@ async fn get_thumbnail(app: tauri::AppHandle, state: tauri::State<'_, AppState>,
         }
     }
 
-    let cache_dir = app.path_resolver().app_local_data_dir().map(|mut p| {
+    let cache_dir = tauri::api::path::local_data_dir().map(|mut p| {
+        p.push("Veloce");
         p.push("Thumbnails");
         p
     });
@@ -953,11 +958,29 @@ fn get_license_text() -> String {
 }
 
 fn main() {
+    let mut context = tauri::generate_context!();
+    
+    // tauri.conf.json で定義されているメインウィンドウの設定を退避させて、自動生成をキャンセルする
+    let window_configs = context.config_mut().tauri.windows.clone();
+    context.config_mut().tauri.windows.clear();
+
     tauri::Builder::default()
         .manage(AppState { 
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
             watcher: Mutex::new(None),
+        })
+        .setup(move |app| {
+            let mut data_dir = tauri::api::path::local_data_dir().unwrap_or_default();
+            data_dir.push("Veloce");
+
+            // 退避させた設定と、指定したデータディレクトリを使って自分でウィンドウを作成する
+            for config in window_configs {
+                tauri::WindowBuilder::from_config(app, config)
+                    .data_directory(data_dir.clone())
+                    .build()?;
+            }
+            Ok(())
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event.event() {
@@ -982,6 +1005,6 @@ fn main() {
             toggle_devtools,
             get_license_text
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
