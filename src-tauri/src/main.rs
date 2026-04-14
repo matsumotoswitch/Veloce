@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
-use std::io::Read; // flate2のread_to_string用
+use std::io::Read; // flate2のread_to_stringやバイナリ解析用
 use std::sync::Mutex;
 use std::hash::{Hash, Hasher};
 use rayon::prelude::*;
@@ -78,8 +78,53 @@ pub struct AppState {
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
 
+// --- ユーティリティ ---
+
+/// アプリケーション専用のローカルデータディレクトリを取得する (`AppData/Local/Veloce`)
+fn get_veloce_data_dir() -> Option<std::path::PathBuf> {
+    tauri::api::path::local_data_dir().map(|mut p| {
+        p.push("Veloce");
+        p
+    })
+}
+
+/// 指定されたパスがサポート対象の画像であれば、ImageFile構造体を生成して返す
+fn create_image_file(path: &Path) -> Option<ImageFile> {
+    if !path.is_file() {
+        return None;
+    }
+    let ext_os = path.extension()?;
+    let ext = format!(".{}", ext_os.to_string_lossy().to_lowercase());
+    let supported = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+    if !supported.contains(&ext.as_str()) {
+        return None;
+    }
+
+    // Windows固有の長いパス修飾子プレフィックスを除去
+    let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
+    let mut size = 0;
+    let mut mtime = 0;
+    if let Ok(metadata) = std::fs::metadata(path) {
+        size = metadata.len();
+        mtime = metadata.modified()
+            .unwrap_or(UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+    }
+
+    Some(ImageFile {
+        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+        ext,
+        path: clean_path,
+        size,
+        mtime,
+    })
+}
+
 // --- Tauri コマンド ---
 
+/// 利用可能なドライブ文字（Windows）またはルートディレクトリ（Unix）のリストを取得する
 #[tauri::command]
 fn get_drives() -> Vec<String> {
     let mut drives = Vec::new();
@@ -137,34 +182,11 @@ async fn load_directory(
             
             let mut results: Vec<_> = entries.into_par_iter().filter_map(|entry| {
                 let entry_path = entry.path();
-                if entry_path.is_file() {
-                    if let Some(ext_os) = entry_path.extension() {
-                        let ext = format!(".{}", ext_os.to_string_lossy().to_lowercase());
-                        let supported = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
-                        if supported.contains(&ext.as_str()) {
-                            let clean_path = entry_path.to_string_lossy().replace("\\\\?\\", "");
-                            // サイズと更新日時の取得は高速なため、第一段階で取得して即座にソートに反映させる
-                            let mut size = 0;
-                            let mut mtime = 0;
-                            if let Ok(metadata) = entry.metadata() {
-                                size = metadata.len();
-                                mtime = metadata.modified()
-                                    .unwrap_or(UNIX_EPOCH)
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_millis() as u64;
-                            }
-                            return Some((clean_path.clone(), ImageFile {
-                                name: entry.file_name().to_string_lossy().into_owned(),
-                                ext,
-                                path: clean_path,
-                                size,
-                                mtime,
-                            }));
-                        }
-                    }
+                if let Some(img_file) = create_image_file(&entry_path) {
+                    Some((img_file.path.clone(), img_file))
+                } else {
+                    None
                 }
-                None
             }).collect();
 
             // ファイル名の順番を安定させるためソート
@@ -197,32 +219,8 @@ async fn load_directory(
                     match event.kind {
                         EventKind::Create(_) | EventKind::Modify(_) => {
                             for path in event.paths {
-                                if path.is_file() {
-                                    if let Some(ext_os) = path.extension() {
-                                        let ext = format!(".{}", ext_os.to_string_lossy().to_lowercase());
-                                        let supported = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
-                                        if supported.contains(&ext.as_str()) {
-                                            let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
-                                            let mut size = 0;
-                                            let mut mtime = 0;
-                                            if let Ok(metadata) = std::fs::metadata(&path) {
-                                                size = metadata.len();
-                                                mtime = metadata.modified()
-                                                    .unwrap_or(UNIX_EPOCH)
-                                                    .duration_since(UNIX_EPOCH)
-                                                    .unwrap_or_default()
-                                                    .as_millis() as u64;
-                                            }
-                                            let img_file = ImageFile {
-                                                name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                                                ext,
-                                                path: clean_path,
-                                                size,
-                                                mtime,
-                                            };
-                                            let _ = app_handle.emit_all("file-changed", img_file);
-                                        }
-                                    }
+                                if let Some(img_file) = create_image_file(&path) {
+                                    let _ = app_handle.emit_all("file-changed", img_file);
                                 }
                             }
                         },
@@ -643,8 +641,7 @@ async fn open_viewer(
 
     let label = format!("viewer_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
 
-    let mut data_dir = tauri::api::path::local_data_dir().unwrap_or_default();
-    data_dir.push("Veloce");
+    let data_dir = get_veloce_data_dir().unwrap_or_default();
 
     tauri::WindowBuilder::new(&app, label, tauri::WindowUrl::App(format!("/viewer.html?index={}", current_index).into()))
         .title("Veloce Viewer")
@@ -673,8 +670,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         }
     }
 
-    let cache_dir = tauri::api::path::local_data_dir().map(|mut p| {
-        p.push("Veloce");
+    let cache_dir = get_veloce_data_dir().map(|mut p| {
         p.push("Thumbnails");
         p
     });
@@ -699,7 +695,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
 
         if let Some(cache_path) = &cache_file_path {
             if cache_path.exists() {
-                println!("Cache: {}", file_path);
+                // キャッシュが既に存在する場合は、I/Oをスキップしてパスのみを即座に返す
                 return Ok(cache_path.to_string_lossy().to_string());
             }
         }
@@ -793,7 +789,6 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
 
                 // WindowsAPIでの取得が成功した場合はそのまま返す
                 if let Some(bytes) = result {
-                    println!("Windows API: {}", file_path);
                     if let Some(cache_path) = &cache_file_path {
                         if std::fs::write(cache_path, &bytes).is_ok() {
                             return Ok(cache_path.to_string_lossy().to_string());
@@ -805,7 +800,6 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         }
 
         // --- フォールバック: 既存の image::open 処理 ---
-        println!("Fallback: {}", file_path);
         let img = image::open(&file_path).map_err(|e| e.to_string())?;
         
         let (src_width_val, src_height_val, src_raw, pixel_type) = match img {
@@ -973,8 +967,7 @@ fn main() {
             watcher: Mutex::new(None),
         })
         .setup(move |app| {
-            let mut data_dir = tauri::api::path::local_data_dir().unwrap_or_default();
-            data_dir.push("Veloce");
+            let data_dir = get_veloce_data_dir().unwrap_or_default();
 
             // 退避させた設定と、指定したデータディレクトリを使って自分でウィンドウを作成する
             for config in window_configs {

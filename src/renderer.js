@@ -8,7 +8,7 @@ let thumbnailObserver;
 let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
 let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
-let thumbnailBlobUrls = new Map(); // filepath -> blobUrl (サムネイルのキャッシュ)
+let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
 
 // --- ドラッグ＆ドロップ状態管理 ---
 const dragState = {
@@ -554,11 +554,11 @@ window.addEventListener('beforeunload', () => {
 });
 
 /**
- * フォルダ移動時に不要になったサムネイルのBlob URLキャッシュを解放する
+ * フォルダ移動時に不要になったサムネイルのキャッシュをクリアする。
+ * （現在はAsset URLを使用しているため、明示的なメモリ解放(revokeObjectURL)は不要です）
  */
 function clearThumbnailCache() {
-  thumbnailBlobUrls.forEach(url => URL.revokeObjectURL(url));
-  thumbnailBlobUrls.clear();
+  thumbnailUrls.clear();
 }
 
 /**
@@ -576,9 +576,9 @@ function initializeThumbnailObserver() {
             if (entry.isIntersecting) {
                 img.dataset.isVisible = 'true';
                 if (filePath && !img.hasAttribute('src')) {
-                    if (thumbnailBlobUrls.has(filePath)) {
+                    if (thumbnailUrls.has(filePath)) {
                         // すでにキャッシュがあればそれを使う
-                        img.src = thumbnailBlobUrls.get(filePath);
+                        img.src = thumbnailUrls.get(filePath);
                     } else {
                         // プレースホルダーを入れて二重リクエストを防止
                         img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -588,14 +588,14 @@ function initializeThumbnailObserver() {
                             if (currentRenderId !== requestRenderId) return; // フォルダ移動等で不要になった場合は破棄
                             
                             if (url) {
-                                thumbnailBlobUrls.set(filePath, url);
+                                thumbnailUrls.set(filePath, url);
                                 if (img.dataset.isVisible === 'true') {
                                     img.src = url;
                                 }
                             } else {
                                 // サムネイル生成失敗時はオリジナル画像をフォールバック表示
                                 const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
-                                thumbnailBlobUrls.set(filePath, fallbackUrl);
+                                thumbnailUrls.set(filePath, fallbackUrl);
                                 if (img.dataset.isVisible === 'true') img.src = fallbackUrl;
                             }
                         });

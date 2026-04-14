@@ -7,7 +7,7 @@ let currentRotation = 0; // 現在の回転角度
 let isFitToWindow = false; // ウィンドウサイズに強制フィット（拡大処理あり）させるか
 let isFullscreen = false; // フルスクリーン状態か
 let isBorderVisible = true; // ウィンドウ枠を表示するか
-let previousWindowSize = null; // Wキーでフィットさせる前のウィンドウサイズ
+let previousWindowSize = null; // ウィンドウフィット(Wキー)適用前のサイズ保存用
 let isSharpened = false; // 画像にシャープネスフィルターを適用するか
 
 let lastFocusTime = 0; // ウィンドウが最後にフォーカスを取得した時刻
@@ -62,7 +62,7 @@ document.body.style.display = 'flex';
 document.body.style.justifyContent = 'center';
 document.body.style.alignItems = 'center';
 document.body.style.boxSizing = 'border-box';
-document.body.style.border = 'none'; // 画像サイズに影響を与えないようにborderは使用しない
+document.body.style.border = 'none'; // 画像サイズに影響を与えないためborderは外側に描画する
 
 // --- ウィンドウ枠オーバーレイの作成 ---
 // inset box-shadow だと画像の下に隠れてしまうため、最前面にボーダー用の要素を配置する
@@ -286,8 +286,8 @@ function updateFullscreenStyles() {
 
 // --- 画像ナビゲーション ---
 /**
- * 現在のインデックス（`currentIndex`）に基づいて画像を表示する。
- * ウィンドウのタイトルも更新する。
+ * 現在のインデックス (`currentIndex`) に基づいて画像を表示し、ウィンドウタイトルを更新する。
+ * 表示後、前後の画像をバックグラウンドでプリロードする。
  */
 async function loadImage() {
   // RustのStateから現在表示すべき画像のパスと全体枚数を取得
@@ -483,7 +483,7 @@ window.addEventListener('mouseup', (e) => {
     if (!hasMoved && !ignoreNextClick) {
       const now = Date.now();
       if (now - lastClickTime < STRICT_DBLCLICK_DELAY) {
-        // 指定時間以内ならダブルクリックとして判定（フルスクリーン切り替え）
+        // 指定時間以内の連続クリックはダブルクリックとして判定（フルスクリーン切り替え）
         clearTimeout(clickTimeout);
         window.veloceAPI.toggleViewerFullscreen();
         lastClickTime = 0; // 連続発火を防ぐためリセット

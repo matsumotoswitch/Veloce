@@ -51,7 +51,7 @@ window.veloceAPI = {
   /**
    * 指定された画像パスから軽量なサムネイル画像を生成して取得します。
    * @param {string} filePath - オリジナル画像のパス。
-   * @returns {Promise<string|null>} サムネイル画像のローカルAsset URL。
+   * @returns {Promise<string>} サムネイル画像（またはフォールバック画像）のローカルAsset URL。
    */
   getThumbnail: async (filePath) => {
     try {
