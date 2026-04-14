@@ -51,16 +51,15 @@ window.veloceAPI = {
   /**
    * 指定された画像パスから軽量なサムネイル画像を生成して取得します。
    * @param {string} filePath - オリジナル画像のパス。
-   * @returns {Promise<string|null>} サムネイル画像のBlob URL。
+   * @returns {Promise<string|null>} サムネイル画像のローカルAsset URL。
    */
   getThumbnail: async (filePath) => {
     try {
-      const bytes = await invoke('get_thumbnail', { filePath });
-      const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
-      return URL.createObjectURL(blob);
+      const thumbnailPath = await invoke('get_thumbnail', { filePath });
+      return convertFileSrc(thumbnailPath);
     } catch (error) {
       console.warn("Failed to generate thumbnail:", error);
-      return null;
+      return convertFileSrc(filePath);
     }
   },
   /**

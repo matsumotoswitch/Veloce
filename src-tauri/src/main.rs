@@ -660,7 +660,7 @@ async fn open_viewer(
 // --- サムネイル生成コマンド ---
 
 #[tauri::command]
-async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> Result<Vec<u8>, String> {
+async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> Result<String, String> {
     // フォルダ移動済みの場合は無駄な処理（画像読み込み・リサイズ）をスキップする
     if let Ok(current_dir) = state.current_dir.lock() {
         let parent_dir = Path::new(&file_path)
@@ -699,10 +699,8 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
 
         if let Some(cache_path) = &cache_file_path {
             if cache_path.exists() {
-                if let Ok(bytes) = std::fs::read(cache_path) {
-                    println!("Cache: {}", file_path);
-                    return Ok(bytes);
-                }
+                println!("Cache: {}", file_path);
+                return Ok(cache_path.to_string_lossy().to_string());
             }
         }
 
@@ -797,9 +795,11 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
                 if let Some(bytes) = result {
                     println!("Windows API: {}", file_path);
                     if let Some(cache_path) = &cache_file_path {
-                        let _ = std::fs::write(cache_path, &bytes);
+                        if std::fs::write(cache_path, &bytes).is_ok() {
+                            return Ok(cache_path.to_string_lossy().to_string());
+                        }
                     }
-                    return Ok(bytes);
+                    return Ok(file_path.clone());
                 }
             }
         }
@@ -848,10 +848,12 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         let bytes = buf.into_inner();
 
         if let Some(cache_path) = &cache_file_path {
-            let _ = std::fs::write(cache_path, &bytes);
+            if std::fs::write(cache_path, &bytes).is_ok() {
+                return Ok(cache_path.to_string_lossy().to_string());
+            }
         }
 
-        Ok(bytes)
+        Ok(file_path)
     }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
