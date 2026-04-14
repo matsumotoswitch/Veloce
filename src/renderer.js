@@ -10,6 +10,8 @@ let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
 let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
 let pendingThumbnails = new Set(); // filepath -> boolean (サムネイルリクエスト中フラグ)
+let preloadCursor = 0; // バックグラウンド生成の検索カーソル
+let isPreloadRunning = false; // バックグラウンド生成が稼働中かどうか
 
 // --- トースト通知状態管理 ---
 let thumbnailTotalRequested = 0;
@@ -615,6 +617,7 @@ window.addEventListener('beforeunload', () => {
 function clearThumbnailCache() {
   thumbnailUrls.clear();
   pendingThumbnails.clear();
+  preloadCursor = 0;
 }
 
 /**
@@ -693,6 +696,57 @@ function initializeThumbnailObserver() {
             }
         }
     }, options);
+}
+
+/**
+ * ブラウザのアイドル時間を利用してバックグラウンドでサムネイルを事前生成する
+ * @param {IdleDeadline} deadline 
+ */
+function processIdleThumbnails(deadline) {
+  // スクロール操作などメインスレッドの負荷（IntersectionObserverの邪魔）を避けるため、
+  // 同時にリクエストするサムネイル数を制限する
+  if (pendingThumbnails.size > 2) {
+    requestIdleCallback(processIdleThumbnails);
+    return;
+  }
+
+  let targetFile = null;
+  while (preloadCursor < currentFiles.length) {
+    const filePath = currentFiles[preloadCursor].path;
+    if (!thumbnailUrls.has(filePath) && !pendingThumbnails.has(filePath)) {
+      targetFile = filePath;
+      break;
+    }
+    preloadCursor++;
+  }
+
+  if (!targetFile) {
+    isPreloadRunning = false;
+    return;
+  }
+
+  pendingThumbnails.add(targetFile);
+
+  window.veloceAPI.getThumbnail(targetFile).then(url => {
+    pendingThumbnails.delete(targetFile);
+    
+    const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
+    thumbnailUrls.set(targetFile, finalUrl);
+
+    thumbnailCompleted++;
+    updateThumbnailToast();
+
+    // DOM上に該当画像のimg要素があり、画面内に入っているのにsrcが空の場合は即座に反映する
+    // (スクロールとプリロードのタイミングが被った場合のフェイルセーフ)
+    const escapedPath = CSS.escape(targetFile);
+    const img = document.querySelector(`.thumbnail-item[data-filepath="${escapedPath}"]`);
+    if (img && img.dataset.isVisible === 'true' && !img.hasAttribute('src')) {
+      img.src = finalUrl;
+    }
+  });
+
+  // ループを継続
+  requestIdleCallback(processIdleThumbnails);
 }
 
 /**
@@ -916,6 +970,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         scheduleRefresh();
       }
     });
+  }
+
+  // バックグラウンドでのサムネイル事前生成ループを開始
+  if (!isPreloadRunning) {
+    isPreloadRunning = true;
+    requestIdleCallback(processIdleThumbnails);
   }
 });
 
@@ -1420,6 +1480,12 @@ async function renderAll() {
 
     // メインスレッドのブロック（UIのフリーズ）を回避するため、次のフレームに処理を譲る
     await new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  // バックグラウンドでのサムネイル事前生成を再スタート
+  if (!isPreloadRunning) {
+    isPreloadRunning = true;
+    requestIdleCallback(processIdleThumbnails);
   }
 }
 
