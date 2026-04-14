@@ -10,6 +10,11 @@ let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
 let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
 
+// --- トースト通知状態管理 ---
+let thumbnailTotalRequested = 0;
+let thumbnailCompleted = 0;
+let thumbnailToastTimeout = null;
+
 // --- ドラッグ＆ドロップ状態管理 ---
 const dragState = {
   paths: [], // ドラッグ中の複数ファイルパス
@@ -29,6 +34,52 @@ const ICONS = {
   SORT_ASC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
   SORT_DESC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`
 };
+
+// --- トースト通知機能 ---
+
+/**
+ * トースト通知を表示する
+ * @param {string} message - 表示するメッセージ
+ * @param {number} duration - 表示時間（ミリ秒）。0の場合は自動で消えない
+ * @param {string|null} id - 通知のID。同じIDの場合は上書きされる
+ */
+function showToast(message, duration = 3000, id = null) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  let toast = id ? document.getElementById(`toast-${id}`) : null;
+
+  if (toast) {
+    toast.textContent = message;
+  } else {
+    toast = document.createElement('div');
+    toast.className = 'toast-message';
+    if (id) toast.id = `toast-${id}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+  }
+
+  requestAnimationFrame(() => {
+    toast.classList.add('show');
+  });
+
+  if (toast.timeoutId) {
+    clearTimeout(toast.timeoutId);
+  }
+
+  if (duration > 0) {
+    toast.timeoutId = setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+      }, 300);
+    }, duration);
+  }
+}
 
 // --- フォルダツリーのコンテキストメニュー作成 ---
 const contextMenu = document.createElement('div');
@@ -236,6 +287,7 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
     const parentPath = contextMenu.targetFolder.path;
     const result = await window.veloceAPI.createFolder(parentPath, folderName);
     if (result && result.success) {
+      showToast(`フォルダ「${folderName}」を作成しました`);
       await refreshTree();
 
       // 親フォルダまで展開し、親フォルダ自身も展開状態（サブフォルダ表示）にする
@@ -269,6 +321,7 @@ const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
   if (newName && newName !== contextMenu.targetFolder.name) {
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
+      showToast(`フォルダ名を「${newName}」に変更しました`);
       if (currentDirectory.startsWith(oldPath)) {
         currentDirectory = currentDirectory.replace(oldPath, result.path);
         localStorage.setItem('currentDirectory', currentDirectory);
@@ -287,6 +340,7 @@ const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
   if (isConfirmed) {
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
+      showToast(`フォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しました`);
       if (currentDirectory.startsWith(oldPath)) {
         // 削除したフォルダ以下を表示していた場合、親フォルダに移動してリストを更新する
         const sep = '\\';
@@ -562,6 +616,29 @@ function clearThumbnailCache() {
 }
 
 /**
+ * サムネイル生成の進捗をトースト通知として更新する
+ */
+function updateThumbnailToast() {
+  if (thumbnailTotalRequested === 0) return;
+  
+  if (thumbnailCompleted < thumbnailTotalRequested) {
+    showToast(`サムネイル作成中 (${thumbnailCompleted}/${thumbnailTotalRequested})`, 0, 'thumbnail-progress');
+  } else {
+    showToast(`サムネイル作成完了 (${thumbnailTotalRequested}/${thumbnailTotalRequested})`, 0, 'thumbnail-progress');
+    clearTimeout(thumbnailToastTimeout);
+    thumbnailToastTimeout = setTimeout(() => {
+       const t = document.getElementById('toast-thumbnail-progress');
+       if (t) {
+         t.classList.remove('show');
+         setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+       }
+       thumbnailTotalRequested = 0;
+       thumbnailCompleted = 0;
+    }, 1000);
+  }
+}
+
+/**
  * サムネイルの遅延読み込みとメモリ解放のためのIntersectionObserverを初期化する
  */
 function initializeThumbnailObserver() {
@@ -584,7 +661,12 @@ function initializeThumbnailObserver() {
                         img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
                         
                         const requestRenderId = currentRenderId;
+                        thumbnailTotalRequested++;
+                        updateThumbnailToast();
+
                         window.veloceAPI.getThumbnail(filePath).then(url => {
+                            thumbnailCompleted++;
+                            updateThumbnailToast();
                             if (currentRenderId !== requestRenderId) return; // フォルダ移動等で不要になった場合は破棄
                             
                             if (url) {
@@ -1110,22 +1192,33 @@ function createTreeNode(folder, isRoot = false) {
     const paths = getPathsFromDragEvent(e);
 
     if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
+      let actionStr = 'コピー';
+      if (paths.length > 0) {
+        const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+        actionStr = getRoot(paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
+      }
+
+      showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move');
+
       // ブラウザのドラッグ終了処理がフリーズするバグを完全に防ぐため、
       // ファイルの移動自体はすぐに行うが、UIの更新はドラッグ終了イベントまで待機する
       setTimeout(async () => {
-        let moved = false;
+        let successCount = 0;
         for (const p of paths) {
           const result = await window.veloceAPI.moveOrCopyFile(p, folder.path);
-          if (result && result.success && result.action === 'move') {
-            moved = true;
+          if (result && result.success) {
+            successCount++;
           }
         }
-        if (moved) {
+        if (successCount > 0) {
+          showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
           if (dragState.isAppDragging) {
             dragState.pendingRefresh = true; // アプリ内ドラッグの場合は dragend で更新する
           } else {
             await refreshFileList(); // 外部からのドロップの場合はすぐに更新する
           }
+        } else {
+          showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
         }
       }, 10);
     }
@@ -1364,6 +1457,7 @@ async function loadMetadataInBackground() {
     if (currentMetaBatchId !== batchId) return;
 
     if (chunkIndex >= pathsToLoad.length) {
+      showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
       // すべてのメタデータ取得完了後、メタデータに依存するキーでソート中の場合は再ソートして再描画する
       if (['width', 'height'].includes(currentSort.key)) {
         sortFiles();
@@ -1378,6 +1472,8 @@ async function loadMetadataInBackground() {
       
       try {
         const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
+        
+        showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress');
         const metadataList = await window.veloceAPI.getImageMetadataBatch(chunkPaths);
 
         if (currentMetaBatchId !== batchId) return;
@@ -1939,8 +2035,36 @@ window.addEventListener('keydown', async (e) => {
   // Deleteで選択中の画像をゴミ箱に移動
   if (e.key === 'Delete') {
     if (selectedIndices.size > 0) {
+      // 非同期削除中にファイル監視(onFileRemoved)が走って currentFiles が縮むため、
+      // インデックスがずれてクラッシュするのを防ぐために削除対象のパスを先に抽出する
+      const pathsToDelete = [];
       for (const i of selectedIndices) {
-        if (currentFiles[i]) await window.veloceAPI.trashFile(currentFiles[i].path);
+        if (currentFiles[i]) pathsToDelete.push(currentFiles[i].path);
+      }
+
+      // 削除を開始する前にUIの選択状態を解除する
+      selectedIndices.clear();
+      selectedIndex = -1;
+      updateSelectionUI();
+      clearMetadataUI();
+
+      let trashedCount = 0;
+      const total = pathsToDelete.length;
+      showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash');
+      
+      for (const path of pathsToDelete) {
+        try {
+          const success = await window.veloceAPI.trashFile(path);
+          if (success) trashedCount++;
+        } catch (err) {
+          console.error('Failed to trash file:', err);
+        }
+      }
+
+      if (trashedCount > 0) {
+        showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash');
+      } else {
+        showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash');
       }
     }
   }
@@ -1949,6 +2073,7 @@ window.addEventListener('keydown', async (e) => {
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
     if (selectedIndex > -1 && currentFiles[selectedIndex]) {
       window.veloceAPI.copyImageToClipboard(currentFiles[selectedIndex].path);
+      showToast('画像をクリップボードにコピーしました');
 
       // コピー成功時に選択中の画像をピカッと光らせるエフェクト
       const applyFlash = (el) => {
