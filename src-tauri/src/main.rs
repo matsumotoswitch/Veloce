@@ -665,8 +665,12 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
         
-        if !current_dir.is_empty() && current_dir.to_lowercase() != parent_dir.to_lowercase() {
-            return Err("Cancelled".to_string());
+        if !current_dir.is_empty() {
+            let current_trim = current_dir.trim_end_matches(&['/', '\\'][..]).to_lowercase();
+            let parent_trim = parent_dir.trim_end_matches(&['/', '\\'][..]).to_lowercase();
+            if current_trim != parent_trim {
+                return Err("Cancelled".to_string());
+            }
         }
     }
 

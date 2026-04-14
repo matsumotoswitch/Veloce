@@ -789,6 +789,7 @@ function scheduleRefresh() {
     const selectedPath = selectedIndex > -1 && currentFiles[selectedIndex] ? currentFiles[selectedIndex].path : null;
     const selectedPaths = new Set(Array.from(selectedIndices).map(i => currentFiles[i] ? currentFiles[i].path : null).filter(Boolean));
 
+    preloadCursor = 0;
     sortFiles();
     
     selectedIndices.clear();
@@ -936,6 +937,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       currentDirectory = result.path;
       localStorage.setItem('currentDirectory', currentDirectory); // 有効なパスを保存
       currentFiles = result.imageFiles || [];
+      clearThumbnailCache();
       sortFiles();
       renderAll();
       loadMetadataInBackground(); // バックグラウンドでメタデータ読み込みを開始
@@ -1158,6 +1160,7 @@ function createTreeNode(folder, isRoot = false) {
         currentDirectory = result.path;
         localStorage.setItem('currentDirectory', currentDirectory); // フォルダ移動時にパスを保存
         currentFiles = result.imageFiles || [];
+        clearThumbnailCache();
         sortFiles();
         renderAll();
         loadMetadataInBackground(); // ディレクトリ変更後もバックグラウンド読み込み
