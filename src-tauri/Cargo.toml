@@ -40,6 +40,11 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 rayon = "1.10.0"
 mimalloc = "0.1.48"
 notify = "6.1.1"
+fast_image_resize = "3.0"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.52"
+features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_Foundation"]
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

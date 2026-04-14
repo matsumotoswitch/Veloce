@@ -9,6 +9,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 use std::io::Read; // flate2のread_to_string用
 use std::sync::Mutex;
+use std::hash::{Hash, Hasher};
 use rayon::prelude::*;
 use tauri::Manager;
 use notify::{Watcher, RecursiveMode, EventKind};
@@ -655,7 +656,7 @@ async fn open_viewer(
 // --- サムネイル生成コマンド ---
 
 #[tauri::command]
-async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> Result<Vec<u8>, String> {
+async fn get_thumbnail(app: tauri::AppHandle, state: tauri::State<'_, AppState>, file_path: String) -> Result<Vec<u8>, String> {
     // フォルダ移動済みの場合は無駄な処理（画像読み込み・リサイズ）をスキップする
     if let Ok(current_dir) = state.current_dir.lock() {
         let parent_dir = Path::new(&file_path)
@@ -668,13 +669,184 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         }
     }
 
+    let cache_dir = app.path_resolver().app_local_data_dir().map(|mut p| {
+        p.push("Thumbnails");
+        p
+    });
+
     tokio::task::spawn_blocking(move || {
+        let mtime = std::fs::metadata(&file_path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH)
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let cache_file_path = if let Some(dir) = &cache_dir {
+            let _ = std::fs::create_dir_all(dir);
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            format!("{}_{}", file_path, mtime).hash(&mut hasher);
+            let hash = hasher.finish();
+            Some(dir.join(format!("{}.jpg", hash)))
+        } else {
+            None
+        };
+
+        if let Some(cache_path) = &cache_file_path {
+            if cache_path.exists() {
+                if let Ok(bytes) = std::fs::read(cache_path) {
+                    println!("Cache: {}", file_path);
+                    return Ok(bytes);
+                }
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            use windows::core::HSTRING;
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+            use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT};
+            use windows::Win32::Graphics::Gdi::{
+                DeleteObject, GetObjectW, GetDIBits, CreateCompatibleDC, DeleteDC,
+                BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB, RGBQUAD
+            };
+            use windows::Win32::Foundation::SIZE;
+
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                
+                let result: Option<Vec<u8>> = (|| -> windows::core::Result<Vec<u8>> {
+                    let path_hstring = HSTRING::from(&file_path);
+                    let item: IShellItemImageFactory = SHCreateItemFromParsingName(&path_hstring, None)?;
+                    
+                    let size = SIZE { cx: 512, cy: 512 };
+                    let hbitmap = item.GetImage(size, SIIGBF_RESIZETOFIT)?;
+
+                    let mut bitmap = BITMAP::default();
+                    if GetObjectW(
+                        hbitmap,
+                        std::mem::size_of::<BITMAP>() as i32,
+                        Some(&mut bitmap as *mut _ as *mut std::ffi::c_void),
+                    ) == 0 {
+                        let _ = DeleteObject(hbitmap);
+                        return Err(windows::core::Error::from_win32());
+                    }
+
+                    let width = bitmap.bmWidth;
+                    let height = bitmap.bmHeight;
+                    let mut info = BITMAPINFO {
+                        bmiHeader: BITMAPINFOHEADER {
+                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                            biWidth: width,
+                            biHeight: -height, // top-down
+                            biPlanes: 1,
+                            biBitCount: 32,
+                            biCompression: BI_RGB.0 as u32,
+                            biSizeImage: 0,
+                            biXPelsPerMeter: 0,
+                            biYPelsPerMeter: 0,
+                            biClrUsed: 0,
+                            biClrImportant: 0,
+                        },
+                        bmiColors: [RGBQUAD::default(); 1],
+                    };
+
+                    let hdc = CreateCompatibleDC(None);
+                    let mut pixels = vec![0u8; (width * height * 4) as usize];
+                    let res = GetDIBits(
+                        hdc,
+                        hbitmap,
+                        0,
+                        height as u32,
+                        Some(pixels.as_mut_ptr() as *mut _),
+                        &mut info,
+                        DIB_RGB_COLORS,
+                    );
+
+                    let _ = DeleteDC(hdc);
+                    let _ = DeleteObject(hbitmap);
+
+                    if res == 0 {
+                        return Err(windows::core::Error::from_win32());
+                    }
+
+                    // BGRA -> RGBA のバイトスワップ
+                    for chunk in pixels.chunks_exact_mut(4) {
+                        chunk.swap(0, 2);
+                    }
+
+                    if let Some(img) = image::RgbaImage::from_raw(width as u32, height as u32, pixels) {
+                        let dyn_img = image::DynamicImage::ImageRgba8(img);
+                        let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
+                        if dyn_img.write_to(&mut buf, image::ImageFormat::Jpeg).is_ok() {
+                            return Ok(buf.into_inner());
+                        }
+                    }
+
+                    Err(windows::core::Error::from_win32())
+                })().ok();
+
+                CoUninitialize();
+
+                // WindowsAPIでの取得が成功した場合はそのまま返す
+                if let Some(bytes) = result {
+                    println!("Windows API: {}", file_path);
+                    if let Some(cache_path) = &cache_file_path {
+                        let _ = std::fs::write(cache_path, &bytes);
+                    }
+                    return Ok(bytes);
+                }
+            }
+        }
+
+        // --- フォールバック: 既存の image::open 処理 ---
+        println!("Fallback: {}", file_path);
         let img = image::open(&file_path).map_err(|e| e.to_string())?;
-        // FilterType::Nearest を使用して最速で縮小する (最大512x512)
-        let thumb = img.resize(512, 512, image::imageops::FilterType::Nearest);
-        let mut buf = std::io::Cursor::new(Vec::new());
+        
+        let (src_width_val, src_height_val, src_raw, pixel_type) = match img {
+            image::DynamicImage::ImageRgb8(rgb) => {
+                let (w, h) = rgb.dimensions();
+                (w, h, rgb.into_raw(), fast_image_resize::PixelType::U8x3)
+            },
+            image::DynamicImage::ImageRgba8(rgba) => {
+                let (w, h) = rgba.dimensions();
+                (w, h, rgba.into_raw(), fast_image_resize::PixelType::U8x4)
+            },
+            _ => {
+                let rgba = img.into_rgba8();
+                let (w, h) = rgba.dimensions();
+                (w, h, rgba.into_raw(), fast_image_resize::PixelType::U8x4)
+            }
+        };
+
+        let src_width = std::num::NonZeroU32::new(src_width_val).unwrap_or(std::num::NonZeroU32::new(1).unwrap());
+        let src_height = std::num::NonZeroU32::new(src_height_val).unwrap_or(std::num::NonZeroU32::new(1).unwrap());
+
+        let src_image = fast_image_resize::Image::from_vec_u8(src_width, src_height, src_raw, pixel_type).map_err(|e| e.to_string())?;
+
+        let max_dim: f32 = 512.0;
+        let ratio = (max_dim / src_width.get() as f32).min(max_dim / src_height.get() as f32).min(1.0_f32);
+        let dst_width = std::num::NonZeroU32::new((src_width.get() as f32 * ratio).max(1.0) as u32).unwrap();
+        let dst_height = std::num::NonZeroU32::new((src_height.get() as f32 * ratio).max(1.0) as u32).unwrap();
+
+        let mut dst_image = fast_image_resize::Image::new(dst_width, dst_height, pixel_type);
+        let mut resizer = fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Nearest);
+        resizer.resize(&src_image.view(), &mut dst_image.view_mut()).map_err(|e| e.to_string())?;
+
+        let thumb = match pixel_type {
+            fast_image_resize::PixelType::U8x3 => image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(dst_width.get(), dst_height.get(), dst_image.into_vec()).unwrap()),
+            _ => image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(dst_width.get(), dst_height.get(), dst_image.into_vec()).unwrap()),
+        };
+
+        let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
         thumb.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
-        Ok(buf.into_inner())
+        let bytes = buf.into_inner();
+
+        if let Some(cache_path) = &cache_file_path {
+            let _ = std::fs::write(cache_path, &bytes);
+        }
+
+        Ok(bytes)
     }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
