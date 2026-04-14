@@ -38,3 +38,6 @@ src-tauri/target/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Tools
+upx.exe
