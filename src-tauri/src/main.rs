@@ -979,6 +979,30 @@ fn main() {
                     .data_directory(data_dir.clone())
                     .build()?;
             }
+
+            // 古いサムネイルキャッシュの自動クリーンアップをバックグラウンドで実行
+            std::thread::spawn(|| {
+                if let Some(mut cache_dir) = get_veloce_data_dir() {
+                    cache_dir.push("Thumbnails");
+                    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+                        let thirty_days_in_secs = 30 * 24 * 60 * 60;
+                        let now = std::time::SystemTime::now();
+                        
+                        for entry in entries.filter_map(Result::ok) {
+                            if let Ok(metadata) = entry.metadata() {
+                                // 最終アクセス日時（取得できなければ更新日時）が30日以上前のファイルを削除
+                                let target_time = metadata.accessed().unwrap_or_else(|_| metadata.modified().unwrap_or(now));
+                                if let Ok(duration) = now.duration_since(target_time) {
+                                    if duration.as_secs() > thirty_days_in_secs {
+                                        let _ = std::fs::remove_file(entry.path());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|event| {
