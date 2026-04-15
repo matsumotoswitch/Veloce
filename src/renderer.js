@@ -1,6 +1,8 @@
 // --- グローバル状態管理 ---
 let currentFiles = []; // 現在のディレクトリ内の画像ファイルリスト
+let filteredFiles = []; // 検索・ソート結果の表示用ファイルリスト
 let currentSort = { key: 'name', asc: true }; // 現在のソート条件
+let searchQuery = ''; // 現在の検索クエリ
 let selectedIndex = -1; // 最後に選択された画像のインデックス
 let selectedIndices = new Set(); // 複数選択された画像のインデックスセット
 let currentDirectory = ''; // 現在表示しているディレクトリパス
@@ -8,6 +10,7 @@ let thumbnailObserver;
 let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
 let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
+let currentPromptBatchId = 0; // プロンプトバックグラウンド取得のキャンセル用
 let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
 let pendingThumbnails = new Set(); // filepath -> boolean (サムネイルリクエスト中フラグ)
 let preloadCursor = 0; // バックグラウンド生成の検索カーソル
@@ -436,7 +439,7 @@ function handleItemDragStart(e, isGrid) {
   const index = parseInt(item.dataset.index, 10);
   
   if (!selectedIndices.has(index)) selectImage(index);
-  const paths = Array.from(selectedIndices).map(idx => currentFiles[idx].path);
+  const paths = Array.from(selectedIndices).map(idx => filteredFiles[idx].path);
   e.dataTransfer.setData('application/json', JSON.stringify(paths));
   e.dataTransfer.setData('text/plain', paths[0]);
   e.dataTransfer.effectAllowed = 'copyMove';
@@ -711,8 +714,8 @@ function processIdleThumbnails(deadline) {
   }
 
   let targetFile = null;
-  while (preloadCursor < currentFiles.length) {
-    const filePath = currentFiles[preloadCursor].path;
+  while (preloadCursor < filteredFiles.length) {
+    const filePath = filteredFiles[preloadCursor].path;
     if (!thumbnailUrls.has(filePath) && !pendingThumbnails.has(filePath)) {
       targetFile = filePath;
       break;
@@ -786,18 +789,8 @@ let autoRefreshTimer = null;
 function scheduleRefresh() {
   clearTimeout(autoRefreshTimer);
   autoRefreshTimer = setTimeout(() => {
-    const selectedPath = selectedIndex > -1 && currentFiles[selectedIndex] ? currentFiles[selectedIndex].path : null;
-    const selectedPaths = new Set(Array.from(selectedIndices).map(i => currentFiles[i] ? currentFiles[i].path : null).filter(Boolean));
-
     preloadCursor = 0;
-    sortFiles();
-    
-    selectedIndices.clear();
-    selectedIndex = -1;
-    currentFiles.forEach((f, i) => {
-      if (selectedPaths.has(f.path)) selectedIndices.add(i);
-      if (f.path === selectedPath) selectedIndex = i;
-    });
+    applySearchAndSort();
 
     renderAll();
     loadMetadataInBackground();
@@ -814,10 +807,6 @@ function scheduleRefresh() {
  */
 async function refreshFileList() {
   if (!currentDirectory || !window.veloceAPI.loadDirectory) return;
-
-  // 更新前に選択されていたファイルのパスを保持
-  const oldSelectedPath = selectedIndex > -1 && currentFiles[selectedIndex] ? currentFiles[selectedIndex].path : null;
-  const oldSelectedPaths = new Set(Array.from(selectedIndices).map(i => currentFiles[i] ? currentFiles[i].path : null).filter(Boolean));
   
   // メインプロセスにディレクトリの再読み込みを要求
   const result = await window.veloceAPI.loadDirectory(currentDirectory);
@@ -825,29 +814,20 @@ async function refreshFileList() {
 
   currentFiles = result.imageFiles || [];
   
-  // 一旦選択をクリアしてからソートする（sortFiles内でのクラッシュを防ぐため）
-  selectedIndex = -1;
-  selectedIndices.clear();
-  
   clearThumbnailCache(); // フォルダ移動時にキャッシュをクリーンアップ
 
-  sortFiles();
-  
-  // ソート後の currentFiles に対して選択状態を復元する
-  currentFiles.forEach((f, i) => {
-    if (oldSelectedPaths.has(f.path)) selectedIndices.add(i);
-    if (f.path === oldSelectedPath) selectedIndex = i;
-  });
+  applySearchAndSort();
 
   renderAll();
   loadMetadataInBackground();
+  loadPromptsInBackground();
   
   // 選択状態のUIを復元、またはリセット
   updateSelectionUI();
   if (selectedIndex > -1) {
     // selectImageを使うと複数選択が解除されるため、個別にメタデータのみ更新する
     const requestId = ++currentMetaRequestId;
-    const meta = await window.veloceAPI.parseMetadata(currentFiles[selectedIndex].path);
+    const meta = await window.veloceAPI.parseMetadata(filteredFiles[selectedIndex].path);
     if (currentMetaRequestId === requestId) renderMetadata(meta);
   } else {
     // 完全に選択が失われた場合（フォルダが空になった場合など）
@@ -905,6 +885,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   updateThumbnailSize();
 
+  // 検索バーの初期化
+  const searchBar = document.getElementById('search-bar');
+  if (searchBar) {
+    searchBar.addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      scheduleRefresh();
+    });
+  }
+
   // ソート順の復元
   const savedSort = localStorage.getItem('currentSort');
   if (savedSort) {
@@ -938,9 +927,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       localStorage.setItem('currentDirectory', currentDirectory); // 有効なパスを保存
       currentFiles = result.imageFiles || [];
       clearThumbnailCache();
-      sortFiles();
+      applySearchAndSort();
       renderAll();
       loadMetadataInBackground(); // バックグラウンドでメタデータ読み込みを開始
+      loadPromptsInBackground(); // プロンプトのバックグラウンド解析を開始
       clearMetadataUI();
 
       // ツリーを保存されていたディレクトリの階層まで自動展開する
@@ -959,6 +949,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
       } else {
         currentFiles.push(newFile);
+        loadPromptsInBackground();
         scheduleRefresh();
       }
     });
@@ -1161,9 +1152,10 @@ function createTreeNode(folder, isRoot = false) {
         localStorage.setItem('currentDirectory', currentDirectory); // フォルダ移動時にパスを保存
         currentFiles = result.imageFiles || [];
         clearThumbnailCache();
-        sortFiles();
+        applySearchAndSort();
         renderAll();
         loadMetadataInBackground(); // ディレクトリ変更後もバックグラウンド読み込み
+        loadPromptsInBackground();
         clearMetadataUI();
       }
     }
@@ -1360,36 +1352,52 @@ document.querySelectorAll('th').forEach(th => {
 	}
 	localStorage.setItem('currentSort', JSON.stringify(currentSort));
 	updateSortIndicators();
-	sortFiles();
+	applySearchAndSort();
 	renderAll();
   });
 });
 
 /**
- * 現在のソート設定（`currentSort`）に基づいて `currentFiles` 配列を並び替える。
+ * 検索クエリで currentFiles をフィルタリングし、ソート設定に基づいて並び替える。
  */
-function sortFiles() {
+function applySearchAndSort() {
   // ソート後も選択状態を維持するためにパスを記録
-  const selectedPath = selectedIndex > -1 && currentFiles[selectedIndex] ? currentFiles[selectedIndex].path : null;
-  const selectedPaths = new Set(Array.from(selectedIndices).map(i => currentFiles[i] ? currentFiles[i].path : null).filter(Boolean));
+  const selectedPath = selectedIndex > -1 && filteredFiles[selectedIndex] ? filteredFiles[selectedIndex].path : null;
+  const selectedPaths = new Set(Array.from(selectedIndices).map(i => filteredFiles[i] ? filteredFiles[i].path : null).filter(Boolean));
 
-  currentFiles.sort((a, b) => {
+  let files = currentFiles;
+
+  if (searchQuery.trim() !== '') {
+    const terms = searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t);
+    
+    files = files.filter(f => {
+      const charPromptsText = f.charPrompts ? JSON.stringify(f.charPrompts) : '';
+      const textToSearch = [f.name, f.prompt, f.negativePrompt, f.source, charPromptsText].filter(Boolean).join(' ').toLowerCase();
+      return terms.every(term => textToSearch.includes(term));
+    });
+  }
+
+  files.sort((a, b) => {
 	let valA = a[currentSort.key] !== undefined ? a[currentSort.key] : 0;
 	let valB = b[currentSort.key] !== undefined ? b[currentSort.key] : 0;
+    if (typeof valA === 'string') valA = valA.toLowerCase();
+    if (typeof valB === 'string') valB = valB.toLowerCase();
 	if (valA < valB) return currentSort.asc ? -1 : 1;
 	if (valA > valB) return currentSort.asc ? 1 : -1;
 	return 0;
   });
 
+  filteredFiles = files;
+
   selectedIndices.clear();
   selectedIndex = -1;
-  currentFiles.forEach((f, i) => {
+  filteredFiles.forEach((f, i) => {
     if (selectedPaths.has(f.path)) selectedIndices.add(i);
     if (f.path === selectedPath) selectedIndex = i;
   });
 
   if (window.veloceAPI && window.veloceAPI.syncImagePaths) {
-    const sortedPaths = currentFiles.map(f => f.path);
+    const sortedPaths = filteredFiles.map(f => f.path);
     window.veloceAPI.syncImagePaths(sortedPaths);
   }
 }
@@ -1409,8 +1417,8 @@ async function renderAll() {
   }
 
   // キャッシュ済み枚数の一括計算
-  thumbnailTotalRequested = currentFiles.length;
-  thumbnailCompleted = currentFiles.filter(f => thumbnailUrls.has(f.path)).length;
+  thumbnailTotalRequested = filteredFiles.length;
+  thumbnailCompleted = filteredFiles.filter(f => thumbnailUrls.has(f.path)).length;
   // 初期進捗の反映
   if (thumbnailTotalRequested > 0 && thumbnailCompleted < thumbnailTotalRequested) {
     updateThumbnailToast();
@@ -1436,11 +1444,11 @@ async function renderAll() {
 
   const CHUNK_SIZE = 100; // 一度に描画するDOMの数
 
-  for (let i = 0; i < currentFiles.length; i += CHUNK_SIZE) {
+  for (let i = 0; i < filteredFiles.length; i += CHUNK_SIZE) {
     // 別のフォルダが選択されるなどして新しい描画リクエストが来たら、現在の描画ループを中断する
     if (renderId !== currentRenderId) return;
 
-    const chunk = currentFiles.slice(i, i + CHUNK_SIZE);
+    const chunk = filteredFiles.slice(i, i + CHUNK_SIZE);
     const tableFragment = document.createDocumentFragment();
     const gridFragment = document.createDocumentFragment();
 
@@ -1571,8 +1579,9 @@ async function loadMetadataInBackground() {
             currentFiles[fileIndex].height = meta.height;
 
             // 対応するテーブル行を更新
-            const row = fileListBody.children[fileIndex];
-            if (row) {
+            const tableIndex = filteredFiles.findIndex(f => f.path === meta.path);
+            if (tableIndex !== -1 && fileListBody.children[tableIndex]) {
+              const row = fileListBody.children[tableIndex];
               row.children[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
               row.children[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
             }
@@ -1591,8 +1600,50 @@ async function loadMetadataInBackground() {
 }
 
 /**
+ * 画像のプロンプトなどのメタデータをバックグラウンドで解析し、検索可能にする。
+ */
+async function loadPromptsInBackground() {
+  const batchId = ++currentPromptBatchId;
+  const CHUNK_SIZE = 50; 
+  const pathsToLoad = currentFiles.filter(f => !f.metaLoaded).map(f => f.path);
+  
+  const processNextChunk = (chunkIndex) => {
+    if (currentPromptBatchId !== batchId || chunkIndex >= pathsToLoad.length) return;
+
+    requestIdleCallback(async () => {
+      if (currentPromptBatchId !== batchId) return;
+      
+      const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
+      const pathToIndex = new Map();
+      currentFiles.forEach((f, i) => pathToIndex.set(f.path, i));
+
+      await Promise.all(chunkPaths.map(async (path) => {
+        try {
+          const meta = await window.veloceAPI.parseMetadata(path);
+          const idx = pathToIndex.get(path);
+          if (idx !== undefined) {
+            currentFiles[idx].prompt = meta.prompt || '';
+            currentFiles[idx].negativePrompt = meta.negativePrompt || '';
+            currentFiles[idx].source = meta.source || '';
+            if (meta.params && Array.isArray(meta.params.characterPrompts)) {
+                currentFiles[idx].charPrompts = meta.params.characterPrompts;
+            }
+            currentFiles[idx].metaLoaded = true;
+          }
+        } catch (e) {}
+      }));
+
+      if (searchQuery.trim() !== '') scheduleRefresh();
+      processNextChunk(chunkIndex + CHUNK_SIZE);
+    });
+  };
+  
+  processNextChunk(0);
+}
+
+/**
  * 画像が選択されたときの処理。UIの選択状態を更新し、メタデータを表示する。
- * @param {number} index - 選択された画像の `currentFiles` 配列内でのインデックス。
+ * @param {number} index - 選択された画像の `filteredFiles` 配列内でのインデックス。
  * @param {MouseEvent|KeyboardEvent} event - イベントオブジェクト（CtrlやShiftの判定用）
  */
 async function selectImage(index, event = null) {
@@ -1629,7 +1680,7 @@ async function selectImage(index, event = null) {
     return;
   }
 
-  const file = currentFiles[index];
+  const file = filteredFiles[index];
   
   updateSelectionUI();
 
@@ -1666,6 +1717,21 @@ async function selectImage(index, event = null) {
   if (currentMetaRequestId !== requestId) return;
 
   renderMetadata(meta);
+}
+
+/**
+ * 検索キーワードに一致するテキストをハイライト表示する
+ */
+function highlightText(text, terms) {
+  if (!text) return '';
+  if (!terms || terms.length === 0) return text;
+  let highlighted = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  terms.forEach(term => {
+    const escapedTerm = term.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const regex = new RegExp(`(${escapedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    highlighted = highlighted.replace(regex, '<mark style="background-color: rgba(235, 192, 109, 0.6); color: #fff; border-radius: 2px; padding: 0 2px;">$1</mark>');
+  });
+  return highlighted;
 }
 
 /**
@@ -1706,6 +1772,8 @@ function renderMetadata(meta) {
   if (!hasAiMetadata) {
     return; // プロンプト情報がない場合は何も表示しない
   }
+
+  const terms = searchQuery.trim() !== '' ? searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t) : [];
 
   const addField = (label, value, isMultiline = false, customMinHeight = '80px') => {
     // 空文字の場合でも、プロンプト情報がある場合は空の枠を表示してレイアウトを崩さないようにする
@@ -1757,34 +1825,34 @@ function renderMetadata(meta) {
     labelWrapper.appendChild(labelEl);
     labelWrapper.appendChild(copyBtn);
     
-    const inputEl = document.createElement(isMultiline ? 'textarea' : 'input');
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'metadata-content';
+    contentDiv.innerHTML = highlightText(String(value), terms);
+    contentDiv.style.width = '100%';
+    contentDiv.style.boxSizing = 'border-box';
+    contentDiv.style.padding = '6px';
+    contentDiv.style.backgroundColor = '#1e1e1e';
+    contentDiv.style.color = '#d4d4d4';
+    contentDiv.style.border = '1px solid #333';
+    contentDiv.style.borderRadius = '4px';
+    contentDiv.style.fontFamily = 'monospace';
+    contentDiv.style.fontSize = '1.1em';
+    contentDiv.style.userSelect = 'text';
+    contentDiv.style.cursor = 'text';
+
     if (isMultiline) {
-      inputEl.style.resize = 'vertical';
-      inputEl.style.minHeight = customMinHeight;
+      contentDiv.style.minHeight = customMinHeight;
+      contentDiv.style.overflowY = 'auto';
+      contentDiv.style.resize = 'vertical';
+      contentDiv.style.wordBreak = 'break-all';
     } else {
-      inputEl.type = 'text';
+      contentDiv.style.whiteSpace = 'nowrap';
+      contentDiv.style.overflowX = 'auto';
+      contentDiv.style.overflowY = 'hidden';
     }
     
-    inputEl.value = value;
-    // readOnly属性だとカーソルが非表示になるため、代わりにbeforeinputイベントで文字入力をブロックする
-    inputEl.addEventListener('beforeinput', (e) => e.preventDefault());
-    inputEl.spellcheck = false; // スペルチェックの赤線を無効化
-    inputEl.style.width = '100%';
-    inputEl.style.boxSizing = 'border-box';
-    inputEl.style.padding = '6px';
-    inputEl.style.backgroundColor = '#1e1e1e';
-    inputEl.style.color = '#d4d4d4';
-    inputEl.style.border = '1px solid #333';
-    inputEl.style.borderRadius = '4px';
-    inputEl.style.fontFamily = 'inherit';
-    inputEl.style.fontSize = 'inherit';
-    inputEl.style.outline = 'none'; // フォーカス時の枠線を消して読み取り専用感を出す
-    
-    // クリックした位置にスムーズにカーソルを置けるよう、フォーカス時の全選択処理を削除
-    // inputEl.addEventListener('focus', () => inputEl.select());
-    
     fieldDiv.appendChild(labelWrapper);
-    fieldDiv.appendChild(inputEl);
+    fieldDiv.appendChild(contentDiv);
     container.appendChild(fieldDiv);
   };
 
@@ -1835,7 +1903,7 @@ function renderMetadata(meta) {
  * @param {number} index - 表示を開始する画像のインデックス。
  */
 function openViewer(index) {
-  const file = currentFiles[index];
+  const file = filteredFiles[index];
 
   window.veloceAPI.openViewer({ 
     currentIndex: index,
@@ -2120,7 +2188,7 @@ window.addEventListener('keydown', async (e) => {
       // インデックスがずれてクラッシュするのを防ぐために削除対象のパスを先に抽出する
       const pathsToDelete = [];
       for (const i of selectedIndices) {
-        if (currentFiles[i]) pathsToDelete.push(currentFiles[i].path);
+        if (filteredFiles[i]) pathsToDelete.push(filteredFiles[i].path);
       }
 
       // 削除を開始する前にUIの選択状態を解除する
@@ -2152,8 +2220,8 @@ window.addEventListener('keydown', async (e) => {
 
   // Ctrl+Cで選択中の画像をクリップボードにコピー
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
-    if (selectedIndex > -1 && currentFiles[selectedIndex]) {
-      window.veloceAPI.copyImageToClipboard(currentFiles[selectedIndex].path);
+    if (selectedIndex > -1 && filteredFiles[selectedIndex]) {
+      window.veloceAPI.copyImageToClipboard(filteredFiles[selectedIndex].path);
       showToast('画像をクリップボードにコピーしました');
 
       // コピー成功時に選択中の画像をピカッと光らせるエフェクト
@@ -2182,7 +2250,7 @@ window.addEventListener('keydown', async (e) => {
 
   // 上下左右キーで画像の選択を移動
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    if (currentFiles.length === 0) return;
+    if (filteredFiles.length === 0) return;
     
     // 矢印キーによる画面のスクロールを防ぐ
     e.preventDefault();
@@ -2202,9 +2270,9 @@ window.addEventListener('keydown', async (e) => {
 
       // 移動先インデックスの計算
       if (e.key === 'ArrowLeft') newIndex = Math.max(0, selectedIndex - 1);
-      else if (e.key === 'ArrowRight') newIndex = Math.min(currentFiles.length - 1, selectedIndex + 1);
+      else if (e.key === 'ArrowRight') newIndex = Math.min(filteredFiles.length - 1, selectedIndex + 1);
       else if (e.key === 'ArrowUp') newIndex = Math.max(0, selectedIndex - columns);
-      else if (e.key === 'ArrowDown') newIndex = Math.min(currentFiles.length - 1, selectedIndex + columns);
+      else if (e.key === 'ArrowDown') newIndex = Math.min(filteredFiles.length - 1, selectedIndex + columns);
     }
 
     // 選択が変更された場合

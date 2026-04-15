@@ -81,6 +81,30 @@ body {
   min-height: 0;
 }
 
+/* Search Bar */
+#search-container {
+  background: var(--panel-bg);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+#search-bar {
+  flex: 1;
+  background: var(--bg-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  padding: 6px 10px;
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+  font-size: 14px;
+}
+#search-bar:focus {
+  border-color: var(--accent-color);
+}
+
 /* Center Top: File List */
 #center-top {
   /* flexコンテナ内ではheightよりもflex-basisでサイズ指定する方が確実 */
