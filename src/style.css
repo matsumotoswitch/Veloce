@@ -251,14 +251,14 @@ tr.selected { background: var(--accent-color); color: #fff; }
   font-size: 14px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
   opacity: 0;
-  transform: translateY(20px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transform: translateY(10px) scale(0.95);
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   white-space: nowrap;
 }
 
 .toast-message.show {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .toast-message.warning {
