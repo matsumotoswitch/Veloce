@@ -115,6 +115,7 @@ contextMenu.style.padding = '4px 0';
 contextMenu.style.zIndex = '10001';
 contextMenu.style.boxShadow = '0 2px 10px rgba(0,0,0,0.5)';
 contextMenu.style.minWidth = '150px';
+contextMenu.style.fontSize = '13px';
 
 /**
  * コンテキストメニューのオプション要素を作成する
@@ -125,7 +126,7 @@ contextMenu.style.minWidth = '150px';
 const createMenuOption = (text, onClick) => {
   const option = document.createElement('div');
   option.textContent = text;
-  option.style.padding = '8px 16px';
+  option.style.padding = '6px 16px';
   option.style.cursor = 'pointer';
   option.style.color = '#ccc';
   option.onmouseenter = () => option.style.backgroundColor = '#3a7afe';
@@ -1767,7 +1768,7 @@ function renderMetadata(meta) {
     container.style.gap = '10px';
     container.style.width = '100%';
     container.style.boxSizing = 'border-box';
-    container.style.paddingRight = '16px'; // 右ペインのスクロールバーと距離を離すための余白
+    container.style.paddingRight = '8px'; // 右ペインのスクロールバーと距離を離すための余白
     
     // 既存の子要素（古いテキストエリア等）を非表示にして新しいコンテナを追加
     if (rightPane) {
