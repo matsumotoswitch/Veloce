@@ -1408,13 +1408,15 @@ async function renderAll() {
       thumbnailObserver.disconnect();
   }
 
-  // サムネイル進捗表示の初期化（全画像数を分母、キャッシュ済みを分子とする）
+  // キャッシュ済み枚数の一括計算
   thumbnailTotalRequested = currentFiles.length;
   thumbnailCompleted = currentFiles.filter(f => thumbnailUrls.has(f.path)).length;
+  // 初期進捗の反映
   if (thumbnailTotalRequested > 0 && thumbnailCompleted < thumbnailTotalRequested) {
     updateThumbnailToast();
   }
 
+  // Clear existing content
   fileListBody.innerHTML = '';
   thumbnailGrid.innerHTML = '';
 
