@@ -87,6 +87,14 @@ function showToast(message, duration = 3000, id = null) {
   }
 }
 
+/**
+ * 汎用的な通知を表示する
+ * @param {string} message - 表示するメッセージ
+ */
+function showNotification(message) {
+  showToast(message);
+}
+
 // --- フォルダツリーのコンテキストメニュー作成 ---
 const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
@@ -1809,6 +1817,7 @@ function renderMetadata(meta) {
     copyBtn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(String(value));
+        showNotification("プロンプトをクリップボードにコピーしました");
         copyBtn.style.transition = 'none'; // 光るときは一瞬で
         copyBtn.style.color = '#fff'; // 芯を白く発光させる
         copyBtn.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
@@ -1835,8 +1844,8 @@ function renderMetadata(meta) {
     contentDiv.style.color = '#d4d4d4';
     contentDiv.style.border = '1px solid #333';
     contentDiv.style.borderRadius = '4px';
-    contentDiv.style.fontFamily = 'monospace';
-    contentDiv.style.fontSize = '1.1em';
+    contentDiv.style.fontFamily = 'inherit';
+    contentDiv.style.fontSize = '1em';
     contentDiv.style.userSelect = 'text';
     contentDiv.style.cursor = 'text';
 
@@ -2220,6 +2229,11 @@ window.addEventListener('keydown', async (e) => {
 
   // Ctrl+Cで選択中の画像をクリップボードにコピー
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+    if (window.getSelection().toString()) {
+      showToast('テキストをクリップボードにコピーしました');
+      return;
+    }
+
     if (selectedIndex > -1 && filteredFiles[selectedIndex]) {
       window.veloceAPI.copyImageToClipboard(filteredFiles[selectedIndex].path);
       showToast('画像をクリップボードにコピーしました');

@@ -239,6 +239,7 @@ tr.selected { background: var(--accent-color); color: #fff; }
   gap: 10px;
   z-index: 10005; /* ダイアログ等より手前に表示 */
   pointer-events: none; /* マウス操作を邪魔しない */
+  align-items: flex-end;
 }
 
 .toast-message {
