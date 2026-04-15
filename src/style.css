@@ -246,7 +246,7 @@ tr.selected { background: var(--accent-color); color: #fff; }
   background-color: rgba(30, 30, 30, 0.9);
   color: #fff;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 8px;
   padding: 10px 16px;
   font-size: 14px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
@@ -259,4 +259,9 @@ tr.selected { background: var(--accent-color); color: #fff; }
 .toast-message.show {
   opacity: 1;
   transform: translateY(0);
+}
+
+.toast-message.warning {
+  background-color: rgba(180, 90, 20, 0.9);
+  border-color: #d97706;
 }

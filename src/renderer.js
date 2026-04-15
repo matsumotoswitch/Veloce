@@ -48,8 +48,9 @@ const ICONS = {
  * @param {string} message - 表示するメッセージ
  * @param {number} duration - 表示時間（ミリ秒）。0の場合は自動で消えない
  * @param {string|null} id - 通知のID。同じIDの場合は上書きされる
+ * @param {'info' | 'success' | 'error' | 'warning'} [type='info'] - 通知の種類
  */
-function showToast(message, duration = 3000, id = null) {
+function showToast(message, duration = 3000, id = null, type = 'info') {
   let container = document.getElementById('toast-container');
   if (!container) {
     container = document.createElement('div');
@@ -61,12 +62,18 @@ function showToast(message, duration = 3000, id = null) {
 
   if (toast) {
     toast.textContent = message;
+    // Reset type classes
+    toast.classList.remove('success', 'error', 'warning');
   } else {
     toast = document.createElement('div');
     toast.className = 'toast-message';
     if (id) toast.id = `toast-${id}`;
     toast.textContent = message;
     container.appendChild(toast);
+  }
+
+  if (type !== 'info') {
+    toast.classList.add(type);
   }
 
   requestAnimationFrame(() => {
@@ -90,9 +97,10 @@ function showToast(message, duration = 3000, id = null) {
 /**
  * 汎用的な通知を表示する
  * @param {string} message - 表示するメッセージ
+ * @param {'info' | 'warning'} [type='info'] - 通知の種類
  */
-function showNotification(message) {
-  showToast(message);
+function showNotification(message, type = 'info') {
+  showToast(message, 3000, null, type);
 }
 
 // --- フォルダツリーのコンテキストメニュー作成 ---
@@ -301,7 +309,7 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
     const parentPath = contextMenu.targetFolder.path;
     const result = await window.veloceAPI.createFolder(parentPath, folderName);
     if (result && result.success) {
-      showToast(`フォルダ「${folderName}」を作成しました`);
+      showNotification(`フォルダ「${folderName}」を作成しました`);
       await refreshTree();
 
       // 親フォルダまで展開し、親フォルダ自身も展開状態（サブフォルダ表示）にする
@@ -335,7 +343,7 @@ const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
   if (newName && newName !== contextMenu.targetFolder.name) {
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
-      showToast(`フォルダ名を「${newName}」に変更しました`);
+      showNotification(`フォルダ名を「${newName}」に変更しました`);
       if (currentDirectory.startsWith(oldPath)) {
         currentDirectory = currentDirectory.replace(oldPath, result.path);
         localStorage.setItem('currentDirectory', currentDirectory);
@@ -354,7 +362,7 @@ const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
   if (isConfirmed) {
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
-      showToast(`フォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しました`);
+      showNotification(`フォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しました`, 'warning');
       if (currentDirectory.startsWith(oldPath)) {
         // 削除したフォルダ以下を表示していた場合、親フォルダに移動してリストを更新する
         const sep = '\\';
@@ -638,7 +646,7 @@ function updateThumbnailToast() {
   if (thumbnailTotalRequested === 0) return;
   
   if (thumbnailCompleted < thumbnailTotalRequested) {
-    showToast(`サムネイル作成中 (${thumbnailCompleted}/${thumbnailTotalRequested})`, 0, 'thumbnail-progress');
+    showToast(`サムネイル作成中 (${thumbnailCompleted}/${thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
   } else {
     showToast(`サムネイル作成完了 (${thumbnailTotalRequested}/${thumbnailTotalRequested})`, 0, 'thumbnail-progress');
     clearTimeout(thumbnailToastTimeout);
@@ -1264,7 +1272,7 @@ function createTreeNode(folder, isRoot = false) {
         actionStr = getRoot(paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
       }
 
-      showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move');
+      showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
 
       // ブラウザのドラッグ終了処理がフリーズするバグを完全に防ぐため、
       // ファイルの移動自体はすぐに行うが、UIの更新はドラッグ終了イベントまで待機する
@@ -1553,8 +1561,7 @@ async function loadMetadataInBackground() {
   const processNextChunk = (chunkIndex) => {
     if (currentMetaBatchId !== batchId) return;
 
-    if (chunkIndex >= pathsToLoad.length) {
-      showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
+    if (chunkIndex >= pathsToLoad.length) {      showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
       // すべてのメタデータ取得完了後、メタデータに依存するキーでソート中の場合は再ソートして再描画する
       if (['width', 'height'].includes(currentSort.key)) {
         sortFiles();
@@ -1569,8 +1576,7 @@ async function loadMetadataInBackground() {
       
       try {
         const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
-        
-        showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress');
+        showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress', 'info');
         const metadataList = await window.veloceAPI.getImageMetadataBatch(chunkPaths);
 
         if (currentMetaBatchId !== batchId) return;
@@ -2208,7 +2214,7 @@ window.addEventListener('keydown', async (e) => {
 
       let trashedCount = 0;
       const total = pathsToDelete.length;
-      showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash');
+      showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
       
       for (const path of pathsToDelete) {
         try {
@@ -2220,9 +2226,9 @@ window.addEventListener('keydown', async (e) => {
       }
 
       if (trashedCount > 0) {
-        showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash');
+        showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
       } else {
-        showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash');
+        showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
       }
     }
   }
@@ -2230,13 +2236,13 @@ window.addEventListener('keydown', async (e) => {
   // Ctrl+Cで選択中の画像をクリップボードにコピー
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
     if (window.getSelection().toString()) {
-      showToast('テキストをクリップボードにコピーしました');
+      showNotification('テキストをクリップボードにコピーしました');
       return;
     }
 
     if (selectedIndex > -1 && filteredFiles[selectedIndex]) {
       window.veloceAPI.copyImageToClipboard(filteredFiles[selectedIndex].path);
-      showToast('画像をクリップボードにコピーしました');
+      showNotification('画像をクリップボードにコピーしました');
 
       // コピー成功時に選択中の画像をピカッと光らせるエフェクト
       const applyFlash = (el) => {
