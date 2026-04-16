@@ -138,6 +138,10 @@ window.veloceAPI = {
    */
   onFileRemoved: (callback) => listen('file-removed', (event) => callback(event.payload)),
   /**
+   * ディレクトリ構造が変更された（フォルダの作成・削除・リネーム）ときの通知を受け取ります。
+   */
+  onDirectoryChanged: (callback) => listen('directory-changed', () => callback()),
+  /**
    * フォルダを作成するようメインプロセスに要求します。
    * @param {string} parentDir - 親ディレクトリのパス。
    * @param {string} folderName - 新しいフォルダ名。

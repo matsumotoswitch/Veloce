@@ -220,21 +220,33 @@ async fn load_directory(
             
             let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
-                    match event.kind {
-                        EventKind::Create(_) | EventKind::Modify(_) => {
-                            for path in event.paths {
-                                if let Some(img_file) = create_image_file(&path) {
-                                    let _ = app_handle.emit_all("file-changed", img_file);
+                    match &event.kind {
+                        EventKind::Access(_) => {
+                            // ファイル/フォルダへのアクセスイベントは大量に発生するため無視する
+                        },
+                        _ => { // それ以外のすべてのイベント (Create, Modify, Remove, Renameなど)
+                            let mut dir_changed = false;
+                            for path in &event.paths {
+                                // is_dir() は削除されたディレクトリにはfalseを返すため、拡張子がない場合もディレクトリ変更と見なす
+                                if path.is_dir() || path.extension().is_none() {
+                                    dir_changed = true;
+                                    break;
                                 }
                             }
-                        },
-                        EventKind::Remove(_) => {
-                            for path in event.paths {
-                                let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
-                                let _ = app_handle.emit_all("file-removed", clean_path);
+
+                            if dir_changed {
+                                let _ = app_handle.emit_all("directory-changed", ());
+                            } else {
+                                for path in event.paths {
+                                    if let EventKind::Remove(_) = &event.kind {
+                                        let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
+                                        let _ = app_handle.emit_all("file-removed", clean_path);
+                                    } else if let Some(img_file) = create_image_file(&path) {
+                                        let _ = app_handle.emit_all("file-changed", img_file);
+                                    }
+                                }
                             }
-                        },
-                        _ => {}
+                        }
                     }
                 }
             }).ok();

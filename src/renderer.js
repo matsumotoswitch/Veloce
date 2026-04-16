@@ -1250,6 +1250,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  if (window.veloceAPI.onDirectoryChanged) {
+    window.veloceAPI.onDirectoryChanged(async () => {
+      // ツリーの表示を最新状態に更新
+      await refreshTree();
+    });
+  }
+
   // バックグラウンドでのサムネイル事前生成ループを開始
   if (!isPreloadRunning) {
     isPreloadRunning = true;
@@ -1266,6 +1273,11 @@ async function refreshTree() {
   const scrollTop = dirTree.scrollTop;
   const scrollLeft = dirTree.scrollLeft;
 
+  // ツリーを再構築する前に「現在展開されている（開いている）フォルダのパス」をすべて記憶
+  const expandedPaths = Array.from(dirTree.querySelectorAll('.tree-children.expanded'))
+    .map(ul => ul.previousElementSibling?.dataset?.path)
+    .filter(Boolean);
+
   // バックグラウンド（メモリ上）で新しいツリーを構築し、チラつきを完全に防止する
   const tempContainer = document.createElement('div');
   const ul = document.createElement('ul');
@@ -1275,6 +1287,17 @@ async function refreshTree() {
     ul.appendChild(createTreeNode({ name: drive, path: drive }, true));
   }
   tempContainer.appendChild(ul);
+
+  // 記憶しておいたパスを浅い階層から順に展開する
+  expandedPaths.sort((a, b) => a.length - b.length);
+  for (const p of expandedPaths) {
+    await expandTreeToPath(p, true, tempContainer);
+    const escapedPath = CSS.escape(p);
+    const itemDiv = tempContainer.querySelector(`.tree-item[data-path="${escapedPath}"]`);
+    if (itemDiv && itemDiv.expandNode) {
+      await itemDiv.expandNode();
+    }
+  }
 
   if (currentDirectory) {
     // 画面に反映する前に、メモリ上のツリーを展開しきる
