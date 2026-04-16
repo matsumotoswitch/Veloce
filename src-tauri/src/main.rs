@@ -34,10 +34,14 @@ pub struct LoadDirectoryResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ImageMetadata {
+pub struct FullMetadata {
     path: String,
     width: u32,
     height: u32,
+    prompt: String,
+    negative_prompt: String,
+    params: serde_json::Value,
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -252,23 +256,146 @@ async fn load_directory(
 }
 
 #[tauri::command]
-async fn get_image_metadata_batch(file_paths: Vec<String>) -> Result<Vec<ImageMetadata>, String> {
+async fn get_full_metadata_batch(file_paths: Vec<String>) -> Result<Vec<FullMetadata>, String> {
     Ok(tokio::task::spawn_blocking(move || {
-        // rayonによるマルチスレッド並列処理で全コアを使い切る（第二段階ロード）
         file_paths.into_par_iter().map(|path| {
-            // 1. 画像の解像度（ヘッダのみ読み込みでファイルハンドルは即解放される）
-            let (width, height) = image::image_dimensions(&path).unwrap_or((0, 0));
-            
-            ImageMetadata {
-                path,
-                width,
-                height,
-            }
+            get_full_metadata_for_path(&path)
         }).collect()
     }).await.unwrap_or_default())
 }
 
 // --- バイナリ解析パーサー群 (JSの実装をRustへ移植) ---
+
+fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
+    let (width, height) = image::image_dimensions(file_path).unwrap_or((0, 0));
+
+    let mut raw_description = String::new();
+    let mut raw_comment = String::new();
+    let mut raw_parameters = String::new();
+    let mut source = String::new();
+
+    let lower_path = file_path.to_lowercase();
+    if lower_path.ends_with(".png") {
+        let chunks = parse_png_chunks(file_path);
+        raw_description = chunks.get("Description").or(chunks.get("ImageDescription")).cloned().unwrap_or_default();
+        raw_comment = chunks.get("Comment").cloned().unwrap_or_default();
+        raw_parameters = chunks.get("parameters").or(chunks.get("Parameters")).cloned().unwrap_or_default();
+        source = chunks.get("Source").or(chunks.get("Software")).cloned().unwrap_or_default();
+    } else {
+        let exif_data = if lower_path.ends_with(".webp") { parse_webp_exif(file_path) } else { parse_jpeg_exif(file_path) };
+
+        if let Some(desc) = exif_data.get("ImageDescription") {
+            raw_description = String::from_utf8_lossy(desc).trim_end_matches('\0').to_string();
+        }
+        if let Some(comment) = exif_data.get("UserComment") {
+            let mut start = 0;
+            if comment.starts_with(b"UNICODE\0") || comment.starts_with(b"ASCII\0\0\0") { start = 8; }
+            raw_comment = String::from_utf8_lossy(&comment[start..]).trim_end_matches('\0').trim().to_string();
+        }
+        if let Some(sw) = exif_data.get("Software") {
+            source = String::from_utf8_lossy(sw).trim_end_matches('\0').to_string();
+        }
+    }
+
+    let mut prompt = raw_description.clone();
+    let mut negative_prompt = String::new();
+    let mut params = serde_json::Value::Object(serde_json::Map::new());
+    let comment_string = raw_comment.trim();
+
+    if let Some(start) = comment_string.find('{') {
+        if let Some(end) = comment_string.rfind('}') {
+            let json_text = &comment_string[start..=end];
+            if let Ok(mut comment_obj) = serde_json::from_str::<serde_json::Value>(json_text) {
+                let mut json_source = None;
+
+                // WebP等の二重エンコードJSON対応
+                if let Some(inner_str) = comment_obj.get("Comment").and_then(|v| v.as_str()) {
+                    if let Ok(inner_obj) = serde_json::from_str::<serde_json::Value>(inner_str) {
+                        if let Some(p) = comment_obj.get("Description").and_then(|v| v.as_str()) { prompt = p.to_string(); }
+                        else if let Some(p) = inner_obj.get("prompt").and_then(|v| v.as_str()) { prompt = p.to_string(); }
+                        if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) { json_source = Some(s.to_string()); }
+
+                        if let serde_json::Value::Object(ref mut map) = comment_obj {
+                            if let serde_json::Value::Object(inner_map) = inner_obj {
+                                for (k, v) in inner_map { map.insert(k, v); }
+                            }
+                            map.remove("Comment");
+                            map.remove("Description");
+                        }
+                    }
+                }
+
+                // 通常のJSON直下のSourceも取得
+                if json_source.is_none() {
+                    if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) {
+                        json_source = Some(s.to_string());
+                    }
+                }
+
+                // 「NovelAI Diffusion V4.5 ...」のようなSoftwareの文字列を優先し、
+                // 空の場合のみJSON内のSourceをフォールバックとして使用する
+                if source.is_empty() {
+                    if let Some(s) = json_source {
+                        source = s;
+                    }
+                }
+
+                if let Some(uc) = comment_obj.get("uc").and_then(|v| v.as_str()) { negative_prompt = uc.to_string(); }
+                if prompt.is_empty() {
+                    if let Some(p) = comment_obj.get("prompt").and_then(|v| v.as_str()) {
+                        prompt = p.to_string();
+                        if let serde_json::Value::Object(ref mut map) = comment_obj { map.remove("prompt"); }
+                    }
+                }
+
+                // NovelAI V4プロンプト対応
+                if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
+                    if let Some(char_captions) = v4_prompt.pointer("/caption/char_captions").and_then(|v| v.as_array()) {
+                        let mut char_prompts_arr = Vec::new();
+                        let ucs = comment_obj.pointer("/v4_negative_prompt/caption/char_captions").and_then(|v| v.as_array());
+
+                        for (i, p) in char_captions.iter().enumerate() {
+                            let mut char_obj = serde_json::Map::new();
+                            if let Some(cap) = p.get("char_caption").and_then(|v| v.as_str()) { char_obj.insert("prompt".to_string(), serde_json::Value::String(cap.to_string())); }
+                            if let Some(uc_arr) = ucs {
+                                if let Some(uc_item) = uc_arr.get(i) {
+                                    if let Some(uc_cap) = uc_item.get("char_caption").and_then(|v| v.as_str()) { char_obj.insert("uc".to_string(), serde_json::Value::String(uc_cap.to_string())); }
+                                }
+                            }
+                            char_prompts_arr.push(serde_json::Value::Object(char_obj));
+                        }
+
+                        if let serde_json::Value::Object(ref mut map) = comment_obj {
+                            map.insert("characterPrompts".to_string(), serde_json::Value::Array(char_prompts_arr));
+                            map.remove("v4_prompt");
+                            map.remove("v4_negative_prompt");
+                        }
+                    }
+                }
+                params = comment_obj;
+            }
+        }
+    }
+
+    // フォールバック処理 (A1111形式など)
+    if params.as_object().map_or(true, |m| m.is_empty()) {
+        if !raw_parameters.is_empty() {
+            let mut map = serde_json::Map::new();
+            map.insert("rawParameters".to_string(), serde_json::Value::String(raw_parameters));
+            params = serde_json::Value::Object(map);
+        } else if comment_string.contains("Steps: ") {
+            let mut map = serde_json::Map::new();
+            map.insert("rawParameters".to_string(), serde_json::Value::String(comment_string.to_string()));
+            params = serde_json::Value::Object(map);
+        } else if prompt.is_empty() && !comment_string.is_empty() {
+            prompt = comment_string.to_string();
+        } else if !comment_string.is_empty() && !comment_string.contains("Steps: ") {
+            negative_prompt = comment_string.to_string();
+        }
+    }
+
+    FullMetadata { path: file_path.to_string(), prompt, negative_prompt, width, height, params, source }
+}
 
 fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
     let mut chunks = std::collections::HashMap::new();
@@ -443,134 +570,15 @@ fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
 #[tauri::command]
 async fn parse_metadata(file_path: String) -> Result<ParseMetadataResult, String> {
     Ok(tokio::task::spawn_blocking(move || {
-        let (width, height) = image::image_dimensions(&file_path).unwrap_or((0, 0));
-
-        let mut raw_description = String::new();
-        let mut raw_comment = String::new();
-        let mut raw_parameters = String::new();
-        let mut source = String::new();
-
-        let lower_path = file_path.to_lowercase();
-        if lower_path.ends_with(".png") {
-            let chunks = parse_png_chunks(&file_path);
-            raw_description = chunks.get("Description").or(chunks.get("ImageDescription")).cloned().unwrap_or_default();
-            raw_comment = chunks.get("Comment").cloned().unwrap_or_default();
-            raw_parameters = chunks.get("parameters").or(chunks.get("Parameters")).cloned().unwrap_or_default();
-            source = chunks.get("Source").or(chunks.get("Software")).cloned().unwrap_or_default();
-        } else {
-            let exif_data = if lower_path.ends_with(".webp") { parse_webp_exif(&file_path) } else { parse_jpeg_exif(&file_path) };
-
-            if let Some(desc) = exif_data.get("ImageDescription") {
-                raw_description = String::from_utf8_lossy(desc).trim_end_matches('\0').to_string();
-            }
-            if let Some(comment) = exif_data.get("UserComment") {
-                let mut start = 0;
-                if comment.starts_with(b"UNICODE\0") || comment.starts_with(b"ASCII\0\0\0") { start = 8; }
-                raw_comment = String::from_utf8_lossy(&comment[start..]).trim_end_matches('\0').trim().to_string();
-            }
-            if let Some(sw) = exif_data.get("Software") {
-                source = String::from_utf8_lossy(sw).trim_end_matches('\0').to_string();
-            }
+        let full_meta = get_full_metadata_for_path(&file_path);
+        ParseMetadataResult {
+            prompt: full_meta.prompt,
+            negative_prompt: full_meta.negative_prompt,
+            width: full_meta.width,
+            height: full_meta.height,
+            params: full_meta.params,
+            source: full_meta.source,
         }
-
-        let mut prompt = raw_description.clone();
-        let mut negative_prompt = String::new();
-        let mut params = serde_json::Value::Object(serde_json::Map::new());
-        let comment_string = raw_comment.trim();
-
-        if let Some(start) = comment_string.find('{') {
-            if let Some(end) = comment_string.rfind('}') {
-                let json_text = &comment_string[start..=end];
-                if let Ok(mut comment_obj) = serde_json::from_str::<serde_json::Value>(json_text) {
-                    let mut json_source = None;
-
-                    // WebP等の二重エンコードJSON対応
-                    if let Some(inner_str) = comment_obj.get("Comment").and_then(|v| v.as_str()) {
-                        if let Ok(inner_obj) = serde_json::from_str::<serde_json::Value>(inner_str) {
-                            if let Some(p) = comment_obj.get("Description").and_then(|v| v.as_str()) { prompt = p.to_string(); }
-                            else if let Some(p) = inner_obj.get("prompt").and_then(|v| v.as_str()) { prompt = p.to_string(); }
-                            if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) { json_source = Some(s.to_string()); }
-
-                            if let serde_json::Value::Object(ref mut map) = comment_obj {
-                                if let serde_json::Value::Object(inner_map) = inner_obj {
-                                    for (k, v) in inner_map { map.insert(k, v); }
-                                }
-                                map.remove("Comment");
-                                map.remove("Description");
-                            }
-                        }
-                    }
-
-                    // 通常のJSON直下のSourceも取得
-                    if json_source.is_none() {
-                        if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) {
-                            json_source = Some(s.to_string());
-                        }
-                    }
-
-                    // 「NovelAI Diffusion V4.5 ...」のようなSoftwareの文字列を優先し、
-                    // 空の場合のみJSON内のSourceをフォールバックとして使用する
-                    if source.is_empty() {
-                        if let Some(s) = json_source {
-                            source = s;
-                        }
-                    }
-
-                    if let Some(uc) = comment_obj.get("uc").and_then(|v| v.as_str()) { negative_prompt = uc.to_string(); }
-                    if prompt.is_empty() {
-                        if let Some(p) = comment_obj.get("prompt").and_then(|v| v.as_str()) {
-                            prompt = p.to_string();
-                            if let serde_json::Value::Object(ref mut map) = comment_obj { map.remove("prompt"); }
-                        }
-                    }
-
-                    // NovelAI V4プロンプト対応
-                    if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
-                        if let Some(char_captions) = v4_prompt.pointer("/caption/char_captions").and_then(|v| v.as_array()) {
-                            let mut char_prompts_arr = Vec::new();
-                            let ucs = comment_obj.pointer("/v4_negative_prompt/caption/char_captions").and_then(|v| v.as_array());
-
-                            for (i, p) in char_captions.iter().enumerate() {
-                                let mut char_obj = serde_json::Map::new();
-                                if let Some(cap) = p.get("char_caption").and_then(|v| v.as_str()) { char_obj.insert("prompt".to_string(), serde_json::Value::String(cap.to_string())); }
-                                if let Some(uc_arr) = ucs {
-                                    if let Some(uc_item) = uc_arr.get(i) {
-                                        if let Some(uc_cap) = uc_item.get("char_caption").and_then(|v| v.as_str()) { char_obj.insert("uc".to_string(), serde_json::Value::String(uc_cap.to_string())); }
-                                    }
-                                }
-                                char_prompts_arr.push(serde_json::Value::Object(char_obj));
-                            }
-
-                            if let serde_json::Value::Object(ref mut map) = comment_obj {
-                                map.insert("characterPrompts".to_string(), serde_json::Value::Array(char_prompts_arr));
-                                map.remove("v4_prompt");
-                                map.remove("v4_negative_prompt");
-                            }
-                        }
-                    }
-                    params = comment_obj;
-                }
-            }
-        }
-
-        // フォールバック処理 (A1111形式など)
-        if params.as_object().map_or(true, |m| m.is_empty()) {
-            if !raw_parameters.is_empty() {
-                let mut map = serde_json::Map::new();
-                map.insert("rawParameters".to_string(), serde_json::Value::String(raw_parameters));
-                params = serde_json::Value::Object(map);
-            } else if comment_string.contains("Steps: ") {
-                let mut map = serde_json::Map::new();
-                map.insert("rawParameters".to_string(), serde_json::Value::String(comment_string.to_string()));
-                params = serde_json::Value::Object(map);
-            } else if prompt.is_empty() && !comment_string.is_empty() {
-                prompt = comment_string.to_string();
-            } else if !comment_string.is_empty() && !comment_string.contains("Steps: ") {
-                negative_prompt = comment_string.to_string();
-            }
-        }
-
-        ParseMetadataResult { prompt, negative_prompt, width, height, params, source }
     }).await.unwrap_or_else(|_| ParseMetadataResult {
         prompt: String::new(),
         negative_prompt: String::new(),
@@ -1058,7 +1066,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_drives,
             load_directory,
-            get_image_metadata_batch,
+            get_full_metadata_batch,
             parse_metadata,
             get_viewer_image,
             open_viewer,

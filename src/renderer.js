@@ -10,7 +10,6 @@ let thumbnailObserver;
 let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
 let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
-let currentPromptBatchId = 0; // プロンプトバックグラウンド取得のキャンセル用
 let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
 let pendingThumbnails = new Set(); // filepath -> boolean (サムネイルリクエスト中フラグ)
 let preloadCursor = 0; // バックグラウンド生成の検索カーソル
@@ -1059,7 +1058,7 @@ function scheduleRefresh() {
     applySearchAndSort();
 
     renderAll();
-    loadMetadataInBackground();
+    loadAllMetadataInBackground();
     updateSelectionUI();
     if (selectedIndex === -1) {
       clearMetadataUI();
@@ -1083,10 +1082,8 @@ async function refreshFileList() {
   clearThumbnailCache(); // フォルダ移動時にキャッシュをクリーンアップ
 
   applySearchAndSort();
-
   renderAll();
-  loadMetadataInBackground();
-  loadPromptsInBackground();
+  loadAllMetadataInBackground();
   
   // 選択状態のUIを復元、またはリセット
   updateSelectionUI();
@@ -1219,8 +1216,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       clearThumbnailCache();
       applySearchAndSort();
       renderAll();
-      loadMetadataInBackground(); // バックグラウンドでメタデータ読み込みを開始
-      loadPromptsInBackground(); // プロンプトのバックグラウンド解析を開始
+      loadAllMetadataInBackground(); // バックグラウンドでメタデータ読み込みを開始
       clearMetadataUI();
 
       // ツリーを保存されていたディレクトリの階層まで自動展開する
@@ -1239,7 +1235,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
       } else {
         currentFiles.push(newFile);
-        loadPromptsInBackground();
         scheduleRefresh();
       }
     });
@@ -1435,8 +1430,7 @@ function createTreeNode(folder, isRoot = false) {
     if (e.target === toggleIcon) return; // トグルクリック時は全体の選択・ロード処理をスキップ
 
     // 他のペインの選択を解除
-    selectedIndices.clear();
-    selectedIndex = -1;
+    selectedIndices.clear();    selectedIndex = -1;
     updateSelectionUI();
     
     if (window.veloceAPI.loadDirectory) {
@@ -1449,8 +1443,7 @@ function createTreeNode(folder, isRoot = false) {
         clearThumbnailCache();
         applySearchAndSort();
         renderAll();
-        loadMetadataInBackground(); // ディレクトリ変更後もバックグラウンド読み込み
-        loadPromptsInBackground();
+        loadAllMetadataInBackground(); // ディレクトリ変更後もバックグラウンド読み込み
         clearMetadataUI();
       }
     }
@@ -1826,55 +1819,62 @@ function formatDate(timestamp) {
 }
 
 /**
- * 画像のメタデータ（幅、高さ）をバックグラウンドで非同期に読み込み、UIを更新する。
+ * 画像のメタデータ（プロンプト、幅、高さなど）をバックグラウンドで一括して非同期に読み込み、UIを更新する。
  * UIの応答性を維持するため、requestIdleCallbackを使用し、処理をチャンクに分割する。
  */
-async function loadMetadataInBackground() {
-  if (!window.veloceAPI.getImageMetadataBatch) return;
+async function loadAllMetadataInBackground() {
+  if (!window.veloceAPI.getFullMetadataBatch) return;
 
-  // まだメタデータ（幅・高さ・サイズ・日時）が読み込まれていないファイルだけを抽出
-  const filesToLoad = currentFiles.filter(f => !f.width && !f.height);
+  // まだメタデータが読み込まれていないファイルだけを抽出
+  const filesToLoad = currentFiles.filter(f => !f.metaLoaded);
   if (filesToLoad.length === 0) return;
 
   const batchId = ++currentMetaBatchId;
   const pathsToLoad = filesToLoad.map(f => f.path);
-  const CHUNK_SIZE = 200; // 並列処理されているため、チャンクサイズを増やして通信回数を減らす
+  const CHUNK_SIZE = 100; // 一度に処理するファイル数
 
   const processNextChunk = (chunkIndex) => {
     if (currentMetaBatchId !== batchId) return;
 
-    if (chunkIndex >= pathsToLoad.length) {      showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
-      // すべてのメタデータ取得完了後、メタデータに依存するキーでソート中の場合は再ソートして再描画する
+    if (chunkIndex >= pathsToLoad.length) {
+      showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
+      // メタデータに依存するキーでソート中の場合は再ソートして再描画する
       if (['width', 'height'].includes(currentSort.key)) {
-        sortFiles();
+        applySearchAndSort();
         renderAll();
       }
       return;
     }
 
-    // ブラウザがアイドル状態のときまで処理を遅延させる
     requestIdleCallback(async () => {
       if (currentMetaBatchId !== batchId) return;
       
       try {
         const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
         showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress', 'info');
-        const metadataList = await window.veloceAPI.getImageMetadataBatch(chunkPaths);
+        
+        const metadataList = await window.veloceAPI.getFullMetadataBatch(chunkPaths);
 
         if (currentMetaBatchId !== batchId) return;
 
-        // 高速な検索のために、パスからインデックスを引くMapを作成（O(1)検索）
         const pathToIndex = new Map();
         currentFiles.forEach((f, i) => pathToIndex.set(f.path, i));
 
-        // 取得したメタデータで currentFiles と UI（テーブル）を更新
         metadataList.forEach(meta => {
           const fileIndex = pathToIndex.get(meta.path);
           if (fileIndex !== undefined && fileIndex > -1) {
-            currentFiles[fileIndex].width = meta.width;
-            currentFiles[fileIndex].height = meta.height;
+            const file = currentFiles[fileIndex];
+            file.width = meta.width;
+            file.height = meta.height;
+            file.prompt = meta.prompt || '';
+            file.negativePrompt = meta.negativePrompt || '';
+            file.source = meta.source || '';
+            if (meta.params && Array.isArray(meta.params.characterPrompts)) {
+                file.charPrompts = meta.params.characterPrompts;
+            }
+            file.metaLoaded = true;
 
-            // 対応するテーブル行を更新
+            // UI（テーブル）を更新
             const tableIndex = filteredFiles.findIndex(f => f.path === meta.path);
             if (tableIndex !== -1 && fileListBody.children[tableIndex]) {
               const row = fileListBody.children[tableIndex];
@@ -1883,57 +1883,19 @@ async function loadMetadataInBackground() {
             }
           }
         });
+
+        // 検索クエリがある場合、新しく読み込んだプロンプトがヒットする可能性があるのでUIを更新
+        if (searchQuery.trim() !== '') {
+            scheduleRefresh();
+        }
       } catch (error) {
         console.error('Failed to load metadata in background:', error);
       }
 
-      // 次のチャンクをスケジュール（現在のチャンクが完了した後にのみ実行し、並列IPC送信を厳密に防ぐ）
       processNextChunk(chunkIndex + CHUNK_SIZE);
     }, { timeout: 2000 }); // 2秒以内にアイドル状態にならなければ強制実行
   };
 
-  processNextChunk(0);
-}
-
-/**
- * 画像のプロンプトなどのメタデータをバックグラウンドで解析し、検索可能にする。
- */
-async function loadPromptsInBackground() {
-  const batchId = ++currentPromptBatchId;
-  const CHUNK_SIZE = 50; 
-  const pathsToLoad = currentFiles.filter(f => !f.metaLoaded).map(f => f.path);
-  
-  const processNextChunk = (chunkIndex) => {
-    if (currentPromptBatchId !== batchId || chunkIndex >= pathsToLoad.length) return;
-
-    requestIdleCallback(async () => {
-      if (currentPromptBatchId !== batchId) return;
-      
-      const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
-      const pathToIndex = new Map();
-      currentFiles.forEach((f, i) => pathToIndex.set(f.path, i));
-
-      await Promise.all(chunkPaths.map(async (path) => {
-        try {
-          const meta = await window.veloceAPI.parseMetadata(path);
-          const idx = pathToIndex.get(path);
-          if (idx !== undefined) {
-            currentFiles[idx].prompt = meta.prompt || '';
-            currentFiles[idx].negativePrompt = meta.negativePrompt || '';
-            currentFiles[idx].source = meta.source || '';
-            if (meta.params && Array.isArray(meta.params.characterPrompts)) {
-                currentFiles[idx].charPrompts = meta.params.characterPrompts;
-            }
-            currentFiles[idx].metaLoaded = true;
-          }
-        } catch (e) {}
-      }));
-
-      if (searchQuery.trim() !== '') scheduleRefresh();
-      processNextChunk(chunkIndex + CHUNK_SIZE);
-    });
-  };
-  
   processNextChunk(0);
 }
 

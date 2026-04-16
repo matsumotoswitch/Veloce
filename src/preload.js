@@ -43,11 +43,11 @@ window.veloceAPI = {
     }
   },
   /**
-   * 複数の画像ファイルのメタデータ（幅・高さ）を一括で取得します。
+   * 複数の画像ファイルのメタデータ（プロンプト、幅・高さなど）を一括で取得します。
    * @param {string[]} filePaths - 解析する画像ファイルパスの配列。
    * @returns {Promise<Array<object>>} 各ファイルのパスとメタデータ（幅・高さなど）を含むオブジェクトの配列。
    */
-  getImageMetadataBatch: (filePaths) => invoke('get_image_metadata_batch', { filePaths }),
+  getFullMetadataBatch: (filePaths) => invoke('get_full_metadata_batch', { filePaths }),
   /**
    * 指定された画像パスから軽量なサムネイル画像を生成して取得します。
    * @param {string} filePath - オリジナル画像のパス。
