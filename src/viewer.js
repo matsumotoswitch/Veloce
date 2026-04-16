@@ -741,7 +741,6 @@ window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
   if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
     e.preventDefault();
-    if (window.veloceAPI.toggleDevtools) window.veloceAPI.toggleDevtools();
     return;
   }
 

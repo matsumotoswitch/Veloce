@@ -2443,9 +2443,15 @@ function toggleHelpOverlay(forceShow) {
 // --- キーボードショートカット ---
 window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
-  if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
+  // e.key ではなく e.code を使用して、キーボードレイアウト等に依存しない確実なキー判定を行う
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyI') {
     e.preventDefault();
-    if (window.veloceAPI.toggleDevtools) window.veloceAPI.toggleDevtools();
+    return;
+  }
+
+  // F12キーによる開発者ツール起動をブロック
+  if (e.key === 'F12') {
+    e.preventDefault();
     return;
   }
 
@@ -2573,4 +2579,9 @@ window.addEventListener('keydown', async (e) => {
       }
     }
   }
+});
+
+// アプリ全体でブラウザ標準の右クリックメニューを完全に無効化
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
 });

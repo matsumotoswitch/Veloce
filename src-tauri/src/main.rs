@@ -942,11 +942,14 @@ async fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn toggle_devtools(window: tauri::Window) {
-    if window.is_devtools_open() {
-        window.close_devtools();
-    } else {
-        window.open_devtools();
+fn toggle_devtools(_window: tauri::Window) {
+    #[cfg(debug_assertions)]
+    {
+        if _window.is_devtools_open() {
+            _window.close_devtools();
+        } else {
+            _window.open_devtools();
+        }
     }
 }
 
