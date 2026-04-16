@@ -957,6 +957,46 @@ fn get_license_text() -> String {
     format!("{}\n\n{}", app_license, credits)
 }
 
+#[tauri::command]
+fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
+    let path = std::path::Path::new(&old_path);
+    let parent = path.parent().unwrap_or(std::path::Path::new(""));
+    let new_path = parent.join(new_name);
+
+    if new_path.exists() {
+        let old_lower = old_path.to_lowercase();
+        let new_lower = new_path.to_string_lossy().to_lowercase();
+        if old_lower != new_lower {
+            return Err("同じ名前のファイルが既に存在します。".to_string());
+        }
+    }
+
+    match std::fs::rename(&old_path, &new_path) {
+        Ok(_) => Ok(new_path.to_string_lossy().to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn rename_folder(old_path: String, new_name: String) -> Result<String, String> {
+    let path = std::path::Path::new(&old_path);
+    let parent = path.parent().unwrap_or(std::path::Path::new(""));
+    let new_path = parent.join(new_name);
+
+    if new_path.exists() {
+        let old_lower = old_path.to_lowercase();
+        let new_lower = new_path.to_string_lossy().to_lowercase();
+        if old_lower != new_lower {
+            return Err("同じ名前のフォルダが既に存在します。".to_string());
+        }
+    }
+
+    match std::fs::rename(&old_path, &new_path) {
+        Ok(_) => Ok(new_path.to_string_lossy().to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn main() {
     let mut context = tauri::generate_context!();
     
@@ -1026,7 +1066,9 @@ fn main() {
             trash_folder,
             copy_image_to_clipboard,
             toggle_devtools,
-            get_license_text
+            get_license_text,
+            rename_file,
+            rename_folder
         ])
         .run(context)
         .expect("error while running tauri application");

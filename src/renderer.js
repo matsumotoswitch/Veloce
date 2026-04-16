@@ -104,7 +104,7 @@ function showNotification(message, type = 'info') {
   showToast(message, 3000, null, type);
 }
 
-// --- フォルダツリーのコンテキストメニュー作成 ---
+// --- コンテキストメニュー作成 ---
 const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
 contextMenu.style.position = 'fixed';
@@ -210,9 +210,10 @@ function createDialogButton(text, bgColor) {
  * ユーザー入力を求めるカスタムプロンプトダイアログを表示する
  * @param {string} message - 表示するメッセージ
  * @param {string} [defaultValue=''] - 入力欄の初期値
+ * @param {boolean} [selectBaseNameOnly=false] - 拡張子を除いたベース名のみを選択状態にするか
  * @returns {Promise<string|null>} 入力された文字列。キャンセルされた場合は null
  */
-function showCustomPrompt(message, defaultValue = '') {
+function showCustomPrompt(message, defaultValue = '', selectBaseNameOnly = false) {
   return new Promise((resolve) => {
     const inputEl = document.createElement('input');
     inputEl.type = 'text';
@@ -225,12 +226,25 @@ function showCustomPrompt(message, defaultValue = '') {
     inputEl.style.color = '#d4d4d4';
     inputEl.style.border = '1px solid #333';
     inputEl.style.borderRadius = '4px';
-    inputEl.style.marginBottom = '15px';
+    inputEl.style.marginBottom = '4px';
     inputEl.style.fontFamily = 'inherit';
     inputEl.style.fontSize = 'inherit';
     inputEl.style.outline = 'none';
 
-    const { buttonsDiv, cleanup } = createCustomDialogBase(message, inputEl);
+    const warningEl = document.createElement('div');
+    warningEl.style.color = '#e81123';
+    warningEl.style.fontSize = '12px';
+    warningEl.style.minHeight = '14px';
+    warningEl.style.marginBottom = '10px';
+    warningEl.style.display = 'none';
+
+    const inputContainer = document.createElement('div');
+    inputContainer.style.display = 'flex';
+    inputContainer.style.flexDirection = 'column';
+    inputContainer.appendChild(inputEl);
+    inputContainer.appendChild(warningEl);
+
+    const { buttonsDiv, cleanup } = createCustomDialogBase(message, inputContainer);
 
     const cancelBtn = createDialogButton('キャンセル', '#444');
     const okBtn = createDialogButton('OK', '#3a7afe');
@@ -238,12 +252,46 @@ function showCustomPrompt(message, defaultValue = '') {
     buttonsDiv.appendChild(cancelBtn);
     buttonsDiv.appendChild(okBtn);
 
+    const validateInput = () => {
+      const val = inputEl.value;
+      if (/[\\/:*?"<>|]/.test(val)) {
+        warningEl.textContent = '以下の文字は使用できません: \\ / : * ? " < > |';
+        warningEl.style.display = 'block';
+        inputEl.style.borderColor = '#e81123';
+        okBtn.disabled = true;
+        okBtn.style.opacity = '0.5';
+        okBtn.style.cursor = 'not-allowed';
+      } else if (val.trim() === '') {
+        warningEl.textContent = '名前を入力してください。';
+        warningEl.style.display = 'block';
+        inputEl.style.borderColor = '#333';
+        okBtn.disabled = true;
+        okBtn.style.opacity = '0.5';
+        okBtn.style.cursor = 'not-allowed';
+      } else {
+        warningEl.style.display = 'none';
+        inputEl.style.borderColor = '#333';
+        okBtn.disabled = false;
+        okBtn.style.opacity = '1';
+        okBtn.style.cursor = 'pointer';
+      }
+    };
+
+    inputEl.addEventListener('input', validateInput);
+    validateInput();
+
     inputEl.focus();
-    inputEl.select();
+    if (selectBaseNameOnly && defaultValue.lastIndexOf('.') > 0) {
+      inputEl.setSelectionRange(0, defaultValue.lastIndexOf('.'));
+    } else {
+      inputEl.select();
+    }
 
     okBtn.addEventListener('click', () => {
-      cleanup();
-      resolve(inputEl.value);
+      if (!okBtn.disabled) {
+        cleanup();
+        resolve(inputEl.value);
+      }
     });
 
     cancelBtn.addEventListener('click', () => {
@@ -253,8 +301,10 @@ function showCustomPrompt(message, defaultValue = '') {
 
     inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
-        cleanup();
-        resolve(inputEl.value);
+        if (!okBtn.disabled) {
+          cleanup();
+          resolve(inputEl.value);
+        }
       } else if (e.key === 'Escape') {
         cleanup();
         resolve(null);
@@ -307,7 +357,16 @@ function showCustomConfirm(message) {
 const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
   if (!contextMenu.targetFolder) return;
   const folderName = await showCustomPrompt('新しいフォルダ名を入力してください:');
-  if (folderName) {
+  if (folderName !== null) {
+    if (folderName.trim() === '') {
+      showNotification('フォルダ名を入力してください。', 'warning');
+      return;
+    }
+    if (/[\\/:*?"<>|]/.test(folderName)) {
+      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+      return;
+    }
+
     const parentPath = contextMenu.targetFolder.path;
     const result = await window.veloceAPI.createFolder(parentPath, folderName);
     if (result && result.success) {
@@ -342,7 +401,16 @@ const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
   const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
-  if (newName && newName !== contextMenu.targetFolder.name) {
+  if (newName !== null && newName !== contextMenu.targetFolder.name) {
+    if (newName.trim() === '') {
+      showNotification('フォルダ名を入力してください。', 'warning');
+      return;
+    }
+    if (/[\\/:*?"<>|]/.test(newName)) {
+      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+      return;
+    }
+
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
       showNotification(`フォルダ名を「${newName}」に変更しました`);
@@ -352,7 +420,7 @@ const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
       }
       await refreshTree();
     } else {
-      alert('フォルダ名の変更に失敗しました:\n' + (result ? result.error : 'Unknown error'));
+      showNotification(`フォルダ名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
     }
   }
 });
@@ -383,9 +451,160 @@ const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
   }
 });
 
+async function renameSelectedFolder() {
+  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
+  if (!selectedFolderEl) return;
+
+  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
+  if (isRoot) {
+    showNotification('ドライブ名を変更することはできません。', 'warning');
+    return;
+  }
+
+  const oldPath = selectedFolderEl.dataset.path;
+  const oldName = selectedFolderEl.querySelector('.tree-label').textContent;
+
+  const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', oldName);
+  if (newName !== null && newName !== oldName) {
+    if (newName.trim() === '') {
+      showNotification('フォルダ名を入力してください。', 'warning');
+      return;
+    }
+    if (/[\\/:*?"<>|]/.test(newName)) {
+      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+      return;
+    }
+
+    const result = await window.veloceAPI.renameFolder(oldPath, newName);
+    if (result && result.success) {
+      showNotification(`フォルダ名を「${newName}」に変更しました`);
+      if (currentDirectory.startsWith(oldPath)) {
+        currentDirectory = currentDirectory.replace(oldPath, result.path);
+        localStorage.setItem('currentDirectory', currentDirectory);
+      }
+      await refreshTree();
+    } else {
+      showNotification(`フォルダ名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
+    }
+  }
+}
+
+async function deleteSelectedFolder() {
+  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
+  if (!selectedFolderEl) return;
+
+  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
+  if (isRoot) {
+    showNotification('ドライブを削除することはできません。', 'warning');
+    return;
+  }
+
+  const oldPath = selectedFolderEl.dataset.path;
+  const folderName = selectedFolderEl.querySelector('.tree-label').textContent;
+
+  const isConfirmed = await showCustomConfirm(`本当にフォルダ「${folderName}」をゴミ箱に移動しますか？`);
+  if (isConfirmed) {
+    const result = await window.veloceAPI.trashFolder(oldPath);
+    if (result && result.success) {
+      showNotification(`フォルダ「${folderName}」をゴミ箱に移動しました`, 'warning');
+      if (currentDirectory.startsWith(oldPath)) {
+        const sep = '\\';
+        const parts = oldPath.split(sep);
+        parts.pop();
+        let parentDir = parts.join(sep);
+        if (!parentDir.includes(sep)) parentDir += sep;
+        currentDirectory = parentDir;
+        localStorage.setItem('currentDirectory', currentDirectory);
+        await refreshFileList();
+      }
+      await refreshTree();
+    } else {
+      showNotification(`フォルダの削除に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
+    }
+  }
+}
+
+async function renameSelectedFile() {
+  if (selectedIndex > -1 && filteredFiles[selectedIndex]) {
+    const file = filteredFiles[selectedIndex];
+    const newName = await showCustomPrompt('新しいファイル名を入力してください:', file.name, true);
+    if (newName !== null && newName !== file.name) {
+      if (newName.trim() === '') {
+        showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
+        return;
+      }
+      if (/[\\/:*?"<>|]/.test(newName)) {
+        showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
+        return;
+      }
+
+      const result = await window.veloceAPI.renameFile(file.path, newName);
+      if (result && result.success) {
+        showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
+        
+        const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
+        
+        const currentIdx = currentFiles.findIndex(f => f.path === file.path);
+        if (currentIdx > -1) {
+          currentFiles[currentIdx].path = result.path;
+          currentFiles[currentIdx].name = newName;
+          currentFiles[currentIdx].ext = newExt;
+        }
+        
+        file.path = result.path;
+        file.name = newName;
+        file.ext = newExt;
+
+        clearThumbnailCache();
+        scheduleRefresh();
+      } else {
+        showToast(`ファイル名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 3000, 'file-rename', 'warning');
+      }
+    }
+  }
+}
+
+async function deleteSelectedFiles() {
+  if (selectedIndices.size > 0) {
+    const pathsToDelete = [];
+    for (const i of selectedIndices) {
+      if (filteredFiles[i]) pathsToDelete.push(filteredFiles[i].path);
+    }
+
+    selectedIndices.clear();
+    selectedIndex = -1;
+    updateSelectionUI();
+    clearMetadataUI();
+
+    let trashedCount = 0;
+    const total = pathsToDelete.length;
+    showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
+    
+    for (const path of pathsToDelete) {
+      try {
+        const success = await window.veloceAPI.trashFile(path);
+        if (success) trashedCount++;
+      } catch (err) {
+        console.error('Failed to trash file:', err);
+      }
+    }
+
+    if (trashedCount > 0) {
+      showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
+    } else {
+      showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
+    }
+  }
+}
+
+const menuRenameFile = createMenuOption('ファイル名変更', renameSelectedFile);
+const menuDeleteFile = createMenuOption('ファイル削除', deleteSelectedFiles);
+
 contextMenu.appendChild(menuNewFolder);
 contextMenu.appendChild(menuRenameFolder);
 contextMenu.appendChild(menuDeleteFolder);
+contextMenu.appendChild(menuRenameFile);
+contextMenu.appendChild(menuDeleteFile);
 document.body.appendChild(contextMenu);
 
 window.addEventListener('click', () => {
@@ -466,12 +685,41 @@ function handleItemDragStart(e, isGrid) {
   dragState.isAppDragging = true;
 }
 
+function handleItemContextMenu(e, isGrid) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  const index = parseInt(item.dataset.index, 10);
+
+  if (!selectedIndices.has(index)) selectImage(index);
+
+  menuNewFolder.style.display = 'none';
+  menuRenameFolder.style.display = 'none';
+  menuDeleteFolder.style.display = 'none';
+  menuRenameFile.style.display = selectedIndices.size === 1 ? 'block' : 'none'; // 複数選択時はリネーム不可
+  menuDeleteFile.style.display = 'block';
+
+  contextMenu.style.display = 'block';
+  const rect = contextMenu.getBoundingClientRect();
+  let x = e.clientX;
+  let y = e.clientY;
+  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
+  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
+  
+  contextMenu.style.left = `${x}px`;
+  contextMenu.style.top = `${y}px`;
+}
+
 thumbnailGrid.addEventListener('click', (e) => handleItemClick(e, true));
 thumbnailGrid.addEventListener('dblclick', (e) => handleItemDblClick(e, true));
 thumbnailGrid.addEventListener('dragstart', (e) => handleItemDragStart(e, true));
+thumbnailGrid.addEventListener('contextmenu', (e) => handleItemContextMenu(e, true));
 
 fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
 fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
+fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
 
 // --- UIリサイズ機能 ---
 // ペインの折りたたみ状態を管理するフラグ
@@ -1185,6 +1433,11 @@ function createTreeNode(folder, isRoot = false) {
   itemDiv.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (e.target === toggleIcon) return; // トグルクリック時は全体の選択・ロード処理をスキップ
+
+    // 他のペインの選択を解除
+    selectedIndices.clear();
+    selectedIndex = -1;
+    updateSelectionUI();
     
     if (window.veloceAPI.loadDirectory) {
       // クリックされたフォルダの画像一覧を中央ペインに表示
@@ -1235,8 +1488,11 @@ function createTreeNode(folder, isRoot = false) {
     contextMenu.targetFolder = folder;
     contextMenu.isRoot = isRoot;
 
+    menuNewFolder.style.display = 'block';
     menuRenameFolder.style.display = isRoot ? 'none' : 'block';
     menuDeleteFolder.style.display = isRoot ? 'none' : 'block';
+    menuRenameFile.style.display = 'none';
+    menuDeleteFile.style.display = 'none';
 
     contextMenu.style.display = 'block';
     const rect = contextMenu.getBoundingClientRect();
@@ -1687,6 +1943,9 @@ async function loadPromptsInBackground() {
  * @param {MouseEvent|KeyboardEvent} event - イベントオブジェクト（CtrlやShiftの判定用）
  */
 async function selectImage(index, event = null) {
+  const activeFolder = document.querySelector('#dir-tree .tree-item.selected');
+  if (activeFolder) activeFolder.classList.remove('selected');
+
   if (event && event.ctrlKey) {
     // Ctrlキーで個別に選択/解除
     if (selectedIndices.has(index)) {
@@ -2222,40 +2481,24 @@ window.addEventListener('keydown', async (e) => {
     await refreshFileList();
   }
 
+  // F2でファイル名を変更
+  if (e.key === 'F2') {
+    e.preventDefault();
+    const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
+    if (selectedFolder) {
+      renameSelectedFolder();
+    } else {
+      renameSelectedFile();
+    }
+  }
+
   // Deleteで選択中の画像をゴミ箱に移動
   if (e.key === 'Delete') {
-    if (selectedIndices.size > 0) {
-      // 非同期削除中にファイル監視(onFileRemoved)が走って currentFiles が縮むため、
-      // インデックスがずれてクラッシュするのを防ぐために削除対象のパスを先に抽出する
-      const pathsToDelete = [];
-      for (const i of selectedIndices) {
-        if (filteredFiles[i]) pathsToDelete.push(filteredFiles[i].path);
-      }
-
-      // 削除を開始する前にUIの選択状態を解除する
-      selectedIndices.clear();
-      selectedIndex = -1;
-      updateSelectionUI();
-      clearMetadataUI();
-
-      let trashedCount = 0;
-      const total = pathsToDelete.length;
-      showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
-      
-      for (const path of pathsToDelete) {
-        try {
-          const success = await window.veloceAPI.trashFile(path);
-          if (success) trashedCount++;
-        } catch (err) {
-          console.error('Failed to trash file:', err);
-        }
-      }
-
-      if (trashedCount > 0) {
-        showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
-      } else {
-        showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
-      }
+    const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
+    if (selectedFolder) {
+      deleteSelectedFolder();
+    } else {
+      deleteSelectedFiles();
     }
   }
 

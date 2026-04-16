@@ -158,11 +158,21 @@ window.veloceAPI = {
    * @param {string} newName - 新しいフォルダ名。
    */
   renameFolder: async (oldPath, newName) => {
-    const { fs, path } = window.__TAURI__;
     try {
-      const parent = await path.dirname(oldPath);
-      const newPath = await path.join(parent, newName);
-      await fs.renameFile(oldPath, newPath);
+      const newPath = await invoke('rename_folder', { oldPath, newName });
+      return { success: true, path: newPath };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  },
+  /**
+   * ファイル名を変更するようメインプロセスに要求します。
+   * @param {string} oldPath - 変更前のファイルのパス。
+   * @param {string} newName - 新しいファイル名。
+   */
+  renameFile: async (oldPath, newName) => {
+    try {
+      const newPath = await invoke('rename_file', { oldPath, newName });
       return { success: true, path: newPath };
     } catch (error) {
       return { success: false, error: String(error) };
