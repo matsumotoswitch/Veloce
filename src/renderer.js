@@ -38,7 +38,8 @@ const ICONS = {
   CHEVRON_UP: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
   CHEVRON_DOWN: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
   SORT_ASC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
-  SORT_DESC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`
+  SORT_DESC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
+  ERASER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>`
 };
 
 // --- トースト通知機能 ---
@@ -908,6 +909,30 @@ window.addEventListener('DOMContentLoaded', async () => {
     searchBar.addEventListener('input', (e) => {
       searchQuery = e.target.value;
       scheduleRefresh();
+    });
+  }
+
+  // 検索クリアボタンの初期化
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  if (searchClearBtn) {
+    searchClearBtn.innerHTML = ICONS.ERASER;
+    searchClearBtn.addEventListener('click', () => {
+      if (searchBar) {
+        searchBar.value = '';
+        searchQuery = '';
+        scheduleRefresh();
+
+        // コピーボタンと同じ発光エフェクト
+        searchClearBtn.style.transition = 'none';
+        searchClearBtn.style.color = '#fff';
+        searchClearBtn.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
+        setTimeout(() => {
+          searchClearBtn.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out';
+          searchClearBtn.style.color = '';
+          searchClearBtn.style.filter = 'none';
+          setTimeout(() => { searchClearBtn.style.transition = ''; }, 400);
+        }, 100);
+      }
     });
   }
 

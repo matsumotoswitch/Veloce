@@ -90,6 +90,18 @@ body {
   display: flex;
   align-items: center;
 }
+#search-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #888;
+  margin-right: 8px;
+  transition: color 0.2s;
+}
+#search-clear-btn:hover {
+  color: var(--accent-color);
+}
 #search-bar {
   flex: 1;
   background: var(--bg-color);
