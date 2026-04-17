@@ -23,6 +23,7 @@ pub struct ImageFile {
     path: String,
     size: u64,
     mtime: u64,
+    has_thumbnail_cache: bool,
 }
 
 #[derive(Serialize)]
@@ -93,7 +94,7 @@ fn get_veloce_data_dir() -> Option<std::path::PathBuf> {
 }
 
 /// 指定されたパスがサポート対象の画像であれば、ImageFile構造体を生成して返す
-fn create_image_file(path: &Path) -> Option<ImageFile> {
+fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>) -> Option<ImageFile> {
     if !path.is_file() {
         return None;
     }
@@ -117,12 +118,23 @@ fn create_image_file(path: &Path) -> Option<ImageFile> {
             .as_millis() as u64;
     }
 
+    let has_thumbnail_cache = if let Some(dir) = cache_dir {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{}_{}", &clean_path, mtime).hash(&mut hasher);
+        let hash = hasher.finish();
+        let cache_path = dir.join(format!("{}.jpg", hash));
+        cache_path.exists()
+    } else {
+        false
+    };
+
     Some(ImageFile {
         name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
         ext,
         path: clean_path,
         size,
         mtime,
+        has_thumbnail_cache,
     })
 }
 
@@ -178,6 +190,11 @@ async fn load_directory(
             path.parent().unwrap_or(path).to_path_buf()
         };
 
+        let cache_dir = get_veloce_data_dir().map(|mut p| {
+            p.push("Thumbnails");
+            p
+        });
+
         let mut image_files = Vec::new();
         let mut paths = Vec::new();
 
@@ -186,7 +203,7 @@ async fn load_directory(
             
             let mut results: Vec<_> = entries.into_par_iter().filter_map(|entry| {
                 let entry_path = entry.path();
-                if let Some(img_file) = create_image_file(&entry_path) {
+                if let Some(img_file) = create_image_file(&entry_path, &cache_dir) {
                     Some((img_file.path.clone(), img_file))
                 } else {
                     None
@@ -220,6 +237,11 @@ async fn load_directory(
             
             let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
+                    let cache_dir = get_veloce_data_dir().map(|mut p| {
+                        p.push("Thumbnails");
+                        p
+                    });
+
                     match &event.kind {
                         EventKind::Access(_) => {
                             // ファイル/フォルダへのアクセスイベントは大量に発生するため無視する
@@ -241,7 +263,7 @@ async fn load_directory(
                                     if let EventKind::Remove(_) = &event.kind {
                                         let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
                                         let _ = app_handle.emit_all("file-removed", clean_path);
-                                    } else if let Some(img_file) = create_image_file(&path) {
+                                    } else if let Some(img_file) = create_image_file(&path, &cache_dir) {
                                         let _ = app_handle.emit_all("file-changed", img_file);
                                     }
                                 }
