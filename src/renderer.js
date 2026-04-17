@@ -1,3 +1,11 @@
+// Ctrl+Shift+I の強制ブロック（キャプチャフェーズ）
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
+    e.preventDefault();
+    e.stopPropagation(); // 他の処理への伝播を完全に遮断
+  }
+}, true);
+
 // --- グローバル状態管理 ---
 let currentFiles = []; // 現在のディレクトリ内の画像ファイルリスト
 let filteredFiles = []; // 検索・ソート結果の表示用ファイルリスト

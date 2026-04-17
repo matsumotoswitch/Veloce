@@ -226,7 +226,7 @@ window.veloceAPI = {
   /**
    * 開発者ツールをトグル表示します（デバッグビルド時のみ有効）
    */
-  toggleDevtools: () => invoke('toggle_devtools'),
+  toggleDevtools: () => { /* 完全に無効化 */ },
   /**
    * ウィンドウを安全に閉じます。
    */
