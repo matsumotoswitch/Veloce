@@ -20,6 +20,11 @@ let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
 let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
 let pendingThumbnails = new Set(); // filepath -> boolean (サムネイルリクエスト中フラグ)
+// PCのCPU論理コア数を取得し、その2倍程度を上限とする（最低でも16、最大でも64に制限）
+const logicalCores = navigator.hardwareConcurrency || 8;
+const MAX_CONCURRENT_THUMBNAILS = Math.max(16, Math.min(64, logicalCores * 2));
+let activeThumbnailTasks = 0;
+let thumbnailRequestQueue = []; // { filePath, requestRenderId, img } の配列
 let preloadCursor = 0; // バックグラウンド生成の検索カーソル
 let isPreloadRunning = false; // バックグラウンド生成が稼働中かどうか
 let searchTimeout = null; // 検索入力のデバウンス用タイマー
@@ -897,6 +902,8 @@ window.addEventListener('beforeunload', () => {
  * セッション中のキャッシュ(thumbnailUrls)は維持される。
  */
 function resetThumbnailPreloader() {
+  thumbnailRequestQueue = [];
+  activeThumbnailTasks = 0;
   pendingThumbnails.clear();
   preloadCursor = 0;
 }
@@ -934,6 +941,56 @@ function updateThumbnailToast() {
   }
 }
 
+function processThumbnailQueue() {
+  // キューに空きがあり、かつタスクが残っている限り、連続でタスクを投入する（whileループ化）
+  while (activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS && thumbnailRequestQueue.length > 0) {
+    const req = thumbnailRequestQueue.shift();
+    const { filePath, requestRenderId, img } = req;
+
+    // 既に不要なリクエスト（画面外に出た、またはフォルダ移動した）場合はスキップ
+    if (currentRenderId !== requestRenderId || img.dataset.isVisible !== 'true') {
+      pendingThumbnails.delete(filePath);
+      continue; // returnではなくcontinueで次のループへ
+    }
+
+    activeThumbnailTasks++;
+    window.veloceAPI.getThumbnail(filePath).then(url => {
+      activeThumbnailTasks--;
+      pendingThumbnails.delete(filePath);
+
+      if (currentRenderId !== requestRenderId) {
+        processThumbnailQueue();
+        return;
+      }
+
+      if (url) {
+        thumbnailUrls.set(filePath, url);
+        if (img.dataset.isVisible === 'true') {
+          img.src = url;
+        }
+      } else {
+        const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
+        thumbnailUrls.set(filePath, fallbackUrl);
+        if (img.dataset.isVisible === 'true') img.src = fallbackUrl;
+      }
+
+      const fileObj = currentFiles.find(f => f.path === filePath);
+      if (fileObj && !fileObj.hasThumbnailCache) {
+        fileObj.hasThumbnailCache = true;
+        thumbnailCompleted++;
+        updateThumbnailToast();
+      }
+
+      // 処理が完了したら、枠が空いたので次の画像を処理する
+      processThumbnailQueue();
+    }).catch(() => {
+      activeThumbnailTasks--;
+      pendingThumbnails.delete(filePath);
+      processThumbnailQueue();
+    });
+  }
+}
+
 /**
  * サムネイルの遅延読み込みとメモリ解放のためのIntersectionObserverを初期化する
  */
@@ -958,30 +1015,8 @@ function initializeThumbnailObserver() {
                         
                         const requestRenderId = currentRenderId;
                         pendingThumbnails.add(filePath);
-
-                        window.veloceAPI.getThumbnail(filePath).then(url => {
-                            pendingThumbnails.delete(filePath);
-                            if (currentRenderId !== requestRenderId) return; // フォルダ移動等で不要になった場合は破棄
-                            
-                            if (url) {
-                                thumbnailUrls.set(filePath, url);
-                                if (img.dataset.isVisible === 'true') {
-                                    img.src = url;
-                                }
-                            } else {
-                                // サムネイル生成失敗時はオリジナル画像をフォールバック表示
-                                const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
-                                thumbnailUrls.set(filePath, fallbackUrl);
-                                if (img.dataset.isVisible === 'true') img.src = fallbackUrl;
-                            }
-
-                            const fileObj = currentFiles.find(f => f.path === filePath);
-                            if (fileObj && !fileObj.hasThumbnailCache) {
-                                fileObj.hasThumbnailCache = true; // 次回以降のカウント重複を防ぐためフラグを立てる
-                                thumbnailCompleted++;
-                                updateThumbnailToast();
-                            }
-                        });
+                        thumbnailRequestQueue.push({ filePath, requestRenderId, img });
+                        processThumbnailQueue();
                     }
                 }
             } else {
@@ -1000,7 +1035,7 @@ function initializeThumbnailObserver() {
 function processIdleThumbnails(deadline) {
   // スクロール操作などメインスレッドの負荷（IntersectionObserverの邪魔）を避けるため、
   // 同時にリクエストするサムネイル数を制限する
-  if (pendingThumbnails.size > 2) {
+  if (pendingThumbnails.size > 8) {
     requestIdleCallback(processIdleThumbnails);
     return;
   }
