@@ -201,20 +201,16 @@ async fn load_directory(
         if let Ok(read_dir) = fs::read_dir(&actual_dir) {
             let entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
             
+            // create_image_file はI/Oを含むため、rayonで並列化して高速化する
             let mut results: Vec<_> = entries.into_par_iter().filter_map(|entry| {
-                let entry_path = entry.path();
-                if let Some(img_file) = create_image_file(&entry_path, &cache_dir) {
-                    Some((img_file.path.clone(), img_file))
-                } else {
-                    None
-                }
+                create_image_file(&entry.path(), &cache_dir)
             }).collect();
 
             // ファイル名の順番を安定させるためソート
-            results.sort_by(|a, b| a.0.cmp(&b.0));
+            results.sort_by(|a, b| a.path.cmp(&b.path));
 
-            for (path, file) in results {
-                paths.push(path);
+            for file in results {
+                paths.push(file.path.clone());
                 image_files.push(file);
             }
         }

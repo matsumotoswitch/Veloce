@@ -22,6 +22,7 @@ let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャ
 let pendingThumbnails = new Set(); // filepath -> boolean (サムネイルリクエスト中フラグ)
 let preloadCursor = 0; // バックグラウンド生成の検索カーソル
 let isPreloadRunning = false; // バックグラウンド生成が稼働中かどうか
+let searchTimeout = null; // 検索入力のデバウンス用タイマー
 
 // --- トースト通知状態管理 ---
 let thumbnailTotalRequested = 0;
@@ -1093,7 +1094,7 @@ function scheduleRefresh() {
     if (selectedIndex === -1) {
       clearMetadataUI();
     }
-  }, 300); // バッチ処理等を考慮し、300ms間更新が止まったタイミングで描画する
+  }, 100); // 連続するファイル更新イベントを100msにまとめる
 }
 
 /**
@@ -1181,8 +1182,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   const searchBar = document.getElementById('search-bar');
   if (searchBar) {
     searchBar.addEventListener('input', (e) => {
-      searchQuery = e.target.value;
-      scheduleRefresh();
+      // 300msのデバウンスを設けて、入力が止まってから検索を実行
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        searchQuery = e.target.value;
+        // scheduleRefreshはUI更新用に100msのデバウンスなので、検索はこちらで長めに待つ
+        scheduleRefresh();
+      }, 300);
     });
   }
 
