@@ -1829,6 +1829,16 @@ async function renderAll() {
   if (fileListContainer) fileListContainer.scrollTop = 0;
   if (thumbnailGrid) thumbnailGrid.scrollTop = 0;
 
+  if (filteredFiles.length === 0) {
+    const emptyMessage = document.createElement('div');
+    emptyMessage.style.width = '100%';
+    emptyMessage.style.textAlign = 'center';
+    emptyMessage.style.color = '#888';
+    emptyMessage.style.marginTop = '40px';
+    emptyMessage.textContent = '表示対象の画像がありません';
+    thumbnailGrid.appendChild(emptyMessage);
+  }
+
   const CHUNK_SIZE = 100; // 一度に描画するDOMの数
 
   for (let i = 0; i < filteredFiles.length; i += CHUNK_SIZE) {
