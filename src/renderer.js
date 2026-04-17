@@ -2566,6 +2566,42 @@ window.addEventListener('keydown', async (e) => {
     }
   }
 
+  // Ctrl+F: 検索バーにフォーカスして全選択
+  if (e.ctrlKey && (e.key.toLowerCase() === 'f' || e.code === 'KeyF')) {
+    e.preventDefault();
+    const searchBar = document.getElementById('search-bar');
+    if (searchBar) {
+      searchBar.focus();
+      searchBar.select();
+    }
+    return;
+  }
+
+  // Ctrl+A: 現在表示されているファイルの全選択
+  if (e.ctrlKey && (e.key.toLowerCase() === 'a' || e.code === 'KeyA')) {
+    // 検索バーなどの入力欄にフォーカスがある場合は、文字の全選択（デフォルト挙動）を優先する
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    e.preventDefault();
+    if (filteredFiles.length === 0) return;
+
+    // 内部状態の更新
+    selectedIndices.clear();
+    for (let i = 0; i < filteredFiles.length; i++) {
+      selectedIndices.add(i);
+    }
+    selectedIndex = filteredFiles.length - 1; // 最後の要素をアクティブインデックスに
+
+    // UIの高速一括更新（DOMの再構築を避けてクラスだけ付与）
+    if (fileListBody) {
+      Array.from(fileListBody.children).forEach(row => row.classList.add('selected'));
+    }
+    if (thumbnailGrid) {
+      Array.from(thumbnailGrid.children).forEach(item => item.classList.add('selected'));
+    }
+    return;
+  }
+
   // 上下左右キーで画像の選択を移動
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
     if (filteredFiles.length === 0) return;
