@@ -350,20 +350,16 @@ async function preloadAdjacentImages() {
  * 前の画像を表示する。
  */
 function showPrev() {
-  if (currentIndex > 0) {
-	currentIndex--;
-	loadImage();
-  }
+  currentIndex = (currentIndex > 0) ? currentIndex - 1 : totalImages - 1;
+  loadImage();
 }
 
 /**
  * 次の画像を表示する。
  */
 function showNext() {
-  if (currentIndex < totalImages - 1) {
-	currentIndex++;
-	loadImage();
-  }
+  currentIndex = (currentIndex < totalImages - 1) ? currentIndex + 1 : 0;
+  loadImage();
 }
 
 // --- マウス操作ハンドリング ---
@@ -503,12 +499,7 @@ window.addEventListener('mouseup', (e) => {
     }
     isDragging = false;
     if (!hasMoved && !ignoreNextClick) {
-      if (currentIndex > 0) {
-        currentIndex--;
-        loadImage();
-      } else {
-        if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
-      }
+      showPrev();
     }
   }
 });
