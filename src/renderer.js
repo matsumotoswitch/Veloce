@@ -20,9 +20,9 @@ let currentMetaRequestId = 0; // 非同期パースの競合対策用
 let currentRenderId = 0; // レンダリングのキャンセル用
 let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
 let pendingThumbnails = new Set(); // filepath -> boolean (サムネイルリクエスト中フラグ)
-// PCのCPU論理コア数を取得し、その2倍程度を上限とする（最低でも16、最大でも64に制限）
+// PCのCPU論理コア数に合わせる（大渋滞を防ぎ、JS側の送信順を厳密に守らせるため）
 const logicalCores = navigator.hardwareConcurrency || 8;
-const MAX_CONCURRENT_THUMBNAILS = Math.max(16, Math.min(64, logicalCores * 2));
+const MAX_CONCURRENT_THUMBNAILS = logicalCores;
 let activeThumbnailTasks = 0;
 let thumbnailRequestQueue = []; // { filePath, requestRenderId, img } の配列
 let preloadCursor = 0; // バックグラウンド生成の検索カーソル
@@ -903,7 +903,6 @@ window.addEventListener('beforeunload', () => {
  */
 function resetThumbnailPreloader() {
   thumbnailRequestQueue = [];
-  activeThumbnailTasks = 0;
   pendingThumbnails.clear();
   preloadCursor = 0;
 }
@@ -944,7 +943,16 @@ function updateThumbnailToast() {
 function processThumbnailQueue() {
   // キューに空きがあり、かつタスクが残っている限り、連続でタスクを投入する（whileループ化）
   while (activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS && thumbnailRequestQueue.length > 0) {
-    const req = thumbnailRequestQueue.shift();
+    // 見えている画像の中から「一番最初（＝一番上）」にあるものを探す
+    let targetIndex = thumbnailRequestQueue.findIndex(req => req.img.dataset.isVisible === 'true');
+
+    // 見えている画像がキュー内に無い場合は、一番最初（一番古いタスク）から処理してスキップ消化する
+    if (targetIndex === -1) {
+      targetIndex = 0;
+    }
+
+    // キューから該当するタスクを抜き出す
+    const req = thumbnailRequestQueue.splice(targetIndex, 1)[0];
     const { filePath, requestRenderId, img } = req;
 
     // 既に不要なリクエスト（画面外に出た、またはフォルダ移動した）場合はスキップ
@@ -955,7 +963,7 @@ function processThumbnailQueue() {
 
     activeThumbnailTasks++;
     window.veloceAPI.getThumbnail(filePath).then(url => {
-      activeThumbnailTasks--;
+      activeThumbnailTasks = Math.max(0, activeThumbnailTasks - 1);
       pendingThumbnails.delete(filePath);
 
       if (currentRenderId !== requestRenderId) {
@@ -984,7 +992,7 @@ function processThumbnailQueue() {
       // 処理が完了したら、枠が空いたので次の画像を処理する
       processThumbnailQueue();
     }).catch(() => {
-      activeThumbnailTasks--;
+      activeThumbnailTasks = Math.max(0, activeThumbnailTasks - 1);
       pendingThumbnails.delete(filePath);
       processThumbnailQueue();
     });
