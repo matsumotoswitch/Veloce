@@ -373,9 +373,6 @@ let hasMoved = false; // ドラッグ中に実際にマウスが移動したか
 let startX = 0, startY = 0; // ドラッグ開始時の座標
 let scrollLeftStart = 0, scrollTopStart = 0; // ドラッグ開始時のスクロール位置
 let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
-let clickTimeout = null; // シングルクリックとダブルクリックを区別するためのタイマー
-let lastClickTime = 0; // 最後にクリックされた時刻
-const STRICT_DBLCLICK_DELAY = 200; // 厳格なダブルクリック判定時間 (ms)
 
 // --- ウィンドウコントロールボタンの作成 ---
 // OS標準のタイトルバーのホバーバグを回避するため、HTMLで自前のコントロールを右上に描画する
@@ -506,18 +503,11 @@ window.addEventListener('mouseup', (e) => {
     }
     isDragging = false;
     if (!hasMoved && !ignoreNextClick) {
-      const now = Date.now();
-      if (now - lastClickTime < STRICT_DBLCLICK_DELAY) {
-        // 指定時間以内の連続クリックはダブルクリックとして判定（フルスクリーン切り替え）
-        clearTimeout(clickTimeout);
-        window.veloceAPI.toggleViewerFullscreen();
-        lastClickTime = 0; // 連続発火を防ぐためリセット
+      if (currentIndex > 0) {
+        currentIndex--;
+        loadImage();
       } else {
-        // シングルクリック判定（2回目のクリックが来るのを指定時間だけ待機して、前の画像に戻る）
-        lastClickTime = now;
-        clickTimeout = setTimeout(() => {
-          showPrev();
-        }, STRICT_DBLCLICK_DELAY);
+        if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
       }
     }
   }
@@ -737,7 +727,7 @@ function toggleHelpOverlay(forceShow) {
           <tr><td style="padding: 6px 15px; font-weight: bold;">0</td><td style="padding: 6px 15px;">100%表示 (大きい画像はフィット)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">1</td><td style="padding: 6px 15px;">完全な100%表示 (画面外にはみ出す)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Enter</td><td style="padding: 6px 15px;">ズーム解除 / 強制フィット切替</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F11 / ダブルクリック</td><td style="padding: 6px 15px;">フルスクリーン切替</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">フルスクリーン切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">左ドラッグ</td><td style="padding: 6px 15px;">ウィンドウ / 画像の移動</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">W</td><td style="padding: 6px 15px;">ウィンドウを画像にフィット</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているビューワーを横一列に並べる</td></tr>
