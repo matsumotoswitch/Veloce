@@ -746,7 +746,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         {
             use windows::core::HSTRING;
             use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
-            use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT};
+            use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_THUMBNAILONLY};
             use windows::Win32::Graphics::Gdi::{
                 DeleteObject, GetObjectW, GetDIBits, CreateCompatibleDC, DeleteDC,
                 BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB, RGBQUAD
@@ -761,7 +761,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
                     let item: IShellItemImageFactory = SHCreateItemFromParsingName(&path_hstring, None)?;
                     
                     let size = SIZE { cx: 512, cy: 512 };
-                    let hbitmap = item.GetImage(size, SIIGBF_RESIZETOFIT)?;
+                    let hbitmap = item.GetImage(size, SIIGBF_THUMBNAILONLY)?;
 
                     let mut bitmap = BITMAP::default();
                     if GetObjectW(
