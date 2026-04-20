@@ -318,6 +318,37 @@ async function loadImage() {
     document.title = `Veloce Viewer - ${currentIndex + 1} / ${totalImages}`;
     imgElement.onload = () => {
       setZoomState(isZoomed);
+
+      // 回転を考慮した本来のサイズを取得
+      const { width: natW, height: natH } = getNaturalDimensions();
+
+      // GCAが実装してくれた natW と natH（回転考慮済みサイズ）をそのまま使用
+      const neededWindowWidth = natW;
+      const neededWindowHeight = natH;
+
+      // モニター限界サイズ（全画面化バグ回避のため高さのみ-1）
+      const maxWindowWidth = window.screen.width;
+      const maxWindowHeight = window.screen.height - 1;
+
+      // 縮小率の計算
+      const ratioX = maxWindowWidth / neededWindowWidth;
+      const ratioY = maxWindowHeight / neededWindowHeight;
+      const scale = Math.min(ratioX, ratioY, 1.0);
+
+      // 最終的なウィンドウサイズを決定
+      const targetWidth = Math.floor(neededWindowWidth * scale);
+      const targetHeight = Math.floor(neededWindowHeight * scale);
+
+      // リサイズの実行と枠の再適用
+      if (!isFullscreen && !document.fullscreenElement) {
+        if (window.veloceAPI && window.veloceAPI.setWindowSize) {
+          window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
+            if (window.veloceAPI.toggleWindowDecorations) {
+              window.veloceAPI.toggleWindowDecorations(isBorderVisible);
+            }
+          });
+        }
+      }
     };
   }
 }
@@ -379,7 +410,8 @@ function createWindowControls() {
   controlsContainer.style.top = '1px'; // 青い枠線(1px)の内側に配置
   controlsContainer.style.right = '1px';
   controlsContainer.style.display = 'flex';
-  controlsContainer.style.zIndex = '10000';
+  controlsContainer.style.zIndex = '9999'; // 画像より手前になるよう最前面に配置
+  controlsContainer.style.visibility = 'visible'; // 確実に表示されるように設定
   controlsContainer.style.transition = 'opacity 0.2s';
   controlsContainer.style.opacity = isBorderVisible ? '1' : '0';
   // ドラッグ操作や画像の切り替え操作と干渉しないようにする

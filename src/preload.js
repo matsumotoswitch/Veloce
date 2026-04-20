@@ -109,6 +109,17 @@ window.veloceAPI = {
    */
   resizeViewerWindow: (width, height) => appWindow.setSize(new LogicalSize(width, height)),
   /**
+   * ビューアウィンドウのサイズを変更するようメインプロセスに要求します。
+   * @param {number} width - 変更後の幅。
+   * @param {number} height - 変更後の高さ。
+   */
+  setWindowSize: async (width, height) => {
+    if (window.__TAURI__ && window.__TAURI__.window) {
+      const { appWindow, LogicalSize } = window.__TAURI__.window;
+      await appWindow.setSize(new LogicalSize(width, height));
+    }
+  },
+  /**
    * ビューアウィンドウのドラッグ移動をOSネイティブに委譲します。
    */
   startViewerDragging: () => appWindow.startDragging(),
