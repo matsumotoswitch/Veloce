@@ -209,6 +209,10 @@ tr.selected { background: var(--accent-color); color: #fff; }
   min-height: 0;
 }
 
+#dir-tree > ul {
+  min-width: max-content;
+}
+
 #dir-tree ul {
   list-style: none;
   padding-left: 16px;

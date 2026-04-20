@@ -2019,9 +2019,6 @@ async function loadAllMetadataInBackground() {
  * @param {MouseEvent|KeyboardEvent} event - イベントオブジェクト（CtrlやShiftの判定用）
  */
 async function selectImage(index, event = null) {
-  const activeFolder = document.querySelector('#dir-tree .tree-item.selected');
-  if (activeFolder) activeFolder.classList.remove('selected');
-
   if (event && event.ctrlKey) {
     // Ctrlキーで個別に選択/解除
     if (selectedIndices.has(index)) {
