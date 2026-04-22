@@ -254,5 +254,13 @@ window.veloceAPI = {
   /**
    * ライセンス情報を取得します。
    */
-  getLicenseText: () => invoke('get_license_text')
+  getLicenseText: () => invoke('get_license_text'),
+  /**
+   * サムネイルキャッシュフォルダをエクスプローラで開きます。
+   */
+  openThumbnailCache: () => invoke('open_thumbnail_folder'),
+  /**
+   * サムネイルキャッシュをすべて削除します。
+   */
+  clearThumbnailCache: () => invoke('clear_thumbnail_cache')
 };

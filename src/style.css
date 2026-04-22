@@ -159,9 +159,68 @@ tr.selected { background: var(--accent-color); color: #fff; }
   justify-content: flex-end;
   flex: none;
   border-bottom: 1px solid var(--border-color);
+  gap: 8px;
 }
 #thumbnail-controls label { font-size: 12px; color: #aaa; }
-#thumbnail-controls input { margin-left: 8px; cursor: pointer; }
+#thumbnail-controls input { cursor: pointer; }
+
+.control-divider {
+  width: 1px;
+  height: 16px;
+  background-color: #555;
+  margin: 0 4px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #a0a0a0;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.icon-btn:hover {
+  background-color: transparent;
+  color: #fff;
+}
+
+.icon-btn svg {
+  stroke: currentColor;
+  transition: stroke 0.2s ease, filter 0.2s ease;
+}
+
+#open-cache-btn:hover svg {
+  stroke: #ebc06d;
+}
+
+#clear-cache-btn:hover svg {
+  stroke: #ff4d4d;
+}
+
+@keyframes true-original-glow {
+  0%, 20% {
+    /* 100ms(20%)まで最高輝度を維持。芯を白くし、白とゴールドの多重シャドウをかける */
+    color: #fff !important;
+    fill: #fff !important;
+    stroke: #fff !important;
+    filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d) brightness(1.1);
+  }
+  100% {
+    /* 残りの400msでスッと元に戻る */
+    filter: none;
+  }
+}
+
+.click-glow,
+.click-glow * {
+  /* アイコンの中身（SVGのパス等）も含めて発光させるため、子要素にも適用 */
+  animation: true-original-glow 0.5s ease-out !important;
+}
 
 #center-bottom {
   flex: 1;

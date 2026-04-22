@@ -1038,6 +1038,43 @@ fn rename_folder(old_path: String, new_name: String) -> Result<String, String> {
     }
 }
 
+#[tauri::command]
+fn open_thumbnail_folder() -> Result<(), String> {
+    if let Some(mut path) = get_veloce_data_dir() {
+        path.push("Thumbnails");
+        if !path.exists() {
+            let _ = std::fs::create_dir_all(&path);
+        }
+
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("explorer").arg(&path).spawn();
+
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(&path).spawn();
+
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+
+        Ok(())
+    } else {
+        Err("Could not resolve local data directory".to_string())
+    }
+}
+
+#[tauri::command]
+fn clear_thumbnail_cache() -> Result<(), String> {
+    if let Some(mut path) = get_veloce_data_dir() {
+        path.push("Thumbnails");
+        if path.exists() {
+            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    } else {
+        Err("Could not resolve local data directory".to_string())
+    }
+}
+
 fn main() {
     let mut context = tauri::generate_context!();
     
@@ -1109,7 +1146,9 @@ fn main() {
             toggle_devtools,
             get_license_text,
             rename_file,
-            rename_folder
+            rename_folder,
+            open_thumbnail_folder,
+            clear_thumbnail_cache
         ])
         .run(context)
         .expect("error while running tauri application");

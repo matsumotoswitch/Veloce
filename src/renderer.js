@@ -118,6 +118,23 @@ function showNotification(message, type = 'info') {
   showToast(message, 3000, null, type);
 }
 
+/**
+ * アイコンクリック時の共通発光エフェクトを適用する
+ * @param {HTMLElement} el - 対象の要素
+ */
+function applyIconGlowEffect(el) {
+  if (!el) return;
+  el.style.transition = 'none';
+  el.style.color = '#fff';
+  el.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
+  setTimeout(() => {
+    el.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out';
+    el.style.color = '';
+    el.style.filter = 'none';
+    setTimeout(() => { el.style.transition = ''; }, 400);
+  }, 100);
+}
+
 // --- コンテキストメニュー作成 ---
 const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
@@ -1244,17 +1261,37 @@ window.addEventListener('DOMContentLoaded', async () => {
         searchBar.value = '';
         searchQuery = '';
         scheduleRefresh();
+        applyIconGlowEffect(searchClearBtn);
+      }
+    });
+  }
 
-        // コピーボタンと同じ発光エフェクト
-        searchClearBtn.style.transition = 'none';
-        searchClearBtn.style.color = '#fff';
-        searchClearBtn.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
-        setTimeout(() => {
-          searchClearBtn.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out';
-          searchClearBtn.style.color = '';
-          searchClearBtn.style.filter = 'none';
-          setTimeout(() => { searchClearBtn.style.transition = ''; }, 400);
-        }, 100);
+  // --- サムネイルキャッシュコントロールの初期化 ---
+  const openCacheBtn = document.getElementById('open-cache-btn');
+  if (openCacheBtn) {
+    openCacheBtn.addEventListener('click', () => {
+      applyIconGlowEffect(openCacheBtn);
+      window.veloceAPI.openThumbnailCache();
+    });
+  }
+
+  const clearCacheBtn = document.getElementById('clear-cache-btn');
+  if (clearCacheBtn) {
+    clearCacheBtn.addEventListener('click', async () => {
+      applyIconGlowEffect(clearCacheBtn);
+      const isConfirmed = await showCustomConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
+      if (isConfirmed) {
+        showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
+        try {
+          await window.veloceAPI.clearThumbnailCache();
+          thumbnailUrls.clear(); // フロントエンドのメモリキャッシュもクリア
+          resetThumbnailPreloader(); // プリロード状態もリセット
+          await refreshFileList(); // ファイルリストを再読み込みしてサムネイルを再生成
+          showToast('サムネイルキャッシュを削除しました。', 3000, 'cache-clear', 'success');
+        } catch (err) {
+          console.error("Failed to clear thumbnail cache:", err);
+          showToast('キャッシュの削除に失敗しました。', 3000, 'cache-clear', 'error');
+        }
       }
     });
   }
@@ -2182,14 +2219,7 @@ function renderMetadata(meta) {
       try {
         await navigator.clipboard.writeText(String(value));
         showNotification("プロンプトをクリップボードにコピーしました");
-        copyBtn.style.transition = 'none'; // 光るときは一瞬で
-        copyBtn.style.color = '#fff'; // 芯を白く発光させる
-        copyBtn.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
-        setTimeout(() => { 
-          copyBtn.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out'; // スッと早くフェードアウト
-          copyBtn.style.color = copyBtn.matches(':hover') ? '#3a7afe' : '#888'; 
-          copyBtn.style.filter = 'none';
-        }, 100); // 100msだけ最高輝度を維持
+        applyIconGlowEffect(copyBtn);
       } catch (err) {
         console.error('Failed to copy: ', err);
       }
@@ -2599,21 +2629,7 @@ window.addEventListener('keydown', async (e) => {
 
       // コピー成功時に選択中の画像をピカッと光らせるエフェクト
       const applyFlash = (el) => {
-        if (!el) return;
-        const originalTransition = el.style.transition;
-        const originalFilter = el.style.filter;
-        
-        el.style.transition = 'none';
-        el.style.filter = 'drop-shadow(0 0 3px #ebc06d) drop-shadow(0 0 6px #ebc06d) brightness(1.1)';
-        
-        setTimeout(() => {
-          el.style.transition = 'filter 0.4s ease-out';
-          el.style.filter = originalFilter || 'none';
-          setTimeout(() => {
-            el.style.transition = originalTransition;
-            if (!originalFilter) el.style.removeProperty('filter');
-          }, 400);
-        }, 100);
+        applyIconGlowEffect(el);
       };
 
       applyFlash(thumbnailGrid.querySelector(`.thumbnail-item[data-index="${selectedIndex}"]`));
