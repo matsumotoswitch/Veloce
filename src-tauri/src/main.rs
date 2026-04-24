@@ -993,9 +993,7 @@ fn toggle_devtools(_window: tauri::Window) {
 
 #[tauri::command]
 fn get_license_text() -> String {
-    let app_license = include_str!("../../LICENSE.md");
-    let credits = include_str!("../../CREDITS.md");
-    format!("{}\n\n{}", app_license, credits)
+    include_str!("../../LICENSE.md").to_string()
 }
 
 #[tauri::command]

@@ -340,3 +340,36 @@ tr.selected { background: var(--accent-color); color: #fff; }
   background-color: rgba(180, 90, 20, 0.9);
   border-color: #d97706;
 }
+
+/* --- ライセンス画面：最終デザイン確定版 --- */
+#license-text {
+  color: #ccc;
+  line-height: 1.5;
+}
+
+/* 見出し：黄色 */
+#license-text h1, #license-text h2, #license-text h3 {
+  color: #ffcc00 !important;
+  margin: 1em 0 0.5em 0 !important; /* 適切な隙間に調整 */
+}
+#license-text h1 { font-size: 1.5em; border-bottom: 1px solid #444; padding-bottom: 4px; }
+#license-text h2 { font-size: 1.25em; border-bottom: 1px solid #333; padding-bottom: 2px; }
+
+/* 引用：背景を暗くし、左バーを強調 */
+.md-blockquote {
+  display: block !important;
+  margin: 1em 0 !important;
+  padding: 10px 16px !important;
+  background: rgba(0, 0, 0, 0.25) !important; /* 周囲より暗い背景 */
+  border-left: 4px solid #666 !important;     /* グレーの縦線 */
+  color: #bbb !important;
+  border-radius: 0 4px 4px 0;
+}
+
+/* リスト：隙間ゼロ */
+#license-text ul { list-style: none !important; padding-left: 0 !important; margin: 0.5em 0 !important; }
+#license-text li { position: relative !important; padding-left: 1.2em !important; line-height: 1.6 !important; }
+#license-text li::before { content: "•" !important; position: absolute; left: 2px; color: #888; }
+
+#license-text hr { border: 0; height: 1px; background: #333; margin: 1.5em 0 !important; }
+#license-text strong { color: #fff !important; }

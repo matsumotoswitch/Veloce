@@ -1,10 +1,10 @@
 // Ctrl+Shift+I の強制ブロック（キャプチャフェーズ）
-window.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
-    e.preventDefault();
-    e.stopPropagation(); // 他の処理への伝播を完全に遮断
-  }
-}, true);
+ window.addEventListener('keydown', (e) => {
+   if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
+     e.preventDefault();
+     e.stopPropagation(); // 他の処理への伝播を完全に遮断
+   }
+ }, true);
 
 // --- グローバル状態管理 ---
 let currentFiles = []; // 現在のディレクトリ内の画像ファイルリスト
@@ -2323,29 +2323,54 @@ function openViewer(index) {
  * @returns {string} HTML文字列
  */
 function parseLicenseMarkdown(text) {
-  return text.split('\n').map(line => {
-    let l = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    if (l.startsWith('### ')) return `<h3 style="color: #ebc06d; margin: 1em 0 0 0;">${l.substring(4)}</h3>`;
-    if (l.startsWith('## ')) return `<h2 style="color: #ebc06d; margin: 1em 0 0 0; border-bottom: 1px solid #555; padding-bottom: 4px;">${l.substring(3)}</h2>`;
-    if (l.startsWith('# ')) return `<h1 style="color: #ebc06d; margin: 0 0 0.5em 0; border-bottom: 1px solid #555; padding-bottom: 4px;">${l.substring(2)}</h1>`;
-    if (l.startsWith('---')) return `<hr style="border: 0; border-top: 1px solid #555; margin: 1em 0;">`;
-    if (l.startsWith('&gt; ')) return `<blockquote style="border-left: 4px solid #555; padding-left: 10px; margin: 0; color: #ebc06d;">${l.substring(5)}</blockquote>`;
-    
-    const links = [];
-    l = l.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, (match, text, url) => {
-      links.push(`<a href="${url}" target="_blank" style="color: #3a7afe; text-decoration: underline;">${text}</a>`);
-      return `__LINK_${links.length - 1}__`;
-    });
-    
-    l = l.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #3a7afe; text-decoration: underline;">$1</a>');
-    
-    links.forEach((linkHtml, index) => {
-      l = l.replace(`__LINK_${index}__`, linkHtml);
-    });
+  if (!text) return '';
+  
+  // 改行コードの統一とエスケープ
+  let html = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    l = l.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #fff;">$1</strong>');
-    return l;
-  }).join('\n');
+  // 1. 引用（blockquote）のパース：連続する > を結合し、中身の改行を <br> 化
+  const lines = html.split('\n');
+  let processedLines = [];
+  let bqBuffer = [];
+
+  for (let line of lines) {
+    const bqMatch = line.match(/^\s*&gt;\s?(.*)$/);
+    if (bqMatch) {
+      bqBuffer.push(bqMatch[1]);
+    } else {
+      if (bqBuffer.length > 0) {
+        processedLines.push(`<blockquote class="md-blockquote">${bqBuffer.join('<br>')}</blockquote>`);
+        bqBuffer = [];
+      }
+      processedLines.push(line);
+    }
+  }
+  if (bqBuffer.length > 0) {
+    processedLines.push(`<blockquote class="md-blockquote">${bqBuffer.join('<br>')}</blockquote>`);
+  }
+  html = processedLines.join('\n');
+  
+  // 2. 見出し、水平線、強調、リストの変換
+  html = html.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
+  html = html.replace(/\*\*(.*?)\*\*/gm, '<strong>$1</strong>');
+  html = html.replace(/^---$/gm, '<hr>');
+  html = html.replace(/^\*\s+(.*)$/gm, '<li class="md-list-item">$1</li>');
+  html = html.replace(/(?:<li class="md-list-item">.*?<\/li>\n?)+/g, match => {
+    return `<ul class="md-list">${match.replace(/\n/g, '')}</ul>`;
+  });
+
+  // 3. 【重要】ブロック要素の前後にある改行を物理的に消去（これによって余計な <br> を防ぐ）
+  const tags = 'h1|h2|h3|ul|li|blockquote|hr';
+  html = html.replace(new RegExp(`\\n+(<\\/?(?:${tags})[^>]*>)`, 'gi'), '$1');
+  html = html.replace(new RegExp(`(<\\/?(?:${tags})[^>]*>)\\n+`, 'gi'), '$1');
+
+  // 4. 最後に、純粋なテキスト間に残った改行のみを <br> にする
+  html = html.replace(/\n/g, '<br>');
+
+  return html;
 }
 
 /**
@@ -2380,7 +2405,7 @@ async function showLicenseDialog() {
   
   let licenseText = "ライセンス情報を読み込み中...";
   try {
-    // Rust側に定義したコマンドを呼び出して、LICENSE.md と CREDITS.md の内容を取得する
+    // Rust側に定義したコマンドを呼び出して、LICENSE.md の内容を取得する
     if (window.__TAURI__ && window.__TAURI__.invoke) {
       licenseText = await window.__TAURI__.invoke('get_license_text');
     } else if (window.veloceAPI && window.veloceAPI.getLicenseText) {
@@ -2391,60 +2416,39 @@ async function showLicenseDialog() {
     licenseText = "ライセンス情報の読み込みに失敗しました。";
   }
 
-  const combinedText = [
-    "# Veloce",
-    "**Copyright (c) 2026 Veloce**",
-    "License: PolyForm Noncommercial License 1.0.0",
-    "",
-    "> ※本ソフトウェアの商用利用（営利目的での利用、組み込み、販売など）は固く禁止されています。",
-    "",
-    "---",
-    "",
-    licenseText
-  ].join('\n');
+  const combinedText = licenseText;
 
-  const parsedText = combinedText.split('\n').map(line => {
-    let l = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    if (l.startsWith('### ')) return '<h3 style="color: #ebc06d; margin: 1em 0 0 0;">' + l.substring(4) + '</h3>';
-    if (l.startsWith('## ')) return '<h2 style="color: #ebc06d; margin: 1em 0 0 0; border-bottom: 1px solid #555; padding-bottom: 4px;">' + l.substring(3) + '</h2>';
-    if (l.startsWith('# ')) return '<h1 style="color: #ebc06d; margin: 0 0 0.5em 0; border-bottom: 1px solid #555; padding-bottom: 4px;">' + l.substring(2) + '</h1>';
-    if (l.startsWith('---')) return '<hr style="border: 0; border-top: 1px solid #555; margin: 1em 0;">';
-    if (l.startsWith('&gt; ')) return '<blockquote style="border-left: 4px solid #555; padding-left: 10px; margin: 0; color: #ebc06d;">' + l.substring(5) + '</blockquote>';
-    
-    const links = [];
-    l = l.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, (match, text, url) => {
-      links.push('<a href="' + url + '" target="_blank" style="color: #3a7afe; text-decoration: underline;">' + text + '</a>');
-      return '__LINK_' + (links.length - 1) + '__';
-    });
-    
-    l = l.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #3a7afe; text-decoration: underline;">$1</a>');
-    
-    links.forEach((linkHtml, index) => {
-      l = l.replace('__LINK_' + index + '__', linkHtml);
-    });
-
-    l = l.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #fff;">$1</strong>');
-    return l;
-  }).join('\n');
+  const parsedText = parseLicenseMarkdown(combinedText);
 
   content.innerHTML = `
     <h2 style="margin-top: 0; color: #ebc06d;">ライセンス情報</h2>
-    <div style="flex: 1; overflow-y: auto; background-color: #2d2d2d; padding: 20px; border: 1px solid #444; border-radius: 4px; color: #ccc; font-family: sans-serif; white-space: pre-wrap; font-size: 14px; line-height: 1.6;">${parsedText}</div>
-    <div style="text-align: right; margin-top: 15px;">
-      <button id="close-license-btn" style="padding: 8px 24px; background-color: #3a7afe; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">閉じる</button>
+    <div style="background-color: rgba(232, 17, 35, 0.1); border: 1px solid #e81123; border-radius: 4px; padding: 12px; margin-bottom: 15px; color: #ff6b6b; font-weight: bold; font-size: 14px;">
+      ※本ソフトウェアは商用利用不可です。無保証・無サポートで提供されており、すべて自己責任でのご利用となります。
     </div>
+    <div id="license-text" style="flex: 1; overflow-y: auto; background-color: #2d2d2d; padding: 0px 20px 20px 20px; border: 1px solid #444; border-radius: 4px; color: #ccc; font-family: sans-serif; white-space: normal; font-size: 14px; line-height: 1.6;">${parsedText}</div>
   `;
   
+  const cleanup = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', keydownHandler, true);
+  };
+
+  const keydownHandler = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cleanup();
+    }
+  };
+
+  document.addEventListener('keydown', keydownHandler, true);
+
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    if (e.target === overlay) cleanup();
   });
   
   overlay.appendChild(content);
   document.body.appendChild(overlay);
-  
-  document.getElementById('close-license-btn').addEventListener('click', () => {
-    overlay.remove();
-  });
 }
 
 /**
