@@ -12,6 +12,12 @@ let totalImages = 0;
 let currentImagePath = '';
 let isZoomed = false; // 100%表示（ズーム）状態か
 let currentRotation = 0; // 現在の回転角度
+let currentScale = 1.0; // 現在のズーム倍率
+let currentTranslateX = 0; // X方向の移動量
+let currentTranslateY = 0; // Y方向の移動量
+let isImageDragging = false; // 画像のパン（移動）ドラッグ中か
+let imageDragStartX = 0;
+let imageDragStartY = 0;
 let isFitToWindow = false; // ウィンドウサイズに強制フィット（拡大処理あり）させるか
 let isFullscreen = false; // フルスクリーン状態か
 let isBorderVisible = true; // ウィンドウ枠を表示するか
@@ -116,6 +122,7 @@ window.addEventListener('DOMContentLoaded', () => {
 function updateImageRendering() {
   // pixelatedの代わりにSVGフィルターを使って、滑らかさを保ったまま輪郭を強調する
   imgElement.style.filter = isSharpened ? 'url(#sharpness-filter)' : 'none';
+  imgElement.style.transform = `translate(${currentTranslateX}px, ${currentTranslateY}px) rotate(${currentRotation}deg) scale(${currentScale})`;
 }
 
 /**
@@ -164,6 +171,10 @@ function getNaturalDimensions() {
 function resetZoomAndFit() {
   isZoomed = false;
   isFitToWindow = false;
+  currentScale = 1.0;
+  currentTranslateX = 0;
+  currentTranslateY = 0;
+  updateImageRendering();
   applyFitState();
   updateFullscreenStyles();
 }
@@ -299,6 +310,9 @@ function updateFullscreenStyles() {
  * 表示後、前後の画像をバックグラウンドでプリロードする。
  */
 async function loadImage() {
+  currentScale = 1.0;
+  currentTranslateX = 0;
+  currentTranslateY = 0;
   // RustのStateから現在表示すべき画像のパスと全体枚数を取得
   const result = await window.veloceAPI.getViewerImage(currentIndex);
   if (result) {
@@ -318,6 +332,7 @@ async function loadImage() {
     document.title = `Veloce Viewer - ${currentIndex + 1} / ${totalImages}`;
     imgElement.onload = () => {
       setZoomState(isZoomed);
+      updateImageRendering();
 
       // 回転を考慮した本来のサイズを取得
       const { width: natW, height: natH } = getNaturalDimensions();
@@ -530,9 +545,50 @@ window.addEventListener('mouseup', (e) => {
       imgElement.style.cursor = 'grab';
     }
     isDragging = false;
-    if (!hasMoved && !ignoreNextClick) {
+    if (!hasMoved && !ignoreNextClick && !isImageDragging) {
       showPrev();
     }
+  }
+});
+
+// --- 画像のパン（移動）機能 ---
+
+// Ctrlキーを押した時だけ「手のひら」カーソルにして、ドラッグ可能であることを示す
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Control') imgElement.style.cursor = 'grab';
+});
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'Control' && !isImageDragging) imgElement.style.cursor = 'default';
+});
+
+// ドラッグ開始（Ctrlを押している時のみ）
+imgElement.addEventListener('mousedown', (e) => {
+  if (e.ctrlKey && e.button === 0) {
+    e.preventDefault(); // Macの右クリック化やOSの標準ドラッグを防止
+    e.stopPropagation(); // 既存のウィンドウドラッグ処理との競合を防止
+    isImageDragging = true;
+    imageDragStartX = e.clientX;
+    imageDragStartY = e.clientY;
+    imgElement.style.cursor = 'grabbing'; // 掴んでいるカーソル
+  }
+});
+
+// ドラッグ中（移動量の計算と適用）
+window.addEventListener('mousemove', (e) => {
+  if (isImageDragging) {
+    currentTranslateX += e.clientX - imageDragStartX;
+    currentTranslateY += e.clientY - imageDragStartY;
+    imageDragStartX = e.clientX;
+    imageDragStartY = e.clientY;
+    updateImageRendering();
+  }
+});
+
+// ドラッグ終了
+window.addEventListener('mouseup', (e) => {
+  if (isImageDragging && e.button === 0) {
+    isImageDragging = false;
+    imgElement.style.cursor = e.ctrlKey ? 'grab' : 'default';
   }
 });
 
@@ -542,14 +598,33 @@ window.addEventListener('contextmenu', (e) => {
   showNext(); // 右クリックで次の画像へ
 });
 
-// --- マウスホイールによる画像送り ---
+// --- マウスホイールによる画像送り・ズーム ---
 window.addEventListener('wheel', (e) => {
-  if (e.deltaY > 0) {
-    showNext(); // 下スクロールで次へ
-  } else if (e.deltaY < 0) {
-    showPrev(); // 上スクロールで前へ
+  if (e.ctrlKey) {
+    e.preventDefault(); // ブラウザ標準のズームを無効化
+
+    // ホイールの回転方向に応じてスケールを増減（約10%ずつなめらかに変化）
+    if (e.deltaY < 0) {
+      currentScale *= 1.1; // 上スクロールで拡大
+    } else {
+      currentScale /= 1.1; // 下スクロールで縮小
+    }
+
+    // 倍率の限界値を設定（10% ～ 3000%）
+    currentScale = Math.max(0.1, Math.min(currentScale, 30.0));
+
+    // 画像に適用
+    if (typeof updateImageRendering === 'function') {
+      updateImageRendering();
+    }
+  } else {
+    if (e.deltaY > 0) {
+      showNext(); // 下スクロールで次へ
+    } else if (e.deltaY < 0) {
+      showPrev(); // 上スクロールで前へ
+    }
   }
-});
+}, { passive: false });
 
 /**
  * アイコンクリック時の共通発光エフェクトを適用する
@@ -585,13 +660,13 @@ window.addEventListener('keydown', async (e) => {
       break;
     case 'ArrowUp':
       currentRotation += 90;
-      imgElement.style.transform = `rotate(${currentRotation}deg)`;
+      updateImageRendering();
       applyFitState();
       updateFullscreenStyles();
       break;
     case 'ArrowDown':
       currentRotation -= 90;
-      imgElement.style.transform = `rotate(${currentRotation}deg)`;
+      updateImageRendering();
       applyFitState();
       updateFullscreenStyles();
       break;
