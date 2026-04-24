@@ -2693,7 +2693,7 @@ window.addEventListener('keydown', async (e) => {
       const containerWidth = thumbnailGrid.clientWidth;
       const itemSize = parseFloat(thumbnailSizeSlider.value) || 120;
       const gap = 8;
-      const padding = 10;
+      const padding = 8;
       const availableWidth = Math.max(1, containerWidth - padding * 2);
       const columns = Math.max(1, Math.floor((availableWidth + gap) / (itemSize + gap)));
 
