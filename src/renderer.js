@@ -1926,20 +1926,24 @@ window.addEventListener('keydown', async (e) => {
 
   if (e.key === 'F2') {
     e.preventDefault();
-    const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
-    if (selectedFolder) {
-      renameSelectedFolder();
-    } else {
+    if (appState.selection.size > 0) {
       renameSelectedFile();
+    } else {
+      const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
+      if (selectedFolder) {
+        renameSelectedFolder();
+      }
     }
   }
 
   if (e.key === 'Delete') {
-    const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
-    if (selectedFolder) {
-      deleteSelectedFolder();
-    } else {
+    if (appState.selection.size > 0) {
       deleteSelectedFiles();
+    } else {
+      const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
+      if (selectedFolder) {
+        deleteSelectedFolder();
+      }
     }
   }
 
