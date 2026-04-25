@@ -1,49 +1,16 @@
-// Ctrl+Shift+I の強制ブロック（キャプチャフェーズ）
- window.addEventListener('keydown', (e) => {
-   if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
-     e.preventDefault();
-     e.stopPropagation(); // 他の処理への伝播を完全に遮断
-   }
- }, true);
+// ============================================================================
+// Veloce - Main Controller (renderer.js)
+// ============================================================================
 
-// --- グローバル状態管理 ---
-let currentFiles = []; // 現在のディレクトリ内の画像ファイルリスト
-let filteredFiles = []; // 検索・ソート結果の表示用ファイルリスト
-let currentSort = { key: 'name', asc: true }; // 現在のソート条件
-let searchQuery = ''; // 現在の検索クエリ
-let selectedIndex = -1; // 最後に選択された画像のインデックス
-let selectedIndices = new Set(); // 複数選択された画像のインデックスセット
-let currentDirectory = ''; // 現在表示しているディレクトリパス
-let thumbnailObserver;
-let currentMetaBatchId = 0; // フォルダ移動時にメタデータ読み込みをキャンセルするため
-let currentMetaRequestId = 0; // 非同期パースの競合対策用
-let currentRenderId = 0; // レンダリングのキャンセル用
-let thumbnailUrls = new Map(); // filepath -> assetUrl (サムネイルのキャッシュ)
-let pendingThumbnails = new Set(); // filepath -> boolean (サムネイルリクエスト中フラグ)
-// PCのCPU論理コア数を取得（速度と安定性のバランスを取るため2倍に設定）
 const logicalCores = navigator.hardwareConcurrency || 8;
 const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
-let activeThumbnailTasks = 0;
-let thumbnailRequestQueue = []; // { filePath, requestRenderId, img } の配列
-let preloadCursor = 0; // バックグラウンド生成の検索カーソル
-let isPreloadRunning = false; // バックグラウンド生成が稼働中かどうか
-let searchTimeout = null; // 検索入力のデバウンス用タイマー
 
-// --- トースト通知状態管理 ---
-let thumbnailTotalRequested = 0;
-let thumbnailCompleted = 0;
-let thumbnailToastTimeout = null;
-let lastThumbnailToastTime = 0;
-
-// --- ドラッグ＆ドロップ状態管理 ---
 const dragState = {
   paths: [], // ドラッグ中の複数ファイルパス
   isAppDragging: false, // アプリ内からのドラッグ中かどうか
   pendingRefresh: false // ドラッグ終了後のリスト更新を待機しているか
 };
 
-// --- 定数定義 (アイコン) ---
-// OSや環境に依存しないインラインSVGアイコン
 const ICONS = {
   DRIVE: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="#a0a0a0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"></line><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line></svg>`,
   FOLDER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="#ebc06d" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
@@ -56,86 +23,27 @@ const ICONS = {
   ERASER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>`
 };
 
-// --- トースト通知機能 ---
+const emptyDragImage = new Image();
+emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-/**
- * トースト通知を表示する
- * @param {string} message - 表示するメッセージ
- * @param {number} duration - 表示時間（ミリ秒）。0の場合は自動で消えない
- * @param {string|null} id - 通知のID。同じIDの場合は上書きされる
- * @param {'info' | 'success' | 'error' | 'warning'} [type='info'] - 通知の種類
- */
-function showToast(message, duration = 3000, id = null, type = 'info') {
-  let container = document.getElementById('toast-container');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toast-container';
-    document.body.appendChild(container);
-  }
+const fileListBody = document.getElementById('file-list-body');
+const thumbnailGrid = document.getElementById('center-bottom');
+const promptText = document.getElementById('prompt-text');
+const negativePromptText = document.getElementById('negative-prompt-text');
+const dirTree = document.getElementById('dir-tree');
+const thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
+const resizerLeft = document.getElementById('resizer-left');
+const resizerRight = document.getElementById('resizer-right');
+const resizerCenter = document.getElementById('resizer-center');
 
-  let toast = id ? document.getElementById(`toast-${id}`) : null;
+const paneState = {
+  left: { isCollapsed: false, preCollapseValue: '', cssVar: '--left-width', storageKey: 'leftWidth', defaultSize: '250px', openIcon: ICONS.CHEVRON_LEFT, closeIcon: ICONS.CHEVRON_RIGHT },
+  right: { isCollapsed: false, preCollapseValue: '', cssVar: '--right-width', storageKey: 'rightWidth', defaultSize: '250px', openIcon: ICONS.CHEVRON_RIGHT, closeIcon: ICONS.CHEVRON_LEFT },
+  center: { isCollapsed: false, preCollapseValue: '', cssVar: '--top-height', storageKey: 'topHeight', defaultSize: '250px', openIcon: ICONS.CHEVRON_UP, closeIcon: ICONS.CHEVRON_DOWN }
+};
 
-  if (toast) {
-    toast.textContent = message;
-    // Reset type classes
-    toast.classList.remove('success', 'error', 'warning');
-  } else {
-    toast = document.createElement('div');
-    toast.className = 'toast-message';
-    if (id) toast.id = `toast-${id}`;
-    toast.textContent = message;
-    container.appendChild(toast);
-  }
+const resizingState = { left: false, right: false, center: false };
 
-  if (type !== 'info') {
-    toast.classList.add(type);
-  }
-
-  requestAnimationFrame(() => {
-    toast.classList.add('show');
-  });
-
-  if (toast.timeoutId) {
-    clearTimeout(toast.timeoutId);
-  }
-
-  if (duration > 0) {
-    toast.timeoutId = setTimeout(() => {
-      toast.classList.remove('show');
-      setTimeout(() => {
-        if (toast.parentElement) toast.remove();
-      }, 300);
-    }, duration);
-  }
-}
-
-/**
- * 汎用的な通知を表示する
- * @param {string} message - 表示するメッセージ
- * @param {'info' | 'warning'} [type='info'] - 通知の種類
- */
-function showNotification(message, type = 'info') {
-  showToast(message, 3000, null, type);
-}
-
-/**
- * アイコンクリック時の共通発光エフェクトを適用する
- * @param {HTMLElement} el - 対象の要素
- */
-function applyIconGlowEffect(el) {
-  if (!el) return;
-  el.style.transition = 'none';
-  el.style.color = '#fff';
-  el.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
-  setTimeout(() => {
-    el.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out';
-    el.style.color = '';
-    el.style.filter = 'none';
-    setTimeout(() => { el.style.transition = ''; }, 400);
-  }, 100);
-}
-
-// --- コンテキストメニュー作成 ---
 const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
 contextMenu.style.position = 'fixed';
@@ -149,12 +57,342 @@ contextMenu.style.boxShadow = '0 2px 10px rgba(0,0,0,0.5)';
 contextMenu.style.minWidth = '150px';
 contextMenu.style.fontSize = '13px';
 
-/**
- * コンテキストメニューのオプション要素を作成する
- * @param {string} text - メニュー項目のテキスト
- * @param {function} onClick - クリック時のコールバック
- * @returns {HTMLDivElement}
- */
+// ----------------------------------------------------------------------------
+// 1. Tauri API & Backend Communication
+// ----------------------------------------------------------------------------
+
+async function refreshFileList() {
+  if (!appState.currentDirectory || !window.veloceAPI.loadDirectory) return;
+  const result = await window.veloceAPI.loadDirectory(appState.currentDirectory);
+  if (!result) return;
+
+  appState.files = result.imageFiles || [];  
+  resetThumbnailPreloader();
+  appState.applyFiltersAndSort();
+  window.uiManager.renderAll();
+  loadAllMetadataInBackground();
+  
+  window.uiManager.updateSelectionUI();
+  if (appState.selectedIndex > -1) {
+    const requestId = ++appState.currentMetaRequestId;
+    const meta = await window.veloceAPI.parseMetadata(appState.filteredFiles[appState.selectedIndex].path);
+    if (appState.currentMetaRequestId === requestId) renderMetadata(meta);
+  } else {
+    clearMetadataUI();
+  }
+}
+
+async function refreshTree() {
+  if (!window.veloceAPI.getDrives) return;
+  const scrollTop = dirTree.scrollTop;
+  const scrollLeft = dirTree.scrollLeft;
+
+  const expandedPaths = Array.from(dirTree.querySelectorAll('.tree-children.expanded'))
+    .map(ul => ul.previousElementSibling?.dataset?.path)
+    .filter(Boolean);
+
+  const tempContainer = document.createElement('div');
+  const ul = document.createElement('ul');
+  ul.className = 'tree-root';
+  const drives = await window.veloceAPI.getDrives();
+  for (const drive of drives) {
+    ul.appendChild(createTreeNode({ name: drive, path: drive }, true));
+  }
+  tempContainer.appendChild(ul);
+
+  expandedPaths.sort((a, b) => a.length - b.length);
+  for (const p of expandedPaths) {
+    await expandTreeToPath(p, true, tempContainer);
+    const escapedPath = CSS.escape(p);
+    const itemDiv = tempContainer.querySelector(`.tree-item[data-path="${escapedPath}"]`);
+    if (itemDiv && itemDiv.expandNode) {
+      await itemDiv.expandNode();
+    }
+  }
+
+  if (appState.currentDirectory) {
+    await expandTreeToPath(appState.currentDirectory, true, tempContainer);
+  }
+
+  dirTree.innerHTML = '';
+  dirTree.appendChild(ul);
+  dirTree.scrollTop = scrollTop;
+  dirTree.scrollLeft = scrollLeft;
+}
+
+async function expandTreeToPath(targetPath, disableScroll = false, rootElement = document) {
+  if (!targetPath || targetPath === 'PC') return;
+
+  const separator = '\\';
+  const parts = targetPath.split(separator).filter(p => p !== '');
+  let pathsToExpand = [];
+  
+  let current = parts[0] + separator;
+  pathsToExpand.push(current);
+  for(let i = 1; i < parts.length; i++) {
+      current += parts[i];
+      pathsToExpand.push(current);
+      current += separator;
+  }
+
+  for (let i = 0; i < pathsToExpand.length; i++) {
+      const p = pathsToExpand[i];
+      const escapedPath = CSS.escape(p);
+      const itemDiv = rootElement.querySelector(`.tree-item[data-path="${escapedPath}"]`);
+      
+      if (itemDiv) {
+          if (i === pathsToExpand.length - 1) {
+              const activeItem = rootElement.querySelector('.tree-item.selected');
+              if (activeItem) activeItem.classList.remove('selected');
+              itemDiv.classList.add('selected');
+              if (!disableScroll) {
+                  itemDiv.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              }
+          } else {
+              if (itemDiv.expandNode) await itemDiv.expandNode();
+          }
+      } else {
+          break;
+      }
+  }
+}
+
+async function loadAllMetadataInBackground() {
+  if (!window.veloceAPI.getFullMetadataBatch) return;
+  const filesToLoad = appState.files.filter(f => !f.metaLoaded);
+  if (filesToLoad.length === 0) return;
+
+  const batchId = ++appState.currentMetaBatchId;
+  const pathsToLoad = filesToLoad.map(f => f.path);
+  const CHUNK_SIZE = 100; 
+
+  const processNextChunk = (chunkIndex) => {
+    if (appState.currentMetaBatchId !== batchId) return;
+
+    if (chunkIndex >= pathsToLoad.length) {
+      window.uiManager.showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
+      if (['width', 'height'].includes(appState.sortConfig.key)) {
+        appState.applyFiltersAndSort();
+        window.uiManager.renderAll();
+      }
+      return;
+    }
+
+    requestIdleCallback(async () => {
+      if (appState.currentMetaBatchId !== batchId) return;
+      
+      try {
+        const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
+        window.uiManager.showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress', 'info');
+        
+        const metadataList = await window.veloceAPI.getFullMetadataBatch(chunkPaths);
+        if (appState.currentMetaBatchId !== batchId) return;
+
+        const pathToIndex = new Map();
+        appState.files.forEach((f, i) => pathToIndex.set(f.path, i));
+
+        metadataList.forEach(meta => {
+          const fileIndex = pathToIndex.get(meta.path);
+          if (fileIndex !== undefined && fileIndex > -1) {
+            const file = appState.files[fileIndex];
+            file.width = meta.width;
+            file.height = meta.height;
+            file.prompt = meta.prompt || '';
+            file.negativePrompt = meta.negativePrompt || '';
+            file.source = meta.source || '';
+            if (meta.params && Array.isArray(meta.params.characterPrompts)) {
+                file.charPrompts = meta.params.characterPrompts;
+            }
+            file.metaLoaded = true;
+
+            const tableIndex = appState.filteredFiles.findIndex(f => f.path === meta.path);
+            if (tableIndex !== -1 && fileListBody.children[tableIndex]) {
+              const row = fileListBody.children[tableIndex];
+              row.children[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
+              row.children[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
+            }
+          }
+        });
+
+        if (appState.searchQuery.trim() !== '') {
+            scheduleRefresh();
+        }
+      } catch (error) {
+        console.error('Failed to load metadata in background:', error);
+      }
+      processNextChunk(chunkIndex + CHUNK_SIZE);
+    }, { timeout: 2000 });
+  };
+  processNextChunk(0);
+}
+
+async function renameSelectedFolder() {
+  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
+  if (!selectedFolderEl) return;
+
+  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
+  if (isRoot) {
+    showNotification('ドライブ名を変更することはできません。', 'warning');
+    return;
+  }
+
+  const oldPath = selectedFolderEl.dataset.path;
+  const oldName = selectedFolderEl.querySelector('.tree-label').textContent;
+
+  const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', oldName);
+  if (newName !== null && newName !== oldName) {
+    if (newName.trim() === '') {
+      showNotification('フォルダ名を入力してください。', 'warning');
+      return;
+    }
+    if (/[\\/:*?"<>|]/.test(newName)) {
+      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+      return;
+    }
+
+    const result = await window.veloceAPI.renameFolder(oldPath, newName);
+    if (result && result.success) {
+      showNotification(`フォルダ名を「${newName}」に変更しました`);
+      if (appState.currentDirectory.startsWith(oldPath)) {
+        appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
+        localStorage.setItem('currentDirectory', appState.currentDirectory);
+      }
+      await refreshTree();
+    } else {
+      showNotification(`フォルダ名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
+    }
+  }
+}
+
+async function deleteSelectedFolder() {
+  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
+  if (!selectedFolderEl) return;
+
+  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
+  if (isRoot) {
+    showNotification('ドライブを削除することはできません。', 'warning');
+    return;
+  }
+
+  const oldPath = selectedFolderEl.dataset.path;
+  const folderName = selectedFolderEl.querySelector('.tree-label').textContent;
+
+  const isConfirmed = await showCustomConfirm(`本当にフォルダ「${folderName}」をゴミ箱に移動しますか？`);
+  if (isConfirmed) {
+    const result = await window.veloceAPI.trashFolder(oldPath);
+    if (result && result.success) {
+      showNotification(`フォルダ「${folderName}」をゴミ箱に移動しました`, 'warning');
+      if (appState.currentDirectory.startsWith(oldPath)) {
+        const sep = '\\';
+        const parts = oldPath.split(sep);
+        parts.pop();
+        let parentDir = parts.join(sep);
+        if (!parentDir.includes(sep)) parentDir += sep;
+        appState.currentDirectory = parentDir;
+        localStorage.setItem('currentDirectory', appState.currentDirectory);
+        await refreshFileList();
+      }
+      await refreshTree();
+    } else {
+      showNotification(`フォルダの削除に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
+    }
+  }
+}
+
+async function renameSelectedFile() {
+  if (appState.selectedIndex > -1 && appState.filteredFiles[appState.selectedIndex]) {
+    const file = appState.filteredFiles[appState.selectedIndex];
+    const oldPath = file.path;
+    const newName = await showCustomPrompt('新しいファイル名を入力してください:', file.name, true);
+    if (newName !== null && newName !== file.name) {
+      if (newName.trim() === '') {
+        window.uiManager.showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
+        return;
+      }
+      if (/[\\/:*?"<>|]/.test(newName)) {
+        window.uiManager.showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
+        return;
+      }
+
+      const result = await window.veloceAPI.renameFile(oldPath, newName);
+      if (result && result.success) {
+        window.uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
+        
+        const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
+        const currentIdx = appState.files.findIndex(f => f.path === oldPath);
+        if (currentIdx > -1) {
+          appState.files[currentIdx].path = result.path;
+          appState.files[currentIdx].name = newName;
+          appState.files[currentIdx].ext = newExt;
+        }
+        file.path = result.path;
+        file.name = newName;
+        file.ext = newExt;
+
+        appState.thumbnailUrls.delete(oldPath);
+        resetThumbnailPreloader();
+        scheduleRefresh();
+      } else {
+        window.uiManager.showToast(`ファイル名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 3000, 'file-rename', 'warning');
+      }
+    }
+  }
+}
+
+async function deleteSelectedFiles() {
+  if (appState.selection.size > 0) {
+    const pathsToDelete = [];
+    for (const i of appState.selection) {
+      if (appState.filteredFiles[i]) pathsToDelete.push(appState.filteredFiles[i].path);
+    }
+
+    appState.selection.clear();
+    appState.selectedIndex = -1;
+    window.uiManager.updateSelectionUI();
+    clearMetadataUI();
+
+    let trashedCount = 0;
+    const total = pathsToDelete.length;
+    window.uiManager.showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
+    
+    for (const path of pathsToDelete) {
+      try {
+        const success = await window.veloceAPI.trashFile(path);
+        if (success) trashedCount++;
+      } catch (err) {
+        console.error('Failed to trash file:', err);
+      }
+    }
+
+    if (trashedCount > 0) {
+      window.uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
+    } else {
+      window.uiManager.showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 2. Core Business Logic
+// ----------------------------------------------------------------------------
+
+function showNotification(message, type = 'info') {
+  window.uiManager.showToast(message, 3000, null, type);
+}
+
+function applyIconGlowEffect(el) {
+  if (!el) return;
+  el.style.transition = 'none';
+  el.style.color = '#fff';
+  el.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
+  setTimeout(() => {
+    el.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out';
+    el.style.color = '';
+    el.style.filter = 'none';
+    setTimeout(() => { el.style.transition = ''; }, 400);
+  }, 100);
+}
+
 const createMenuOption = (text, onClick) => {
   const option = document.createElement('div');
   option.textContent = text;
@@ -171,12 +409,6 @@ const createMenuOption = (text, onClick) => {
   return option;
 };
 
-/**
- * カスタムダイアログのベース要素を構築する内部関数
- * @param {string} message - ダイアログに表示するメッセージ
- * @param {HTMLElement} [contentElement] - メッセージの下に配置する追加要素
- * @returns {object} { buttonsDiv, cleanup } ボタンを追加するコンテナと破棄関数
- */
 function createCustomDialogBase(message, contentElement) {
   const overlay = document.createElement('div');
   overlay.style.position = 'fixed';
@@ -224,12 +456,6 @@ function createCustomDialogBase(message, contentElement) {
   return { buttonsDiv, cleanup };
 }
 
-/**
- * カスタムダイアログ用のボタン要素を生成する
- * @param {string} text - ボタンテキスト
- * @param {string} bgColor - 背景色
- * @returns {HTMLButtonElement} 生成されたボタン要素
- */
 function createDialogButton(text, bgColor) {
   const btn = document.createElement('button');
   btn.textContent = text;
@@ -237,13 +463,6 @@ function createDialogButton(text, bgColor) {
   return btn;
 }
 
-/**
- * ユーザー入力を求めるカスタムプロンプトダイアログを表示する
- * @param {string} message - 表示するメッセージ
- * @param {string} [defaultValue=''] - 入力欄の初期値
- * @param {boolean} [selectBaseNameOnly=false] - 拡張子を除いたベース名のみを選択状態にするか
- * @returns {Promise<string|null>} 入力された文字列。キャンセルされた場合は null
- */
 function showCustomPrompt(message, defaultValue = '', selectBaseNameOnly = false) {
   return new Promise((resolve) => {
     const inputEl = document.createElement('input');
@@ -344,11 +563,6 @@ function showCustomPrompt(message, defaultValue = '', selectBaseNameOnly = false
   });
 }
 
-/**
- * 確認を求めるカスタムダイアログを表示する
- * @param {string} message - 表示するメッセージ
- * @returns {Promise<boolean>} OKが押された場合は true、キャンセル時は false
- */
 function showCustomConfirm(message) {
   return new Promise((resolve) => {
     const { buttonsDiv, cleanup } = createCustomDialogBase(message);
@@ -385,573 +599,36 @@ function showCustomConfirm(message) {
   });
 }
 
-const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
-  if (!contextMenu.targetFolder) return;
-  const folderName = await showCustomPrompt('新しいフォルダ名を入力してください:');
-  if (folderName !== null) {
-    if (folderName.trim() === '') {
-      showNotification('フォルダ名を入力してください。', 'warning');
-      return;
-    }
-    if (/[\\/:*?"<>|]/.test(folderName)) {
-      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
-      return;
-    }
-
-    const parentPath = contextMenu.targetFolder.path;
-    const result = await window.veloceAPI.createFolder(parentPath, folderName);
-    if (result && result.success) {
-      showNotification(`フォルダ「${folderName}」を作成しました`);
-      await refreshTree();
-
-      // 親フォルダまで展開し、親フォルダ自身も展開状態（サブフォルダ表示）にする
-      await expandTreeToPath(parentPath, true);
-      const escapedParentPath = CSS.escape(parentPath);
-      const parentDiv = document.querySelector(`.tree-item[data-path="${escapedParentPath}"]`);
-      if (parentDiv && parentDiv.expandNode) {
-        await parentDiv.expandNode();
-      }
-
-      // ツリーの選択状態（フォーカス）を、現在開いているディレクトリに戻す
-      if (currentDirectory) {
-        const escapedCurrent = CSS.escape(currentDirectory);
-        const currentDiv = document.querySelector(`.tree-item[data-path="${escapedCurrent}"]`);
-        if (currentDiv) {
-          const activeItem = document.querySelector('.tree-item.selected');
-          if (activeItem) activeItem.classList.remove('selected');
-          currentDiv.classList.add('selected');
-        }
-      }
-    } else {
-      alert('フォルダの作成に失敗しました:\n' + (result ? result.error : 'Unknown error'));
-    }
-  }
-});
-
-const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
-  if (!contextMenu.targetFolder) return;
-  const oldPath = contextMenu.targetFolder.path;
-  const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
-  if (newName !== null && newName !== contextMenu.targetFolder.name) {
-    if (newName.trim() === '') {
-      showNotification('フォルダ名を入力してください。', 'warning');
-      return;
-    }
-    if (/[\\/:*?"<>|]/.test(newName)) {
-      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
-      return;
-    }
-
-    const result = await window.veloceAPI.renameFolder(oldPath, newName);
-    if (result && result.success) {
-      showNotification(`フォルダ名を「${newName}」に変更しました`);
-      if (currentDirectory.startsWith(oldPath)) {
-        currentDirectory = currentDirectory.replace(oldPath, result.path);
-        localStorage.setItem('currentDirectory', currentDirectory);
-      }
-      await refreshTree();
-    } else {
-      showNotification(`フォルダ名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
-    }
-  }
-});
-
-const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
-  if (!contextMenu.targetFolder) return;
-  const oldPath = contextMenu.targetFolder.path;
-  const isConfirmed = await showCustomConfirm(`本当にフォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しますか？`);
-  if (isConfirmed) {
-    const result = await window.veloceAPI.trashFolder(oldPath);
-    if (result && result.success) {
-      showNotification(`フォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しました`, 'warning');
-      if (currentDirectory.startsWith(oldPath)) {
-        // 削除したフォルダ以下を表示していた場合、親フォルダに移動してリストを更新する
-        const sep = '\\';
-        const parts = oldPath.split(sep);
-        parts.pop();
-        let parentDir = parts.join(sep);
-        if (!parentDir.includes(sep)) parentDir += sep;
-        currentDirectory = parentDir;
-        localStorage.setItem('currentDirectory', currentDirectory);
-        await refreshFileList();
-      }
-      await refreshTree();
-    } else {
-      alert('フォルダの削除に失敗しました:\n' + (result ? result.error : 'Unknown error'));
-    }
-  }
-});
-
-async function renameSelectedFolder() {
-  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
-  if (!selectedFolderEl) return;
-
-  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
-  if (isRoot) {
-    showNotification('ドライブ名を変更することはできません。', 'warning');
-    return;
-  }
-
-  const oldPath = selectedFolderEl.dataset.path;
-  const oldName = selectedFolderEl.querySelector('.tree-label').textContent;
-
-  const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', oldName);
-  if (newName !== null && newName !== oldName) {
-    if (newName.trim() === '') {
-      showNotification('フォルダ名を入力してください。', 'warning');
-      return;
-    }
-    if (/[\\/:*?"<>|]/.test(newName)) {
-      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
-      return;
-    }
-
-    const result = await window.veloceAPI.renameFolder(oldPath, newName);
-    if (result && result.success) {
-      showNotification(`フォルダ名を「${newName}」に変更しました`);
-      if (currentDirectory.startsWith(oldPath)) {
-        currentDirectory = currentDirectory.replace(oldPath, result.path);
-        localStorage.setItem('currentDirectory', currentDirectory);
-      }
-      await refreshTree();
-    } else {
-      showNotification(`フォルダ名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
-    }
-  }
-}
-
-async function deleteSelectedFolder() {
-  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
-  if (!selectedFolderEl) return;
-
-  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
-  if (isRoot) {
-    showNotification('ドライブを削除することはできません。', 'warning');
-    return;
-  }
-
-  const oldPath = selectedFolderEl.dataset.path;
-  const folderName = selectedFolderEl.querySelector('.tree-label').textContent;
-
-  const isConfirmed = await showCustomConfirm(`本当にフォルダ「${folderName}」をゴミ箱に移動しますか？`);
-  if (isConfirmed) {
-    const result = await window.veloceAPI.trashFolder(oldPath);
-    if (result && result.success) {
-      showNotification(`フォルダ「${folderName}」をゴミ箱に移動しました`, 'warning');
-      if (currentDirectory.startsWith(oldPath)) {
-        const sep = '\\';
-        const parts = oldPath.split(sep);
-        parts.pop();
-        let parentDir = parts.join(sep);
-        if (!parentDir.includes(sep)) parentDir += sep;
-        currentDirectory = parentDir;
-        localStorage.setItem('currentDirectory', currentDirectory);
-        await refreshFileList();
-      }
-      await refreshTree();
-    } else {
-      showNotification(`フォルダの削除に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
-    }
-  }
-}
-
-async function renameSelectedFile() {
-  if (selectedIndex > -1 && filteredFiles[selectedIndex]) {
-    const file = filteredFiles[selectedIndex];
-    const oldPath = file.path;
-    const newName = await showCustomPrompt('新しいファイル名を入力してください:', file.name, true);
-    if (newName !== null && newName !== file.name) {
-      if (newName.trim() === '') {
-        showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
-        return;
-      }
-      if (/[\\/:*?"<>|]/.test(newName)) {
-        showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
-        return;
-      }
-
-      const result = await window.veloceAPI.renameFile(oldPath, newName);
-      if (result && result.success) {
-        showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
-        
-        const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
-        
-        const currentIdx = currentFiles.findIndex(f => f.path === oldPath);
-        if (currentIdx > -1) {
-          currentFiles[currentIdx].path = result.path;
-          currentFiles[currentIdx].name = newName;
-          currentFiles[currentIdx].ext = newExt;
-        }
-        
-        file.path = result.path;
-        file.name = newName;
-        file.ext = newExt;
-
-        // 名前が変更されたので、古いパスのサムネイルキャッシュを破棄する
-        thumbnailUrls.delete(oldPath);
-        resetThumbnailPreloader();
-        scheduleRefresh();
-      } else {
-        showToast(`ファイル名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 3000, 'file-rename', 'warning');
-      }
-    }
-  }
-}
-
-async function deleteSelectedFiles() {
-  if (selectedIndices.size > 0) {
-    const pathsToDelete = [];
-    for (const i of selectedIndices) {
-      if (filteredFiles[i]) pathsToDelete.push(filteredFiles[i].path);
-    }
-
-    selectedIndices.clear();
-    selectedIndex = -1;
-    updateSelectionUI();
-    clearMetadataUI();
-
-    let trashedCount = 0;
-    const total = pathsToDelete.length;
-    showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
-    
-    for (const path of pathsToDelete) {
-      try {
-        const success = await window.veloceAPI.trashFile(path);
-        if (success) trashedCount++;
-      } catch (err) {
-        console.error('Failed to trash file:', err);
-      }
-    }
-
-    if (trashedCount > 0) {
-      showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
-    } else {
-      showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
-    }
-  }
-}
-
-const menuRenameFile = createMenuOption('ファイル名変更', renameSelectedFile);
-const menuDeleteFile = createMenuOption('ファイル削除', deleteSelectedFiles);
-
-contextMenu.appendChild(menuNewFolder);
-contextMenu.appendChild(menuRenameFolder);
-contextMenu.appendChild(menuDeleteFolder);
-contextMenu.appendChild(menuRenameFile);
-contextMenu.appendChild(menuDeleteFile);
-document.body.appendChild(contextMenu);
-
-window.addEventListener('click', () => {
-  if (contextMenu.style.display === 'block') {
-    contextMenu.style.display = 'none';
-  }
-});
-
-// --- ドラッグツールチップの作成 ---
-const dragTooltip = document.createElement('div');
-dragTooltip.id = 'drag-tooltip';
-dragTooltip.style.position = 'fixed';
-dragTooltip.style.pointerEvents = 'none'; // マウスイベントを透過させてドロップの邪魔にならないようにする
-dragTooltip.style.zIndex = '10000';
-dragTooltip.style.padding = '4px 8px';
-dragTooltip.style.backgroundColor = 'rgba(0, 0, 0, 1.0)'; // 背景を完全に不透明にする
-dragTooltip.style.color = '#ffffff'; // 文字色を真っ白にする
-dragTooltip.style.border = '1px solid #555'; // 視認性を高めるために薄い枠線を追加
-dragTooltip.style.borderRadius = '4px';
-dragTooltip.style.display = 'none';
-dragTooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5)';
-document.body.appendChild(dragTooltip);
-
-// ドラッグ終了時にツールチップを隠す
-document.addEventListener('dragend', async () => {
-  dragTooltip.style.display = 'none';
-  dragState.paths = [];
-  dragState.isAppDragging = false;
-
-  // ドラッグ操作が完全に終了してから、安全にUIを更新して古い画像を消去する
-  if (dragState.pendingRefresh) {
-    dragState.pendingRefresh = false;
-    await refreshFileList();
-  }
-});
-
-// --- ドラッグ時のOS標準ゴースト画像を消すための透明画像 ---
-const emptyDragImage = new Image();
-emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-
-// --- DOM要素のキャッシュ ---
-const fileListBody = document.getElementById('file-list-body');
-const thumbnailGrid = document.getElementById('center-bottom');
-const promptText = document.getElementById('prompt-text');
-const negativePromptText = document.getElementById('negative-prompt-text');
-const dirTree = document.getElementById('dir-tree');
-const thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
-const resizerLeft = document.getElementById('resizer-left');
-const resizerRight = document.getElementById('resizer-right');
-const resizerCenter = document.getElementById('resizer-center');
-
-// --- イベントデリゲーション ---
-// 数千件の要素に対して個別にイベントを登録するのを防ぎ、メモリ消費とレンダリング速度を改善
-function handleItemClick(e, isGrid) {
-  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  if (!item || !item.dataset.index) return;
-  selectImage(parseInt(item.dataset.index, 10), e);
-}
-
-function handleItemDblClick(e, isGrid) {
-  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  if (!item || !item.dataset.index) return;
-  openViewer(parseInt(item.dataset.index, 10));
-}
-
-function handleItemDragStart(e, isGrid) {
-  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  if (!item || !item.dataset.index) return;
-  const index = parseInt(item.dataset.index, 10);
-  
-  if (!selectedIndices.has(index)) selectImage(index);
-  const paths = Array.from(selectedIndices).map(idx => filteredFiles[idx].path);
-  e.dataTransfer.setData('application/json', JSON.stringify(paths));
-  e.dataTransfer.setData('text/plain', paths[0]);
-  e.dataTransfer.effectAllowed = 'copyMove';
-  e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
-  dragState.paths = paths;
-  dragState.isAppDragging = true;
-}
-
-function handleItemContextMenu(e, isGrid) {
-  e.preventDefault();
-  e.stopPropagation();
-
-  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  if (!item || !item.dataset.index) return;
-  const index = parseInt(item.dataset.index, 10);
-
-  if (!selectedIndices.has(index)) selectImage(index);
-
-  menuNewFolder.style.display = 'none';
-  menuRenameFolder.style.display = 'none';
-  menuDeleteFolder.style.display = 'none';
-  menuRenameFile.style.display = selectedIndices.size === 1 ? 'block' : 'none'; // 複数選択時はリネーム不可
-  menuDeleteFile.style.display = 'block';
-
-  contextMenu.style.display = 'block';
-  const rect = contextMenu.getBoundingClientRect();
-  let x = e.clientX;
-  let y = e.clientY;
-  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
-  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
-  
-  contextMenu.style.left = `${x}px`;
-  contextMenu.style.top = `${y}px`;
-}
-
-thumbnailGrid.addEventListener('click', (e) => handleItemClick(e, true));
-thumbnailGrid.addEventListener('dblclick', (e) => handleItemDblClick(e, true));
-thumbnailGrid.addEventListener('dragstart', (e) => handleItemDragStart(e, true));
-thumbnailGrid.addEventListener('contextmenu', (e) => handleItemContextMenu(e, true));
-
-fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
-fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
-fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
-
-// --- UIリサイズ機能 ---
-// ペインの折りたたみ状態を管理するフラグ
-const paneState = {
-  left: { isCollapsed: false, preCollapseValue: '', cssVar: '--left-width', storageKey: 'leftWidth', defaultSize: '250px', openIcon: ICONS.CHEVRON_LEFT, closeIcon: ICONS.CHEVRON_RIGHT },
-  right: { isCollapsed: false, preCollapseValue: '', cssVar: '--right-width', storageKey: 'rightWidth', defaultSize: '250px', openIcon: ICONS.CHEVRON_RIGHT, closeIcon: ICONS.CHEVRON_LEFT },
-  center: { isCollapsed: false, preCollapseValue: '', cssVar: '--top-height', storageKey: 'topHeight', defaultSize: '250px', openIcon: ICONS.CHEVRON_UP, closeIcon: ICONS.CHEVRON_DOWN }
-};
-
-// 各リザイザー（ペイン間の境界線）のドラッグ状態を管理するフラグ
-const resizingState = { left: false, right: false, center: false };
-
-/**
- * リサイズ境界線を設定し、ドラッグ操作とトグルボタンを初期化する
- * @param {HTMLElement} resizer - 境界線のDOM要素
- * @param {string} type - 'left', 'right', 'center'
- * @param {string} cursor - マウスカーソルの種類
- */
-function setupResizer(resizer, type, cursor) {
-  if (!resizer) return;
-  resizer.addEventListener('mousedown', () => {
-    resizingState[type] = true;
-    resizer.classList.add('resizing');
-    document.body.style.cursor = cursor;
-    if (paneState[type].isCollapsed) {
-      paneState[type].isCollapsed = false;
-      const btn = resizer.querySelector('.resizer-toggle');
-      if (btn) btn.innerHTML = paneState[type].openIcon;
-    }
-  });
-  createResizerToggle(resizer, type);
-}
-
-function createResizerToggle(resizer, type) {
-  resizer.style.position = 'relative';
-
-  const btn = document.createElement('div');
-  btn.className = 'resizer-toggle';
-  btn.style.cssText = `
-    position: absolute; display: flex; justify-content: center; align-items: center;
-    background-color: #333; border: 1px solid #555; border-radius: 2px; cursor: pointer;
-    z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  `;
-  
-  btn.addEventListener('mouseenter', () => btn.style.backgroundColor = '#444');
-  btn.addEventListener('mouseleave', () => btn.style.backgroundColor = '#333');
-
-  const isVertical = type === 'center';
-  btn.style.width = isVertical ? '30px' : '14px';
-  btn.style.height = isVertical ? '14px' : '30px';
-  
-  const state = paneState[type];
-  btn.innerHTML = state.openIcon;
-  
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (state.isCollapsed) {
-      document.body.style.setProperty(state.cssVar, state.preCollapseValue || state.defaultSize);
-      btn.innerHTML = state.openIcon;
-      state.isCollapsed = false;
-      localStorage.setItem(state.storageKey, state.preCollapseValue || state.defaultSize);
-    } else {
-      state.preCollapseValue = document.body.style.getPropertyValue(state.cssVar) || getComputedStyle(document.body).getPropertyValue(state.cssVar).trim();
-      if (!state.preCollapseValue || state.preCollapseValue === '0px') state.preCollapseValue = state.defaultSize;
-      document.body.style.setProperty(state.cssVar, '0px');
-      btn.innerHTML = state.closeIcon;
-      state.isCollapsed = true;
-      localStorage.setItem(state.storageKey, '0px');
-    }
-  });
-
-  // ドラッグ操作と干渉しないようイベント伝播を防止
-  btn.addEventListener('mousedown', (e) => e.stopPropagation());
-  
-  resizer.appendChild(btn);
-}
-
-setupResizer(resizerLeft, 'left', 'col-resize');
-setupResizer(resizerRight, 'right', 'col-resize');
-setupResizer(resizerCenter, 'center', 'row-resize');
-
-let resizerRafId = null;
-window.addEventListener('mousemove', (e) => {
-  // いずれかのリサイズがアクティブな場合、マウスの動きに合わせてペインの幅/高さを更新
-  if (!resizingState.left && !resizingState.right && !resizingState.center) return;
-
-  if (resizerRafId) cancelAnimationFrame(resizerRafId);
-  resizerRafId = requestAnimationFrame(() => {
-    if (resizingState.left) {
-      const newWidth = Math.max(100, Math.min(e.clientX, window.innerWidth - 400));
-      document.body.style.setProperty('--left-width', `${newWidth}px`);
-    } else if (resizingState.right) {
-      const newWidth = Math.max(150, Math.min(window.innerWidth - e.clientX, window.innerWidth - 400));
-      document.body.style.setProperty('--right-width', `${newWidth}px`);
-    } else if (resizingState.center) {
-      const centerPane = document.getElementById('center-pane');
-      const rect = centerPane.getBoundingClientRect();
-      const newHeight = Math.max(50, Math.min(e.clientY - rect.top, rect.height - 50));
-      document.body.style.setProperty('--top-height', `${newHeight}px`);
-    }
-  });
-});
-
-window.addEventListener('mouseup', () => {
-  // リサイズが終了した（マウスボタンが離された）場合
-  ['left', 'right', 'center'].forEach(type => {
-    if (resizingState[type]) {
-      const state = paneState[type];
-      localStorage.setItem(state.storageKey, document.body.style.getPropertyValue(state.cssVar));
-      resizingState[type] = false;
-      
-      const resizer = type === 'left' ? resizerLeft : (type === 'right' ? resizerRight : resizerCenter);
-      resizer.classList.remove('resizing');
-    }
-  });
-  document.body.style.cursor = 'default';
-});
-
-// --- サムネイルサイズ変更機能 ---
-
-function updateThumbnailSize() {
-  // index.htmlで設定された min="100" max="500" の値をそのままピクセルサイズとして使用
-  const size = parseFloat(thumbnailSizeSlider.value) || 120;
-  document.body.style.setProperty('--thumbnail-size', `${size}px`);
-}
-
-thumbnailSizeSlider.addEventListener('input', updateThumbnailSize);
-
-thumbnailSizeSlider.addEventListener('change', (e) => {
-  localStorage.setItem('thumbnailScale', e.target.value);
-});
-
-// --- ウィンドウサイズ・位置の保存 ---
-let windowStateTimer;
-window.addEventListener('resize', () => {
-  clearTimeout(windowStateTimer);
-  // リサイズ中に連続で保存処理が走らないよう、操作後500ms待機して保存
-  windowStateTimer = setTimeout(async () => {
-    if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
-      const isMax = await window.veloceAPI.isViewerMaximized();
-      localStorage.setItem('mainWinMaximized', isMax);
-      if (!isMax) {
-        localStorage.setItem('mainWinWidth', window.outerWidth);
-        localStorage.setItem('mainWinHeight', window.outerHeight);
-        localStorage.setItem('mainWinX', window.screenX);
-        localStorage.setItem('mainWinY', window.screenY);
-      }
-    }
-  }, 500);
-});
-
-window.addEventListener('beforeunload', () => {
-  // 終了時、最大化されていなければ最終的な位置を確実に保存する
-  if (localStorage.getItem('mainWinMaximized') !== 'true') {
-    localStorage.setItem('mainWinX', window.screenX);
-    localStorage.setItem('mainWinY', window.screenY);
-  }
-});
-
-/**
- * サムネイルのバックグラウンドプリロード処理の状態をリセットする。
- * フォルダ移動時などに呼び出され、プリロードカーソルを先頭に戻す。
- * セッション中のキャッシュ(thumbnailUrls)は維持される。
- */
 function resetThumbnailPreloader() {
-  thumbnailRequestQueue = [];
-  pendingThumbnails.clear();
-  preloadCursor = 0;
+  appState.thumbnailRequestQueue = [];
+  appState.pendingThumbnails.clear();
+  appState.preloadCursor = 0;
 }
 
-/**
- * サムネイル生成の進捗をトースト通知として更新する。
- * 高速なキャッシュ読み込み時にUIが過剰に更新されるのを防ぐため、スロットリングを導入。
- */
 function updateThumbnailToast() {
-  if (thumbnailTotalRequested === 0) return;
+  if (appState.thumbnailTotalRequested === 0) return;
 
   const now = Date.now();
   const THROTTLE_DELAY = 50; // 50msに1回まで更新を許可
 
   // 最後の更新から十分な時間が経過したか、または最後の1件の時のみUIを更新
-  if (now - lastThumbnailToastTime > THROTTLE_DELAY || thumbnailCompleted === thumbnailTotalRequested) {
-    lastThumbnailToastTime = now;
+  if (now - appState.lastThumbnailToastTime > THROTTLE_DELAY || appState.thumbnailCompleted === appState.thumbnailTotalRequested) {
+    appState.lastThumbnailToastTime = now;
 
-    if (thumbnailCompleted < thumbnailTotalRequested) {
-      showToast(`サムネイル作成中 (${thumbnailCompleted}/${thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
+    if (appState.thumbnailCompleted < appState.thumbnailTotalRequested) {
+      window.uiManager.showToast(`サムネイル作成中 (${appState.thumbnailCompleted}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
     } else {
-      showToast(`サムネイル作成完了 (${thumbnailTotalRequested}/${thumbnailTotalRequested})`, 0, 'thumbnail-progress');
-      clearTimeout(thumbnailToastTimeout);
-      thumbnailToastTimeout = setTimeout(() => {
+      window.uiManager.showToast(`サムネイル作成完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
+      clearTimeout(appState.thumbnailToastTimeout);
+      appState.thumbnailToastTimeout = setTimeout(() => {
         const t = document.getElementById('toast-thumbnail-progress');
         if (t) {
           t.classList.remove('show');
           setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
         }
-        thumbnailTotalRequested = 0;
-        thumbnailCompleted = 0;
-        lastThumbnailToastTime = 0;
+        appState.thumbnailTotalRequested = 0;
+        appState.thumbnailCompleted = 0;
+        appState.lastThumbnailToastTime = 0;
       }, 1000);
     }
   }
@@ -959,9 +636,9 @@ function updateThumbnailToast() {
 
 function processThumbnailQueue() {
   // キューに空きがあり、かつタスクが残っている限り、連続でタスクを投入する（whileループ化）
-  while (activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS && thumbnailRequestQueue.length > 0) {
+  while (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS && appState.thumbnailRequestQueue.length > 0) {
     // 見えている画像の中から「一番最初（＝一番上）」にあるものを探す
-    let targetIndex = thumbnailRequestQueue.findIndex(req => req.img.dataset.isVisible === 'true');
+    let targetIndex = appState.thumbnailRequestQueue.findIndex(req => req.img.dataset.isVisible === 'true');
 
     // 見えている画像がキュー内に無い場合は、一番最初（一番古いタスク）から処理してスキップ消化する
     if (targetIndex === -1) {
@@ -969,78 +646,75 @@ function processThumbnailQueue() {
     }
 
     // キューから該当するタスクを抜き出す
-    const req = thumbnailRequestQueue.splice(targetIndex, 1)[0];
+    const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
     const { filePath, requestRenderId, img } = req;
 
     // 既に不要なリクエスト（画面外に出た、またはフォルダ移動した）場合はスキップ
-    if (currentRenderId !== requestRenderId || img.dataset.isVisible !== 'true') {
-      pendingThumbnails.delete(filePath);
+    if (appState.currentRenderId !== requestRenderId || img.dataset.isVisible !== 'true') {
+      appState.pendingThumbnails.delete(filePath);
       continue; // returnではなくcontinueで次のループへ
     }
 
-    activeThumbnailTasks++;
+    appState.activeThumbnailTasks++;
     window.veloceAPI.getThumbnail(filePath).then(url => {
-      activeThumbnailTasks = Math.max(0, activeThumbnailTasks - 1);
-      pendingThumbnails.delete(filePath);
+      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
+      appState.pendingThumbnails.delete(filePath);
 
-      if (currentRenderId !== requestRenderId) {
+      if (appState.currentRenderId !== requestRenderId) {
         processThumbnailQueue();
         return;
       }
 
       if (url) {
-        thumbnailUrls.set(filePath, url);
+        appState.thumbnailUrls.set(filePath, url);
         if (img.dataset.isVisible === 'true') {
           img.src = url;
         }
       } else {
         const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
-        thumbnailUrls.set(filePath, fallbackUrl);
+        appState.thumbnailUrls.set(filePath, fallbackUrl);
         if (img.dataset.isVisible === 'true') img.src = fallbackUrl;
       }
 
-      const fileObj = currentFiles.find(f => f.path === filePath);
+      const fileObj = appState.files.find(f => f.path === filePath);
       if (fileObj && !fileObj.hasThumbnailCache) {
         fileObj.hasThumbnailCache = true;
-        thumbnailCompleted++;
+        appState.thumbnailCompleted++;
         updateThumbnailToast();
       }
 
       // 処理が完了したら、枠が空いたので次の画像を処理する
       processThumbnailQueue();
     }).catch(() => {
-      activeThumbnailTasks = Math.max(0, activeThumbnailTasks - 1);
-      pendingThumbnails.delete(filePath);
+      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
+      appState.pendingThumbnails.delete(filePath);
       processThumbnailQueue();
     });
   }
 }
 
-/**
- * サムネイルの遅延読み込みとメモリ解放のためのIntersectionObserverを初期化する
- */
 function initializeThumbnailObserver() {
     const options = {
-        root: document.getElementById('center-pane'), // 正しいスクロールコンテナを指定
+        root: document.getElementById('center-bottom'), // 正しいスクロールコンテナを指定
         rootMargin: '400px 0px 400px 0px', // 少し広めに範囲を取る
     };
-    thumbnailObserver = new IntersectionObserver((entries) => {
+    appState.thumbnailObserver = new IntersectionObserver((entries) => {
         for (const entry of entries) {
             const img = entry.target;
             const filePath = img.dataset.filepath;
             if (entry.isIntersecting) {
                 img.dataset.isVisible = 'true';
                 if (filePath && !img.hasAttribute('src')) {
-                    if (thumbnailUrls.has(filePath)) {
+                    if (appState.thumbnailUrls.has(filePath)) {
                         // すでにキャッシュがあればそれを使う
-                        img.src = thumbnailUrls.get(filePath);
-                    } else if (!pendingThumbnails.has(filePath)) {
+                        img.src = appState.thumbnailUrls.get(filePath);
+                    } else if (!appState.pendingThumbnails.has(filePath)) {
                         // プレースホルダーを入れて二重リクエストを防止
                         img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
                         
-                        const requestRenderId = currentRenderId;
-                        pendingThumbnails.add(filePath);
-                        thumbnailRequestQueue.push({ filePath, requestRenderId, img });
+                        const requestRenderId = appState.currentRenderId;
+                        appState.pendingThumbnails.add(filePath);
+                        appState.thumbnailRequestQueue.push({ filePath, requestRenderId, img });
                         processThumbnailQueue();
                     }
                 }
@@ -1053,50 +727,42 @@ function initializeThumbnailObserver() {
     }, options);
 }
 
-/**
- * ブラウザのアイドル時間を利用してバックグラウンドでサムネイルを事前生成する
- * @param {IdleDeadline} deadline 
- */
 function processIdleThumbnails(deadline) {
-  // スクロール操作などメインスレッドの負荷（IntersectionObserverの邪魔）を避けるため、
-  // 同時にリクエストするサムネイル数を制限する
-  if (pendingThumbnails.size > 8) {
+  if (appState.pendingThumbnails.size > 8) {
     requestIdleCallback(processIdleThumbnails);
     return;
   }
 
   let targetFile = null;
-  while (preloadCursor < filteredFiles.length) {
-    const filePath = filteredFiles[preloadCursor].path;
-    if (!thumbnailUrls.has(filePath) && !pendingThumbnails.has(filePath)) {
+  while (appState.preloadCursor < appState.filteredFiles.length) {
+    const filePath = appState.filteredFiles[appState.preloadCursor].path;
+    if (!appState.thumbnailUrls.has(filePath) && !appState.pendingThumbnails.has(filePath)) {
       targetFile = filePath;
       break;
     }
-    preloadCursor++;
+    appState.preloadCursor++;
   }
 
   if (!targetFile) {
-    isPreloadRunning = false;
+    appState.isPreloadRunning = false;
     return;
   }
 
-  pendingThumbnails.add(targetFile);
+  appState.pendingThumbnails.add(targetFile);
 
   window.veloceAPI.getThumbnail(targetFile).then(url => {
-    pendingThumbnails.delete(targetFile);
+    appState.pendingThumbnails.delete(targetFile);
     
     const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
-    thumbnailUrls.set(targetFile, finalUrl);
+    appState.thumbnailUrls.set(targetFile, finalUrl);
 
-    const fileObj = currentFiles.find(f => f.path === targetFile);
+    const fileObj = appState.files.find(f => f.path === targetFile);
     if (fileObj && !fileObj.hasThumbnailCache) {
-        fileObj.hasThumbnailCache = true; // 次回以降のカウント重複を防ぐためフラグを立てる
-        thumbnailCompleted++;
+        fileObj.hasThumbnailCache = true; 
+        appState.thumbnailCompleted++;
         updateThumbnailToast();
     }
 
-    // DOM上に該当画像のimg要素があり、画面内に入っているのにsrcが空の場合は即座に反映する
-    // (スクロールとプリロードのタイミングが被った場合のフェイルセーフ)
     const escapedPath = CSS.escape(targetFile);
     const img = document.querySelector(`.thumbnail-item[data-filepath="${escapedPath}"]`);
     if (img && img.dataset.isVisible === 'true' && !img.hasAttribute('src')) {
@@ -1104,13 +770,9 @@ function processIdleThumbnails(deadline) {
     }
   });
 
-  // ループを継続
   requestIdleCallback(processIdleThumbnails);
 }
 
-/**
- * プロンプト情報（メタデータ）の表示をクリアして非表示にする。
- */
 function clearMetadataUI() {
   const container = document.getElementById('metadata-container');
   if (container) {
@@ -1119,371 +781,21 @@ function clearMetadataUI() {
   }
 }
 
-/**
- * 選択状態のUI（クラス）を一括更新する。
- * querySelectorAllを使用せず、直接子要素を参照してパフォーマンスを劇的に向上させる。
- */
-function updateSelectionUI() {
-  // 全要素をループするのではなく、既に選択されている要素のクラスを外す
-  const currentSelectedRows = fileListBody.querySelectorAll('.selected');
-  for (let i = 0; i < currentSelectedRows.length; i++) currentSelectedRows[i].classList.remove('selected');
-  
-  const currentSelectedThumbs = thumbnailGrid.querySelectorAll('.selected');
-  for (let i = 0; i < currentSelectedThumbs.length; i++) currentSelectedThumbs[i].classList.remove('selected');
-
-  // 新たに選択された要素のみにクラスを付与する
-  const rows = fileListBody.children;
-  const thumbs = thumbnailGrid.children;
-  for (const i of selectedIndices) {
-    if (rows[i]) rows[i].classList.add('selected');
-    if (thumbs[i]) thumbs[i].classList.add('selected');
-  }
-}
-
-// AI等による連続したファイル生成に追従するための差分更新ロジック
-let autoRefreshTimer = null;
 function scheduleRefresh() {
-  clearTimeout(autoRefreshTimer);
-  autoRefreshTimer = setTimeout(() => {
-    preloadCursor = 0;
-    applySearchAndSort();
+  clearTimeout(appState.searchTimeout); 
+  appState.searchTimeout = setTimeout(() => {
+    appState.preloadCursor = 0;
+    appState.applyFiltersAndSort();
 
-    renderAll();
+    window.uiManager.renderAll();
     loadAllMetadataInBackground();
-    updateSelectionUI();
-    if (selectedIndex === -1) {
+    window.uiManager.updateSelectionUI();
+    if (appState.selectedIndex === -1) {
       clearMetadataUI();
     }
-  }, 100); // 連続するファイル更新イベントを100msにまとめる
+  }, 100); 
 }
 
-/**
- * 現在表示しているディレクトリのファイルリストを再読み込みし、UIを更新する。
- * ファイルの削除や追加があった場合に呼び出される。
- */
-async function refreshFileList() {
-  if (!currentDirectory || !window.veloceAPI.loadDirectory) return;
-  
-  // メインプロセスにディレクトリの再読み込みを要求
-  const result = await window.veloceAPI.loadDirectory(currentDirectory);
-  if (!result) return;
-
-  currentFiles = result.imageFiles || [];  
-  resetThumbnailPreloader();
-
-  applySearchAndSort();
-  renderAll();
-  loadAllMetadataInBackground();
-  
-  // 選択状態のUIを復元、またはリセット
-  updateSelectionUI();
-  if (selectedIndex > -1) {
-    // selectImageを使うと複数選択が解除されるため、個別にメタデータのみ更新する
-    const requestId = ++currentMetaRequestId;
-    const meta = await window.veloceAPI.parseMetadata(filteredFiles[selectedIndex].path);
-    if (currentMetaRequestId === requestId) renderMetadata(meta);
-  } else {
-    // 完全に選択が失われた場合（フォルダが空になった場合など）
-    clearMetadataUI();
-  }
-}
-
-/**
- * アプリケーションの初期化処理。DOMの読み込み完了後に実行される。
- */
-window.addEventListener('DOMContentLoaded', async () => {
-  // localStorageから前回のウィンドウサイズ・位置・最大化状態を復元
-  const savedWinW = localStorage.getItem('mainWinWidth');
-  const savedWinH = localStorage.getItem('mainWinHeight');
-  const savedWinX = localStorage.getItem('mainWinX');
-  const savedWinY = localStorage.getItem('mainWinY');
-  const savedWinMax = localStorage.getItem('mainWinMaximized');
-
-  if (savedWinW && savedWinH && window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
-    window.veloceAPI.resizeViewerWindow(parseInt(savedWinW, 10), parseInt(savedWinH, 10));
-  }
-  if (savedWinX && savedWinY && window.veloceAPI && window.veloceAPI.moveViewerWindow) {
-    window.veloceAPI.moveViewerWindow(parseInt(savedWinX, 10), parseInt(savedWinY, 10));
-  }
-  if (savedWinMax === 'true' && window.veloceAPI && window.veloceAPI.isViewerMaximized && window.veloceAPI.maximizeViewer) {
-    window.veloceAPI.isViewerMaximized().then(isMax => {
-      if (!isMax) window.veloceAPI.maximizeViewer();
-    });
-  }
-
-  initializeThumbnailObserver();
-
-  // localStorageから前回のペインサイズを復元
-  ['left', 'right', 'center'].forEach(type => {
-    const state = paneState[type];
-    const savedVal = localStorage.getItem(state.storageKey);
-    if (savedVal) {
-      document.body.style.setProperty(state.cssVar, savedVal);
-      if (savedVal === '0px') {
-        state.isCollapsed = true;
-        const resizer = type === 'left' ? resizerLeft : (type === 'right' ? resizerRight : resizerCenter);
-        const btn = resizer.querySelector('.resizer-toggle');
-        if (btn) btn.innerHTML = state.closeIcon;
-      }
-    }
-  });
-
-  // localStorageから前回のサムネイルサイズ(100〜500)を復元
-  const savedThumbScale = localStorage.getItem('thumbnailScale');
-  if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {
-    // 古いバージョン(0〜100)の値でない場合のみ復元する
-    thumbnailSizeSlider.value = savedThumbScale;
-  } else {
-    thumbnailSizeSlider.value = 120; // 初期値（120px）
-  }
-  updateThumbnailSize();
-
-  // 検索バーの初期化
-  const searchBar = document.getElementById('search-bar');
-  if (searchBar) {
-    searchBar.addEventListener('input', (e) => {
-      // 300msのデバウンスを設けて、入力が止まってから検索を実行
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => {
-        searchQuery = e.target.value;
-        // scheduleRefreshはUI更新用に100msのデバウンスなので、検索はこちらで長めに待つ
-        scheduleRefresh();
-      }, 300);
-    });
-  }
-
-  // 検索クリアボタンの初期化
-  const searchClearBtn = document.getElementById('search-clear-btn');
-  if (searchClearBtn) {
-    searchClearBtn.innerHTML = ICONS.ERASER;
-    searchClearBtn.addEventListener('click', () => {
-      if (searchBar) {
-        searchBar.value = '';
-        searchQuery = '';
-        scheduleRefresh();
-        applyIconGlowEffect(searchClearBtn);
-      }
-    });
-  }
-
-  // --- サムネイルキャッシュコントロールの初期化 ---
-  const openCacheBtn = document.getElementById('open-cache-btn');
-  if (openCacheBtn) {
-    openCacheBtn.addEventListener('click', () => {
-      applyIconGlowEffect(openCacheBtn);
-      window.veloceAPI.openThumbnailCache();
-    });
-  }
-
-  const clearCacheBtn = document.getElementById('clear-cache-btn');
-  if (clearCacheBtn) {
-    clearCacheBtn.addEventListener('click', async () => {
-      applyIconGlowEffect(clearCacheBtn);
-      const isConfirmed = await showCustomConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
-      if (isConfirmed) {
-        showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
-        try {
-          await window.veloceAPI.clearThumbnailCache();
-          thumbnailUrls.clear(); // フロントエンドのメモリキャッシュもクリア
-          resetThumbnailPreloader(); // プリロード状態もリセット
-          await refreshFileList(); // ファイルリストを再読み込みしてサムネイルを再生成
-          showToast('サムネイルキャッシュを削除しました。', 3000, 'cache-clear', 'success');
-        } catch (err) {
-          console.error("Failed to clear thumbnail cache:", err);
-          showToast('キャッシュの削除に失敗しました。', 3000, 'cache-clear', 'error');
-        }
-      }
-    });
-  }
-
-  // ソート順の復元
-  const savedSort = localStorage.getItem('currentSort');
-  if (savedSort) {
-    try {
-      currentSort = JSON.parse(savedSort);
-    } catch (e) {
-      console.error('Failed to parse saved sort:', e);
-    }
-  }
-
-  // ファイル一覧のヘッダーを初期化（ソート記号付き）
-  updateSortIndicators();
-
-  // 初期状態では右ペインのすべての要素を非表示にする
-  if (promptText && promptText.parentElement) {
-    Array.from(promptText.parentElement.children).forEach(child => {
-      child.style.display = 'none';
-    });
-  }
-
-  // --- ディレクトリツリーの初期化を先に実行（UIを即座に表示させるため） ---
-  await refreshTree();
-
-  // --- ツリー構築後にディレクトリの読み込みを行う ---
-  if (window.veloceAPI.loadDirectory) {
-    // localStorageから前回のディレクトリを復元、なければ 'PC'（ホームディレクトリ）
-    const savedDirectory = localStorage.getItem('currentDirectory') || 'PC';
-    const result = await window.veloceAPI.loadDirectory(savedDirectory);
-    if (result) {
-      currentDirectory = result.path;
-      localStorage.setItem('currentDirectory', currentDirectory); // 有効なパスを保存
-      currentFiles = result.imageFiles || [];
-      resetThumbnailPreloader();
-      applySearchAndSort();
-      renderAll();
-      loadAllMetadataInBackground(); // バックグラウンドでメタデータ読み込みを開始
-      clearMetadataUI();
-
-      // ツリーを保存されていたディレクトリの階層まで自動展開する
-      await expandTreeToPath(currentDirectory);
-    }
-  }
-
-  if (window.veloceAPI.onFileChanged) {
-    window.veloceAPI.onFileChanged((newFile) => {
-      const index = currentFiles.findIndex(f => f.path === newFile.path);
-      if (index > -1) {
-        const oldFile = currentFiles[index];
-        if (oldFile.size !== newFile.size || oldFile.mtime !== newFile.mtime) {
-            // ファイルが更新されたので、古いサムネイルキャッシュを破棄する
-            thumbnailUrls.delete(newFile.path);
-          currentFiles[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0 };
-          scheduleRefresh();
-        }
-      } else {
-        currentFiles.push(newFile);
-        scheduleRefresh();
-      }
-    });
-  }
-
-  if (window.veloceAPI.onFileRemoved) {
-    window.veloceAPI.onFileRemoved((path) => {
-      const index = currentFiles.findIndex(f => f.path === path);
-      if (index > -1) {
-        currentFiles.splice(index, 1);
-        scheduleRefresh();
-      }
-    });
-  }
-
-  if (window.veloceAPI.onDirectoryChanged) {
-    window.veloceAPI.onDirectoryChanged(async () => {
-      // ツリーの表示を最新状態に更新
-      await refreshTree();
-    });
-  }
-
-  // バックグラウンドでのサムネイル事前生成ループを開始
-  if (!isPreloadRunning) {
-    isPreloadRunning = true;
-    requestIdleCallback(processIdleThumbnails);
-  }
-});
-
-/**
- * フォルダツリー全体を再構築し、現在のディレクトリを展開する。
- */
-async function refreshTree() {
-  if (!window.veloceAPI.getDrives) return;
-
-  const scrollTop = dirTree.scrollTop;
-  const scrollLeft = dirTree.scrollLeft;
-
-  // ツリーを再構築する前に「現在展開されている（開いている）フォルダのパス」をすべて記憶
-  const expandedPaths = Array.from(dirTree.querySelectorAll('.tree-children.expanded'))
-    .map(ul => ul.previousElementSibling?.dataset?.path)
-    .filter(Boolean);
-
-  // バックグラウンド（メモリ上）で新しいツリーを構築し、チラつきを完全に防止する
-  const tempContainer = document.createElement('div');
-  const ul = document.createElement('ul');
-  ul.className = 'tree-root';
-  const drives = await window.veloceAPI.getDrives();
-  for (const drive of drives) {
-    ul.appendChild(createTreeNode({ name: drive, path: drive }, true));
-  }
-  tempContainer.appendChild(ul);
-
-  // 記憶しておいたパスを浅い階層から順に展開する
-  expandedPaths.sort((a, b) => a.length - b.length);
-  for (const p of expandedPaths) {
-    await expandTreeToPath(p, true, tempContainer);
-    const escapedPath = CSS.escape(p);
-    const itemDiv = tempContainer.querySelector(`.tree-item[data-path="${escapedPath}"]`);
-    if (itemDiv && itemDiv.expandNode) {
-      await itemDiv.expandNode();
-    }
-  }
-
-  if (currentDirectory) {
-    // 画面に反映する前に、メモリ上のツリーを展開しきる
-    await expandTreeToPath(currentDirectory, true, tempContainer);
-  }
-
-  // 構築が完全に終わったツリーを一気に画面に反映する
-  dirTree.innerHTML = '';
-  dirTree.appendChild(ul);
-
-  // スクロール位置を正確に復元する
-  dirTree.scrollTop = scrollTop;
-  dirTree.scrollLeft = scrollLeft;
-}
-
-/**
- * 指定されたパスまでツリーをルートから再帰的に展開し、選択状態にする
- * @param {string} targetPath 展開する対象のディレクトリパス
- * @param {boolean} disableScroll スクロールを無効にするかどうか
- * @param {HTMLElement} rootElement 検索対象のルート要素（デフォルトはdocument）
- */
-async function expandTreeToPath(targetPath, disableScroll = false, rootElement = document) {
-  if (!targetPath || targetPath === 'PC') return;
-
-  const separator = '\\';
-  const parts = targetPath.split(separator).filter(p => p !== '');
-  let pathsToExpand = [];
-  
-  // パスを階層ごとの文字列に分解する (例: "C:\A\B" -> ["C:\", "C:\A", "C:\A\B"])
-  let current = parts[0] + separator;
-  pathsToExpand.push(current);
-  for(let i = 1; i < parts.length; i++) {
-      current += parts[i];
-      pathsToExpand.push(current);
-      current += separator;
-  }
-
-  // ルートから順番にDOM要素を探して展開していく
-  for (let i = 0; i < pathsToExpand.length; i++) {
-      const p = pathsToExpand[i];
-      // 属性セレクタに利用するため、パスのバックスラッシュ等をエスケープ
-      const escapedPath = CSS.escape(p);
-      const itemDiv = rootElement.querySelector(`.tree-item[data-path="${escapedPath}"]`);
-      
-      if (itemDiv) {
-          if (i === pathsToExpand.length - 1) {
-              // 最後の目的のフォルダを選択状態にする
-              const activeItem = rootElement.querySelector('.tree-item.selected');
-              if (activeItem) activeItem.classList.remove('selected');
-              itemDiv.classList.add('selected');
-              if (!disableScroll) {
-                  itemDiv.scrollIntoView({ block: 'center', behavior: 'smooth' });
-              }
-          } else {
-              // 途中の階層なら、そのフォルダを展開（サブフォルダをロード）する
-              if (itemDiv.expandNode) await itemDiv.expandNode();
-          }
-      } else {
-          break; // パスが見つからない（削除された等）場合は展開を打ち切る
-      }
-  }
-}
-
-/**
- * ファイルツリーの各ノード（フォルダ）に対応するDOM要素を再帰的に生成する。
- * @param {object} folder - フォルダ情報（{ name, path }）。
- * @param {boolean} [isRoot=false] - このノードがルートノードかどうか。
- * @returns {HTMLLIElement} 生成されたツリーノードのli要素。
- */
 function createTreeNode(folder, isRoot = false) {
   const li = document.createElement('li');
   li.className = 'tree-node';
@@ -1570,27 +882,26 @@ function createTreeNode(folder, isRoot = false) {
     if (e.target === toggleIcon) return; // トグルクリック時は全体の選択・ロード処理をスキップ
 
     // 他のペインの選択を解除
-    selectedIndices.clear();    selectedIndex = -1;
-    updateSelectionUI();
+    appState.selection.clear();    appState.selectedIndex = -1;
+    window.uiManager.updateSelectionUI();
     
     if (window.veloceAPI.loadDirectory) {
       // クリックされたフォルダの画像一覧を中央ペインに表示
       const result = await window.veloceAPI.loadDirectory(folder.path);
       if (result) {
-        currentDirectory = result.path;
-        localStorage.setItem('currentDirectory', currentDirectory); // フォルダ移動時にパスを保存
-        currentFiles = result.imageFiles || [];
+        appState.currentDirectory = result.path;
+        localStorage.setItem('currentDirectory', appState.currentDirectory); // フォルダ移動時にパスを保存
+        appState.files = result.imageFiles || [];
         resetThumbnailPreloader();
-        applySearchAndSort();
-        renderAll();
-        loadAllMetadataInBackground(); // ディレクトリ変更後もバックグラウンド読み込み
+        appState.applyFiltersAndSort();
+        window.uiManager.renderAll();
+        loadAllMetadataInBackground(); 
         clearMetadataUI();
       }
     }
 
     const wasSelected = itemDiv.classList.contains('selected');
 
-    // フォルダアイコン自体、または選択済みの項目を再度クリックした場合は開閉状態をトグルする
     if (e.target === icon || wasSelected) {
       const isExpanded = childrenUl.classList.contains('expanded');
       if (isExpanded) {
@@ -1599,17 +910,14 @@ function createTreeNode(folder, isRoot = false) {
         await expandNode();
       }
     } else {
-      // 別の未選択項目をクリックした場合は、必ず展開する
       await expandNode();
     }
     
-    // クリックされた項目を選択状態にし、他の項目は非選択にする
     const activeItem = document.querySelector('.tree-item.selected');
     if (activeItem) activeItem.classList.remove('selected');
     itemDiv.classList.add('selected');
   });
 
-  // --- コンテキストメニュー (右クリック) の処理 ---
   itemDiv.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1631,7 +939,6 @@ function createTreeNode(folder, isRoot = false) {
     const rect = contextMenu.getBoundingClientRect();
     let x = e.clientX;
     let y = e.clientY;
-    // メニューが画面外にはみ出る場合は位置を内側にずらす
     if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
     if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
     
@@ -1639,22 +946,19 @@ function createTreeNode(folder, isRoot = false) {
     contextMenu.style.top = `${y}px`;
   });
 
-  // --- ドラッグ＆ドロップ (ドロップ先) の処理 ---
   itemDiv.addEventListener('dragenter', (e) => {
     e.preventDefault();
     itemDiv.style.backgroundColor = 'rgba(58, 122, 254, 0.3)'; // ホバー時のハイライト
   });
 
   itemDiv.addEventListener('dragover', (e) => {
-    e.preventDefault(); // ドロップを許可するために必要
+    e.preventDefault(); 
     
-    // ドライブレターが同じか判定（Windows想定。その他は常に'/'）
     let actionStr = 'コピー'; // 外部からのドロップのデフォルト
     if (dragState.paths.length > 0) {
       const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
       actionStr = getRoot(dragState.paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
     }
-    // ブラウザの仕様に準拠した dropEffect を設定（copyMoveは無効な値のため除外）
     e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
 
     const folderName = isRoot ? folder.path : folder.name;
@@ -1662,11 +966,10 @@ function createTreeNode(folder, isRoot = false) {
     dragTooltip.textContent = `${countStr}「${folderName}」へ${actionStr}`;
     dragTooltip.style.display = 'block';
     dragTooltip.style.left = (e.clientX + 15) + 'px';
-    dragTooltip.style.top = (e.clientY + 15) + 'px'; // ゴースト画像を消すため、見やすい右下の位置に戻す
+    dragTooltip.style.top = (e.clientY + 15) + 'px'; 
   });
 
   itemDiv.addEventListener('dragleave', (e) => {
-    // 子要素に乗った際の色抜けを防ぐ
     if (!itemDiv.contains(e.relatedTarget)) {
       itemDiv.style.backgroundColor = '';
       dragTooltip.style.display = 'none';
@@ -1687,10 +990,8 @@ function createTreeNode(folder, isRoot = false) {
         actionStr = getRoot(paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
       }
 
-      showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
+      window.uiManager.showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
 
-      // ブラウザのドラッグ終了処理がフリーズするバグを完全に防ぐため、
-      // ファイルの移動自体はすぐに行うが、UIの更新はドラッグ終了イベントまで待機する
       setTimeout(async () => {
         let successCount = 0;
         for (const p of paths) {
@@ -1700,14 +1001,14 @@ function createTreeNode(folder, isRoot = false) {
           }
         }
         if (successCount > 0) {
-          showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
+          window.uiManager.showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
           if (dragState.isAppDragging) {
-            dragState.pendingRefresh = true; // アプリ内ドラッグの場合は dragend で更新する
+            dragState.pendingRefresh = true; 
           } else {
-            await refreshFileList(); // 外部からのドロップの場合はすぐに更新する
+            await refreshFileList(); 
           }
         } else {
-          showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
+          window.uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
         }
       }, 10);
     }
@@ -1716,12 +1017,6 @@ function createTreeNode(folder, isRoot = false) {
   return li;
 }
 
-/**
- * ドラッグ＆ドロップイベントからファイルパスの配列を抽出する。
- * アプリ内ドラッグの場合は状態変数から、外部からのドロップの場合はdataTransferから取得・サニタイズする。
- * @param {DragEvent} e - ドラッグイベントオブジェクト
- * @returns {string[]} 抽出されたファイルパスの配列
- */
 function getPathsFromDragEvent(e) {
   if (dragState.paths && dragState.paths.length > 0) {
     return [...dragState.paths];
@@ -1738,9 +1033,7 @@ function getPathsFromDragEvent(e) {
   
   const sourcePath = e.dataTransfer.getData('text/plain');
   if (sourcePath) {
-    // ブラウザによって画像URLがセットされた場合のサニタイズ (file:///C:/... 等)
     let cleanPath = decodeURIComponent(sourcePath).trim();
-    // file:/// や file:\ など、あらゆる形式のファイルスキームを確実に除去する
     cleanPath = cleanPath.replace(/^file:(?:\/|\\)*/i, '');
     if (!cleanPath.match(/^[A-Za-z]:/)) cleanPath = '/' + cleanPath;
     paths.push(cleanPath);
@@ -1748,7 +1041,6 @@ function getPathsFromDragEvent(e) {
   return paths;
 }
 
-// --- ソート機能 ---
 const TABLE_HEADERS = {
   name: '名前',
   ext: '拡張子',
@@ -1762,9 +1054,8 @@ function updateSortIndicators() {
   document.querySelectorAll('th[data-sort]').forEach(th => {
     const key = th.dataset.sort;
     if (TABLE_HEADERS[key]) {
-      if (currentSort.key === key) {
-        // ソート対象の列に昇順/降順のアイコンを追加する
-        th.innerHTML = TABLE_HEADERS[key] + (currentSort.asc ? ICONS.SORT_ASC : ICONS.SORT_DESC);
+      if (appState.sortConfig.key === key) {
+        th.innerHTML = TABLE_HEADERS[key] + (appState.sortConfig.asc ? ICONS.SORT_ASC : ICONS.SORT_DESC);
       } else {
         th.textContent = TABLE_HEADERS[key];
       }
@@ -1772,192 +1063,10 @@ function updateSortIndicators() {
   });
 }
 
-document.querySelectorAll('th').forEach(th => {
-  th.addEventListener('click', () => {
-	const key = th.dataset.sort;
-	if (currentSort.key === key) {
-	  currentSort.asc = !currentSort.asc;
-	} else {
-	  currentSort.key = key;
-	  currentSort.asc = true;
-	}
-	localStorage.setItem('currentSort', JSON.stringify(currentSort));
-	updateSortIndicators();
-	applySearchAndSort();
-	renderAll();
-  });
-});
-
-/**
- * 検索クエリで currentFiles をフィルタリングし、ソート設定に基づいて並び替える。
- */
-function applySearchAndSort() {
-  // ソート後も選択状態を維持するためにパスを記録
-  const selectedPath = selectedIndex > -1 && filteredFiles[selectedIndex] ? filteredFiles[selectedIndex].path : null;
-  const selectedPaths = new Set(Array.from(selectedIndices).map(i => filteredFiles[i] ? filteredFiles[i].path : null).filter(Boolean));
-
-  let files = currentFiles;
-
-  if (searchQuery.trim() !== '') {
-    const terms = searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t);
-    
-    files = files.filter(f => {
-      const charPromptsText = f.charPrompts ? JSON.stringify(f.charPrompts) : '';
-      const textToSearch = [f.name, f.prompt, f.negativePrompt, f.source, charPromptsText].filter(Boolean).join(' ').toLowerCase();
-      return terms.every(term => textToSearch.includes(term));
-    });
-  }
-
-  files.sort((a, b) => {
-	let valA = a[currentSort.key] !== undefined ? a[currentSort.key] : 0;
-	let valB = b[currentSort.key] !== undefined ? b[currentSort.key] : 0;
-    if (typeof valA === 'string') valA = valA.toLowerCase();
-    if (typeof valB === 'string') valB = valB.toLowerCase();
-	if (valA < valB) return currentSort.asc ? -1 : 1;
-	if (valA > valB) return currentSort.asc ? 1 : -1;
-	return 0;
-  });
-
-  filteredFiles = files;
-
-  selectedIndices.clear();
-  selectedIndex = -1;
-  filteredFiles.forEach((f, i) => {
-    if (selectedPaths.has(f.path)) selectedIndices.add(i);
-    if (f.path === selectedPath) selectedIndex = i;
-  });
-
-  if (window.veloceAPI && window.veloceAPI.syncImagePaths) {
-    const sortedPaths = filteredFiles.map(f => f.path);
-    window.veloceAPI.syncImagePaths(sortedPaths);
-  }
-}
-
-// --- レンダリング関連 ---
-
-/**
- * テーブルとグリッドの両方を再描画する。
- * 数千枚の画像がある場合でもUIがフリーズしないよう、チャンク分割して非同期に描画する。
- */
-async function renderAll() {
-  const renderId = ++currentRenderId;
-
-  // 既存の画像の監視をすべて停止
-  if (thumbnailObserver) {
-      thumbnailObserver.disconnect();
-  }
-
-  // 本当に新規作成が必要なサムネイルの枚数を計算
-  const cachedCount = filteredFiles.filter(f => thumbnailUrls.has(f.path) || f.hasThumbnailCache).length;
-  thumbnailTotalRequested = filteredFiles.length - cachedCount;
-  thumbnailCompleted = 0;
-  // 初期進捗の反映
-  if (thumbnailTotalRequested > 0 && thumbnailCompleted < thumbnailTotalRequested) {
-    updateThumbnailToast();
-  }
-
-  // Clear existing content
-  fileListBody.innerHTML = '';
-  thumbnailGrid.innerHTML = '';
-
-  // 画面サイズ変更時にサムネイルや余白が間延びしないようレイアウトを調整
-  thumbnailGrid.style.display = 'flex';
-  thumbnailGrid.style.flexWrap = 'wrap';
-  thumbnailGrid.style.gap = '8px';
-  thumbnailGrid.style.justifyContent = 'flex-start';
-  thumbnailGrid.style.alignContent = 'flex-start';
-
-  // ファイル一覧とサムネイルのコンテナを取得
-  const fileListContainer = document.getElementById('center-top');
-
-  // コンテンツの再描画後、各ペインのスクロール位置を先頭に戻す
-  if (fileListContainer) fileListContainer.scrollTop = 0;
-  if (thumbnailGrid) thumbnailGrid.scrollTop = 0;
-
-  if (filteredFiles.length === 0) {
-    const emptyMessage = document.createElement('div');
-    emptyMessage.style.width = '100%';
-    emptyMessage.style.textAlign = 'center';
-    emptyMessage.style.color = '#888';
-    emptyMessage.style.marginTop = '40px';
-    emptyMessage.textContent = '表示対象の画像がありません';
-    thumbnailGrid.appendChild(emptyMessage);
-  }
-
-  const CHUNK_SIZE = 100; // 一度に描画するDOMの数
-
-  for (let i = 0; i < filteredFiles.length; i += CHUNK_SIZE) {
-    // 別のフォルダが選択されるなどして新しい描画リクエストが来たら、現在の描画ループを中断する
-    if (renderId !== currentRenderId) return;
-
-    const chunk = filteredFiles.slice(i, i + CHUNK_SIZE);
-    const tableFragment = document.createDocumentFragment();
-    const gridFragment = document.createDocumentFragment();
-
-    chunk.forEach((file, chunkIndex) => {
-      const index = i + chunkIndex;
-      const isSelected = selectedIndices.has(index);
-
-      // --- テーブル行の作成 ---
-      const tr = document.createElement('tr');
-      if (isSelected) tr.classList.add('selected');
-      tr.dataset.index = index;
-      tr.innerHTML = `
-        <td>${file.name}</td>
-        <td>${file.ext}</td>
-        <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
-        <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
-        <td style="text-align: right;">${file.size ? formatSize(file.size) : '-'}</td>
-        <td>${file.mtime ? formatDate(file.mtime) : '-'}</td>
-      `;
-      
-      tr.draggable = true;
-      tableFragment.appendChild(tr);
-
-      // --- サムネイルの作成 ---
-      const img = document.createElement('img');
-      if (isSelected) img.classList.add('selected');
-      img.decoding = "async";
-      img.dataset.filepath = file.path;
-      img.dataset.index = index;
-      img.className = 'thumbnail-item';
-      img.style.objectFit = 'contain';
-      img.style.width = 'var(--thumbnail-size)';
-      img.style.height = 'var(--thumbnail-size)';
-      
-      img.draggable = true;
-      gridFragment.appendChild(img);
-      thumbnailObserver.observe(img);
-    });
-
-    fileListBody.appendChild(tableFragment);
-    thumbnailGrid.appendChild(gridFragment);
-
-    // メインスレッドのブロック（UIのフリーズ）を回避するため、次のフレームに処理を譲る
-    await new Promise(resolve => setTimeout(resolve, 0));
-  }
-
-  // バックグラウンドでのサムネイル事前生成を再スタート
-  if (!isPreloadRunning) {
-    isPreloadRunning = true;
-    requestIdleCallback(processIdleThumbnails);
-  }
-}
-
-/**
- * ファイルサイズをバイト単位の文字列にフォーマットする。
- * @param {number} bytes - バイト単位のファイルサイズ。
- * @returns {string} フォーマットされた文字列 (例: "123,456")。
- */
 function formatSize(bytes) {
   return bytes.toLocaleString();
 }
 
-/**
- * タイムスタンプを "yyyy/MM/dd hh:mm:ss" 形式の文字列にフォーマットする。
- * @param {number} timestamp - Unixタイムスタンプ (ミリ秒)。
- * @returns {string} フォーマットされた日時文字列。
- */
 function formatDate(timestamp) {
   const d = new Date(timestamp);
   const yyyy = d.getFullYear();
@@ -1969,129 +1078,43 @@ function formatDate(timestamp) {
   return `${yyyy}/${MM}/${dd} ${hh}:${mm}:${ss}`;
 }
 
-/**
- * 画像のメタデータ（プロンプト、幅、高さなど）をバックグラウンドで一括して非同期に読み込み、UIを更新する。
- * UIの応答性を維持するため、requestIdleCallbackを使用し、処理をチャンクに分割する。
- */
-async function loadAllMetadataInBackground() {
-  if (!window.veloceAPI.getFullMetadataBatch) return;
-
-  // まだメタデータが読み込まれていないファイルだけを抽出
-  const filesToLoad = currentFiles.filter(f => !f.metaLoaded);
-  if (filesToLoad.length === 0) return;
-
-  const batchId = ++currentMetaBatchId;
-  const pathsToLoad = filesToLoad.map(f => f.path);
-  const CHUNK_SIZE = 100; // 一度に処理するファイル数
-
-  const processNextChunk = (chunkIndex) => {
-    if (currentMetaBatchId !== batchId) return;
-
-    if (chunkIndex >= pathsToLoad.length) {
-      showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
-      // メタデータに依存するキーでソート中の場合は再ソートして再描画する
-      if (['width', 'height'].includes(currentSort.key)) {
-        applySearchAndSort();
-        renderAll();
-      }
-      return;
-    }
-
-    requestIdleCallback(async () => {
-      if (currentMetaBatchId !== batchId) return;
-      
-      try {
-        const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
-        showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress', 'info');
-        
-        const metadataList = await window.veloceAPI.getFullMetadataBatch(chunkPaths);
-
-        if (currentMetaBatchId !== batchId) return;
-
-        const pathToIndex = new Map();
-        currentFiles.forEach((f, i) => pathToIndex.set(f.path, i));
-
-        metadataList.forEach(meta => {
-          const fileIndex = pathToIndex.get(meta.path);
-          if (fileIndex !== undefined && fileIndex > -1) {
-            const file = currentFiles[fileIndex];
-            file.width = meta.width;
-            file.height = meta.height;
-            file.prompt = meta.prompt || '';
-            file.negativePrompt = meta.negativePrompt || '';
-            file.source = meta.source || '';
-            if (meta.params && Array.isArray(meta.params.characterPrompts)) {
-                file.charPrompts = meta.params.characterPrompts;
-            }
-            file.metaLoaded = true;
-
-            // UI（テーブル）を更新
-            const tableIndex = filteredFiles.findIndex(f => f.path === meta.path);
-            if (tableIndex !== -1 && fileListBody.children[tableIndex]) {
-              const row = fileListBody.children[tableIndex];
-              row.children[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
-              row.children[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
-            }
-          }
-        });
-
-        // 検索クエリがある場合、新しく読み込んだプロンプトがヒットする可能性があるのでUIを更新
-        if (searchQuery.trim() !== '') {
-            scheduleRefresh();
-        }
-      } catch (error) {
-        console.error('Failed to load metadata in background:', error);
-      }
-
-      processNextChunk(chunkIndex + CHUNK_SIZE);
-    }, { timeout: 2000 }); // 2秒以内にアイドル状態にならなければ強制実行
-  };
-
-  processNextChunk(0);
-}
-
-/**
- * 画像が選択されたときの処理。UIの選択状態を更新し、メタデータを表示する。
- * @param {number} index - 選択された画像の `filteredFiles` 配列内でのインデックス。
- * @param {MouseEvent|KeyboardEvent} event - イベントオブジェクト（CtrlやShiftの判定用）
- */
 async function selectImage(index, event = null) {
   if (event && event.ctrlKey) {
     // Ctrlキーで個別に選択/解除
-    if (selectedIndices.has(index)) {
-      selectedIndices.delete(index);
-      if (selectedIndex === index) {
-        selectedIndex = selectedIndices.size > 0 ? Array.from(selectedIndices).pop() : -1;
+    if (appState.selection.has(index)) {
+      appState.selection.delete(index);
+      if (appState.selectedIndex === index) {
+        appState.selectedIndex = appState.selection.size > 0 ? Array.from(appState.selection).pop() : -1;
       }
     } else {
-      selectedIndices.add(index);
-      selectedIndex = index;
+      appState.selection.add(index);
+      appState.selectedIndex = index;
     }
-  } else if (event && event.shiftKey && selectedIndex !== -1) {
+  } else if (event && event.shiftKey && appState.selectedIndex !== -1) {
     // Shiftキーで範囲選択
-    const start = Math.min(selectedIndex, index);
-    const end = Math.max(selectedIndex, index);
-    selectedIndices.clear();
+    const start = Math.min(appState.selectedIndex, index);
+    const end = Math.max(appState.selectedIndex, index);
+    appState.selection.clear();
     for (let i = start; i <= end; i++) {
-      selectedIndices.add(i);
+      appState.selection.add(i);
     }
-    selectedIndex = index;
+    appState.selectedIndex = index;
   } else {
     // 通常のクリック（単一選択）
-    selectedIndices.clear();
-    selectedIndices.add(index);
-    selectedIndex = index;
+    appState.selection.clear();
+    appState.selection.add(index);
+    appState.selectedIndex = index;
   }
 
-  if (selectedIndex === -1) {
-    updateSelectionUI();
+  if (appState.selectedIndex === -1) {
+    window.uiManager.updateSelectionUI();
     clearMetadataUI();
     return;
   }
 
-  const file = filteredFiles[index];
+  const file = appState.filteredFiles[index];
   
-  updateSelectionUI();
+  window.uiManager.updateSelectionUI();
 
   // 選択した画像やリスト行が画面内に表示されるように自動スクロール
   const items = thumbnailGrid.children;
@@ -2104,33 +1127,24 @@ async function selectImage(index, event = null) {
   }
   const rows = fileListBody.children;
   if (rows[index]) {
-    // テーブルのヘッダーの裏に行が隠れてしまうのを防ぐため、
-    // ヘッダーの高さを取得して行のスクロール時の余白（マージン）として設定する
     const thead = document.querySelector('#file-table thead');
     if (thead) {
       rows[index].style.scrollMarginTop = `${thead.getBoundingClientRect().height}px`;
     }
     
-    // 標準機能で最短距離の表示位置へスクロールさせる
-    // （scroll-margin-top が考慮されるため、自動的にヘッダーを避けてピタッと止まります）
     rows[index].scrollIntoView({ block: 'nearest' });
   }
 
-  // 現在リクエストしているパース処理のIDを発行
-  const requestId = ++currentMetaRequestId;
+  const requestId = ++appState.currentMetaRequestId;
 
   // インスペクターの更新
   const meta = await window.veloceAPI.parseMetadata(file.path);
   
-  // 非同期処理中に別の画像が選択された場合は、古い結果を破棄して上書きを防ぐ
-  if (currentMetaRequestId !== requestId) return;
+  if (appState.currentMetaRequestId !== requestId) return;
 
   renderMetadata(meta);
 }
 
-/**
- * 検索キーワードに一致するテキストをハイライト表示する
- */
 function highlightText(text, terms) {
   if (!text) return '';
   if (!terms || terms.length === 0) return text;
@@ -2143,15 +1157,10 @@ function highlightText(text, terms) {
   return highlighted;
 }
 
-/**
- * メタデータをテキストボックスとして動的に生成・表示する
- * @param {object} meta - 解析されたメタデータ
- */
 function renderMetadata(meta) {
   let container = document.getElementById('metadata-container');
   const rightPane = promptText ? promptText.parentElement : null;
   
-  // AI生成のプロンプト情報があるかどうかを判定
   const hasAiMetadata = meta.prompt || meta.negativePrompt || meta.source || (meta.params && Object.keys(meta.params).length > 0);
 
   if (!container) {
@@ -2162,7 +1171,7 @@ function renderMetadata(meta) {
     container.style.gap = '10px';
     container.style.width = '100%';
     container.style.boxSizing = 'border-box';
-    container.style.paddingRight = '8px'; // 右ペインのスクロールバーと距離を離すための余白
+    container.style.paddingRight = '8px'; 
     
     // 既存の子要素（古いテキストエリア等）を非表示にして新しいコンテナを追加
     if (rightPane) {
@@ -2179,13 +1188,12 @@ function renderMetadata(meta) {
   container.innerHTML = '';
 
   if (!hasAiMetadata) {
-    return; // プロンプト情報がない場合は何も表示しない
+    return; 
   }
 
-  const terms = searchQuery.trim() !== '' ? searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t) : [];
+  const terms = appState.searchQuery.trim() !== '' ? appState.searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t) : [];
 
   const addField = (label, value, isMultiline = false, customMinHeight = '80px') => {
-    // 空文字の場合でも、プロンプト情報がある場合は空の枠を表示してレイアウトを崩さないようにする
     if (value === undefined || value === null) return;
     
     const fieldDiv = document.createElement('div');
@@ -2202,7 +1210,6 @@ function renderMetadata(meta) {
     labelEl.textContent = label;
     labelEl.style.color = '#ccc';
 
-    // コピー用アイコン (SVG)
     const copyBtn = document.createElement('span');
     copyBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
     copyBtn.style.cursor = 'pointer';
@@ -2262,14 +1269,12 @@ function renderMetadata(meta) {
   if (meta.source) {
     addField('モデル / バージョン', meta.source);
   }
-  // メインのプロンプト表示枠の高さを倍(160px)に設定
   addField('プロンプト', meta.prompt, true, '160px');
   addField('除外したい要素', meta.negativePrompt, true, '160px');
   
   if (meta.params) {
     if (Array.isArray(meta.params.characterPrompts)) {
       meta.params.characterPrompts.forEach((char, idx) => {
-        // キャラプロンプトは3行分がきっちり表示できるよう少し高め(90px)に設定
         addField(`キャラクター ${idx + 1} プロンプト`, char.prompt, true, '90px');
         addField(`キャラクター ${idx + 1} 除外したい要素`, char.uc, true, '90px');
       });
@@ -2284,7 +1289,6 @@ function renderMetadata(meta) {
     addField('ステップ', meta.params.steps);
     
     let sampler = meta.params.sampler;
-    // smオプションが有効な場合、NovelAIの表示に近づけるため(karras)を付与
     if (sampler && meta.params.sm && !sampler.includes('karras')) {
         sampler += " (karras)";
     }
@@ -2294,19 +1298,14 @@ function renderMetadata(meta) {
     addField('プロンプトガイダンスの再調整', meta.params.cfg_rescale);
     addField('除外したい要素の強さ', meta.params.uncond_scale);
 
-    // Automatic1111などの未パースなパラメータがある場合のフォールバック表示
     if (meta.params.rawParameters) {
       addField('生成パラメータ', meta.params.rawParameters, true);
     }
   }
 }
 
-/**
- * 画像ビューアウィンドウを開く。
- * @param {number} index - 表示を開始する画像のインデックス。
- */
 function openViewer(index) {
-  const file = filteredFiles[index];
+  const file = appState.filteredFiles[index];
 
   window.veloceAPI.openViewer({ 
     currentIndex: index,
@@ -2317,19 +1316,12 @@ function openViewer(index) {
   });
 }
 
-/**
- * ライセンス情報を表示するための簡易Markdownパーサー
- * @param {string} text - Markdown形式のテキスト
- * @returns {string} HTML文字列
- */
 function parseLicenseMarkdown(text) {
   if (!text) return '';
   
-  // 改行コードの統一とエスケープ
   let html = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  // 1. 引用（blockquote）のパース：連続する > を結合し、中身の改行を <br> 化
   const lines = html.split('\n');
   let processedLines = [];
   let bqBuffer = [];
@@ -2351,7 +1343,6 @@ function parseLicenseMarkdown(text) {
   }
   html = processedLines.join('\n');
   
-  // 2. 見出し、水平線、強調、リストの変換
   html = html.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
   html = html.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
   html = html.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
@@ -2362,20 +1353,15 @@ function parseLicenseMarkdown(text) {
     return `<ul class="md-list">${match.replace(/\n/g, '')}</ul>`;
   });
 
-  // 3. 【重要】ブロック要素の前後にある改行を物理的に消去（これによって余計な <br> を防ぐ）
   const tags = 'h1|h2|h3|ul|li|blockquote|hr';
   html = html.replace(new RegExp(`\\n+(<\\/?(?:${tags})[^>]*>)`, 'gi'), '$1');
   html = html.replace(new RegExp(`(<\\/?(?:${tags})[^>]*>)\\n+`, 'gi'), '$1');
 
-  // 4. 最後に、純粋なテキスト間に残った改行のみを <br> にする
   html = html.replace(/\n/g, '<br>');
 
   return html;
 }
 
-/**
- * オープンソースライセンスを表示するダイアログを生成
- */
 async function showLicenseDialog() {
   const overlay = document.createElement('div');
   overlay.id = 'license-overlay';
@@ -2385,7 +1371,7 @@ async function showLicenseDialog() {
   overlay.style.width = '100vw';
   overlay.style.height = '100vh';
   overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-  overlay.style.zIndex = '10000'; // ヘルプ画面より上に表示
+  overlay.style.zIndex = '10000'; 
   overlay.style.display = 'flex';
   overlay.style.justifyContent = 'center';
   overlay.style.alignItems = 'center';
@@ -2405,7 +1391,6 @@ async function showLicenseDialog() {
   
   let licenseText = "ライセンス情報を読み込み中...";
   try {
-    // Rust側に定義したコマンドを呼び出して、LICENSE.md の内容を取得する
     if (window.__TAURI__ && window.__TAURI__.invoke) {
       licenseText = await window.__TAURI__.invoke('get_license_text');
     } else if (window.veloceAPI && window.veloceAPI.getLicenseText) {
@@ -2451,13 +1436,9 @@ async function showLicenseDialog() {
   document.body.appendChild(overlay);
 }
 
-/**
- * ヘルプ（ショートカット一覧）をオーバーレイ表示/非表示する
- */
 function toggleHelpOverlay(forceShow) {
   let overlay = document.getElementById('help-overlay');
   
-  // 既に表示されている場合は非表示にする (トグル動作)
   if (overlay) {
     overlay.remove();
     return;
@@ -2474,7 +1455,7 @@ function toggleHelpOverlay(forceShow) {
   overlay.style.height = '100vh';
   overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
   overlay.style.backdropFilter = 'blur(10px)';
-  overlay.style.webkitBackdropFilter = 'blur(10px)'; // Safari対応
+  overlay.style.webkitBackdropFilter = 'blur(10px)'; 
   overlay.style.zIndex = '9999';
   overlay.style.display = 'flex';
   overlay.style.justifyContent = 'center';
@@ -2539,7 +1520,6 @@ function toggleHelpOverlay(forceShow) {
     </div>
   `;
   
-  // 画面のどこをクリックしてもヘルプを閉じる（ライセンスリンク以外）
   overlay.addEventListener('click', (e) => {
     if (e.target.id === 'license-link') {
       showLicenseDialog();
@@ -2552,54 +1532,394 @@ function toggleHelpOverlay(forceShow) {
   document.body.appendChild(overlay);
 }
 
-// --- キーボードショートカット ---
+// ----------------------------------------------------------------------------
+// 3. Event Handlers (User Interactions)
+// ----------------------------------------------------------------------------
+
+const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
+  if (!contextMenu.targetFolder) return;
+  const folderName = await showCustomPrompt('新しいフォルダ名を入力してください:');
+  if (folderName !== null) {
+    if (folderName.trim() === '') {
+      showNotification('フォルダ名を入力してください。', 'warning');
+      return;
+    }
+    if (/[\\/:*?"<>|]/.test(folderName)) {
+      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+      return;
+    }
+
+    const parentPath = contextMenu.targetFolder.path;
+    const result = await window.veloceAPI.createFolder(parentPath, folderName);
+    if (result && result.success) {
+      showNotification(`フォルダ「${folderName}」を作成しました`);
+      await refreshTree();
+
+      await expandTreeToPath(parentPath, true);
+      const escapedParentPath = CSS.escape(parentPath);
+      const parentDiv = document.querySelector(`.tree-item[data-path="${escapedParentPath}"]`);
+      if (parentDiv && parentDiv.expandNode) {
+        await parentDiv.expandNode();
+      }
+
+      if (appState.currentDirectory) {
+        const escapedCurrent = CSS.escape(appState.currentDirectory);
+        const currentDiv = document.querySelector(`.tree-item[data-path="${escapedCurrent}"]`);
+        if (currentDiv) {
+          const activeItem = document.querySelector('.tree-item.selected');
+          if (activeItem) activeItem.classList.remove('selected');
+          currentDiv.classList.add('selected');
+        }
+      }
+    } else {
+      alert('フォルダの作成に失敗しました:\n' + (result ? result.error : 'Unknown error'));
+    }
+  }
+});
+
+const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
+  if (!contextMenu.targetFolder) return;
+  const oldPath = contextMenu.targetFolder.path;
+  const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
+  if (newName !== null && newName !== contextMenu.targetFolder.name) {
+    if (newName.trim() === '') {
+      showNotification('フォルダ名を入力してください。', 'warning');
+      return;
+    }
+    if (/[\\/:*?"<>|]/.test(newName)) {
+      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+      return;
+    }
+
+    const result = await window.veloceAPI.renameFolder(oldPath, newName);
+    if (result && result.success) {
+      showNotification(`フォルダ名を「${newName}」に変更しました`);
+      if (appState.currentDirectory.startsWith(oldPath)) {
+        appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
+        localStorage.setItem('currentDirectory', appState.currentDirectory);
+      }
+      await refreshTree();
+    } else {
+      showNotification(`フォルダ名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
+    }
+  }
+});
+
+const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
+  if (!contextMenu.targetFolder) return;
+  const oldPath = contextMenu.targetFolder.path;
+  const isConfirmed = await showCustomConfirm(`本当にフォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しますか？`);
+  if (isConfirmed) {
+    const result = await window.veloceAPI.trashFolder(oldPath);
+    if (result && result.success) {
+      showNotification(`フォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しました`, 'warning');
+      if (appState.currentDirectory.startsWith(oldPath)) {
+        const sep = '\\';
+        const parts = oldPath.split(sep);
+        parts.pop();
+        let parentDir = parts.join(sep);
+        if (!parentDir.includes(sep)) parentDir += sep;
+        appState.currentDirectory = parentDir;
+        localStorage.setItem('currentDirectory', appState.currentDirectory);
+        await refreshFileList();
+      }
+      await refreshTree();
+    } else {
+      alert('フォルダの削除に失敗しました:\n' + (result ? result.error : 'Unknown error'));
+    }
+  }
+});
+
+const menuRenameFile = createMenuOption('ファイル名変更', renameSelectedFile);
+const menuDeleteFile = createMenuOption('ファイル削除', deleteSelectedFiles);
+
+contextMenu.appendChild(menuNewFolder);
+contextMenu.appendChild(menuRenameFolder);
+contextMenu.appendChild(menuDeleteFolder);
+contextMenu.appendChild(menuRenameFile);
+contextMenu.appendChild(menuDeleteFile);
+document.body.appendChild(contextMenu);
+
+window.addEventListener('click', () => {
+  if (contextMenu.style.display === 'block') {
+    contextMenu.style.display = 'none';
+  }
+});
+
+const dragTooltip = document.createElement('div');
+dragTooltip.id = 'drag-tooltip';
+dragTooltip.style.position = 'fixed';
+dragTooltip.style.pointerEvents = 'none'; 
+dragTooltip.style.zIndex = '10000';
+dragTooltip.style.padding = '4px 8px';
+dragTooltip.style.backgroundColor = 'rgba(0, 0, 0, 1.0)'; 
+dragTooltip.style.color = '#ffffff'; 
+dragTooltip.style.border = '1px solid #555'; 
+dragTooltip.style.borderRadius = '4px';
+dragTooltip.style.display = 'none';
+dragTooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5)';
+document.body.appendChild(dragTooltip);
+
+document.addEventListener('dragend', async () => {
+  dragTooltip.style.display = 'none';
+  dragState.paths = [];
+  dragState.isAppDragging = false;
+
+  if (dragState.pendingRefresh) {
+    dragState.pendingRefresh = false;
+    await refreshFileList();
+  }
+});
+
+function handleItemClick(e, isGrid) {
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  selectImage(parseInt(item.dataset.index, 10), e);
+}
+
+function handleItemDblClick(e, isGrid) {
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  openViewer(parseInt(item.dataset.index, 10));
+}
+
+function handleItemDragStart(e, isGrid) {
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  const index = parseInt(item.dataset.index, 10);
+  
+  if (!appState.selection.has(index)) selectImage(index);
+  const paths = Array.from(appState.selection).map(idx => appState.filteredFiles[idx].path);
+  e.dataTransfer.setData('application/json', JSON.stringify(paths));
+  e.dataTransfer.setData('text/plain', paths[0]);
+  e.dataTransfer.effectAllowed = 'copyMove';
+  e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
+  dragState.paths = paths;
+  dragState.isAppDragging = true;
+}
+
+function handleItemContextMenu(e, isGrid) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
+  if (!item || !item.dataset.index) return;
+  const index = parseInt(item.dataset.index, 10);
+
+  if (!appState.selection.has(index)) selectImage(index);
+
+  menuNewFolder.style.display = 'none';
+  menuRenameFolder.style.display = 'none';
+  menuDeleteFolder.style.display = 'none';
+  menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none'; 
+  menuDeleteFile.style.display = 'block';
+
+  contextMenu.style.display = 'block';
+  const rect = contextMenu.getBoundingClientRect();
+  let x = e.clientX;
+  let y = e.clientY;
+  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
+  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
+  
+  contextMenu.style.left = `${x}px`;
+  contextMenu.style.top = `${y}px`;
+}
+
+thumbnailGrid.addEventListener('click', (e) => handleItemClick(e, true));
+thumbnailGrid.addEventListener('dblclick', (e) => handleItemDblClick(e, true));
+thumbnailGrid.addEventListener('dragstart', (e) => handleItemDragStart(e, true));
+thumbnailGrid.addEventListener('contextmenu', (e) => handleItemContextMenu(e, true));
+
+fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
+fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
+fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
+
+function setupResizer(resizer, type, cursor) {
+  if (!resizer) return;
+  resizer.addEventListener('mousedown', () => {
+    resizingState[type] = true;
+    resizer.classList.add('resizing');
+    document.body.style.cursor = cursor;
+    if (paneState[type].isCollapsed) {
+      paneState[type].isCollapsed = false;
+      const btn = resizer.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = paneState[type].openIcon;
+    }
+  });
+  createResizerToggle(resizer, type);
+}
+
+function createResizerToggle(resizer, type) {
+  resizer.style.position = 'relative';
+
+  const btn = document.createElement('div');
+  btn.className = 'resizer-toggle';
+  btn.style.cssText = `
+    position: absolute; display: flex; justify-content: center; align-items: center;
+    background-color: #333; border: 1px solid #555; border-radius: 2px; cursor: pointer;
+    z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  `;
+  
+  btn.addEventListener('mouseenter', () => btn.style.backgroundColor = '#444');
+  btn.addEventListener('mouseleave', () => btn.style.backgroundColor = '#333');
+
+  const isVertical = type === 'center';
+  btn.style.width = isVertical ? '30px' : '14px';
+  btn.style.height = isVertical ? '14px' : '30px';
+  
+  const state = paneState[type];
+  btn.innerHTML = state.openIcon;
+  
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (state.isCollapsed) {
+      document.body.style.setProperty(state.cssVar, state.preCollapseValue || state.defaultSize);
+      btn.innerHTML = state.openIcon;
+      state.isCollapsed = false;
+      localStorage.setItem(state.storageKey, state.preCollapseValue || state.defaultSize);
+    } else {
+      state.preCollapseValue = document.body.style.getPropertyValue(state.cssVar) || getComputedStyle(document.body).getPropertyValue(state.cssVar).trim();
+      if (!state.preCollapseValue || state.preCollapseValue === '0px') state.preCollapseValue = state.defaultSize;
+      document.body.style.setProperty(state.cssVar, '0px');
+      btn.innerHTML = state.closeIcon;
+      state.isCollapsed = true;
+      localStorage.setItem(state.storageKey, '0px');
+    }
+  });
+
+  btn.addEventListener('mousedown', (e) => e.stopPropagation());
+  
+  resizer.appendChild(btn);
+}
+
+setupResizer(resizerLeft, 'left', 'col-resize');
+setupResizer(resizerRight, 'right', 'col-resize');
+setupResizer(resizerCenter, 'center', 'row-resize');
+
+let resizerRafId = null;
+window.addEventListener('mousemove', (e) => {
+  if (!resizingState.left && !resizingState.right && !resizingState.center) return;
+
+  if (resizerRafId) cancelAnimationFrame(resizerRafId);
+  resizerRafId = requestAnimationFrame(() => {
+    if (resizingState.left) {
+      const newWidth = Math.max(100, Math.min(e.clientX, window.innerWidth - 400));
+      document.body.style.setProperty('--left-width', `${newWidth}px`);
+    } else if (resizingState.right) {
+      const newWidth = Math.max(150, Math.min(window.innerWidth - e.clientX, window.innerWidth - 400));
+      document.body.style.setProperty('--right-width', `${newWidth}px`);
+    } else if (resizingState.center) {
+      const centerPane = document.getElementById('center-pane');
+      const rect = centerPane.getBoundingClientRect();
+      const newHeight = Math.max(50, Math.min(e.clientY - rect.top, rect.height - 50));
+      document.body.style.setProperty('--top-height', `${newHeight}px`);
+    }
+  });
+});
+
+window.addEventListener('mouseup', () => {
+  ['left', 'right', 'center'].forEach(type => {
+    if (resizingState[type]) {
+      const state = paneState[type];
+      localStorage.setItem(state.storageKey, document.body.style.getPropertyValue(state.cssVar));
+      resizingState[type] = false;
+      
+      const resizer = type === 'left' ? resizerLeft : (type === 'right' ? resizerRight : resizerCenter);
+      resizer.classList.remove('resizing');
+    }
+  });
+  document.body.style.cursor = 'default';
+});
+
+function updateThumbnailSize() {
+  const size = parseFloat(thumbnailSizeSlider.value) || 120;
+  document.body.style.setProperty('--thumbnail-size', `${size}px`);
+}
+
+thumbnailSizeSlider.addEventListener('input', updateThumbnailSize);
+
+thumbnailSizeSlider.addEventListener('change', (e) => {
+  localStorage.setItem('thumbnailScale', e.target.value);
+});
+
+let windowStateTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(async () => {
+    if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
+      const isMax = await window.veloceAPI.isViewerMaximized();
+      localStorage.setItem('mainWinMaximized', isMax);
+      if (!isMax) {
+        localStorage.setItem('mainWinWidth', window.outerWidth);
+        localStorage.setItem('mainWinHeight', window.outerHeight);
+        localStorage.setItem('mainWinX', window.screenX);
+        localStorage.setItem('mainWinY', window.screenY);
+      }
+    }
+  }, 500);
+});
+
+window.addEventListener('beforeunload', () => {
+  if (localStorage.getItem('mainWinMaximized') !== 'true') {
+    localStorage.setItem('mainWinX', window.screenX);
+    localStorage.setItem('mainWinY', window.screenY);
+  }
+});
+
+document.querySelectorAll('th').forEach(th => {
+  th.addEventListener('click', () => {
+	const key = th.dataset.sort;
+	if (appState.sortConfig.key === key) {
+	  appState.sortConfig.asc = !appState.sortConfig.asc;
+	} else {
+	  appState.sortConfig.key = key;
+	  appState.sortConfig.asc = true;
+	}
+	localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+	updateSortIndicators();
+	appState.applyFiltersAndSort();
+	window.uiManager.renderAll();
+  });
+});
+
 window.addEventListener('keydown', async (e) => {
-  // Ctrl+Shift+I で開発者ツールをトグル表示
-  // e.key ではなく e.code を使用して、キーボードレイアウト等に依存しない確実なキー判定を行う
-  if (e.ctrlKey && e.shiftKey && e.code === 'KeyI') {
+  if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
     e.preventDefault();
     return;
   }
 
-  // F12キーによる開発者ツール起動をブロック
   if (e.key === 'F12') {
     e.preventDefault();
     return;
   }
 
-  // 入力フィールド（テキストボックス等）にフォーカスがある場合は、文字入力やテキストのコピー（Ctrl+C）、カーソル移動などの標準動作を優先する
   const activeTagName = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
   if ((activeTagName === 'input' || activeTagName === 'textarea') && e.key !== 'Escape') {
     return;
   }
 
-  // F1またはHでヘルプ表示のトグル
   if (e.key === 'F1' || e.key.toLowerCase() === 'h') {
     e.preventDefault();
     toggleHelpOverlay();
     return;
   }
   
-  // Escでヘルプを閉じる
   if (e.key === 'Escape' && document.getElementById('help-overlay')) {
     e.preventDefault();
     toggleHelpOverlay(false);
     return;
   }
 
-  // Aでビューワーを横に並べる
   if (e.key === 'a' || e.key === 'A') {
     e.preventDefault();
     if (window.veloceAPI.arrangeViewers) window.veloceAPI.arrangeViewers();
   }
 
-  // F5で最新の情報に更新
   if (e.key === 'F5') {
     e.preventDefault();
     await refreshFileList();
   }
 
-  // F2でファイル名を変更
   if (e.key === 'F2') {
     e.preventDefault();
     const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
@@ -2610,7 +1930,6 @@ window.addEventListener('keydown', async (e) => {
     }
   }
 
-  // Deleteで選択中の画像をゴミ箱に移動
   if (e.key === 'Delete') {
     const selectedFolder = document.querySelector('#dir-tree .tree-item.selected');
     if (selectedFolder) {
@@ -2620,28 +1939,25 @@ window.addEventListener('keydown', async (e) => {
     }
   }
 
-  // Ctrl+Cで選択中の画像をクリップボードにコピー
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
     if (window.getSelection().toString()) {
       showNotification('テキストをクリップボードにコピーしました');
       return;
     }
 
-    if (selectedIndex > -1 && filteredFiles[selectedIndex]) {
-      window.veloceAPI.copyImageToClipboard(filteredFiles[selectedIndex].path);
+    if (appState.selectedIndex > -1 && appState.filteredFiles[appState.selectedIndex]) {
+      window.veloceAPI.copyImageToClipboard(appState.filteredFiles[appState.selectedIndex].path);
       showNotification('画像をクリップボードにコピーしました');
 
-      // コピー成功時に選択中の画像をピカッと光らせるエフェクト
       const applyFlash = (el) => {
         applyIconGlowEffect(el);
       };
 
-      applyFlash(thumbnailGrid.querySelector(`.thumbnail-item[data-index="${selectedIndex}"]`));
-      applyFlash(fileListBody.querySelector(`tr[data-index="${selectedIndex}"]`));
+      applyFlash(thumbnailGrid.querySelector(`.thumbnail-item[data-index="${appState.selectedIndex}"]`));
+      applyFlash(fileListBody.querySelector(`tr[data-index="${appState.selectedIndex}"]`));
     }
   }
 
-  // Ctrl+F: 検索バーにフォーカスして全選択
   if (e.ctrlKey && (e.key.toLowerCase() === 'f' || e.code === 'KeyF')) {
     e.preventDefault();
     const searchBar = document.getElementById('search-bar');
@@ -2652,41 +1968,29 @@ window.addEventListener('keydown', async (e) => {
     return;
   }
 
-  // Ctrl+A: 現在表示されているファイルの全選択
   if (e.ctrlKey && (e.key.toLowerCase() === 'a' || e.code === 'KeyA')) {
-    // 検索バーなどの入力欄にフォーカスがある場合は、文字の全選択（デフォルト挙動）を優先する
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     e.preventDefault();
-    if (filteredFiles.length === 0) return;
+    if (appState.filteredFiles.length === 0) return;
 
-    // 内部状態の更新
-    selectedIndices.clear();
-    for (let i = 0; i < filteredFiles.length; i++) {
-      selectedIndices.add(i);
+    appState.selection.clear();
+    for (let i = 0; i < appState.filteredFiles.length; i++) {
+      appState.selection.add(i);
     }
-    selectedIndex = filteredFiles.length - 1; // 最後の要素をアクティブインデックスに
+    appState.selectedIndex = appState.filteredFiles.length - 1; 
 
-    // UIの高速一括更新（DOMの再構築を避けてクラスだけ付与）
-    if (fileListBody) {
-      Array.from(fileListBody.children).forEach(row => row.classList.add('selected'));
-    }
-    if (thumbnailGrid) {
-      Array.from(thumbnailGrid.children).forEach(item => item.classList.add('selected'));
-    }
+    window.uiManager.updateSelectionUI();
     return;
   }
 
-  // 上下左右キーで画像の選択を移動
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    if (filteredFiles.length === 0) return;
+    if (appState.filteredFiles.length === 0) return;
     
-    // 矢印キーによる画面のスクロールを防ぐ
     e.preventDefault();
 
-    let newIndex = selectedIndex;
+    let newIndex = appState.selectedIndex;
     
-    // まだ画像が選択されていない場合は最初の画像を選択
     if (newIndex === -1) {
       newIndex = 0;
     } else {
@@ -2697,17 +2001,15 @@ window.addEventListener('keydown', async (e) => {
       const availableWidth = Math.max(1, containerWidth - padding * 2);
       const columns = Math.max(1, Math.floor((availableWidth + gap) / (itemSize + gap)));
 
-      // 移動先インデックスの計算
-      if (e.key === 'ArrowLeft') newIndex = Math.max(0, selectedIndex - 1);
-      else if (e.key === 'ArrowRight') newIndex = Math.min(filteredFiles.length - 1, selectedIndex + 1);
-      else if (e.key === 'ArrowUp') newIndex = Math.max(0, selectedIndex - columns);
-      else if (e.key === 'ArrowDown') newIndex = Math.min(filteredFiles.length - 1, selectedIndex + columns);
+      if (e.key === 'ArrowLeft') newIndex = Math.max(0, appState.selectedIndex - 1);
+      else if (e.key === 'ArrowRight') newIndex = Math.min(appState.filteredFiles.length - 1, appState.selectedIndex + 1);
+      else if (e.key === 'ArrowUp') newIndex = Math.max(0, appState.selectedIndex - columns);
+      else if (e.key === 'ArrowDown') newIndex = Math.min(appState.filteredFiles.length - 1, appState.selectedIndex + columns);
     }
 
-    // 選択が変更された場合
-    if (newIndex !== selectedIndex) {
+    if (newIndex !== appState.selectedIndex) {
       if (e.shiftKey) {
-        selectImage(newIndex, { shiftKey: true }); // Shift+矢印で範囲選択
+        selectImage(newIndex, { shiftKey: true }); 
       } else {
         selectImage(newIndex);
       }
@@ -2715,7 +2017,188 @@ window.addEventListener('keydown', async (e) => {
   }
 });
 
-// アプリ全体でブラウザ標準の右クリックメニューを完全に無効化
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}, true);
+
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
+});
+
+// ----------------------------------------------------------------------------
+// 4. Application Initialization
+// ----------------------------------------------------------------------------
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const savedWinW = localStorage.getItem('mainWinWidth');
+  const savedWinH = localStorage.getItem('mainWinHeight');
+  const savedWinX = localStorage.getItem('mainWinX');
+  const savedWinY = localStorage.getItem('mainWinY');
+  const savedWinMax = localStorage.getItem('mainWinMaximized');
+
+  if (savedWinW && savedWinH && window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
+    window.veloceAPI.resizeViewerWindow(parseInt(savedWinW, 10), parseInt(savedWinH, 10));
+  }
+  if (savedWinX && savedWinY && window.veloceAPI && window.veloceAPI.moveViewerWindow) {
+    window.veloceAPI.moveViewerWindow(parseInt(savedWinX, 10), parseInt(savedWinY, 10));
+  }
+  if (savedWinMax === 'true' && window.veloceAPI && window.veloceAPI.isViewerMaximized && window.veloceAPI.maximizeViewer) {
+    window.veloceAPI.isViewerMaximized().then(isMax => {
+      if (!isMax) window.veloceAPI.maximizeViewer();
+    });
+  }
+
+  initializeThumbnailObserver();
+
+  ['left', 'right', 'center'].forEach(type => {
+    const state = paneState[type];
+    const savedVal = localStorage.getItem(state.storageKey);
+    if (savedVal) {
+      document.body.style.setProperty(state.cssVar, savedVal);
+      if (savedVal === '0px') {
+        state.isCollapsed = true;
+        const resizer = type === 'left' ? resizerLeft : (type === 'right' ? resizerRight : resizerCenter);
+        const btn = resizer.querySelector('.resizer-toggle');
+        if (btn) btn.innerHTML = state.closeIcon;
+      }
+    }
+  });
+
+  const savedThumbScale = localStorage.getItem('thumbnailScale');
+  if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {
+    thumbnailSizeSlider.value = savedThumbScale;
+  } else {
+    thumbnailSizeSlider.value = 120; 
+  }
+  updateThumbnailSize();
+
+  const searchBar = document.getElementById('search-bar');
+  if (searchBar) {
+    searchBar.addEventListener('input', (e) => {
+      clearTimeout(appState.searchTimeout);
+      appState.searchTimeout = setTimeout(() => {
+        appState.searchQuery = e.target.value;
+        scheduleRefresh();
+      }, 300);
+    });
+  }
+
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  if (searchClearBtn) {
+    searchClearBtn.innerHTML = ICONS.ERASER;
+    searchClearBtn.addEventListener('click', () => {
+      if (searchBar) {
+        searchBar.value = '';
+        appState.searchQuery = '';
+        scheduleRefresh();
+        applyIconGlowEffect(searchClearBtn);
+      }
+    });
+  }
+
+  const openCacheBtn = document.getElementById('open-cache-btn');
+  if (openCacheBtn) {
+    openCacheBtn.addEventListener('click', () => {
+      applyIconGlowEffect(openCacheBtn);
+      window.veloceAPI.openThumbnailCache();
+    });
+  }
+
+  const clearCacheBtn = document.getElementById('clear-cache-btn');
+  if (clearCacheBtn) {
+    clearCacheBtn.addEventListener('click', async () => {
+      applyIconGlowEffect(clearCacheBtn);
+      const isConfirmed = await showCustomConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
+      if (isConfirmed) {
+        window.uiManager.showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
+        try {
+          await window.veloceAPI.clearThumbnailCache();
+          appState.thumbnailUrls.clear(); 
+          resetThumbnailPreloader(); 
+          await refreshFileList(); 
+          window.uiManager.showToast('サムネイルキャッシュを削除しました。', 3000, 'cache-clear', 'success');
+        } catch (err) {
+          console.error("Failed to clear thumbnail cache:", err);
+          window.uiManager.showToast('キャッシュの削除に失敗しました。', 3000, 'cache-clear', 'error');
+        }
+      }
+    });
+  }
+
+  const savedSort = localStorage.getItem('currentSort');
+  if (savedSort) {
+    try {
+      appState.sortConfig = JSON.parse(savedSort);
+    } catch (e) {
+      console.error('Failed to parse saved sort:', e);
+    }
+  }
+
+  updateSortIndicators();
+
+  if (promptText && promptText.parentElement) {
+    Array.from(promptText.parentElement.children).forEach(child => {
+      child.style.display = 'none';
+    });
+  }
+
+  await refreshTree();
+
+  if (window.veloceAPI.loadDirectory) {
+    const savedDirectory = localStorage.getItem('currentDirectory') || 'PC';
+    const result = await window.veloceAPI.loadDirectory(savedDirectory);
+    if (result) {
+      appState.currentDirectory = result.path;
+      localStorage.setItem('currentDirectory', appState.currentDirectory); 
+      appState.files = result.imageFiles || [];
+      resetThumbnailPreloader();
+      appState.applyFiltersAndSort();
+      window.uiManager.renderAll();
+      loadAllMetadataInBackground(); 
+      clearMetadataUI();
+
+      await expandTreeToPath(appState.currentDirectory);
+    }
+  }
+
+  if (window.veloceAPI.onFileChanged) {
+    window.veloceAPI.onFileChanged((newFile) => {
+      const index = appState.files.findIndex(f => f.path === newFile.path);
+      if (index > -1) {
+        const oldFile = appState.files[index];
+        if (oldFile.size !== newFile.size || oldFile.mtime !== newFile.mtime) {
+            appState.thumbnailUrls.delete(newFile.path);
+          appState.files[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0 };
+          scheduleRefresh();
+        }
+      } else {
+        appState.files.push(newFile);
+        scheduleRefresh();
+      }
+    });
+  }
+
+  if (window.veloceAPI.onFileRemoved) {
+    window.veloceAPI.onFileRemoved((path) => {
+      const index = appState.files.findIndex(f => f.path === path);
+      if (index > -1) {
+        appState.files.splice(index, 1);
+        scheduleRefresh();
+      }
+    });
+  }
+
+  if (window.veloceAPI.onDirectoryChanged) {
+    window.veloceAPI.onDirectoryChanged(async () => {
+      await refreshTree();
+    });
+  }
+
+  if (!appState.isPreloadRunning) {
+    appState.isPreloadRunning = true;
+    requestIdleCallback(processIdleThumbnails);
+  }
 });
