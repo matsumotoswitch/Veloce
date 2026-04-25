@@ -8,6 +8,21 @@ class AppState {
     this.selection = new Set();  // 旧 selectedIndices
     this.currentDirectory = '';  // 旧 currentDirectory
 
+    // レイアウト状態の管理
+    this.layout = {
+      leftWidth: 200,
+      rightWidth: 300,
+      leftVisible: true,
+      rightVisible: true
+    };
+
+    // ドラッグ状態の管理
+    this.dragState = {
+      paths: [],
+      isAppDragging: false,
+      pendingRefresh: false
+    };
+
     // 追加：システム状態・サムネイル管理
     this.thumbnailObserver = null;
     this.currentMetaBatchId = 0;

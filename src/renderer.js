@@ -5,24 +5,6 @@
 const logicalCores = navigator.hardwareConcurrency || 8;
 const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
 
-const dragState = {
-  paths: [], // ドラッグ中の複数ファイルパス
-  isAppDragging: false, // アプリ内からのドラッグ中かどうか
-  pendingRefresh: false // ドラッグ終了後のリスト更新を待機しているか
-};
-
-const ICONS = {
-  DRIVE: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="#a0a0a0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"></line><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line></svg>`,
-  FOLDER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="#ebc06d" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
-  CHEVRON_LEFT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>`,
-  CHEVRON_RIGHT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`,
-  CHEVRON_UP: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
-  CHEVRON_DOWN: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
-  SORT_ASC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
-  SORT_DESC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
-  ERASER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>`
-};
-
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -35,12 +17,6 @@ const thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
 const resizerLeft = document.getElementById('resizer-left');
 const resizerRight = document.getElementById('resizer-right');
 const resizerCenter = document.getElementById('resizer-center');
-
-const paneState = {
-  left: { isCollapsed: false, preCollapseValue: '', cssVar: '--left-width', storageKey: 'leftWidth', defaultSize: '250px', openIcon: ICONS.CHEVRON_LEFT, closeIcon: ICONS.CHEVRON_RIGHT },
-  right: { isCollapsed: false, preCollapseValue: '', cssVar: '--right-width', storageKey: 'rightWidth', defaultSize: '250px', openIcon: ICONS.CHEVRON_RIGHT, closeIcon: ICONS.CHEVRON_LEFT },
-  center: { isCollapsed: false, preCollapseValue: '', cssVar: '--top-height', storageKey: 'topHeight', defaultSize: '250px', openIcon: ICONS.CHEVRON_UP, closeIcon: ICONS.CHEVRON_DOWN }
-};
 
 const resizingState = { left: false, right: false, center: false };
 
@@ -809,7 +785,7 @@ function createTreeNode(folder, isRoot = false) {
   // 展開・折りたたみ用のトグルアイコン
   const toggleIcon = document.createElement('span');
   toggleIcon.className = 'toggle-icon';
-  toggleIcon.innerHTML = ICONS.CHEVRON_RIGHT;
+  toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
   toggleIcon.style.cursor = 'pointer';
   toggleIcon.style.marginRight = '5px';
   toggleIcon.style.display = 'inline-flex';
@@ -818,7 +794,7 @@ function createTreeNode(folder, isRoot = false) {
 
   const icon = document.createElement('span');
   icon.className = 'tree-icon';
-  icon.innerHTML = isRoot ? ICONS.DRIVE : ICONS.FOLDER;
+  icon.innerHTML = isRoot ? UIManager.ICONS.DRIVE : UIManager.ICONS.FOLDER;
   icon.style.marginRight = '4px';
   icon.style.display = 'inline-flex';
   icon.style.alignItems = 'center';
@@ -851,7 +827,7 @@ function createTreeNode(folder, isRoot = false) {
     childrenUl.style.display = 'block';
     childrenUl.classList.remove('collapsed');
     childrenUl.classList.add('expanded');
-    toggleIcon.innerHTML = ICONS.CHEVRON_DOWN;
+    toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
   };
 
   // 外部から展開処理を呼び出せるように要素に紐付ける
@@ -862,7 +838,7 @@ function createTreeNode(folder, isRoot = false) {
     childrenUl.style.display = 'none';
     childrenUl.classList.remove('expanded');
     childrenUl.classList.add('collapsed');
-    toggleIcon.innerHTML = ICONS.CHEVRON_RIGHT;
+    toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
   };
 
   // トグルアイコン部分だけをクリックした場合は開閉のみを行う
@@ -955,14 +931,14 @@ function createTreeNode(folder, isRoot = false) {
     e.preventDefault(); 
     
     let actionStr = 'コピー'; // 外部からのドロップのデフォルト
-    if (dragState.paths.length > 0) {
+    if (appState.dragState.paths.length > 0) {
       const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-      actionStr = getRoot(dragState.paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
+      actionStr = getRoot(appState.dragState.paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
     }
     e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
 
     const folderName = isRoot ? folder.path : folder.name;
-    const countStr = dragState.paths.length > 1 ? `${dragState.paths.length}個のファイルを ` : '';
+    const countStr = appState.dragState.paths.length > 1 ? `${appState.dragState.paths.length}個のファイルを ` : '';
     dragTooltip.textContent = `${countStr}「${folderName}」へ${actionStr}`;
     dragTooltip.style.display = 'block';
     dragTooltip.style.left = (e.clientX + 15) + 'px';
@@ -1002,8 +978,8 @@ function createTreeNode(folder, isRoot = false) {
         }
         if (successCount > 0) {
           window.uiManager.showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
-          if (dragState.isAppDragging) {
-            dragState.pendingRefresh = true; 
+        if (appState.dragState.isAppDragging) {
+          appState.dragState.pendingRefresh = true; 
           } else {
             await refreshFileList(); 
           }
@@ -1018,8 +994,8 @@ function createTreeNode(folder, isRoot = false) {
 }
 
 function getPathsFromDragEvent(e) {
-  if (dragState.paths && dragState.paths.length > 0) {
-    return [...dragState.paths];
+  if (appState.dragState.paths && appState.dragState.paths.length > 0) {
+    return [...appState.dragState.paths];
   }
   
   const paths = [];
@@ -1055,7 +1031,7 @@ function updateSortIndicators() {
     const key = th.dataset.sort;
     if (TABLE_HEADERS[key]) {
       if (appState.sortConfig.key === key) {
-        th.innerHTML = TABLE_HEADERS[key] + (appState.sortConfig.asc ? ICONS.SORT_ASC : ICONS.SORT_DESC);
+        th.innerHTML = TABLE_HEADERS[key] + (appState.sortConfig.asc ? UIManager.ICONS.SORT_ASC : UIManager.ICONS.SORT_DESC);
       } else {
         th.textContent = TABLE_HEADERS[key];
       }
@@ -1662,11 +1638,11 @@ document.body.appendChild(dragTooltip);
 
 document.addEventListener('dragend', async () => {
   dragTooltip.style.display = 'none';
-  dragState.paths = [];
-  dragState.isAppDragging = false;
+  appState.dragState.paths = [];
+  appState.dragState.isAppDragging = false;
 
-  if (dragState.pendingRefresh) {
-    dragState.pendingRefresh = false;
+  if (appState.dragState.pendingRefresh) {
+    appState.dragState.pendingRefresh = false;
     await refreshFileList();
   }
 });
@@ -1694,8 +1670,8 @@ function handleItemDragStart(e, isGrid) {
   e.dataTransfer.setData('text/plain', paths[0]);
   e.dataTransfer.effectAllowed = 'copyMove';
   e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
-  dragState.paths = paths;
-  dragState.isAppDragging = true;
+  appState.dragState.paths = paths;
+  appState.dragState.isAppDragging = true;
 }
 
 function handleItemContextMenu(e, isGrid) {
@@ -1740,10 +1716,16 @@ function setupResizer(resizer, type, cursor) {
     resizingState[type] = true;
     resizer.classList.add('resizing');
     document.body.style.cursor = cursor;
-    if (paneState[type].isCollapsed) {
-      paneState[type].isCollapsed = false;
+    if (type === 'left' && !appState.layout.leftVisible) {
+      appState.layout.leftVisible = true;
       const btn = resizer.querySelector('.resizer-toggle');
-      if (btn) btn.innerHTML = paneState[type].openIcon;
+      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
+      window.uiManager.applyLayout();
+    } else if (type === 'right' && !appState.layout.rightVisible) {
+      appState.layout.rightVisible = true;
+      const btn = resizer.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+      window.uiManager.applyLayout();
     }
   });
   createResizerToggle(resizer, type);
@@ -1767,23 +1749,38 @@ function createResizerToggle(resizer, type) {
   btn.style.width = isVertical ? '30px' : '14px';
   btn.style.height = isVertical ? '14px' : '30px';
   
-  const state = paneState[type];
-  btn.innerHTML = state.openIcon;
+  let openIcon, closeIcon;
+  if (type === 'left') { openIcon = UIManager.ICONS.CHEVRON_LEFT; closeIcon = UIManager.ICONS.CHEVRON_RIGHT; }
+  else if (type === 'right') { openIcon = UIManager.ICONS.CHEVRON_RIGHT; closeIcon = UIManager.ICONS.CHEVRON_LEFT; }
+  else { openIcon = UIManager.ICONS.CHEVRON_UP; closeIcon = UIManager.ICONS.CHEVRON_DOWN; }
   
+  if (type === 'left') btn.innerHTML = appState.layout.leftVisible ? openIcon : closeIcon;
+  else if (type === 'right') btn.innerHTML = appState.layout.rightVisible ? openIcon : closeIcon;
+  else btn.innerHTML = openIcon;
+
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (state.isCollapsed) {
-      document.body.style.setProperty(state.cssVar, state.preCollapseValue || state.defaultSize);
-      btn.innerHTML = state.openIcon;
-      state.isCollapsed = false;
-      localStorage.setItem(state.storageKey, state.preCollapseValue || state.defaultSize);
-    } else {
-      state.preCollapseValue = document.body.style.getPropertyValue(state.cssVar) || getComputedStyle(document.body).getPropertyValue(state.cssVar).trim();
-      if (!state.preCollapseValue || state.preCollapseValue === '0px') state.preCollapseValue = state.defaultSize;
-      document.body.style.setProperty(state.cssVar, '0px');
-      btn.innerHTML = state.closeIcon;
-      state.isCollapsed = true;
-      localStorage.setItem(state.storageKey, '0px');
+    if (type === 'left') {
+      appState.layout.leftVisible = !appState.layout.leftVisible;
+      btn.innerHTML = appState.layout.leftVisible ? openIcon : closeIcon;
+      localStorage.setItem('leftVisible', appState.layout.leftVisible);
+      window.uiManager.applyLayout();
+    } else if (type === 'right') {
+      appState.layout.rightVisible = !appState.layout.rightVisible;
+      btn.innerHTML = appState.layout.rightVisible ? openIcon : closeIcon;
+      localStorage.setItem('rightVisible', appState.layout.rightVisible);
+      window.uiManager.applyLayout();
+    } else if (type === 'center') {
+      const root = document.documentElement;
+      const isCollapsed = root.style.getPropertyValue('--top-height') === '0px';
+      if (isCollapsed) {
+        root.style.setProperty('--top-height', localStorage.getItem('topHeight') || '250px');
+        btn.innerHTML = openIcon;
+      } else {
+        localStorage.setItem('topHeight', root.style.getPropertyValue('--top-height') || '250px');
+        root.style.setProperty('--top-height', '0px');
+        btn.innerHTML = closeIcon;
+      }
     }
   });
 
@@ -1804,30 +1801,37 @@ window.addEventListener('mousemove', (e) => {
   resizerRafId = requestAnimationFrame(() => {
     if (resizingState.left) {
       const newWidth = Math.max(100, Math.min(e.clientX, window.innerWidth - 400));
-      document.body.style.setProperty('--left-width', `${newWidth}px`);
+      appState.layout.leftWidth = newWidth;
+      window.uiManager.applyLayout();
     } else if (resizingState.right) {
       const newWidth = Math.max(150, Math.min(window.innerWidth - e.clientX, window.innerWidth - 400));
-      document.body.style.setProperty('--right-width', `${newWidth}px`);
+      appState.layout.rightWidth = newWidth;
+      window.uiManager.applyLayout();
     } else if (resizingState.center) {
       const centerPane = document.getElementById('center-pane');
       const rect = centerPane.getBoundingClientRect();
       const newHeight = Math.max(50, Math.min(e.clientY - rect.top, rect.height - 50));
-      document.body.style.setProperty('--top-height', `${newHeight}px`);
+      document.documentElement.style.setProperty('--top-height', `${newHeight}px`);
     }
   });
 });
 
 window.addEventListener('mouseup', () => {
-  ['left', 'right', 'center'].forEach(type => {
-    if (resizingState[type]) {
-      const state = paneState[type];
-      localStorage.setItem(state.storageKey, document.body.style.getPropertyValue(state.cssVar));
-      resizingState[type] = false;
-      
-      const resizer = type === 'left' ? resizerLeft : (type === 'right' ? resizerRight : resizerCenter);
-      resizer.classList.remove('resizing');
-    }
-  });
+  if (resizingState.left) {
+    localStorage.setItem('leftWidth', appState.layout.leftWidth);
+    resizingState.left = false;
+    if (resizerLeft) resizerLeft.classList.remove('resizing');
+  }
+  if (resizingState.right) {
+    localStorage.setItem('rightWidth', appState.layout.rightWidth);
+    resizingState.right = false;
+    if (resizerRight) resizerRight.classList.remove('resizing');
+  }
+  if (resizingState.center) {
+    localStorage.setItem('topHeight', document.documentElement.style.getPropertyValue('--top-height'));
+    resizingState.center = false;
+    if (resizerCenter) resizerCenter.classList.remove('resizing');
+  }
   document.body.style.cursor = 'default';
 });
 
@@ -2053,19 +2057,37 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   initializeThumbnailObserver();
 
-  ['left', 'right', 'center'].forEach(type => {
-    const state = paneState[type];
-    const savedVal = localStorage.getItem(state.storageKey);
-    if (savedVal) {
-      document.body.style.setProperty(state.cssVar, savedVal);
-      if (savedVal === '0px') {
-        state.isCollapsed = true;
-        const resizer = type === 'left' ? resizerLeft : (type === 'right' ? resizerRight : resizerCenter);
-        const btn = resizer.querySelector('.resizer-toggle');
-        if (btn) btn.innerHTML = state.closeIcon;
-      }
+  const savedLeftWidth = localStorage.getItem('leftWidth');
+  if (savedLeftWidth) appState.layout.leftWidth = parseInt(savedLeftWidth, 10);
+  
+  const savedRightWidth = localStorage.getItem('rightWidth');
+  if (savedRightWidth) appState.layout.rightWidth = parseInt(savedRightWidth, 10);
+
+  const savedLeftVisible = localStorage.getItem('leftVisible');
+  if (savedLeftVisible !== null) appState.layout.leftVisible = savedLeftVisible === 'true';
+
+  const savedRightVisible = localStorage.getItem('rightVisible');
+  if (savedRightVisible !== null) appState.layout.rightVisible = savedRightVisible === 'true';
+
+  window.uiManager.applyLayout();
+
+  if (!appState.layout.leftVisible && resizerLeft) {
+    const btn = resizerLeft.querySelector('.resizer-toggle');
+    if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+  }
+  if (!appState.layout.rightVisible && resizerRight) {
+    const btn = resizerRight.querySelector('.resizer-toggle');
+    if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
+  }
+
+  const savedTopHeight = localStorage.getItem('topHeight');
+  if (savedTopHeight) {
+    document.documentElement.style.setProperty('--top-height', savedTopHeight);
+    if (savedTopHeight === '0px' && resizerCenter) {
+      const btn = resizerCenter.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
     }
-  });
+  }
 
   const savedThumbScale = localStorage.getItem('thumbnailScale');
   if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {
@@ -2088,7 +2110,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const searchClearBtn = document.getElementById('search-clear-btn');
   if (searchClearBtn) {
-    searchClearBtn.innerHTML = ICONS.ERASER;
+    searchClearBtn.innerHTML = UIManager.ICONS.ERASER;
     searchClearBtn.addEventListener('click', () => {
       if (searchBar) {
         searchBar.value = '';
