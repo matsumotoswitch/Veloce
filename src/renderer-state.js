@@ -1,48 +1,56 @@
+/**
+ * メイン画面のアプリケーション全体の状態とデータを管理するクラス
+ */
 class AppState {
   constructor() {
-    this.files = [];             // 旧 currentFiles
-    this.filteredFiles = [];     // 旧 filteredFiles
-    this.sortConfig = { key: 'name', asc: true }; // 旧 currentSort
-    this.searchQuery = '';       // 旧 searchQuery
-    this.selectedIndex = -1;     // 旧 selectedIndex
-    this.selection = new Set();  // 旧 selectedIndices
-    this.currentDirectory = '';  // 旧 currentDirectory
+    this.files = [];              // 読み込まれたすべての画像ファイルリスト
+    this.filteredFiles = [];      // 検索・ソート適用後のファイルリスト
+    this.sortConfig = { key: 'name', asc: true }; // 現在のソート設定
+    this.searchQuery = '';        // 検索クエリ文字列
+    this.selectedIndex = -1;      // 現在アクティブな選択アイテムのインデックス
+    this.selection = new Set();   // 複数選択されているアイテムのインデックス集合
+    this.currentDirectory = '';   // 現在表示中のディレクトリパス
 
     // レイアウト状態の管理
     this.layout = {
-      leftWidth: 200,
-      rightWidth: 300,
-      leftVisible: true,
-      rightVisible: true
+      leftWidth: 200,             // 左ペインの幅(px)
+      rightWidth: 300,            // 右ペインの幅(px)
+      leftVisible: true,          // 左ペインの表示状態
+      rightVisible: true          // 右ペインの表示状態
     };
 
     // ドラッグ状態の管理
     this.dragState = {
-      paths: [],
-      isAppDragging: false,
-      pendingRefresh: false
+      paths: [],                  // ドラッグ中のファイルパスのリスト
+      isAppDragging: false,       // アプリ内からのドラッグかどうか
+      pendingRefresh: false       // ドラッグ終了後にリスト更新が必要かどうか
     };
 
-    // 追加：システム状態・サムネイル管理
-    this.thumbnailObserver = null;
-    this.currentMetaBatchId = 0;
-    this.currentMetaRequestId = 0;
-    this.currentRenderId = 0;
-    this.thumbnailUrls = new Map();
-    this.pendingThumbnails = new Set();
-    this.activeThumbnailTasks = 0;
-    this.thumbnailRequestQueue = [];
-    this.preloadCursor = 0;
-    this.isPreloadRunning = false;
-    this.searchTimeout = null;
+    // システム状態・サムネイル管理
+    this.thumbnailObserver = null;   // サムネイルの遅延読み込み用IntersectionObserver
+    this.currentMetaBatchId = 0;     // メタデータ一括読み込みのバッチID（非同期キャンセル用）
+    this.currentMetaRequestId = 0;   // メタデータ個別読み込みのリクエストID
+    this.currentRenderId = 0;        // リスト描画のリクエストID
+    this.thumbnailUrls = new Map();  // サムネイル画像のURLキャッシュ（パス -> URL）
+    this.pendingThumbnails = new Set(); // サムネイル取得待ちのファイルパス集合
+    this.activeThumbnailTasks = 0;   // 現在実行中のサムネイル取得タスク数
+    this.thumbnailRequestQueue = []; // サムネイル取得リクエストのキュー
+    this.preloadCursor = 0;          // バックグラウンドプリロードの現在のインデックス
+    this.isPreloadRunning = false;   // プリロード処理が実行中かどうか
+    this.searchTimeout = null;       // 検索入力のデバウンス用タイマー
 
-    // 追加：トースト通知状態管理
-    this.thumbnailTotalRequested = 0;
-    this.thumbnailCompleted = 0;
-    this.thumbnailToastTimeout = null;
-    this.lastThumbnailToastTime = 0;
+    // トースト通知状態管理
+    this.thumbnailTotalRequested = 0; // サムネイル生成リクエストの総数
+    this.thumbnailCompleted = 0;      // サムネイル生成完了数
+    this.thumbnailToastTimeout = null; // トースト通知を消すためのタイマー
+    this.lastThumbnailToastTime = 0;  // 最後にトースト通知を更新した時刻
   }
 
+  /**
+   * 現在のファイルリストに対して、検索クエリによるフィルタリングと、
+   * 設定されたソート条件による並び替えを適用し、結果を filteredFiles に格納します。
+   * また、選択状態の維持も行います。
+   */
   applyFiltersAndSort() {
     // ソート後も選択状態を維持するためにパスを記録
     const selectedPath = this.selectedIndex > -1 && this.filteredFiles[this.selectedIndex] ? this.filteredFiles[this.selectedIndex].path : null;

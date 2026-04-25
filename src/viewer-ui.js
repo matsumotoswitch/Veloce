@@ -1,20 +1,32 @@
+/**
+ * ビューア画面のUIとDOM操作を管理するクラス
+ */
 class ViewerUI {
   static ICONS = {
     MAXIMIZE: `<svg viewBox="0 0 10 10" width="10" height="10"><rect width="10" height="10" fill="none" stroke="#fff" stroke-width="1"/></svg>`,
     RESTORE: `<svg viewBox="0 0 10 10" width="10" height="10"><rect x="1" y="3" width="6" height="6" fill="none" stroke="#fff" stroke-width="1"/><polyline points="3,3 3,1 9,1 9,7 7,7" fill="none" stroke="#fff" stroke-width="1"/></svg>`
   };
 
+  /**
+   * @param {ViewerState} state - ビューア状態のインスタンス
+   */
   constructor(state) {
     this.state = state;
     this.viewerImg = document.getElementById('viewer-img');
   }
 
+  /**
+   * 画像の変形（ズーム・パン・回転）とフィルター（シャープネス）を適用し、画面の描画を更新します。
+   */
   updateImageRendering() {
     if (!this.viewerImg) return;
     this.viewerImg.style.filter = this.state.isSharpened ? 'url(#sharpness-filter)' : 'none';
     this.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
   }
 
+  /**
+   * フルスクリーン状態などを考慮して、ウィンドウ枠（ボーダー）とコントロールボタンの表示状態を更新します。
+   */
   applyBorderVisibility() {
     if (this.state.isFullscreen) return;
     const overlay = document.getElementById('border-overlay');
@@ -26,6 +38,10 @@ class ViewerUI {
     }
   }
   
+  /**
+   * 画像上のマウスカーソルの種類を変更します。
+   * @param {string} type - CSSのcursorプロパティに設定する値（例: 'grab', 'default'）
+   */
   setCursor(type) {
     if (this.viewerImg) this.viewerImg.style.cursor = type;
   }

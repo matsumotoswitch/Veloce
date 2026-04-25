@@ -1,3 +1,6 @@
+/**
+ * メイン画面のUIとDOM操作を管理するクラス
+ */
 class UIManager {
   static ICONS = {
     DRIVE: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="#a0a0a0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"></line><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line></svg>`,
@@ -11,6 +14,9 @@ class UIManager {
     ERASER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>`
   };
 
+  /**
+   * @param {AppState} state - アプリケーション状態のインスタンス
+   */
   constructor(state) {
     this.state = state;
     // 頻繁に操作するDOM要素はここで取得しておく
@@ -19,7 +25,13 @@ class UIManager {
     this.toastContainer = document.getElementById('toast-container');
   }
 
-  // --- トースト通知の表示 ---
+  /**
+   * トースト通知を画面に表示します。
+   * @param {string} message - 表示するメッセージ
+   * @param {number} [duration=3000] - 表示する時間(ミリ秒)。0の場合は自動で消えません。
+   * @param {string|null} [id=null] - トーストの一意なID。既存のトーストを更新する場合に使用。
+   * @param {string} [type='info'] - トーストの種類 ('info', 'success', 'warning', 'error')
+   */
   showToast(message, duration = 3000, id = null, type = 'info') {
     if (!this.toastContainer) {
       let container = document.getElementById('toast-container');
@@ -67,7 +79,9 @@ class UIManager {
     }
   }
 
-  // --- 選択状態のUIを一括更新 ---
+  /**
+   * リストとサムネイルグリッドの選択状態を表すUIを一括で更新します。
+   */
   updateSelectionUI() {
     if (!this.fileListBody || !this.thumbnailGrid) {
       this.fileListBody = document.getElementById('file-list-body');
@@ -91,7 +105,9 @@ class UIManager {
     }
   }
 
-  // パネルの表示・非表示や幅を CSS 変数に反映する
+  /**
+   * パネル（左右ペイン）の表示・非表示や幅を CSS 変数に反映してレイアウトを更新します。
+   */
   applyLayout() {
     const root = document.documentElement;
     const lWidth = this.state.layout.leftVisible ? `${this.state.layout.leftWidth}px` : '0px';
@@ -106,7 +122,9 @@ class UIManager {
     if (rightPane) rightPane.style.display = this.state.layout.rightVisible ? 'flex' : 'none';
   }
 
-  // --- サムネイルとファイルリストの描画 ---
+  /**
+   * ファイルリストとサムネイルグリッドの描画を非同期で行います。
+   */
   async renderAll() {
     if (!this.fileListBody || !this.thumbnailGrid) {
       this.fileListBody = document.getElementById('file-list-body');

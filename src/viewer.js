@@ -2,6 +2,10 @@
 // Veloce - Viewer Controller (viewer.js)
 // ============================================================================
 
+// ============================================================================
+// 1. Setup & Window Initialization
+// ============================================================================
+
 // Ctrl+Shift+I の強制ブロック（キャプチャフェーズ）
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
@@ -37,11 +41,7 @@ function initSharpnessFilter() {
 }
 initSharpnessFilter();
 
-// --- 初期スタイル設定 ---
-// 全画面表示時などにブラウザのデフォルトマージンによる意図しない余白が発生するのを防ぐ。
-// また、画像をビューポート全体にフィットさせるための基本スタイルを適用する。
-document.documentElement.style.margin = '0';
-document.documentElement.style.padding = '0';
+// 画像をビューポート全体にフィットさせるための基本スタイルを適用する。;
 document.documentElement.style.overflow = 'hidden';
 document.body.style.margin = '0';
 document.body.style.padding = '0';
@@ -54,11 +54,9 @@ document.body.style.alignItems = 'center';
 document.body.style.boxSizing = 'border-box';
 document.body.style.border = 'none'; // 画像サイズに影響を与えないためborderは外側に描画する
 
-// --- ウィンドウ枠オーバーレイの作成 ---
 // inset box-shadow だと画像の下に隠れてしまうため、最前面にボーダー用の要素を配置する
-const borderOverlay = document.createElement('div');
-borderOverlay.id = 'border-overlay';
-borderOverlay.style.position = 'fixed';
+const borderOverlay = document.createElement('div');borderOverlay.id = 'border-overlay';
+on = 'fixed';
 borderOverlay.style.top = '0';
 borderOverlay.style.left = '0';
 borderOverlay.style.width = '100vw';
@@ -92,6 +90,10 @@ window.addEventListener('DOMContentLoaded', () => {
     
     loadImage();
 });
+
+// ============================================================================
+// 2. Window & View Management
+// ============================================================================
 
 /**
  * 画像のズーム状態（100%表示か、画面フィットか）を設定する。
@@ -266,9 +268,11 @@ function updateFullscreenStyles() {
   }
 }
 
-// --- 画像ナビゲーション ---
-/**
- * 現在のインデックス (`currentIndex`) に基づいて画像を表示し、ウィンドウタイトルを更新する。
+// ============================================================================
+// 3. Image Navigation & Loading
+// ============================================================================
+
+/*現在のインデックス (`currentIndex`) に基づいて画像を表示し、ウィンドウタイトルを更新する。
  * 表示後、前後の画像をバックグラウンドでプリロードする。
  */
 async function loadImage() {
@@ -370,22 +374,22 @@ function showNext() {
   loadImage();
 }
 
-// --- マウス操作ハンドリング ---
+// ============================================================================
+// 4. UI Controls
+// ============================================================================
+
 // ドラッグ、クリック、ダブルクリックを判別するための状態変数
-let isDragging = false;
-let hasMoved = false; // ドラッグ中に実際にマウスが移動したか
+leD hasMoved = false; // ドラッグ中に実際にマウスが移動したか
 let startX = 0, startY = 0; // ドラッグ開始時の座標
 let scrollLeftStart = 0, scrollTopStart = 0; // ドラッグ開始時のスクロール位置
 let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
 
-// --- ウィンドウコントロールボタンの作成 ---
 // OS標準のタイトルバーのホバーバグを回避するため、HTMLで自前のコントロールを右上に描画する
 function createWindowControls() {
   const controlsContainer = document.createElement('div');
   controlsContainer.id = 'window-controls';
-  controlsContainer.style.position = 'fixed';
-  controlsContainer.style.top = '1px'; // 青い枠線(1px)の内側に配置
-  controlsContainer.style.right = '1px';
+  controlsContainer.style.position = 'fixed'  controlsContainer.style.top = '1px'; // 青い枠線(1px)の内側に配置
+ght = '1px';
   controlsContainer.style.display = 'flex';
   controlsContainer.style.zIndex = '9999'; // 画像より手前になるよう最前面に配置
   controlsContainer.style.visibility = 'visible'; // 確実に表示されるように設定
@@ -443,6 +447,10 @@ function createWindowControls() {
 }
 
 createWindowControls();
+
+// ============================================================================
+// 5. Event Handlers (Mouse & Keyboard)
+// ============================================================================
 
 window.addEventListener('mousedown', (e) => {
   // ウィンドウがフォーカスを取得した直後のクリック（フォーカス目的のクリック）を画像送りとして扱わない
@@ -513,16 +521,12 @@ window.addEventListener('mouseup', (e) => {
   }
 });
 
-// --- 画像のパン（移動）機能 ---
-
 // Ctrlキーを押した時だけ「手のひら」カーソルにして、ドラッグ可能であることを示す
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Control') window.viewerUI.setCursor('grab');
 });
 window.addEventListener('keyup', (e) => {
-  if (e.key === 'Control' && !window.viewerState.isImageDragging) window.viewerUI.setCursor('default');
-});
-
+  i
 // ドラッグ開始（Ctrlを押している時のみ）
 window.viewerUI.viewerImg.addEventListener('mousedown', (e) => {
   if (e.ctrlKey && e.button === 0) {
@@ -560,7 +564,6 @@ window.addEventListener('contextmenu', (e) => {
   showNext(); // 右クリックで次の画像へ
 });
 
-// --- マウスホイールによる画像送り・ズーム ---
 window.addEventListener('wheel', (e) => {
   if (e.ctrlKey) {
     e.preventDefault(); // ブラウザ標準のズームを無効化
@@ -569,8 +572,7 @@ window.addEventListener('wheel', (e) => {
     if (e.deltaY < 0) {
       window.viewerState.currentScale *= 1.1; // 上スクロールで拡大
     } else {
-      window.viewerState.currentScale /= 1.1; // 下スクロールで縮小
-    }
+
 
     // 倍率の限界値を設定（10% ～ 3000%）
     window.viewerState.currentScale = Math.max(0.1, Math.min(window.viewerState.currentScale, 30.0));
@@ -605,7 +607,6 @@ function applyIconGlowEffect(el) {
   }, 100);
 }
 
-// --- キーボードショートカット ---
 window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
   if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
@@ -615,8 +616,7 @@ window.addEventListener('keydown', async (e) => {
 
   switch (e.key) {
     case 'ArrowLeft':
-      showPrev();
-      break;
+
     case 'ArrowRight':
       showNext();
       break;

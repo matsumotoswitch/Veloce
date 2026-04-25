@@ -2,6 +2,9 @@
 // Veloce - Main Controller (renderer.js)
 // ============================================================================
 
+// ============================================================================
+// 1. Constants & Global Variables
+// ============================================================================
 const logicalCores = navigator.hardwareConcurrency || 8;
 const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
 
@@ -33,9 +36,9 @@ contextMenu.style.boxShadow = '0 2px 10px rgba(0,0,0,0.5)';
 contextMenu.style.minWidth = '150px';
 contextMenu.style.fontSize = '13px';
 
-// ----------------------------------------------------------------------------
-// 1. Tauri API & Backend Communication
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 2. Tauri API & Backend Communication
+// ============================================================================
 
 async function refreshFileList() {
   if (!appState.currentDirectory || !window.veloceAPI.loadDirectory) return;
@@ -348,9 +351,9 @@ async function deleteSelectedFiles() {
   }
 }
 
-// ----------------------------------------------------------------------------
-// 2. Core Business Logic
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 3. Core Business Logic & Helpers
+// ============================================================================
 
 function showNotification(message, type = 'info') {
   window.uiManager.showToast(message, 3000, null, type);
@@ -1508,9 +1511,9 @@ function toggleHelpOverlay(forceShow) {
   document.body.appendChild(overlay);
 }
 
-// ----------------------------------------------------------------------------
-// 3. Event Handlers (User Interactions)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 4. Event Handlers (User Interactions)
+// ============================================================================
 
 const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
   if (!contextMenu.targetFolder) return;
@@ -2036,9 +2039,9 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
 });
 
-// ----------------------------------------------------------------------------
-// 4. Application Initialization
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 5. Application Initialization
+// ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
   const savedWinW = localStorage.getItem('mainWinWidth');
