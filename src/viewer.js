@@ -6,6 +6,8 @@
 // 1. Setup & Window Initialization
 // ============================================================================
 
+const viewerImg = document.getElementById('viewer-img');
+
 // Ctrl+Shift+I の強制ブロック（キャプチャフェーズ）
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
@@ -55,8 +57,9 @@ document.body.style.boxSizing = 'border-box';
 document.body.style.border = 'none'; // 画像サイズに影響を与えないためborderは外側に描画する
 
 // inset box-shadow だと画像の下に隠れてしまうため、最前面にボーダー用の要素を配置する
-const borderOverlay = document.createElement('div');borderOverlay.id = 'border-overlay';
-on = 'fixed';
+const borderOverlay = document.createElement('div');
+borderOverlay.id = 'border-overlay';
+borderOverlay.style.position = 'fixed';
 borderOverlay.style.top = '0';
 borderOverlay.style.left = '0';
 borderOverlay.style.width = '100vw';
@@ -289,9 +292,14 @@ async function loadImage() {
     if (window.viewerState.preloadCache.has(window.viewerState.currentIndex)) {
       const cachedData = window.viewerState.preloadCache.get(window.viewerState.currentIndex);
       window.viewerState.currentImagePath = cachedData.path; // パスを更新
-      window.viewerUI.viewerImg.src = cachedData.img.src;
+      if (viewerImg) {
+        viewerImg.src = cachedData.img.src;
+      }
     } else {
-      window.viewerUI.viewerImg.src = window.veloceAPI.convertFileSrc(window.viewerState.currentImagePath);
+      const assetUrl = window.veloceAPI.convertFileSrc(window.viewerState.currentImagePath);
+      if (viewerImg) {
+        viewerImg.src = assetUrl;
+      }
     }
     preloadAdjacentImages();
 
@@ -379,7 +387,7 @@ function showNext() {
 // ============================================================================
 
 // ドラッグ、クリック、ダブルクリックを判別するための状態変数
-leD hasMoved = false; // ドラッグ中に実際にマウスが移動したか
+let hasMoved = false; // ドラッグ中に実際にマウスが移動したか
 let startX = 0, startY = 0; // ドラッグ開始時の座標
 let scrollLeftStart = 0, scrollTopStart = 0; // ドラッグ開始時のスクロール位置
 let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
@@ -388,8 +396,9 @@ let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
 function createWindowControls() {
   const controlsContainer = document.createElement('div');
   controlsContainer.id = 'window-controls';
-  controlsContainer.style.position = 'fixed'  controlsContainer.style.top = '1px'; // 青い枠線(1px)の内側に配置
-ght = '1px';
+  controlsContainer.style.position = 'fixed';
+  controlsContainer.style.top = '1px'; // 青い枠線(1px)の内側に配置
+  controlsContainer.style.right = '1px';
   controlsContainer.style.display = 'flex';
   controlsContainer.style.zIndex = '9999'; // 画像より手前になるよう最前面に配置
   controlsContainer.style.visibility = 'visible'; // 確実に表示されるように設定
@@ -526,7 +535,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Control') window.viewerUI.setCursor('grab');
 });
 window.addEventListener('keyup', (e) => {
-  i
+  if (e.key === 'Control' && !window.viewerState.isImageDragging) window.viewerUI.setCursor('default');
+});
 // ドラッグ開始（Ctrlを押している時のみ）
 window.viewerUI.viewerImg.addEventListener('mousedown', (e) => {
   if (e.ctrlKey && e.button === 0) {
@@ -572,7 +582,8 @@ window.addEventListener('wheel', (e) => {
     if (e.deltaY < 0) {
       window.viewerState.currentScale *= 1.1; // 上スクロールで拡大
     } else {
-
+      window.viewerState.currentScale /= 1.1; // 下スクロールで縮小
+    }
 
     // 倍率の限界値を設定（10% ～ 3000%）
     window.viewerState.currentScale = Math.max(0.1, Math.min(window.viewerState.currentScale, 30.0));
