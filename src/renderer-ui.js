@@ -296,6 +296,31 @@ class UIManager {
         }
       });
     });
+
+    // --- 【追加】Diff画面でのドラッグ選択コピー対応 ---
+    container.querySelectorAll('.prompt-look').forEach(lookDiv => {
+      lookDiv.addEventListener('copy', (e) => {
+        const selection = window.getSelection();
+        if (selection.isCollapsed) return;
+
+        const clone = selection.getRangeAt(0).cloneContents();
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(clone);
+
+        const tags = tempDiv.querySelectorAll('.diff-tag');
+        tags.forEach(tag => {
+          tag.textContent = tag.textContent + ", ";
+        });
+
+        let copiedText = tempDiv.textContent;
+        copiedText = copiedText.replace(/,\s*$/, '').trim();
+
+        e.clipboardData.setData('text/plain', copiedText);
+        e.preventDefault();
+      });
+    });
+    // --- ここまで ---
+
     modal.style.display = 'flex';
   }
 

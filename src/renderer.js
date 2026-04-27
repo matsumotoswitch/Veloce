@@ -1229,6 +1229,35 @@ function renderMetadata(meta) {
       });
     }
 
+    // --- 【追加】ドラッグ選択コピー時のカンマ自動挿入ロジック ---
+    const lookDiv = fieldDiv.querySelector('.prompt-look');
+    if (isTag && lookDiv) {
+      lookDiv.addEventListener('copy', (e) => {
+        const selection = window.getSelection();
+        if (selection.isCollapsed) return;
+
+        // 選択された範囲のDOMをクローン
+        const clone = selection.getRangeAt(0).cloneContents();
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(clone);
+
+        // 選択範囲に含まれる全てのタグ要素を取得し、末尾にカンマを追加
+        const tags = tempDiv.querySelectorAll('.diff-tag');
+        tags.forEach(tag => {
+          tag.textContent = tag.textContent + ", ";
+        });
+
+        // プレーンテキストとして抽出し、末尾の余分なカンマを削除
+        let copiedText = tempDiv.textContent;
+        copiedText = copiedText.replace(/,\s*$/, '').trim();
+
+        // クリップボードの標準動作を上書き
+        e.clipboardData.setData('text/plain', copiedText);
+        e.preventDefault();
+      });
+    }
+    // --- ここまで ---
+
     container.appendChild(fieldDiv);
   };
 
@@ -1689,6 +1718,30 @@ async function renderMetadata(file) {
         }
       });
     });
+
+    // --- 【追加】ドラッグ選択コピー時のカンマ自動挿入ロジック ---
+    container.querySelectorAll('.prompt-look').forEach(lookDiv => {
+      lookDiv.addEventListener('copy', (e) => {
+        const selection = window.getSelection();
+        if (selection.isCollapsed) return;
+
+        const clone = selection.getRangeAt(0).cloneContents();
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(clone);
+
+        const tags = tempDiv.querySelectorAll('.diff-tag');
+        tags.forEach(tag => {
+          tag.textContent = tag.textContent + ", ";
+        });
+
+        let copiedText = tempDiv.textContent;
+        copiedText = copiedText.replace(/,\s*$/, '').trim();
+
+        e.clipboardData.setData('text/plain', copiedText);
+        e.preventDefault();
+      });
+    });
+    // --- ここまで ---
   } catch (error) {
     container.innerHTML = `<div style="color:#ff4d4d; padding:10px; font-size:0.9em; border:1px solid #ff4d4d;">描画エラー: ${error.message}</div>`;
   }
