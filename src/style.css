@@ -312,7 +312,7 @@ tr.selected { background: var(--accent-color); color: #fff; }
   display: flex;
   flex-direction: column-reverse; /* 新しい通知が一番下に表示される */
   gap: 10px;
-  z-index: 10005; /* ダイアログ等より手前に表示 */
+  z-index: 10010; /* モーダル(10005)よりもさらに手前の、アプリ最前面に表示 */
   pointer-events: none; /* マウス操作を邪魔しない */
   align-items: flex-end;
 }
@@ -373,3 +373,115 @@ tr.selected { background: var(--accent-color); color: #fff; }
 
 #license-text hr { border: 0; height: 1px; background: #333; margin: 1.5em 0 !important; }
 #license-text strong { color: #fff !important; }
+
+/* --- Diff Modal --- */
+.modal { display: none; position: fixed; z-index: 10005; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.modal-content { background-color: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+
+/* 左右分割レイアウト用 */
+.diff-columns {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+.diff-column {
+  flex: 1;
+  min-width: 0; /* 折り返し防止 */
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #333;
+}
+.diff-column h4 {
+  margin: 0 0 10px 0;
+  font-size: 0.85em;
+  color: #888;
+  border-bottom: 1px solid #333;
+  padding-bottom: 5px;
+}
+
+/* メイン画面のプロンプトエリアに合わせたスタイル */
+.prompt-look {
+  background-color: #111;
+  border: 1px solid #333;
+  padding: 10px;
+  border-radius: 4px;
+  min-height: 120px;
+  max-height: 250px;
+  overflow-y: auto;
+  font-size: 1.1em;
+  line-height: 1.5;
+  color: #ccc;
+}
+
+/* パラメータ表示用の高さ調整 */
+.prompt-look.param-box {
+  min-height: 34px; /* 1行分程度の高さ */
+  max-height: 60px;
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+}
+
+.diff-section { margin-bottom: 20px; }
+.diff-section h3 { color: #888; margin-bottom: 8px; font-size: 1.1em; border-bottom: 1px solid #444; padding-bottom: 4px; transition: color 0.2s; }
+.diff-section h3.has-diff { color: #ffcc00; }
+
+/* Diffモーダル内のコピーボタン */
+.diff-copy-btn {
+  cursor: pointer;
+  color: #888;
+  display: inline-flex;
+  align-items: center;
+  transition: color 0.1s, filter 0.1s;
+}
+.diff-copy-btn:hover {
+  color: #3a7afe;
+}
+
+/* --- Diff Copy Button Glow Effect --- */
+.diff-copy-btn svg {
+  transition: stroke 0.1s, filter 0.1s;
+}
+
+/* 発光状態のクラス */
+.diff-copy-btn.glow {
+  color: #fff !important;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 8px #ebc06d) drop-shadow(0 0 15px #ebc06d) !important;
+}
+.diff-copy-btn.glow svg {
+  stroke: #fff !important;
+}
+
+.diff-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  margin: 2px;
+  border-radius: 3px;
+  background-color: #333;
+  color: #ccc;
+  font-family: Consolas, monospace;
+  font-size: 1em;
+  word-break: break-all;
+}
+.diff-tag.added { background-color: rgba(40, 167, 69, 0.2); color: #a3f7b5; border: 1px solid #28a745; }
+.diff-tag.removed { background-color: rgba(220, 53, 69, 0.2); color: #f8babb; border: 1px solid #dc3545; }
+.diff-tag.common { opacity: 0.6; border: 1px solid transparent; }
+
+/* Diffモーダル内のサムネイル表示用 */
+.diff-thumbnail-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 250px; /* サムネイルの最大高さ */
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid #333;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.diff-thumbnail {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}

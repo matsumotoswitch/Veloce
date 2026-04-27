@@ -123,6 +123,182 @@ class UIManager {
   }
 
   /**
+   * 2つの画像ファイルの全メタデータを比較表示します。
+   * 全項目をプロンプトと同じテキストボックス形式で左右に並べて表示します。
+   */
+  showDiffModal(file1, file2, meta1 = {}, meta2 = {}) {
+    const modal = document.getElementById('diff-modal');
+    const container = document.getElementById('diff-container');
+    if (!modal || !container) return;
+
+    const parse = (text) => text ? text.split(',').map(t => t.trim()).filter(t => t) : [];
+    
+    const createCopyIcon = (text) => {
+      if (!text) return '';
+      const escaped = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<span class="diff-copy-btn" title="クリップボードにコピー" data-copy-text="${escaped}">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+      </span>`;
+    };
+
+    const extractData = (file, meta) => {
+      const p = meta.params || {};
+      const data = {
+        name: file.name,
+        source: meta.source || file.source || null,
+        prompt: meta.prompt || file.prompt || '',
+        negativePrompt: meta.negativePrompt || file.negativePrompt || '',
+        chars: [],
+        params: {}
+      };
+      if (Array.isArray(p.characterPrompts)) {
+        data.chars = p.characterPrompts.map(cp => ({ prompt: cp.prompt || '', uc: cp.uc || '' }));
+      } else if (Array.isArray(file.charPrompts)) {
+        data.chars = file.charPrompts.map(cp => ({
+          prompt: (cp && typeof cp === 'object' && cp.prompt) ? cp.prompt : String(cp),
+          uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : ''
+        }));
+      }
+      const res = (p.width && p.height) ? `${p.width}x${p.height}` : (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
+      let sampler = p.sampler || file.sampler || null;
+      if (sampler !== '-' && p.sm && !sampler.includes('karras')) sampler += " (karras)";
+      data.params = {
+        resolution: res,
+        seed: p.seed ?? file.seed ?? null,
+        steps: p.steps ?? file.steps ?? null,
+        sampler: sampler,
+        scale: p.scale ?? file.scale ?? null,
+        cfg_rescale: p.cfg_rescale ?? file.cfg_rescale ?? null,
+        uncond_scale: p.uncond_scale ?? file.uncond_scale ?? null,
+        rawParameters: p.rawParameters ?? file.rawParameters ?? null
+      };
+      return data;
+    };
+
+    const d1 = extractData(file1, meta1);
+    const d2 = extractData(file2, meta2);
+
+    const renderSideBySideSection = (title, text1, text2, isParam = false) => {
+      const v1 = text1 ?? '-';
+      const v2 = text2 ?? '-';
+      if (v1 === '-' && v2 === '-') return ''; 
+
+      // 差異があるかどうかを判定
+      const hasDiff = v1 !== v2;
+      const titleClass = hasDiff ? 'has-diff' : '';
+
+      const tags1 = parse(String(v1));
+      const tags2 = parse(String(v2));
+      const set1 = new Set(tags1);
+      const set2 = new Set(tags2);
+
+      const renderTags = (tags, otherSet, mode) => {
+        if (tags.length === 0 || tags[0] === '-') return '<span style="opacity:0.3">なし</span>';
+        return tags.map(t => {
+          let className = 'common';
+          if (mode === 'left' && !otherSet.has(t)) className = 'removed';
+          if (mode === 'right' && !otherSet.has(t)) className = 'added';
+          return `<span class="diff-tag ${className}">${t}</span>`;
+        }).join('');
+      };
+
+      const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
+
+      return `
+        <div class="diff-columns">
+          <div class="diff-column">
+            <div class="diff-section">
+              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>${title}</span>${createCopyIcon(v1)}
+              </h3>
+              <div class="${boxClass}">${renderTags(tags1, set2, 'left')}</div>
+            </div>
+          </div>
+          <div class="diff-column">
+            <div class="diff-section">
+              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>${title}</span>${createCopyIcon(v2)}
+              </h3>
+              <div class="${boxClass}">${renderTags(tags2, set1, 'right')}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
+    let contentHtml = '';
+    contentHtml += renderSideBySideSection('モデル / バージョン', d1.source, d2.source, true);
+    contentHtml += renderSideBySideSection('プロンプト', d1.prompt, d2.prompt);
+    contentHtml += renderSideBySideSection('除外したい要素', d1.negativePrompt, d2.negativePrompt);
+
+    const maxChars = Math.max(d1.chars.length, d2.chars.length);
+    for (let i = 0; i < maxChars; i++) {
+      const c1 = d1.chars[i] || { prompt: '', uc: '' };
+      const c2 = d2.chars[i] || { prompt: '', uc: '' };
+      contentHtml += renderSideBySideSection(`キャラクター ${i + 1} プロンプト`, c1.prompt, c2.prompt);
+      contentHtml += renderSideBySideSection(`キャラクター ${i + 1} 除外したい要素`, c1.uc, c2.uc);
+    }
+
+    contentHtml += renderSideBySideSection('画像サイズ', d1.params.resolution, d2.params.resolution, true);
+    contentHtml += renderSideBySideSection('シード値', d1.params.seed, d2.params.seed, true);
+    contentHtml += renderSideBySideSection('ステップ', d1.params.steps, d2.params.steps, true);
+    contentHtml += renderSideBySideSection('サンプラー', d1.params.sampler, d2.params.sampler, true);
+    contentHtml += renderSideBySideSection('プロンプトガイダンス', d1.params.scale, d2.params.scale, true);
+    contentHtml += renderSideBySideSection('プロンプトガイダンスの再調整', d1.params.cfg_rescale, d2.params.cfg_rescale, true);
+    contentHtml += renderSideBySideSection('除外したい要素の強さ', d1.params.uncond_scale, d2.params.uncond_scale, true);
+    contentHtml += renderSideBySideSection('生成パラメータ (Raw)', d1.params.rawParameters, d2.params.rawParameters);
+
+    const src1 = window.veloceAPI.convertFileSrc(file1.path);
+    const src2 = window.veloceAPI.convertFileSrc(file2.path);
+
+    const headerHtml = `
+      <div style="display: flex; gap: 15px; margin-bottom: 15px; font-size: 0.85em;">
+        <div style="flex: 1; display: flex; flex-direction: column;">
+          <div style="color:#f8babb; background: rgba(248,186,187,0.1); padding: 8px; border-radius: 4px; border: 1px solid rgba(248,186,187,0.2);">
+            <strong>[1]</strong> ${d1.name}
+          </div>
+          <div class="diff-thumbnail-container">
+            <img src="${src1}" class="diff-thumbnail" decoding="async">
+          </div>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column;">
+          <div style="color:#a3f7b5; background: rgba(163,247,181,0.1); padding: 8px; border-radius: 4px; border: 1px solid rgba(163,247,181,0.2);">
+            <strong>[2]</strong> ${d2.name}
+          </div>
+          <div class="diff-thumbnail-container">
+            <img src="${src2}" class="diff-thumbnail" decoding="async">
+          </div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = headerHtml + contentHtml;
+
+    container.querySelectorAll('.diff-copy-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const target = e.currentTarget;
+        const text = target.getAttribute('data-copy-text');
+        if (text && text !== '-') {
+          try {
+            await navigator.clipboard.writeText(text);
+            this.showToast("クリップボードにコピーしました");
+            target.classList.add('glow');
+            setTimeout(() => {
+              target.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out';
+              target.classList.remove('glow');
+              setTimeout(() => { target.style.transition = ''; }, 600);
+            }, 200);
+          } catch (err) {}
+        }
+      });
+    });
+    modal.style.display = 'flex';
+  }
+
+  /**
    * ファイルリストとサムネイルグリッドの描画を非同期で行います。
    */
   async renderAll() {

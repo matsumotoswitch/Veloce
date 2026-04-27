@@ -1625,6 +1625,17 @@ window.addEventListener('click', () => {
   }
 });
 
+// Diffモーダルの安全な閉じる処理
+window.addEventListener('click', (e) => {
+  const diffModal = document.getElementById('diff-modal');
+  if (!diffModal) return;
+  
+  // 閉じるボタン（x）が押された場合、またはモーダルの外側（背景）が押された場合
+  if (e.target.id === 'diff-close' || e.target === diffModal) {
+    diffModal.style.display = 'none';
+  }
+});
+
 const dragTooltip = document.createElement('div');
 dragTooltip.id = 'drag-tooltip';
 dragTooltip.style.position = 'fixed';
@@ -1911,15 +1922,48 @@ window.addEventListener('keydown', async (e) => {
     return;
   }
   
-  if (e.key === 'Escape' && document.getElementById('help-overlay')) {
-    e.preventDefault();
-    toggleHelpOverlay(false);
-    return;
+  if (e.key === 'Escape') {
+    const diffModal = document.getElementById('diff-modal');
+    if (diffModal && diffModal.style.display === 'flex') {
+      e.preventDefault();
+      diffModal.style.display = 'none';
+      return;
+    }
+    if (document.getElementById('help-overlay')) {
+      e.preventDefault();
+      toggleHelpOverlay(false);
+      return;
+    }
   }
 
   if (e.key === 'a' || e.key === 'A') {
     e.preventDefault();
     if (window.veloceAPI.arrangeViewers) window.veloceAPI.arrangeViewers();
+  }
+
+  if (e.key === 'd' || e.key === 'D') {
+    e.preventDefault();
+    if (appState.selection.size === 2) {
+      const indices = Array.from(appState.selection);
+      const file1 = appState.filteredFiles[indices[0]];
+      const file2 = appState.filteredFiles[indices[1]];
+      
+      // 完全なメタデータを取得してからDiffモーダルを開く
+      window.uiManager.showToast('比較データを読み込み中...', 0, 'diff-loading', 'info');
+      Promise.all([
+        window.veloceAPI.parseMetadata(file1.path),
+        window.veloceAPI.parseMetadata(file2.path)
+      ]).then(([meta1, meta2]) => {
+        const t = document.getElementById('toast-diff-loading');
+        if (t) {
+          t.classList.remove('show');
+          setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+        }
+        window.uiManager.showDiffModal(file1, file2, meta1, meta2);
+      });
+    } else {
+      window.uiManager.showToast('Diff機能を使用するには、Ctrlキーを押しながら画像を2つ選択してください。', 3000, null, 'warning');
+    }
   }
 
   if (e.key === 'F5') {
