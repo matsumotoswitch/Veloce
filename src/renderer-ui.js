@@ -186,14 +186,15 @@ class UIManager {
       const v2 = text2 ?? '-';
       if (v1 === '-' && v2 === '-') return ''; 
 
-      // 差異があるかどうかを判定
-      const hasDiff = v1 !== v2;
-      const titleClass = hasDiff ? 'has-diff' : '';
-
       const tags1 = parse(String(v1));
       const tags2 = parse(String(v2));
       const set1 = new Set(tags1);
       const set2 = new Set(tags2);
+
+      // 単純な文字列比較ではなく、パース・整理されたタグ配列の中身で比較する
+      // これにより「末尾のスペース」や「余分なカンマ」だけの違いを無視できます
+      const hasDiff = tags1.join(',') !== tags2.join(',');
+      const titleClass = hasDiff ? 'has-diff' : '';
 
       const renderTags = (tags, otherSet, mode) => {
         if (tags.length === 0 || tags[0] === '-') return '<span style="opacity:0.3">なし</span>';
