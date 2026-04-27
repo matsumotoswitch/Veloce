@@ -1116,22 +1116,21 @@ async function selectImage(index, event = null) {
 }
 
 function renderMetadata(meta) {
+  const promptText = document.getElementById('prompt-text');
   let container = document.getElementById('metadata-container');
-  const rightPane = promptText ? promptText.parentElement : null;
+  const rightPane = promptText ? promptText.parentElement : document.getElementById('right-pane');
   
-  const hasAiMetadata = meta.prompt || meta.negativePrompt || meta.source || (meta.params && Object.keys(meta.params).length > 0);
+  const hasAiMetadata = meta && (meta.prompt || meta.negativePrompt || meta.source || (meta.params && Object.keys(meta.params).length > 0));
 
   if (!container) {
     container = document.createElement('div');
     container.id = 'metadata-container';
     container.style.display = hasAiMetadata ? 'flex' : 'none';
     container.style.flexDirection = 'column';
-    container.style.gap = '10px';
     container.style.width = '100%';
     container.style.boxSizing = 'border-box';
     container.style.paddingRight = '8px'; 
     
-    // 既存の子要素（古いテキストエリア等）を非表示にして新しいコンテナを追加
     if (rightPane) {
       rightPane.style.overflowY = 'auto';
       Array.from(rightPane.children).forEach(child => {
@@ -1149,115 +1148,120 @@ function renderMetadata(meta) {
     return; 
   }
 
-  const terms = appState.searchQuery.trim() !== '' ? appState.searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t) : [];
+  // --- 【最強版】検索キーワードの確実な取得 ---
+  let searchStr = '';
+  const searchInput = document.getElementById('search-bar'); // HTMLのIDに合わせて修正
+  if (searchInput && searchInput.value) {
+    searchStr = searchInput.value; // 検索ボックスから直接取得
+  } else if (typeof appState !== 'undefined' && appState.searchQuery) {
+    searchStr = appState.searchQuery; // フォールバック
+  }
+  
+  const terms = searchStr.trim() !== '' 
+    ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(t => t) 
+    : [];
 
-  const addField = (label, value, isMultiline = false, customMinHeight = '80px') => {
-    if (value === undefined || value === null) return;
+  const copyIconSvg = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+
+  const addField = (label, value, isTag = false) => {
+    if (value === undefined || value === null || value === '') return;
     
     const fieldDiv = document.createElement('div');
-    fieldDiv.style.display = 'flex';
-    fieldDiv.style.flexDirection = 'column';
-    
-    const labelWrapper = document.createElement('div');
-    labelWrapper.style.display = 'flex';
-    labelWrapper.style.justifyContent = 'space-between';
-    labelWrapper.style.alignItems = 'center';
-    labelWrapper.style.marginBottom = '4px';
+    fieldDiv.className = 'inspector-section';
+    fieldDiv.style.marginBottom = '15px';
 
-    const labelEl = document.createElement('label');
-    labelEl.textContent = label;
-    labelEl.style.color = '#ccc';
+    const titleHtml = `
+      <h3 style="color: #ffcc00; font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+        <span>${label}</span>
+        <span class="diff-copy-btn" title="クリップボードにコピー" data-copy-text="${String(value).replace(/"/g, '&quot;')}">${copyIconSvg}</span>
+      </h3>
+    `;
 
-    const copyBtn = document.createElement('span');
-    copyBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-    copyBtn.style.cursor = 'pointer';
-    copyBtn.style.color = '#888';
-    copyBtn.title = 'クリップボードにコピー';
-    copyBtn.style.transition = 'color 0.1s, filter 0.1s';
-    copyBtn.style.display = 'inline-flex';
-    copyBtn.style.alignItems = 'center';
-    
-    copyBtn.onmouseenter = () => { if (copyBtn.style.color === 'rgb(136, 136, 136)' || copyBtn.style.color === '#888') copyBtn.style.color = '#3a7afe'; };
-    copyBtn.onmouseleave = () => { if (copyBtn.style.color === 'rgb(58, 122, 254)' || copyBtn.style.color === '#3a7afe') copyBtn.style.color = '#888'; };
-    
-    copyBtn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(String(value));
-        showNotification("プロンプトをクリップボードにコピーしました");
-        applyIconGlowEffect(copyBtn);
-      } catch (err) {
-        console.error('Failed to copy: ', err);
+    let contentHtml = '';
+    if (isTag) {
+      const tags = String(value).split(',').map(t => t.trim()).filter(t => t);
+      if (tags.length === 0) {
+        contentHtml = '<span style="opacity:0.3">なし</span>';
+      } else {
+        contentHtml = tags.map(t => {
+          // --- 【修正】ハイライトの絶対発光処理 ---
+          const isMatch = terms.some(term => t.toLowerCase().includes(term));
+          
+          // isMatchがtrueなら、枠線・背景・文字色・光彩エフェクトを全て適用する
+          const matchStyle = isMatch 
+            ? 'border: 1px solid #ffcc00; background-color: rgba(255, 204, 0, 0.25); color: #ffcc00; font-weight: bold; box-shadow: 0 0 8px rgba(255,204,0,0.3);' 
+            : 'border: 1px solid transparent;';
+
+          const displayHtml = typeof highlightText === 'function' ? highlightText(t, terms) : t;
+          
+          return `<span class="diff-tag common" style="${matchStyle}">${displayHtml}</span>`;
+        }).join('');
       }
-    });
-    
-    labelWrapper.appendChild(labelEl);
-    labelWrapper.appendChild(copyBtn);
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'metadata-content';
-    contentDiv.innerHTML = highlightText(String(value), terms);
-    contentDiv.style.width = '100%';
-    contentDiv.style.boxSizing = 'border-box';
-    contentDiv.style.padding = '6px';
-    contentDiv.style.backgroundColor = '#1e1e1e';
-    contentDiv.style.color = '#d4d4d4';
-    contentDiv.style.border = '1px solid #333';
-    contentDiv.style.borderRadius = '4px';
-    contentDiv.style.fontFamily = 'inherit';
-    contentDiv.style.fontSize = '1em';
-    contentDiv.style.userSelect = 'text';
-    contentDiv.style.cursor = 'text';
-
-    if (isMultiline) {
-      contentDiv.style.minHeight = customMinHeight;
-      contentDiv.style.overflowY = 'auto';
-      contentDiv.style.resize = 'vertical';
-      contentDiv.style.wordBreak = 'break-all';
     } else {
-      contentDiv.style.whiteSpace = 'nowrap';
-      contentDiv.style.overflowX = 'auto';
-      contentDiv.style.overflowY = 'hidden';
+      const displayHtml = typeof highlightText === 'function' ? highlightText(String(value), terms) : String(value);
+      contentHtml = `<span class="diff-tag common">${displayHtml}</span>`;
     }
-    
-    fieldDiv.appendChild(labelWrapper);
-    fieldDiv.appendChild(contentDiv);
+
+    const boxClass = isTag ? "prompt-look" : "prompt-look param-box";
+
+    fieldDiv.innerHTML = `
+      ${titleHtml}
+      <div class="${boxClass}">
+        ${contentHtml}
+      </div>
+    `;
+
+    const copyBtn = fieldDiv.querySelector('.diff-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(String(value));
+          if (typeof showNotification === 'function') showNotification("クリップボードにコピーしました");
+          else if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました");
+          
+          copyBtn.classList.add('glow');
+          setTimeout(() => {
+            copyBtn.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out';
+            copyBtn.classList.remove('glow');
+            setTimeout(() => { copyBtn.style.transition = ''; }, 600);
+          }, 200);
+        } catch (err) {}
+      });
+    }
+
     container.appendChild(fieldDiv);
   };
 
-  if (meta.source) {
-    addField('モデル / バージョン', meta.source);
-  }
-  addField('プロンプト', meta.prompt, true, '160px');
-  addField('除外したい要素', meta.negativePrompt, true, '160px');
+  if (meta.source) addField('モデル / バージョン', meta.source, false);
+  addField('プロンプト', meta.prompt, true);
+  addField('除外したい要素', meta.negativePrompt, true);
   
   if (meta.params) {
     if (Array.isArray(meta.params.characterPrompts)) {
       meta.params.characterPrompts.forEach((char, idx) => {
-        addField(`キャラクター ${idx + 1} プロンプト`, char.prompt, true, '90px');
-        addField(`キャラクター ${idx + 1} 除外したい要素`, char.uc, true, '90px');
+        addField(`キャラクター ${idx + 1} プロンプト`, char.prompt, true);
+        addField(`キャラクター ${idx + 1} 除外したい要素`, char.uc, true);
       });
     }
     
     const resolution = (meta.params.width && meta.params.height) 
       ? `${meta.params.width}x${meta.params.height}` 
       : (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
-    addField('画像サイズ', resolution);
+    addField('画像サイズ', resolution, false);
     
-    addField('シード値', meta.params.seed);
-    addField('ステップ', meta.params.steps);
+    addField('シード値', meta.params.seed, false);
+    addField('ステップ', meta.params.steps, false);
     
     let sampler = meta.params.sampler;
-    if (sampler && meta.params.sm && !sampler.includes('karras')) {
-        sampler += " (karras)";
-    }
-    addField('サンプラー', sampler);
+    if (sampler && meta.params.sm && !sampler.includes('karras')) sampler += " (karras)";
+    addField('サンプラー', sampler, false);
     
-    addField('プロンプトガイダンス', meta.params.scale);
-    addField('プロンプトガイダンスの再調整', meta.params.cfg_rescale);
-    addField('除外したい要素の強さ', meta.params.uncond_scale);
+    addField('プロンプトガイダンス', meta.params.scale, false);
+    addField('プロンプトガイダンスの再調整', meta.params.cfg_rescale, false);
+    addField('除外したい要素の強さ', meta.params.uncond_scale, false);
 
     if (meta.params.rawParameters) {
-      addField('生成パラメータ', meta.params.rawParameters, true);
+      addField('生成パラメータ (Raw)', meta.params.rawParameters, true);
     }
   }
 }
@@ -1581,6 +1585,19 @@ async function renderMetadata(file) {
 
     const d = extractData();
 
+    // --- 【最強版】検索キーワードの確実な取得 ---
+    let searchStr = '';
+    const searchInput = document.getElementById('search-bar');
+    if (searchInput && searchInput.value) {
+      searchStr = searchInput.value;
+    } else if (typeof appState !== 'undefined' && appState.searchQuery) {
+      searchStr = appState.searchQuery;
+    }
+    
+    const terms = searchStr.trim() !== '' 
+      ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(t => t) 
+      : [];
+
     // ヘルパー: コピーアイコン生成
     const createCopyIcon = (text) => {
       if (!text || text === '-') return '';
@@ -1595,13 +1612,24 @@ async function renderMetadata(file) {
       if (!text || text === '-') return '';
       const tags = String(text).split(',').map(t => t.trim()).filter(t => t);
       const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
+      
+      const tagsHtml = tags.map(t => {
+        const isMatch = terms.some(term => t.toLowerCase().includes(term));
+        const matchStyle = isMatch 
+          ? 'border: 1px solid #ffcc00; background-color: rgba(255, 204, 0, 0.25); color: #ffcc00; font-weight: bold; box-shadow: 0 0 8px rgba(255,204,0,0.3);' 
+          : 'border: 1px solid transparent;';
+          
+        const displayHtml = typeof highlightText === 'function' ? highlightText(t, terms) : t;
+        return `<span class="diff-tag common" style="${matchStyle}">${displayHtml}</span>`;
+      }).join('');
+
       return `
         <div class="inspector-section" style="margin-bottom: 15px;">
           <h3 style="font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
             <span>${title}</span>${createCopyIcon(text)}
           </h3>
           <div class="${boxClass}">
-            ${tags.map(t => `<span class="diff-tag common">${t}</span>`).join('')}
+            ${tagsHtml}
           </div>
         </div>
       `;
