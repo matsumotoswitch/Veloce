@@ -13,8 +13,6 @@ emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAA
 
 const fileListBody = document.getElementById('file-list-body');
 const thumbnailGrid = document.getElementById('center-bottom');
-const promptText = document.getElementById('prompt-text');
-const negativePromptText = document.getElementById('negative-prompt-text');
 const dirTree = document.getElementById('dir-tree');
 const thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
 const resizerLeft = document.getElementById('resizer-left');
@@ -53,9 +51,7 @@ async function refreshFileList() {
   
   window.uiManager.updateSelectionUI();
   if (appState.selectedIndex > -1) {
-    const requestId = ++appState.currentMetaRequestId;
-    const meta = await window.veloceAPI.parseMetadata(appState.filteredFiles[appState.selectedIndex].path);
-    if (appState.currentMetaRequestId === requestId) renderMetadata(meta);
+    renderMetadata(appState.filteredFiles[appState.selectedIndex]);
   } else {
     clearMetadataUI();
   }
@@ -753,10 +749,9 @@ function processIdleThumbnails(deadline) {
 }
 
 function clearMetadataUI() {
-  const container = document.getElementById('metadata-container');
+  const container = document.getElementById('inspector-content');
   if (container) {
-    container.innerHTML = '';
-    container.style.display = 'none';
+    container.innerHTML = '<div style="color: #666; text-align: center; margin-top: 50px;">画像を選択すると詳細が表示されます</div>';
   }
 }
 
@@ -1117,23 +1112,7 @@ async function selectImage(index, event = null) {
   const requestId = ++appState.currentMetaRequestId;
 
   // インスペクターの更新
-  const meta = await window.veloceAPI.parseMetadata(file.path);
-  
-  if (appState.currentMetaRequestId !== requestId) return;
-
-  renderMetadata(meta);
-}
-
-function highlightText(text, terms) {
-  if (!text) return '';
-  if (!terms || terms.length === 0) return text;
-  let highlighted = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  terms.forEach(term => {
-    const escapedTerm = term.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const regex = new RegExp(`(${escapedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    highlighted = highlighted.replace(regex, '<mark style="background-color: rgba(235, 192, 109, 0.6); color: #fff; border-radius: 2px; padding: 0 2px;">$1</mark>');
-  });
-  return highlighted;
+  renderMetadata(file);
 }
 
 function renderMetadata(meta) {
@@ -1556,6 +1535,137 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
   }
 });
 
+/**
+ * 指定されたファイルのメタデータをインスペクターに描画します。
+ * Diff画面と同一のデザイン、項目順、コピー機能を提供します。
+ */
+async function renderMetadata(file) {
+  const container = document.getElementById('inspector-content');
+  if (!file || !container) return;
+
+  try {
+    // データの取得と安全なフォールバック
+    const rawMeta = await window.veloceAPI.parseMetadata(file.path);
+    const meta = rawMeta || {};
+    const p = meta.params || {};
+
+    // Diff画面と共通のデータ抽出ロジック
+    const extractData = () => {
+      const data = {
+        source: meta.source || file.source || null,
+        prompt: meta.prompt || file.prompt || '',
+        negativePrompt: meta.negativePrompt || file.negativePrompt || '',
+        chars: [],
+        params: {}
+      };
+      if (Array.isArray(p.characterPrompts)) {
+        data.chars = p.characterPrompts.map(cp => ({ prompt: cp.prompt || '', uc: cp.uc || '' }));
+      } else if (Array.isArray(file.charPrompts)) {
+        data.chars = file.charPrompts.map(cp => ({
+          prompt: (cp && typeof cp === 'object' && cp.prompt) ? cp.prompt : String(cp),
+          uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : ''
+        }));
+      }
+      const res = (p.width && p.height) ? `${p.width}x${p.height}` : (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
+      let sampler = p.sampler || file.sampler || null;
+      if (sampler && p.sm && !sampler.includes('karras')) sampler += " (karras)";
+      data.params = {
+        resolution: res, seed: p.seed ?? file.seed ?? null,
+        steps: p.steps ?? file.steps ?? null, sampler: sampler,
+        scale: p.scale ?? file.scale ?? null, cfg_rescale: p.cfg_rescale ?? file.cfg_rescale ?? null,
+        uncond_scale: p.uncond_scale ?? file.uncond_scale ?? null,
+        rawParameters: p.rawParameters ?? file.rawParameters ?? null
+      };
+      return data;
+    };
+
+    const d = extractData();
+
+    // ヘルパー: コピーアイコン生成
+    const createCopyIcon = (text) => {
+      if (!text || text === '-') return '';
+      const escaped = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<span class="diff-copy-btn" title="コピー" data-copy-text="${escaped}">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+      </span>`;
+    };
+
+    // ヘルパー: セクション描画
+    const renderSection = (title, text, isParam = false) => {
+      if (!text || text === '-') return '';
+      const tags = String(text).split(',').map(t => t.trim()).filter(t => t);
+      const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
+      return `
+        <div class="inspector-section" style="margin-bottom: 15px;">
+          <h3 style="font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+            <span>${title}</span>${createCopyIcon(text)}
+          </h3>
+          <div class="${boxClass}">
+            ${tags.map(t => `<span class="diff-tag common">${t}</span>`).join('')}
+          </div>
+        </div>
+      `;
+    };
+
+    let html = '';
+    html += renderSection('モデル / バージョン', d.source, true);
+    html += renderSection('プロンプト', d.prompt);
+    html += renderSection('除外したい要素', d.negativePrompt);
+    d.chars.forEach((c, i) => {
+      html += renderSection(`キャラクター ${i + 1} プロンプト`, c.prompt);
+      html += renderSection(`キャラクター ${i + 1} 除外したい要素`, c.uc);
+    });
+    html += renderSection('画像サイズ', d.params.resolution, true);
+    html += renderSection('シード値', d.params.seed, true);
+    html += renderSection('ステップ', d.params.steps, true);
+    html += renderSection('サンプラー', d.params.sampler, true);
+    html += renderSection('プロンプトガイダンス', d.params.scale, true);
+    html += renderSection('プロンプトガイダンスの再調整', d.params.cfg_rescale, true);
+    html += renderSection('除外したい要素の強さ', d.params.uncond_scale, true);
+    html += renderSection('生成パラメータ (Raw)', d.params.rawParameters);
+
+    // プロンプトが何もない場合（または抽出に失敗した場合）
+    if (html === '') {
+      const rawMetaStr = JSON.stringify(meta, null, 2);
+      if (rawMetaStr !== '{}' && rawMetaStr !== 'null') {
+        const escapedMeta = rawMetaStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        html = `
+          <div style="padding: 10px; color: #ccc;">
+            <h3 style="font-size: 1em; border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 10px;">未対応のメタデータ形式</h3>
+            <p style="font-size: 0.85em; margin-bottom: 10px; line-height: 1.4;">データは読み込めていますが、NovelAIなどの特殊な格納形式になっています。以下の生データを確認してください：</p>
+            <div class="prompt-look" style="white-space: pre-wrap; font-family: Consolas, monospace; font-size: 0.85em; word-break: break-all; max-height: 400px; overflow-y: auto;">${escapedMeta}</div>
+          </div>
+        `;
+      } else {
+        html = '<div style="color: #666; text-align: center; margin-top: 50px;">メタデータが含まれていないか、読み取れませんでした。</div>';
+      }
+    }
+
+    container.innerHTML = html;
+
+    // コピーイベントの登録
+    container.querySelectorAll('.diff-copy-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const target = e.currentTarget;
+        const text = target.getAttribute('data-copy-text');
+        if (text) {
+          await navigator.clipboard.writeText(text);
+          if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました");
+          else showNotification("クリップボードにコピーしました"); // 古い関数へのフォールバック
+          target.classList.add('glow');
+          setTimeout(() => {
+            target.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out';
+            target.classList.remove('glow');
+            setTimeout(() => { target.style.transition = ''; }, 600);
+          }, 200);
+        }
+      });
+    });
+  } catch (error) {
+    container.innerHTML = `<div style="color:#ff4d4d; padding:10px; font-size:0.9em; border:1px solid #ff4d4d;">描画エラー: ${error.message}</div>`;
+  }
+}
+
 const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
@@ -1901,10 +2011,12 @@ document.querySelectorAll('th').forEach(th => {
 });
 
 window.addEventListener('keydown', async (e) => {
+/*
   if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
     e.preventDefault();
     return;
   }
+*/
 
   if (e.key === 'F12') {
     e.preventDefault();
@@ -2072,12 +2184,14 @@ window.addEventListener('keydown', async (e) => {
   }
 });
 
+/*
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
     e.preventDefault();
     e.stopPropagation();
   }
 }, true);
+*/
 
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
@@ -2211,12 +2325,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   updateSortIndicators();
-
-  if (promptText && promptText.parentElement) {
-    Array.from(promptText.parentElement.children).forEach(child => {
-      child.style.display = 'none';
-    });
-  }
 
   await refreshTree();
 
