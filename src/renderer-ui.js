@@ -322,6 +322,18 @@ class UIManager {
     // --- ここまで ---
 
     modal.style.display = 'flex';
+
+    // モーダルが表示されてレイアウトが計算された後にスクロールをリセットする
+    requestAnimationFrame(() => {
+      if (container.parentElement) {
+        container.parentElement.scrollTop = 0;
+      }
+      container.scrollTop = 0;
+      
+      // 念のためモーダル全体がスクロール対象だった場合のカバー
+      const diffModal = document.getElementById('diff-modal');
+      if (diffModal) diffModal.scrollTop = 0;
+    });
   }
 
   /**
