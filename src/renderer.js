@@ -2,6 +2,17 @@
 // Veloce - Main Controller (renderer.js)
 // ============================================================================
 
+// 開発者ツール（F12, Ctrl+Shift+I）の強制ブロック
+window.addEventListener('keydown', (e) => {
+  if (
+    (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) ||
+    e.key === 'F12' || e.code === 'F12'
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}, true);
+
 // ============================================================================
 // 1. Constants & Global Variables
 // ============================================================================
@@ -2092,16 +2103,6 @@ document.querySelectorAll('th').forEach(th => {
 });
 
 window.addEventListener('keydown', async (e) => {
-  if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
-    e.preventDefault();
-    return;
-  }
-
-  if (e.key === 'F12') {
-    e.preventDefault();
-    return;
-  }
-
   const activeTagName = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
   if ((activeTagName === 'input' || activeTagName === 'textarea') && e.key !== 'Escape') {
     return;
@@ -2262,13 +2263,6 @@ window.addEventListener('keydown', async (e) => {
     }
   }
 });
-
-window.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
-}, true);
 
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
