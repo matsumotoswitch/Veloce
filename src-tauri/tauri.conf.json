@@ -30,7 +30,15 @@
       "protocol": {
         "all": false,
         "asset": true,
-        "assetScope": ["**"]
+        "assetScope": [
+          "**",
+          "$LOCALDATA/**",
+          "$APPDATA/**",
+          "C:/**",
+          "D:/**",
+          "E:/**",
+          "F:/**"
+        ]
       },
       "window": {
         "all": false,

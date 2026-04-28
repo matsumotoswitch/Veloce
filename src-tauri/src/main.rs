@@ -94,7 +94,7 @@ fn get_veloce_data_dir() -> Option<std::path::PathBuf> {
 }
 
 /// 指定されたパスがサポート対象の画像であれば、ImageFile構造体を生成して返す
-fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>) -> Option<ImageFile> {
+fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>, cache_set: Option<&std::collections::HashSet<String>>) -> Option<ImageFile> {
     if !path.is_file() {
         return None;
     }
@@ -122,8 +122,12 @@ fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>) -> Opt
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         format!("{}_{}", &clean_path, mtime).hash(&mut hasher);
         let hash = hasher.finish();
-        let cache_path = dir.join(format!("{}.jpg", hash));
-        cache_path.exists()
+        let file_name = format!("{}.jpg", hash);
+        if let Some(set) = cache_set {
+            set.contains(&file_name)
+        } else {
+            dir.join(&file_name).exists()
+        }
     } else {
         false
     };
@@ -195,6 +199,17 @@ async fn load_directory(
             p
         });
 
+        let mut cache_set = std::collections::HashSet::new();
+        if let Some(ref dir) = cache_dir {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.filter_map(Result::ok) {
+                    if let Ok(name) = entry.file_name().into_string() {
+                        cache_set.insert(name);
+                    }
+                }
+            }
+        }
+
         let mut image_files = Vec::new();
         let mut paths = Vec::new();
 
@@ -203,7 +218,7 @@ async fn load_directory(
             
             // create_image_file はI/Oを含むため、rayonで並列化して高速化する
             let mut results: Vec<_> = entries.into_par_iter().filter_map(|entry| {
-                create_image_file(&entry.path(), &cache_dir)
+                create_image_file(&entry.path(), &cache_dir, Some(&cache_set))
             }).collect();
 
             // ファイル名の順番を安定させるためソート
@@ -259,7 +274,7 @@ async fn load_directory(
                                     if let EventKind::Remove(_) = &event.kind {
                                         let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
                                         let _ = app_handle.emit_all("file-removed", clean_path);
-                                    } else if let Some(img_file) = create_image_file(&path, &cache_dir) {
+                                    } else if let Some(img_file) = create_image_file(&path, &cache_dir, None) {
                                         let _ = app_handle.emit_all("file-changed", img_file);
                                     }
                                 }
@@ -704,8 +719,8 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
             .unwrap_or_default();
         
         if !current_dir.is_empty() {
-            let current_trim = current_dir.trim_end_matches(&['/', '\\'][..]).to_lowercase();
-            let parent_trim = parent_dir.trim_end_matches(&['/', '\\'][..]).to_lowercase();
+            let current_trim = current_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
+            let parent_trim = parent_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
             if current_trim != parent_trim {
                 return Err("Cancelled".to_string());
             }
