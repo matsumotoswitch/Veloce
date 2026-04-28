@@ -20,7 +20,9 @@ class ViewerUI {
    */
   updateImageRendering() {
     if (!this.viewerImg) return;
-    this.viewerImg.style.filter = this.state.isSharpened ? 'url(#sharpness-filter)' : 'none';
+    let filters = [];
+    if (this.state.isUnsharped) filters.push('url(#unsharp-filter)');
+    this.viewerImg.style.filter = filters.length > 0 ? filters.join(' ') : 'none';
     this.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
   }
 

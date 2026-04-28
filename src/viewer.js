@@ -24,24 +24,32 @@ window.addEventListener('focus', () => {
  * SVGシャープネスフィルターの初期化
  * 小数倍率で拡大した際にも滑らかさを保ちつつ輪郭を強調するためのフィルターを生成します。
  */
-function initSharpnessFilter() {
+function initUnsharpFilter() {
   const svgNS = "http://www.w3.org/2000/svg";
   const svgElement = document.createElementNS(svgNS, "svg");
   svgElement.style.cssText = "position: absolute; width: 0; height: 0; pointer-events: none;";
-  const filterElement = document.createElementNS(svgNS, "filter");
-  filterElement.id = "sharpness-filter";
-  const feConvolveMatrix = document.createElementNS(svgNS, "feConvolveMatrix");
-  feConvolveMatrix.setAttribute("order", "3");
-  feConvolveMatrix.setAttribute("preserveAlpha", "true");
-  // 中央の重みを高くし、上下左右をマイナスにすることで輪郭を強調（アンシャープマスクの原理）
-  feConvolveMatrix.setAttribute("kernelMatrix", "0 -1 0 -1 8 -1 0 -1 0");
-  feConvolveMatrix.setAttribute("divisor", "4"); // (8 - 4 = 4) で全体の明るさ（輝度）を元の画像と同じに維持
 
-  filterElement.appendChild(feConvolveMatrix);
-  svgElement.appendChild(filterElement);
+  const unsharpFilter = document.createElementNS(svgNS, "filter");
+  unsharpFilter.id = "unsharp-filter";
+
+  const feConvolveUnsharp = document.createElementNS(svgNS, "feConvolveMatrix");
+  // stdDev=0.8 のガウスぼかしを 0.8 倍して引き算し、中心を 1.8 倍する数学的近似行列
+  feConvolveUnsharp.setAttribute("order", "5 5");
+  feConvolveUnsharp.setAttribute("kernelMatrix", 
+    " 0     -0.008 -0.018 -0.008  0 " +
+    "-0.008 -0.078 -0.170 -0.078 -0.008 " +
+    "-0.018 -0.170  2.128 -0.170 -0.018 " +
+    "-0.008 -0.078 -0.170 -0.078 -0.008 " +
+    " 0     -0.008 -0.018 -0.008  0"
+  );
+  feConvolveUnsharp.setAttribute("preserveAlpha", "true");
+
+  unsharpFilter.appendChild(feConvolveUnsharp);
+  svgElement.appendChild(unsharpFilter);
+
   document.body.appendChild(svgElement);
 }
-initSharpnessFilter();
+initUnsharpFilter();
 
 // 画像をビューポート全体にフィットさせるための基本スタイルを適用する。;
 document.documentElement.style.overflow = 'hidden';
@@ -727,9 +735,9 @@ window.addEventListener('keydown', async (e) => {
       window.viewerState.isBorderVisible = !window.viewerState.isBorderVisible;
       window.viewerUI.applyBorderVisibility();
       break;
-    case 's':
-    case 'S':
-      window.viewerState.isSharpened = !window.viewerState.isSharpened;
+    case 'u':
+    case 'U':
+      window.viewerState.isUnsharped = !window.viewerState.isUnsharped;
       window.viewerUI.updateImageRendering();
       break;
   }

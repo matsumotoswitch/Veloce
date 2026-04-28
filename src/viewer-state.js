@@ -18,7 +18,7 @@ class ViewerState {
     this.isFullscreen = false;      // フルスクリーン状態かどうか
     this.isBorderVisible = true;    // ウィンドウ枠を表示するかどうか
     this.previousWindowSize = null; // ウィンドウフィット前のサイズ保存用
-    this.isSharpened = false;       // 画像にシャープネスフィルターを適用するかどうか
+    this.isUnsharped = false;       // アンシャープマスクフィルターを適用するかどうか
     this.lastFocusTime = 0;         // ウィンドウが最後にフォーカスを取得した時刻
     this.ignoreNextClick = false;   // フォーカス目的のクリックを無視するためのフラグ
     this.preloadCache = new Map();  // 前後の画像のプリロードキャッシュ
