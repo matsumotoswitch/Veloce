@@ -397,7 +397,7 @@ tr.selected { background: var(--accent-color); color: #fff; }
 .diff-column h4 {
   margin: 0 0 10px 0;
   font-size: 0.85em;
-  color: #888;
+  color: #ccc;
   border-bottom: 1px solid #333;
   padding-bottom: 5px;
 }
@@ -426,7 +426,7 @@ tr.selected { background: var(--accent-color); color: #fff; }
 }
 
 .diff-section { margin-bottom: 20px; }
-.diff-section h3 { color: #888; margin-bottom: 8px; font-size: 0.9em; border-bottom: 1px solid #444; padding-bottom: 4px; transition: color 0.2s; }
+.diff-section h3 { color: #ccc; margin-bottom: 8px; font-size: 0.9em; border-bottom: 1px solid #444; padding-bottom: 4px; transition: color 0.2s; }
 .diff-section h3.has-diff { color: #ffcc00; }
 
 /* Diffモーダル内のコピーボタン */

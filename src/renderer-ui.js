@@ -256,20 +256,14 @@ class UIManager {
     const src2 = window.veloceAPI.convertFileSrc(file2.path);
 
     const headerHtml = `
-      <div style="display: flex; gap: 15px; margin-bottom: 15px; font-size: 0.85em;">
+      <div style="display: flex; gap: 15px; margin-bottom: 15px;">
         <div style="flex: 1; display: flex; flex-direction: column;">
-          <div style="color:#f8babb; background: rgba(248,186,187,0.1); padding: 8px; border-radius: 4px; border: 1px solid rgba(248,186,187,0.2);">
-            <strong>[1]</strong> ${d1.name}
-          </div>
-          <div class="diff-thumbnail-container">
+          <div class="diff-thumbnail-container" style="margin-top: 0;">
             <img src="${src1}" class="diff-thumbnail" decoding="async">
           </div>
         </div>
         <div style="flex: 1; display: flex; flex-direction: column;">
-          <div style="color:#a3f7b5; background: rgba(163,247,181,0.1); padding: 8px; border-radius: 4px; border: 1px solid rgba(163,247,181,0.2);">
-            <strong>[2]</strong> ${d2.name}
-          </div>
-          <div class="diff-thumbnail-container">
+          <div class="diff-thumbnail-container" style="margin-top: 0;">
             <img src="${src2}" class="diff-thumbnail" decoding="async">
           </div>
         </div>
