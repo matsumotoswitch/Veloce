@@ -144,16 +144,21 @@ fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>, cache_
 
 // --- Tauri コマンド ---
 
-/// 利用可能なドライブ文字（Windows）またはルートディレクトリ（Unix）のリストを取得する
 #[tauri::command]
 fn get_drives() -> Vec<String> {
     let mut drives = Vec::new();
     
     #[cfg(windows)]
     {
-        for c in b'A'..=b'Z' {
-            let path = format!("{}:\\", c as char);
-            if Path::new(&path).exists() {
+        // Windows APIを直接叩いて、接続済みのドライブ一覧を瞬時に取得する
+        extern "system" {
+            fn GetLogicalDrives() -> u32;
+        }
+        let bitmask = unsafe { GetLogicalDrives() };
+        for i in 0..26 {
+            // ビットが立っている（1になっている）アルファベットだけを抽出
+            if (bitmask & (1 << i)) != 0 {
+                let path = format!("{}:\\", (b'A' + i) as char);
                 drives.push(path);
             }
         }
