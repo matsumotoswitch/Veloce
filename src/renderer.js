@@ -21,6 +21,14 @@ window.addEventListener('keydown', (e) => {
 import { appState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
 
+const CONFIG = {
+  CHUNK_SIZE: 100,        // 一度にDOMに追加する要素数（レンダリング負荷軽減）
+  SEARCH_DELAY: 300,      // 検索入力時の反映遅延時間(ms)
+  REFRESH_DELAY: 100,     // リフレッシュ処理の遅延時間(ms)
+  GRID_GAP: 8,            // サムネイルグリッドの隙間(px)
+  GRID_PADDING: 8         // サムネイルグリッドのパディング(px)
+};
+
 const logicalCores = navigator.hardwareConcurrency || 8;
 const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
 
@@ -147,7 +155,7 @@ async function loadAllMetadataInBackground() {
 
   const batchId = ++appState.currentMetaBatchId;
   const pathsToLoad = filesToLoad.map(f => f.path);
-  const CHUNK_SIZE = 100; 
+  const CHUNK_SIZE = CONFIG.CHUNK_SIZE; 
 
   const processNextChunk = (chunkIndex) => {
     if (appState.currentMetaBatchId !== batchId) return;
@@ -775,7 +783,7 @@ function scheduleRefresh() {
     if (appState.selectedIndex === -1) {
       clearMetadataUI();
     }
-  }, 100); 
+  }, CONFIG.REFRESH_DELAY); 
 }
 
 function createTreeNode(folder, isRoot = false) {
@@ -2050,8 +2058,8 @@ window.addEventListener('keydown', async (e) => {
     } else {
       const containerWidth = thumbnailGrid.clientWidth;
       const itemSize = parseFloat(thumbnailSizeSlider.value) || 120;
-      const gap = 8;
-      const padding = 8;
+      const gap = CONFIG.GRID_GAP;
+      const padding = CONFIG.GRID_PADDING;
       const availableWidth = Math.max(1, containerWidth - padding * 2);
       const columns = Math.max(1, Math.floor((availableWidth + gap) / (itemSize + gap)));
 
@@ -2146,7 +2154,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       appState.searchTimeout = setTimeout(() => {
         appState.searchQuery = e.target.value;
         scheduleRefresh();
-      }, 300);
+      }, CONFIG.SEARCH_DELAY);
     });
   }
 

@@ -1,5 +1,7 @@
 import { appState } from './renderer-state.js';
 
+const CHUNK_SIZE = 100;
+
 function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return '-';
   return bytes.toLocaleString();
@@ -407,8 +409,6 @@ class UIManager {
       emptyMessage.textContent = '表示対象の画像がありません';
       this.elements.thumbnailGrid.appendChild(emptyMessage);
     }
-
-    const CHUNK_SIZE = 100;
 
     for (let i = 0; i < this.state.filteredFiles.length; i += CHUNK_SIZE) {
       if (renderId !== this.state.currentRenderId) return;

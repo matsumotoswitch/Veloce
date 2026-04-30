@@ -22,6 +22,15 @@ window.addEventListener('keydown', (e) => {
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
 
+const CONFIG = {
+  ZOOM_STEP: 1.1,         // マウスホイールでのズーム倍率
+  MIN_ZOOM: 0.1,          // 最小ズーム倍率 (10%)
+  MAX_ZOOM: 30.0,         // 最大ズーム倍率 (3000%)
+  EDGE_THRESHOLD: 10,     // ウィンドウ端のリサイズ判定エリア(px)
+  FOCUS_DELAY: 200,       // フォーカス時の誤クリック防止時間(ms)
+  RESIZE_THROTTLE: 150    // リサイズイベントの間引き時間(ms)
+};
+
 window.addEventListener('focus', () => {
   viewerState.lastFocusTime = Date.now();
 });
@@ -478,7 +487,7 @@ createWindowControls();
 
 window.addEventListener('mousedown', (e) => {
   // ウィンドウがフォーカスを取得した直後のクリック（フォーカス目的のクリック）を画像送りとして扱わない
-  if (Date.now() - viewerState.lastFocusTime < 200) {
+  if (Date.now() - viewerState.lastFocusTime < CONFIG.FOCUS_DELAY) {
     viewerState.ignoreNextClick = true;
   } else {
     viewerState.ignoreNextClick = false;
@@ -495,7 +504,7 @@ window.addEventListener('mousedown', (e) => {
       viewerUI.setCursor('grabbing');
     } else {
       // OSのネイティブリサイズと競合しないよう、縁は移動の対象外
-      const EDGE = 10;
+      const EDGE = CONFIG.EDGE_THRESHOLD;
       if (e.clientX < EDGE || e.clientX > window.innerWidth - EDGE ||
           e.clientY < EDGE || e.clientY > window.innerHeight - EDGE) {
         isDragging = false;
@@ -596,12 +605,15 @@ window.addEventListener('wheel', (e) => {
     // ホイールの回転方向に応じてスケールを増減（約10%ずつなめらかに変化）
     if (e.deltaY < 0) {
       viewerState.currentScale *= 1.1; // 上スクロールで拡大
+      viewerState.currentScale *= CONFIG.ZOOM_STEP; // 上スクロールで拡大
     } else {
       viewerState.currentScale /= 1.1; // 下スクロールで縮小
+      viewerState.currentScale /= CONFIG.ZOOM_STEP; // 下スクロールで縮小
     }
 
     // 倍率の限界値を設定（10% ～ 3000%）
     viewerState.currentScale = Math.max(0.1, Math.min(viewerState.currentScale, 30.0));
+    viewerState.currentScale = Math.max(CONFIG.MIN_ZOOM, Math.min(viewerState.currentScale, CONFIG.MAX_ZOOM));
 
     // 画像に適用
     if (typeof viewerUI.updateImageRendering === 'function') {
