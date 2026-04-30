@@ -1,3 +1,5 @@
+import { viewerState } from './viewer-state.js';
+
 /**
  * ビューア画面のUIとDOM操作を管理するクラス
  */
@@ -49,6 +51,5 @@ class ViewerUI {
   }
 }
 
-// インスタンス化
-window.viewerUI = new ViewerUI(window.viewerState);
-window.ViewerUI = ViewerUI;
+export { ViewerUI };
+export const viewerUI = new ViewerUI(viewerState);

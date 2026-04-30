@@ -1,3 +1,24 @@
+import { appState } from './renderer-state.js';
+
+function formatSize(bytes) {
+  if (bytes === undefined || bytes === null) return '-';
+  return bytes.toLocaleString();
+}
+
+function formatDate(timestamp) {
+  if (!timestamp) return '-';
+  // Rust側のUnixタイムスタンプ(秒)とJSのミリ秒の違いを吸収
+  const ms = timestamp < 1000000000000 ? timestamp * 1000 : timestamp;
+  const d = new Date(ms);
+  const yyyy = d.getFullYear();
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${yyyy}/${MM}/${dd} ${hh}:${mm}:${ss}`;
+}
+
 /**
  * メイン画面のUIとDOM操作を管理するクラス
  */
@@ -398,8 +419,8 @@ class UIManager {
           <td>${file.ext}</td>
           <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
           <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
-          <td style="text-align: right;">${file.size ? (typeof formatSize === 'function' ? formatSize(file.size) : file.size.toLocaleString()) : '-'}</td>
-          <td>${file.mtime ? (typeof formatDate === 'function' ? formatDate(file.mtime) : file.mtime) : '-'}</td>
+          <td style="text-align: right;">${formatSize(file.size)}</td>
+          <td>${formatDate(file.mtime)}</td>
         `;
         
         tr.draggable = true;
@@ -440,6 +461,5 @@ class UIManager {
   }
 }
 
-// グローバルにインスタンスを一つだけ公開する
-window.uiManager = new UIManager(window.appState);
-window.UIManager = UIManager;
+export { UIManager };
+export const uiManager = new UIManager(appState);

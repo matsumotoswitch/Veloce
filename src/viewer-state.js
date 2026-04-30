@@ -25,5 +25,4 @@ class ViewerState {
   }
 }
 
-// グローバルにインスタンスを公開
-window.viewerState = new ViewerState();
+export const viewerState = new ViewerState();

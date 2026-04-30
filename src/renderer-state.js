@@ -94,5 +94,4 @@ class AppState {
   }
 }
 
-// グローバルにインスタンスを一つだけ公開する
-window.appState = new AppState();
+export const appState = new AppState();

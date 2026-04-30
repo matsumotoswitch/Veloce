@@ -18,8 +18,8 @@ window.addEventListener('keydown', (e) => {
 // ============================================================================
 // 1. Constants & Global Variables
 // ============================================================================
-const appState = window.appState;
-const UIManager = window.UIManager;
+import { appState } from './renderer-state.js';
+import { UIManager, uiManager } from './renderer-ui.js';
 
 const logicalCores = navigator.hardwareConcurrency || 8;
 const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
@@ -62,10 +62,10 @@ async function refreshFileList() {
   appState.files = result.imageFiles || [];  
   resetThumbnailPreloader();
   appState.applyFiltersAndSort();
-  window.uiManager.renderAll();
+  uiManager.renderAll();
   loadAllMetadataInBackground();
   
-  window.uiManager.updateSelectionUI();
+  uiManager.updateSelectionUI();
   if (appState.selectedIndex > -1) {
     renderMetadata(appState.filteredFiles[appState.selectedIndex]);
   } else {
@@ -161,10 +161,10 @@ async function loadAllMetadataInBackground() {
     if (appState.currentMetaBatchId !== batchId) return;
 
     if (chunkIndex >= pathsToLoad.length) {
-      window.uiManager.showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
+      uiManager.showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
       if (['width', 'height'].includes(appState.sortConfig.key)) {
         appState.applyFiltersAndSort();
-        window.uiManager.renderAll();
+        uiManager.renderAll();
       }
       return;
     }
@@ -174,7 +174,7 @@ async function loadAllMetadataInBackground() {
       
       try {
         const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
-        window.uiManager.showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress', 'info');
+        uiManager.showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress', 'info');
         
         const metadataList = await window.veloceAPI.getFullMetadataBatch(chunkPaths);
         if (appState.currentMetaBatchId !== batchId) return;
@@ -297,17 +297,17 @@ async function renameSelectedFile() {
     const newName = await showCustomPrompt('新しいファイル名を入力してください:', file.name, true);
     if (newName !== null && newName !== file.name) {
       if (newName.trim() === '') {
-        window.uiManager.showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
+      uiManager.showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
         return;
       }
       if (/[\\/:*?"<>|]/.test(newName)) {
-        window.uiManager.showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
+      uiManager.showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
         return;
       }
 
       const result = await window.veloceAPI.renameFile(oldPath, newName);
       if (result && result.success) {
-        window.uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
+        uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
         
         const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
         const currentIdx = appState.files.findIndex(f => f.path === oldPath);
@@ -324,7 +324,7 @@ async function renameSelectedFile() {
         resetThumbnailPreloader();
         scheduleRefresh();
       } else {
-        window.uiManager.showToast(`ファイル名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 3000, 'file-rename', 'warning');
+        uiManager.showToast(`ファイル名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 3000, 'file-rename', 'warning');
       }
     }
   }
@@ -339,12 +339,12 @@ async function deleteSelectedFiles() {
 
     appState.selection.clear();
     appState.selectedIndex = -1;
-    window.uiManager.updateSelectionUI();
+    uiManager.updateSelectionUI();
     clearMetadataUI();
 
     let trashedCount = 0;
     const total = pathsToDelete.length;
-    window.uiManager.showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
+    uiManager.showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
     
     for (const path of pathsToDelete) {
       try {
@@ -356,9 +356,9 @@ async function deleteSelectedFiles() {
     }
 
     if (trashedCount > 0) {
-      window.uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
+      uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
     } else {
-      window.uiManager.showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
+      uiManager.showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
     }
   }
 }
@@ -368,7 +368,7 @@ async function deleteSelectedFiles() {
 // ============================================================================
 
 function showNotification(message, type = 'info') {
-  window.uiManager.showToast(message, 3000, null, type);
+  uiManager.showToast(message, 3000, null, type);
 }
 
 function applyIconGlowEffect(el) {
@@ -607,9 +607,9 @@ function updateThumbnailToast() {
     appState.lastThumbnailToastTime = now;
 
     if (appState.thumbnailCompleted < appState.thumbnailTotalRequested) {
-      window.uiManager.showToast(`サムネイル作成中 (${appState.thumbnailCompleted}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
+      uiManager.showToast(`サムネイル作成中 (${appState.thumbnailCompleted}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
     } else {
-      window.uiManager.showToast(`サムネイル作成完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
+      uiManager.showToast(`サムネイル作成完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
       clearTimeout(appState.thumbnailToastTimeout);
       appState.thumbnailToastTimeout = setTimeout(() => {
         const t = document.getElementById('toast-thumbnail-progress');
@@ -777,9 +777,9 @@ function scheduleRefresh() {
     appState.preloadCursor = 0;
     appState.applyFiltersAndSort();
 
-    window.uiManager.renderAll();
+    uiManager.renderAll();
     loadAllMetadataInBackground();
-    window.uiManager.updateSelectionUI();
+    uiManager.updateSelectionUI();
     if (appState.selectedIndex === -1) {
       clearMetadataUI();
     }
@@ -873,7 +873,7 @@ function createTreeNode(folder, isRoot = false) {
 
     // 他のペインの選択を解除
     appState.selection.clear();    appState.selectedIndex = -1;
-    window.uiManager.updateSelectionUI();
+    uiManager.updateSelectionUI();
     
     if (window.veloceAPI.loadDirectory) {
       // クリックされたフォルダの画像一覧を中央ペインに表示
@@ -884,7 +884,7 @@ function createTreeNode(folder, isRoot = false) {
         appState.files = result.imageFiles || [];
         resetThumbnailPreloader();
         appState.applyFiltersAndSort();
-        window.uiManager.renderAll();
+        uiManager.renderAll();
         loadAllMetadataInBackground(); 
         clearMetadataUI();
       }
@@ -980,7 +980,7 @@ function createTreeNode(folder, isRoot = false) {
         actionStr = getRoot(paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
       }
 
-      window.uiManager.showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
+      uiManager.showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
 
       setTimeout(async () => {
         let successCount = 0;
@@ -991,14 +991,14 @@ function createTreeNode(folder, isRoot = false) {
           }
         }
         if (successCount > 0) {
-          window.uiManager.showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
+          uiManager.showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
         if (appState.dragState.isAppDragging) {
           appState.dragState.pendingRefresh = true; 
           } else {
             await refreshFileList(); 
           }
         } else {
-          window.uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
+          uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
         }
       }, 10);
     }
@@ -1053,21 +1053,6 @@ function updateSortIndicators() {
   });
 }
 
-function formatSize(bytes) {
-  return bytes.toLocaleString();
-}
-
-function formatDate(timestamp) {
-  const d = new Date(timestamp);
-  const yyyy = d.getFullYear();
-  const MM = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return `${yyyy}/${MM}/${dd} ${hh}:${mm}:${ss}`;
-}
-
 async function selectImage(index, event = null) {
   if (event && event.ctrlKey) {
     // Ctrlキーで個別に選択/解除
@@ -1097,14 +1082,14 @@ async function selectImage(index, event = null) {
   }
 
   if (appState.selectedIndex === -1) {
-    window.uiManager.updateSelectionUI();
+    uiManager.updateSelectionUI();
     clearMetadataUI();
     return;
   }
 
   const file = appState.filteredFiles[index];
   
-  window.uiManager.updateSelectionUI();
+  uiManager.updateSelectionUI();
 
   // 選択した画像やリスト行が画面内に表示されるように自動スクロール
   const items = thumbnailGrid.children;
@@ -1762,13 +1747,13 @@ function setupResizer(resizer, type, cursor) {
       localStorage.setItem('leftVisible', 'true'); // ← これを追加
       const btn = resizer.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
-      window.uiManager.applyLayout();
+      uiManager.applyLayout();
     } else if (type === 'right' && !appState.layout.rightVisible) {
       appState.layout.rightVisible = true;
       localStorage.setItem('rightVisible', 'true'); // ← これを追加
       const btn = resizer.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
-      window.uiManager.applyLayout();
+      uiManager.applyLayout();
     }
   });
   createResizerToggle(resizer, type);
@@ -1807,12 +1792,12 @@ function createResizerToggle(resizer, type) {
       appState.layout.leftVisible = !appState.layout.leftVisible;
       btn.innerHTML = appState.layout.leftVisible ? openIcon : closeIcon;
       localStorage.setItem('leftVisible', appState.layout.leftVisible);
-      window.uiManager.applyLayout();
+      uiManager.applyLayout();
     } else if (type === 'right') {
       appState.layout.rightVisible = !appState.layout.rightVisible;
       btn.innerHTML = appState.layout.rightVisible ? openIcon : closeIcon;
       localStorage.setItem('rightVisible', appState.layout.rightVisible);
-      window.uiManager.applyLayout();
+      uiManager.applyLayout();
     } else if (type === 'center') {
       const root = document.documentElement;
       const isCollapsed = root.style.getPropertyValue('--top-height') === '0px';
@@ -1850,11 +1835,11 @@ window.addEventListener('mousemove', (e) => {
     if (resizingState.left) {
       const newWidth = Math.max(100, Math.min(e.clientX, window.innerWidth - 400));
       appState.layout.leftWidth = newWidth;
-      window.uiManager.applyLayout();
+      uiManager.applyLayout();
     } else if (resizingState.right) {
       const newWidth = Math.max(150, Math.min(window.innerWidth - e.clientX, window.innerWidth - 400));
       appState.layout.rightWidth = newWidth;
-      window.uiManager.applyLayout();
+      uiManager.applyLayout();
     } else if (resizingState.center) {
       const centerPane = document.getElementById('center-pane');
       const rect = centerPane.getBoundingClientRect();
@@ -1930,7 +1915,7 @@ document.querySelectorAll('th').forEach(th => {
 	localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
 	updateSortIndicators();
 	appState.applyFiltersAndSort();
-	window.uiManager.renderAll();
+	uiManager.renderAll();
   });
 });
 
@@ -1973,7 +1958,7 @@ window.addEventListener('keydown', async (e) => {
       const file2 = appState.filteredFiles[indices[1]];
       
       // 完全なメタデータを取得してからDiffモーダルを開く
-      window.uiManager.showToast('比較データを読み込み中...', 0, 'diff-loading', 'info');
+      uiManager.showToast('比較データを読み込み中...', 0, 'diff-loading', 'info');
       Promise.all([
         window.veloceAPI.parseMetadata(file1.path),
         window.veloceAPI.parseMetadata(file2.path)
@@ -1983,10 +1968,10 @@ window.addEventListener('keydown', async (e) => {
           t.classList.remove('show');
           setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
         }
-        window.uiManager.showDiffModal(file1, file2, meta1, meta2);
+        uiManager.showDiffModal(file1, file2, meta1, meta2);
       });
     } else {
-      window.uiManager.showToast('Diff機能を使用するには、Ctrlキーを押しながら画像を2つ選択してください。', 3000, null, 'warning');
+      uiManager.showToast('Diff機能を使用するには、Ctrlキーを押しながら画像を2つ選択してください。', 3000, null, 'warning');
     }
   }
 
@@ -2059,7 +2044,7 @@ window.addEventListener('keydown', async (e) => {
     }
     appState.selectedIndex = appState.filteredFiles.length - 1; 
 
-    window.uiManager.updateSelectionUI();
+    uiManager.updateSelectionUI();
     return;
   }
 
@@ -2137,7 +2122,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const savedRightVisible = localStorage.getItem('rightVisible');
   if (savedRightVisible !== null) appState.layout.rightVisible = savedRightVisible === 'true';
 
-  window.uiManager.applyLayout();
+  uiManager.applyLayout();
 
   if (!appState.layout.leftVisible && resizerLeft) {
     const btn = resizerLeft.querySelector('.resizer-toggle');
@@ -2203,16 +2188,16 @@ window.addEventListener('DOMContentLoaded', async () => {
       applyIconGlowEffect(clearCacheBtn);
       const isConfirmed = await showCustomConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
       if (isConfirmed) {
-        window.uiManager.showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
+        uiManager.showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
         try {
           await window.veloceAPI.clearThumbnailCache();
           appState.thumbnailUrls.clear(); 
           resetThumbnailPreloader(); 
           await refreshFileList(); 
-          window.uiManager.showToast('サムネイルキャッシュを削除しました。', 3000, 'cache-clear', 'success');
+          uiManager.showToast('サムネイルキャッシュを削除しました。', 3000, 'cache-clear', 'success');
         } catch (err) {
           console.error("Failed to clear thumbnail cache:", err);
-          window.uiManager.showToast('キャッシュの削除に失敗しました。', 3000, 'cache-clear', 'error');
+          uiManager.showToast('キャッシュの削除に失敗しました。', 3000, 'cache-clear', 'error');
         }
       }
     });
@@ -2240,7 +2225,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       appState.files = result.imageFiles || [];
       resetThumbnailPreloader();
       appState.applyFiltersAndSort();
-      window.uiManager.renderAll();
+      uiManager.renderAll();
       loadAllMetadataInBackground(); 
       clearMetadataUI();
 
