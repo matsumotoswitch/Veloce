@@ -2056,8 +2056,8 @@ window.addEventListener('keydown', async (e) => {
     if (newIndex === -1) {
       newIndex = 0;
     } else {
-      const containerWidth = thumbnailGrid.clientWidth;
-      const itemSize = parseFloat(thumbnailSizeSlider.value) || 120;
+      const containerWidth = uiManager.elements.thumbnailGrid.clientWidth;
+      const itemSize = parseFloat(uiManager.elements.thumbnailSizeSlider.value) || 120;
       const gap = CONFIG.GRID_GAP;
       const padding = CONFIG.GRID_PADDING;
       const availableWidth = Math.max(1, containerWidth - padding * 2);
