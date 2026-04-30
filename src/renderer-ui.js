@@ -115,11 +115,6 @@ class UIManager {
     
     root.style.setProperty('--left-width', lWidth);
     root.style.setProperty('--right-width', rWidth);
-
-    const leftPane = document.getElementById('left-pane');
-    if (leftPane) leftPane.style.display = this.state.layout.leftVisible ? 'flex' : 'none';
-    const rightPane = document.getElementById('right-pane');
-    if (rightPane) rightPane.style.display = this.state.layout.rightVisible ? 'flex' : 'none';
   }
 
   /**

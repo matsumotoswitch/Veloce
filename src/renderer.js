@@ -1934,11 +1934,13 @@ function setupResizer(resizer, type, cursor) {
     document.body.style.cursor = cursor;
     if (type === 'left' && !appState.layout.leftVisible) {
       appState.layout.leftVisible = true;
+      localStorage.setItem('leftVisible', 'true'); // ← これを追加
       const btn = resizer.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
       window.uiManager.applyLayout();
     } else if (type === 'right' && !appState.layout.rightVisible) {
       appState.layout.rightVisible = true;
+      localStorage.setItem('rightVisible', 'true'); // ← これを追加
       const btn = resizer.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
       window.uiManager.applyLayout();
@@ -1990,11 +1992,16 @@ function createResizerToggle(resizer, type) {
       const root = document.documentElement;
       const isCollapsed = root.style.getPropertyValue('--top-height') === '0px';
       if (isCollapsed) {
-        root.style.setProperty('--top-height', localStorage.getItem('topHeight') || '250px');
+        // 閉じる前の高さを復元（なければデフォルト250px）
+        const restoreHeight = localStorage.getItem('prevTopHeight') || '250px';
+        root.style.setProperty('--top-height', restoreHeight);
+        localStorage.setItem('topHeight', restoreHeight);
         btn.innerHTML = openIcon;
       } else {
-        localStorage.setItem('topHeight', root.style.getPropertyValue('--top-height') || '250px');
+        // 閉じる直前の高さを prevTopHeight として退避させてから 0px にする
+        localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
         root.style.setProperty('--top-height', '0px');
+        localStorage.setItem('topHeight', '0px');
         btn.innerHTML = closeIcon;
       }
     }
