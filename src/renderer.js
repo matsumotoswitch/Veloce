@@ -793,6 +793,8 @@ function createTreeNode(folder, isRoot = false) {
   const itemDiv = document.createElement('div');
   itemDiv.className = 'tree-item folder';
   itemDiv.dataset.path = folder.path; // 展開用の目印としてパスを持たせる
+  itemDiv.dataset.name = folder.name;
+  itemDiv.dataset.isRoot = isRoot;
   itemDiv.style.display = 'flex';
   itemDiv.style.alignItems = 'center';
 
@@ -854,155 +856,7 @@ function createTreeNode(folder, isRoot = false) {
     childrenUl.classList.add('collapsed');
     toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
   };
-
-  // トグルアイコン部分だけをクリックした場合は開閉のみを行う
-  toggleIcon.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const isExpanded = childrenUl.classList.contains('expanded');
-    if (isExpanded) {
-      collapseNode();
-    } else {
-      await expandNode();
-    }
-  });
-
-  // フォルダ項目がクリックされたときのイベントハンドラ
-  itemDiv.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (e.target === toggleIcon) return; // トグルクリック時は全体の選択・ロード処理をスキップ
-
-    // 他のペインの選択を解除
-    appState.selection.clear();    appState.selectedIndex = -1;
-    uiManager.updateSelectionUI();
-    
-    if (window.veloceAPI.loadDirectory) {
-      // クリックされたフォルダの画像一覧を中央ペインに表示
-      const result = await window.veloceAPI.loadDirectory(folder.path);
-      if (result) {
-        appState.currentDirectory = result.path;
-        localStorage.setItem('currentDirectory', appState.currentDirectory); // フォルダ移動時にパスを保存
-        appState.files = result.imageFiles || [];
-        resetThumbnailPreloader();
-        appState.applyFiltersAndSort();
-        uiManager.renderAll();
-        loadAllMetadataInBackground(); 
-        clearMetadataUI();
-      }
-    }
-
-    const wasSelected = itemDiv.classList.contains('selected');
-
-    if (e.target === icon || wasSelected) {
-      const isExpanded = childrenUl.classList.contains('expanded');
-      if (isExpanded) {
-        collapseNode();
-      } else {
-        await expandNode();
-      }
-    } else {
-      await expandNode();
-    }
-    
-    const activeItem = document.querySelector('.tree-item.selected');
-    if (activeItem) activeItem.classList.remove('selected');
-    itemDiv.classList.add('selected');
-  });
-
-  itemDiv.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const activeItem = document.querySelector('.tree-item.selected');
-    if (activeItem) activeItem.classList.remove('selected');
-    itemDiv.classList.add('selected');
-
-    contextMenu.targetFolder = folder;
-    contextMenu.isRoot = isRoot;
-
-    menuNewFolder.style.display = 'block';
-    menuRenameFolder.style.display = isRoot ? 'none' : 'block';
-    menuDeleteFolder.style.display = isRoot ? 'none' : 'block';
-    menuRenameFile.style.display = 'none';
-    menuDeleteFile.style.display = 'none';
-
-    contextMenu.style.display = 'block';
-    const rect = contextMenu.getBoundingClientRect();
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
-    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
-    
-    contextMenu.style.left = `${x}px`;
-    contextMenu.style.top = `${y}px`;
-  });
-
-  itemDiv.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-    itemDiv.style.backgroundColor = 'rgba(58, 122, 254, 0.3)'; // ホバー時のハイライト
-  });
-
-  itemDiv.addEventListener('dragover', (e) => {
-    e.preventDefault(); 
-    
-    let actionStr = 'コピー'; // 外部からのドロップのデフォルト
-    if (appState.dragState.paths.length > 0) {
-      const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-      actionStr = getRoot(appState.dragState.paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
-    }
-    e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
-
-    const folderName = isRoot ? folder.path : folder.name;
-    const countStr = appState.dragState.paths.length > 1 ? `${appState.dragState.paths.length}個のファイルを ` : '';
-    dragTooltip.textContent = `${countStr}「${folderName}」へ${actionStr}`;
-    dragTooltip.style.display = 'block';
-    dragTooltip.style.left = (e.clientX + 15) + 'px';
-    dragTooltip.style.top = (e.clientY + 15) + 'px'; 
-  });
-
-  itemDiv.addEventListener('dragleave', (e) => {
-    if (!itemDiv.contains(e.relatedTarget)) {
-      itemDiv.style.backgroundColor = '';
-      dragTooltip.style.display = 'none';
-    }
-  });
-
-  itemDiv.addEventListener('drop', (e) => {
-    e.preventDefault();
-    itemDiv.style.backgroundColor = '';
-    dragTooltip.style.display = 'none';
-    
-    const paths = getPathsFromDragEvent(e);
-
-    if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
-      let actionStr = 'コピー';
-      if (paths.length > 0) {
-        const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-        actionStr = getRoot(paths[0]) === getRoot(folder.path) ? '移動' : 'コピー';
-      }
-
-      uiManager.showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
-
-      setTimeout(async () => {
-        let successCount = 0;
-        for (const p of paths) {
-          const result = await window.veloceAPI.moveOrCopyFile(p, folder.path);
-          if (result && result.success) {
-            successCount++;
-          }
-        }
-        if (successCount > 0) {
-          uiManager.showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
-        if (appState.dragState.isAppDragging) {
-          appState.dragState.pendingRefresh = true; 
-          } else {
-            await refreshFileList(); 
-          }
-        } else {
-          uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
-        }
-      }, 10);
-    }
-  });
+  itemDiv.collapseNode = collapseNode;
 
   return li;
 }
@@ -1734,6 +1588,178 @@ uiManager.elements.thumbnailGrid.addEventListener('contextmenu', (e) => handleIt
 uiManager.elements.fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
 uiManager.elements.fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
 uiManager.elements.fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
+
+// ============================================================================
+// Directory Tree Event Delegation
+// ============================================================================
+uiManager.elements.dirTree.addEventListener('click', async (e) => {
+  const toggleIcon = e.target.closest('.toggle-icon');
+  const itemDiv = e.target.closest('.tree-item');
+  if (!itemDiv) return;
+
+  const childrenUl = itemDiv.nextElementSibling;
+  const isExpanded = childrenUl && childrenUl.classList.contains('expanded');
+
+  // トグルアイコンがクリックされた場合
+  if (toggleIcon) {
+    e.stopPropagation();
+    if (isExpanded) {
+      if (itemDiv.collapseNode) itemDiv.collapseNode();
+    } else {
+      if (itemDiv.expandNode) await itemDiv.expandNode();
+    }
+    return;
+  }
+
+  // フォルダ本体がクリックされた場合
+  e.stopPropagation();
+  appState.selection.clear();
+  appState.selectedIndex = -1;
+  uiManager.updateSelectionUI();
+
+  const path = itemDiv.dataset.path;
+  if (window.veloceAPI.loadDirectory) {
+    const result = await window.veloceAPI.loadDirectory(path);
+    if (result) {
+      appState.currentDirectory = result.path;
+      localStorage.setItem('currentDirectory', appState.currentDirectory);
+      appState.files = result.imageFiles || [];
+      resetThumbnailPreloader();
+      appState.applyFiltersAndSort();
+      uiManager.renderAll();
+      loadAllMetadataInBackground();
+      clearMetadataUI();
+    }
+  }
+
+  const wasSelected = itemDiv.classList.contains('selected');
+  const icon = e.target.closest('.tree-icon');
+
+  if (icon || wasSelected) {
+    if (isExpanded) {
+      if (itemDiv.collapseNode) itemDiv.collapseNode();
+    } else {
+      if (itemDiv.expandNode) await itemDiv.expandNode();
+    }
+  } else {
+    if (itemDiv.expandNode) await itemDiv.expandNode();
+  }
+
+  const activeItem = document.querySelector('#dir-tree .tree-item.selected');
+  if (activeItem) activeItem.classList.remove('selected');
+  itemDiv.classList.add('selected');
+});
+
+uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
+  const itemDiv = e.target.closest('.tree-item');
+  if (!itemDiv) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const activeItem = document.querySelector('#dir-tree .tree-item.selected');
+  if (activeItem) activeItem.classList.remove('selected');
+  itemDiv.classList.add('selected');
+
+  const isRoot = itemDiv.dataset.isRoot === 'true';
+  contextMenu.targetFolder = {
+    path: itemDiv.dataset.path,
+    name: itemDiv.dataset.name
+  };
+  contextMenu.isRoot = isRoot;
+
+  menuNewFolder.style.display = 'block';
+  menuRenameFolder.style.display = isRoot ? 'none' : 'block';
+  menuDeleteFolder.style.display = isRoot ? 'none' : 'block';
+  menuRenameFile.style.display = 'none';
+  menuDeleteFile.style.display = 'none';
+
+  contextMenu.style.display = 'block';
+  const rect = contextMenu.getBoundingClientRect();
+  let x = e.clientX;
+  let y = e.clientY;
+  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
+  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
+
+  contextMenu.style.left = `${x}px`;
+  contextMenu.style.top = `${y}px`;
+});
+
+uiManager.elements.dirTree.addEventListener('dragenter', (e) => {
+  const itemDiv = e.target.closest('.tree-item');
+  if (!itemDiv) return;
+  e.preventDefault();
+  itemDiv.style.backgroundColor = 'rgba(58, 122, 254, 0.3)';
+});
+
+uiManager.elements.dirTree.addEventListener('dragover', (e) => {
+  const itemDiv = e.target.closest('.tree-item');
+  if (!itemDiv) return;
+  e.preventDefault();
+
+  let actionStr = 'コピー';
+  if (appState.dragState.paths.length > 0) {
+    const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+    actionStr = getRoot(appState.dragState.paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+  }
+  e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
+
+  const isRoot = itemDiv.dataset.isRoot === 'true';
+  const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
+  const countStr = appState.dragState.paths.length > 1 ? `${appState.dragState.paths.length}個のファイルを ` : '';
+  dragTooltip.textContent = `${countStr}「${folderName}」へ${actionStr}`;
+  dragTooltip.style.display = 'block';
+  dragTooltip.style.left = (e.clientX + 15) + 'px';
+  dragTooltip.style.top = (e.clientY + 15) + 'px';
+});
+
+uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
+  const itemDiv = e.target.closest('.tree-item');
+  if (!itemDiv) return;
+  if (!itemDiv.contains(e.relatedTarget)) {
+    itemDiv.style.backgroundColor = '';
+    dragTooltip.style.display = 'none';
+  }
+});
+
+uiManager.elements.dirTree.addEventListener('drop', (e) => {
+  const itemDiv = e.target.closest('.tree-item');
+  if (!itemDiv) return;
+  e.preventDefault();
+  itemDiv.style.backgroundColor = '';
+  dragTooltip.style.display = 'none';
+
+  const paths = getPathsFromDragEvent(e);
+  if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
+    let actionStr = 'コピー';
+    if (paths.length > 0) {
+      const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+      actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+    }
+
+    uiManager.showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
+
+    setTimeout(async () => {
+      let successCount = 0;
+      for (const p of paths) {
+        const result = await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path);
+        if (result && result.success) {
+          successCount++;
+        }
+      }
+      if (successCount > 0) {
+        uiManager.showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
+        if (appState.dragState.isAppDragging) {
+          appState.dragState.pendingRefresh = true;
+        } else {
+          await refreshFileList();
+        }
+      } else {
+        uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
+      }
+    }, 10);
+  }
+});
 
 function setupResizer(resizer, type, cursor) {
   if (!resizer) return;
