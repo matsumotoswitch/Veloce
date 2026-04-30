@@ -27,14 +27,6 @@ const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-const fileListBody = document.getElementById('file-list-body');
-const thumbnailGrid = document.getElementById('center-bottom');
-const dirTree = document.getElementById('dir-tree');
-const thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
-const resizerLeft = document.getElementById('resizer-left');
-const resizerRight = document.getElementById('resizer-right');
-const resizerCenter = document.getElementById('resizer-center');
-
 const resizingState = { left: false, right: false, center: false };
 
 const contextMenu = document.createElement('div');
@@ -75,10 +67,10 @@ async function refreshFileList() {
 
 async function refreshTree() {
   if (!window.veloceAPI.getDrives) return;
-  const scrollTop = dirTree.scrollTop;
-  const scrollLeft = dirTree.scrollLeft;
+  const scrollTop = uiManager.elements.dirTree.scrollTop;
+  const scrollLeft = uiManager.elements.dirTree.scrollLeft;
 
-  const expandedPaths = Array.from(dirTree.querySelectorAll('.tree-children.expanded'))
+  const expandedPaths = Array.from(uiManager.elements.dirTree.querySelectorAll('.tree-children.expanded'))
     .map(ul => ul.previousElementSibling?.dataset?.path)
     .filter(Boolean);
 
@@ -105,10 +97,10 @@ async function refreshTree() {
     await expandTreeToPath(appState.currentDirectory, true, tempContainer);
   }
 
-  dirTree.innerHTML = '';
-  dirTree.appendChild(ul);
-  dirTree.scrollTop = scrollTop;
-  dirTree.scrollLeft = scrollLeft;
+  uiManager.elements.dirTree.innerHTML = '';
+  uiManager.elements.dirTree.appendChild(ul);
+  uiManager.elements.dirTree.scrollTop = scrollTop;
+  uiManager.elements.dirTree.scrollLeft = scrollLeft;
 }
 
 async function expandTreeToPath(targetPath, disableScroll = false, rootElement = document) {
@@ -197,8 +189,8 @@ async function loadAllMetadataInBackground() {
             file.metaLoaded = true;
 
             const tableIndex = appState.filteredFiles.findIndex(f => f.path === meta.path);
-            if (tableIndex !== -1 && fileListBody.children[tableIndex]) {
-              const row = fileListBody.children[tableIndex];
+            if (tableIndex !== -1 && uiManager.elements.fileListBody.children[tableIndex]) {
+              const row = uiManager.elements.fileListBody.children[tableIndex];
               row.children[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
               row.children[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
             }
@@ -1092,7 +1084,7 @@ async function selectImage(index, event = null) {
   uiManager.updateSelectionUI();
 
   // 選択した画像やリスト行が画面内に表示されるように自動スクロール
-  const items = thumbnailGrid.children;
+  const items = uiManager.elements.thumbnailGrid.children;
   if (items[index]) {
     if (items[index].scrollIntoViewIfNeeded) {
       items[index].scrollIntoViewIfNeeded(false);
@@ -1100,7 +1092,7 @@ async function selectImage(index, event = null) {
       items[index].scrollIntoView({ block: 'nearest' });
     }
   }
-  const rows = fileListBody.children;
+  const rows = uiManager.elements.fileListBody.children;
   if (rows[index]) {
     const thead = document.querySelector('#file-table thead');
     if (thead) {
@@ -1437,9 +1429,8 @@ async function renderMetadata(file) {
 
     // --- 【最強版】検索キーワードの確実な取得 ---
     let searchStr = '';
-    const searchInput = document.getElementById('search-bar');
-    if (searchInput && searchInput.value) {
-      searchStr = searchInput.value;
+    if (uiManager.elements.searchBar && uiManager.elements.searchBar.value) {
+      searchStr = uiManager.elements.searchBar.value;
     } else if (typeof appState !== 'undefined' && appState.searchQuery) {
       searchStr = appState.searchQuery;
     }
@@ -1727,14 +1718,14 @@ function handleItemContextMenu(e, isGrid) {
   contextMenu.style.top = `${y}px`;
 }
 
-thumbnailGrid.addEventListener('click', (e) => handleItemClick(e, true));
-thumbnailGrid.addEventListener('dblclick', (e) => handleItemDblClick(e, true));
-thumbnailGrid.addEventListener('dragstart', (e) => handleItemDragStart(e, true));
-thumbnailGrid.addEventListener('contextmenu', (e) => handleItemContextMenu(e, true));
+uiManager.elements.thumbnailGrid.addEventListener('click', (e) => handleItemClick(e, true));
+uiManager.elements.thumbnailGrid.addEventListener('dblclick', (e) => handleItemDblClick(e, true));
+uiManager.elements.thumbnailGrid.addEventListener('dragstart', (e) => handleItemDragStart(e, true));
+uiManager.elements.thumbnailGrid.addEventListener('contextmenu', (e) => handleItemContextMenu(e, true));
 
-fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
-fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
-fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
+uiManager.elements.fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
+uiManager.elements.fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
+uiManager.elements.fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
 
 function setupResizer(resizer, type, cursor) {
   if (!resizer) return;
@@ -1822,9 +1813,9 @@ function createResizerToggle(resizer, type) {
   resizer.appendChild(btn);
 }
 
-setupResizer(resizerLeft, 'left', 'col-resize');
-setupResizer(resizerRight, 'right', 'col-resize');
-setupResizer(resizerCenter, 'center', 'row-resize');
+setupResizer(uiManager.elements.resizerLeft, 'left', 'col-resize');
+setupResizer(uiManager.elements.resizerRight, 'right', 'col-resize');
+setupResizer(uiManager.elements.resizerCenter, 'center', 'row-resize');
 
 let resizerRafId = null;
 window.addEventListener('mousemove', (e) => {
@@ -1853,29 +1844,29 @@ window.addEventListener('mouseup', () => {
   if (resizingState.left) {
     localStorage.setItem('leftWidth', appState.layout.leftWidth);
     resizingState.left = false;
-    if (resizerLeft) resizerLeft.classList.remove('resizing');
+    if (uiManager.elements.resizerLeft) uiManager.elements.resizerLeft.classList.remove('resizing');
   }
   if (resizingState.right) {
     localStorage.setItem('rightWidth', appState.layout.rightWidth);
     resizingState.right = false;
-    if (resizerRight) resizerRight.classList.remove('resizing');
+    if (uiManager.elements.resizerRight) uiManager.elements.resizerRight.classList.remove('resizing');
   }
   if (resizingState.center) {
     localStorage.setItem('topHeight', document.documentElement.style.getPropertyValue('--top-height'));
     resizingState.center = false;
-    if (resizerCenter) resizerCenter.classList.remove('resizing');
+    if (uiManager.elements.resizerCenter) uiManager.elements.resizerCenter.classList.remove('resizing');
   }
   document.body.style.cursor = 'default';
 });
 
 function updateThumbnailSize() {
-  const size = parseFloat(thumbnailSizeSlider.value) || 120;
+  const size = parseFloat(uiManager.elements.thumbnailSizeSlider.value) || 120;
   document.body.style.setProperty('--thumbnail-size', `${size}px`);
 }
 
-thumbnailSizeSlider.addEventListener('input', updateThumbnailSize);
+uiManager.elements.thumbnailSizeSlider.addEventListener('input', updateThumbnailSize);
 
-thumbnailSizeSlider.addEventListener('change', (e) => {
+uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
   localStorage.setItem('thumbnailScale', e.target.value);
 });
 
@@ -2017,17 +2008,16 @@ window.addEventListener('keydown', async (e) => {
         applyIconGlowEffect(el);
       };
 
-      applyFlash(thumbnailGrid.querySelector(`.thumbnail-item[data-index="${appState.selectedIndex}"]`));
-      applyFlash(fileListBody.querySelector(`tr[data-index="${appState.selectedIndex}"]`));
+      applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${appState.selectedIndex}"]`));
+      applyFlash(uiManager.elements.fileListBody.querySelector(`tr[data-index="${appState.selectedIndex}"]`));
     }
   }
 
   if (e.ctrlKey && (e.key.toLowerCase() === 'f' || e.code === 'KeyF')) {
     e.preventDefault();
-    const searchBar = document.getElementById('search-bar');
-    if (searchBar) {
-      searchBar.focus();
-      searchBar.select();
+    if (uiManager.elements.searchBar) {
+      uiManager.elements.searchBar.focus();
+      uiManager.elements.searchBar.select();
     }
     return;
   }
@@ -2124,35 +2114,34 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   uiManager.applyLayout();
 
-  if (!appState.layout.leftVisible && resizerLeft) {
-    const btn = resizerLeft.querySelector('.resizer-toggle');
+  if (!appState.layout.leftVisible && uiManager.elements.resizerLeft) {
+    const btn = uiManager.elements.resizerLeft.querySelector('.resizer-toggle');
     if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
   }
-  if (!appState.layout.rightVisible && resizerRight) {
-    const btn = resizerRight.querySelector('.resizer-toggle');
+  if (!appState.layout.rightVisible && uiManager.elements.resizerRight) {
+    const btn = uiManager.elements.resizerRight.querySelector('.resizer-toggle');
     if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
   }
 
   const savedTopHeight = localStorage.getItem('topHeight');
   if (savedTopHeight) {
     document.documentElement.style.setProperty('--top-height', savedTopHeight);
-    if (savedTopHeight === '0px' && resizerCenter) {
-      const btn = resizerCenter.querySelector('.resizer-toggle');
+    if (savedTopHeight === '0px' && uiManager.elements.resizerCenter) {
+      const btn = uiManager.elements.resizerCenter.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
     }
   }
 
   const savedThumbScale = localStorage.getItem('thumbnailScale');
   if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {
-    thumbnailSizeSlider.value = savedThumbScale;
+    uiManager.elements.thumbnailSizeSlider.value = savedThumbScale;
   } else {
-    thumbnailSizeSlider.value = 120; 
+    uiManager.elements.thumbnailSizeSlider.value = 120; 
   }
   updateThumbnailSize();
 
-  const searchBar = document.getElementById('search-bar');
-  if (searchBar) {
-    searchBar.addEventListener('input', (e) => {
+  if (uiManager.elements.searchBar) {
+    uiManager.elements.searchBar.addEventListener('input', (e) => {
       clearTimeout(appState.searchTimeout);
       appState.searchTimeout = setTimeout(() => {
         appState.searchQuery = e.target.value;
@@ -2161,31 +2150,28 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  const searchClearBtn = document.getElementById('search-clear-btn');
-  if (searchClearBtn) {
-    searchClearBtn.innerHTML = UIManager.ICONS.ERASER;
-    searchClearBtn.addEventListener('click', () => {
-      if (searchBar) {
-        searchBar.value = '';
+  if (uiManager.elements.searchClearBtn) {
+    uiManager.elements.searchClearBtn.innerHTML = UIManager.ICONS.ERASER;
+    uiManager.elements.searchClearBtn.addEventListener('click', () => {
+      if (uiManager.elements.searchBar) {
+        uiManager.elements.searchBar.value = '';
         appState.searchQuery = '';
         scheduleRefresh();
-        applyIconGlowEffect(searchClearBtn);
+        applyIconGlowEffect(uiManager.elements.searchClearBtn);
       }
     });
   }
 
-  const openCacheBtn = document.getElementById('open-cache-btn');
-  if (openCacheBtn) {
-    openCacheBtn.addEventListener('click', () => {
-      applyIconGlowEffect(openCacheBtn);
+  if (uiManager.elements.openCacheBtn) {
+    uiManager.elements.openCacheBtn.addEventListener('click', () => {
+      applyIconGlowEffect(uiManager.elements.openCacheBtn);
       window.veloceAPI.openThumbnailCache();
     });
   }
 
-  const clearCacheBtn = document.getElementById('clear-cache-btn');
-  if (clearCacheBtn) {
-    clearCacheBtn.addEventListener('click', async () => {
-      applyIconGlowEffect(clearCacheBtn);
+  if (uiManager.elements.clearCacheBtn) {
+    uiManager.elements.clearCacheBtn.addEventListener('click', async () => {
+      applyIconGlowEffect(uiManager.elements.clearCacheBtn);
       const isConfirmed = await showCustomConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
       if (isConfirmed) {
         uiManager.showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');

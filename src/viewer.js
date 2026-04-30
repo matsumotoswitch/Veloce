@@ -19,7 +19,6 @@ window.addEventListener('keydown', (e) => {
 // 1. Setup & Window Initialization
 // ============================================================================
 
-const viewerImg = document.getElementById('viewer-img');
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
 
@@ -86,9 +85,9 @@ borderOverlay.style.zIndex = '9998'; // コントロールボタンの下、画�
 document.body.appendChild(borderOverlay);
 
 // 初期状態は画面にフィットさせる
-if (viewerUI.viewerImg) {
-  viewerUI.viewerImg.style.maxWidth = '100%';
-  viewerUI.viewerImg.style.maxHeight = '100%';
+if (viewerUI.elements.viewerImg) {
+  viewerUI.elements.viewerImg.style.maxWidth = '100%';
+  viewerUI.elements.viewerImg.style.maxHeight = '100%';
 }
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -121,10 +120,10 @@ function setZoomState(zoomed) {
   viewerState.isZoomed = zoomed;
   if (viewerState.isZoomed) {
     // 100%表示（ズーム）に切り替え
-    viewerUI.viewerImg.style.maxWidth = 'none';
-    viewerUI.viewerImg.style.maxHeight = 'none';
-    viewerUI.viewerImg.style.width = `${viewerUI.viewerImg.naturalWidth}px`;
-    viewerUI.viewerImg.style.height = `${viewerUI.viewerImg.naturalHeight}px`;
+    viewerUI.elements.viewerImg.style.maxWidth = 'none';
+    viewerUI.elements.viewerImg.style.maxHeight = 'none';
+    viewerUI.elements.viewerImg.style.width = `${viewerUI.elements.viewerImg.naturalWidth}px`;
+    viewerUI.elements.viewerImg.style.height = `${viewerUI.elements.viewerImg.naturalHeight}px`;
     viewerUI.setCursor('grab');
   } else {
     // 画面フィットまたはデフォルト表示に切り替え
@@ -148,8 +147,8 @@ function isRotationSwapped() {
 function getNaturalDimensions() {
   const swapped = isRotationSwapped();
   return {
-    width: swapped ? viewerUI.viewerImg.naturalHeight : viewerUI.viewerImg.naturalWidth,
-    height: swapped ? viewerUI.viewerImg.naturalWidth : viewerUI.viewerImg.naturalHeight
+    width: swapped ? viewerUI.elements.viewerImg.naturalHeight : viewerUI.elements.viewerImg.naturalWidth,
+    height: swapped ? viewerUI.elements.viewerImg.naturalWidth : viewerUI.elements.viewerImg.naturalHeight
   };
 }
 
@@ -176,25 +175,25 @@ function applyFitState() {
   if (viewerState.isFitToWindow) {
     // 回転時のアスペクト比崩れを防ぐため、回転角度に応じて縦横の100%基準を入れ替える
     const isSwapped = isRotationSwapped();
-    viewerUI.viewerImg.style.maxWidth = 'none';
-    viewerUI.viewerImg.style.maxHeight = 'none';
-    viewerUI.viewerImg.style.width = isSwapped ? '100vh' : '100vw';
-    viewerUI.viewerImg.style.height = isSwapped ? '100vw' : '100vh';
-    viewerUI.viewerImg.style.objectFit = 'contain';
+    viewerUI.elements.viewerImg.style.maxWidth = 'none';
+    viewerUI.elements.viewerImg.style.maxHeight = 'none';
+    viewerUI.elements.viewerImg.style.width = isSwapped ? '100vh' : '100vw';
+    viewerUI.elements.viewerImg.style.height = isSwapped ? '100vw' : '100vh';
+    viewerUI.elements.viewerImg.style.objectFit = 'contain';
   } else {
     // デフォルト（大きい画像のみ縮小、小さい画像はそのままのサイズ）
-    viewerUI.viewerImg.style.maxWidth = '100%';
-    viewerUI.viewerImg.style.maxHeight = '100%';
-    viewerUI.viewerImg.style.width = 'auto';
-    viewerUI.viewerImg.style.height = 'auto';
-    viewerUI.viewerImg.style.objectFit = 'contain';
+    viewerUI.elements.viewerImg.style.maxWidth = '100%';
+    viewerUI.elements.viewerImg.style.maxHeight = '100%';
+    viewerUI.elements.viewerImg.style.width = 'auto';
+    viewerUI.elements.viewerImg.style.height = 'auto';
+    viewerUI.elements.viewerImg.style.objectFit = 'contain';
   }
   
   viewerUI.setCursor('default');
   document.body.style.overflow = 'hidden';
   document.body.style.justifyContent = 'center';
   document.body.style.alignItems = 'center';
-  viewerUI.viewerImg.style.margin = '0';
+  viewerUI.elements.viewerImg.style.margin = '0';
   document.body.scrollTop = 0;
   document.body.scrollLeft = 0;
 }
@@ -237,7 +236,7 @@ function updateFullscreenStyles() {
   if (!viewerState.isZoomed) {
     document.body.style.justifyContent = 'center';
     document.body.style.alignItems = 'center';
-    viewerUI.viewerImg.style.margin = '0';
+    viewerUI.elements.viewerImg.style.margin = '0';
     return;
   }
 
@@ -248,11 +247,11 @@ function updateFullscreenStyles() {
   const isSwapped = isRotationSwapped();
   
   if (isSwapped) {
-    const marginY = (viewerUI.viewerImg.naturalWidth - viewerUI.viewerImg.naturalHeight) / 2;
-    const marginX = (viewerUI.viewerImg.naturalHeight - viewerUI.viewerImg.naturalWidth) / 2;
-    viewerUI.viewerImg.style.margin = `${marginY}px ${marginX}px`;
+    const marginY = (viewerUI.elements.viewerImg.naturalWidth - viewerUI.elements.viewerImg.naturalHeight) / 2;
+    const marginX = (viewerUI.elements.viewerImg.naturalHeight - viewerUI.elements.viewerImg.naturalWidth) / 2;
+    viewerUI.elements.viewerImg.style.margin = `${marginY}px ${marginX}px`;
   } else {
-    viewerUI.viewerImg.style.margin = '0';
+    viewerUI.elements.viewerImg.style.margin = '0';
   }
 
   // 補正後のサイズ（レイアウト上のサイズ＝視覚的なサイズ）
@@ -307,19 +306,19 @@ async function loadImage() {
     if (viewerState.preloadCache.has(viewerState.currentIndex)) {
       const cachedData = viewerState.preloadCache.get(viewerState.currentIndex);
       viewerState.currentImagePath = cachedData.path; // パスを更新
-      if (viewerImg) {
-        viewerImg.src = cachedData.img.src;
+      if (viewerUI.elements.viewerImg) {
+        viewerUI.elements.viewerImg.src = cachedData.img.src;
       }
     } else {
       const assetUrl = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
-      if (viewerImg) {
-        viewerImg.src = assetUrl;
+      if (viewerUI.elements.viewerImg) {
+        viewerUI.elements.viewerImg.src = assetUrl;
       }
     }
     preloadAdjacentImages();
 
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
-    viewerUI.viewerImg.onload = () => {
+    viewerUI.elements.viewerImg.onload = () => {
       setZoomState(viewerState.isZoomed);
       viewerUI.updateImageRendering();
 
@@ -554,7 +553,7 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 'Control' && !viewerState.isImageDragging) viewerUI.setCursor('default');
 });
 // ドラッグ開始（Ctrlを押している時のみ）
-viewerUI.viewerImg.addEventListener('mousedown', (e) => {
+viewerUI.elements.viewerImg.addEventListener('mousedown', (e) => {
   if (e.ctrlKey && e.button === 0) {
     e.preventDefault(); // Macの右クリック化やOSの標準ドラッグを防止
     e.stopPropagation(); // 既存のウィンドウドラッグ処理との競合を防止
@@ -774,7 +773,7 @@ window.addEventListener('keydown', async (e) => {
 	if (viewerState.currentImagePath) {
 	  window.veloceAPI.copyImageToClipboard(viewerState.currentImagePath);
       // 共通の光るエフェクトを適用
-      applyIconGlowEffect(viewerUI.viewerImg);
+      applyIconGlowEffect(viewerUI.elements.viewerImg);
 	}
   }
 });

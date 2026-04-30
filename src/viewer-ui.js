@@ -14,18 +14,20 @@ class ViewerUI {
    */
   constructor(state) {
     this.state = state;
-    this.viewerImg = document.getElementById('viewer-img');
+    this.elements = {
+      viewerImg: document.getElementById('viewer-img')
+    };
   }
 
   /**
    * 画像の変形（ズーム・パン・回転）とフィルター（シャープネス）を適用し、画面の描画を更新します。
    */
   updateImageRendering() {
-    if (!this.viewerImg) return;
+    if (!this.elements.viewerImg) return;
     let filters = [];
     if (this.state.isUnsharped) filters.push('url(#unsharp-filter)');
-    this.viewerImg.style.filter = filters.length > 0 ? filters.join(' ') : 'none';
-    this.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+    this.elements.viewerImg.style.filter = filters.length > 0 ? filters.join(' ') : 'none';
+    this.elements.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
   }
 
   /**
@@ -47,7 +49,7 @@ class ViewerUI {
    * @param {string} type - CSSのcursorプロパティに設定する値（例: 'grab', 'default'）
    */
   setCursor(type) {
-    if (this.viewerImg) this.viewerImg.style.cursor = type;
+    if (this.elements.viewerImg) this.elements.viewerImg.style.cursor = type;
   }
 }
 

@@ -41,8 +41,19 @@ class UIManager {
   constructor(state) {
     this.state = state;
     // 頻繁に操作するDOM要素はここで取得しておく
-    this.thumbnailGrid = document.getElementById('center-bottom');
-    this.fileListBody = document.getElementById('file-list-body');
+    this.elements = {
+      fileListBody: document.getElementById('file-list-body'),
+      thumbnailGrid: document.getElementById('center-bottom'),
+      dirTree: document.getElementById('dir-tree'),
+      thumbnailSizeSlider: document.getElementById('thumbnail-size-slider'),
+      resizerLeft: document.getElementById('resizer-left'),
+      resizerRight: document.getElementById('resizer-right'),
+      resizerCenter: document.getElementById('resizer-center'),
+      searchBar: document.getElementById('search-bar'),
+      searchClearBtn: document.getElementById('search-clear-btn'),
+      openCacheBtn: document.getElementById('open-cache-btn'),
+      clearCacheBtn: document.getElementById('clear-cache-btn')
+    };
     this.toastContainer = document.getElementById('toast-container');
   }
 
@@ -104,22 +115,22 @@ class UIManager {
    * リストとサムネイルグリッドの選択状態を表すUIを一括で更新します。
    */
   updateSelectionUI() {
-    if (!this.fileListBody || !this.thumbnailGrid) {
-      this.fileListBody = document.getElementById('file-list-body');
-      this.thumbnailGrid = document.getElementById('center-bottom');
-      if (!this.fileListBody || !this.thumbnailGrid) return;
+    if (!this.elements.fileListBody || !this.elements.thumbnailGrid) {
+      this.elements.fileListBody = document.getElementById('file-list-body');
+      this.elements.thumbnailGrid = document.getElementById('center-bottom');
+      if (!this.elements.fileListBody || !this.elements.thumbnailGrid) return;
     }
 
     // 全要素をループするのではなく、既に選択されている要素のクラスを外す
-    const currentSelectedRows = this.fileListBody.querySelectorAll('.selected');
+    const currentSelectedRows = this.elements.fileListBody.querySelectorAll('.selected');
     for (let i = 0; i < currentSelectedRows.length; i++) currentSelectedRows[i].classList.remove('selected');
     
-    const currentSelectedThumbs = this.thumbnailGrid.querySelectorAll('.selected');
+    const currentSelectedThumbs = this.elements.thumbnailGrid.querySelectorAll('.selected');
     for (let i = 0; i < currentSelectedThumbs.length; i++) currentSelectedThumbs[i].classList.remove('selected');
 
     // 新たに選択された要素のみにクラスを付与する
-    const rows = this.fileListBody.children;
-    const thumbs = this.thumbnailGrid.children;
+    const rows = this.elements.fileListBody.children;
+    const thumbs = this.elements.thumbnailGrid.children;
     for (const i of this.state.selection) {
       if (rows[i]) rows[i].classList.add('selected');
       if (thumbs[i]) thumbs[i].classList.add('selected');
@@ -350,9 +361,9 @@ class UIManager {
    * ファイルリストとサムネイルグリッドの描画を非同期で行います。
    */
   async renderAll() {
-    if (!this.fileListBody || !this.thumbnailGrid) {
-      this.fileListBody = document.getElementById('file-list-body');
-      this.thumbnailGrid = document.getElementById('center-bottom');
+    if (!this.elements.fileListBody || !this.elements.thumbnailGrid) {
+      this.elements.fileListBody = document.getElementById('file-list-body');
+      this.elements.thumbnailGrid = document.getElementById('center-bottom');
     }
 
     const renderId = ++this.state.currentRenderId;
@@ -372,29 +383,29 @@ class UIManager {
       if (typeof updateThumbnailToast === 'function') updateThumbnailToast();
     }
 
-    if (this.fileListBody) this.fileListBody.innerHTML = '';
-    if (this.thumbnailGrid) this.thumbnailGrid.innerHTML = '';
+    if (this.elements.fileListBody) this.elements.fileListBody.innerHTML = '';
+    if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.innerHTML = '';
 
-    if (this.thumbnailGrid) {
-      this.thumbnailGrid.style.display = 'flex';
-      this.thumbnailGrid.style.flexWrap = 'wrap';
-      this.thumbnailGrid.style.gap = '8px';
-      this.thumbnailGrid.style.justifyContent = 'flex-start';
-      this.thumbnailGrid.style.alignContent = 'flex-start';
+    if (this.elements.thumbnailGrid) {
+      this.elements.thumbnailGrid.style.display = 'flex';
+      this.elements.thumbnailGrid.style.flexWrap = 'wrap';
+      this.elements.thumbnailGrid.style.gap = '8px';
+      this.elements.thumbnailGrid.style.justifyContent = 'flex-start';
+      this.elements.thumbnailGrid.style.alignContent = 'flex-start';
     }
 
     const fileListContainer = document.getElementById('center-top');
     if (fileListContainer) fileListContainer.scrollTop = 0;
-    if (this.thumbnailGrid) this.thumbnailGrid.scrollTop = 0;
+    if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
 
-    if (this.state.filteredFiles.length === 0 && this.thumbnailGrid) {
+    if (this.state.filteredFiles.length === 0 && this.elements.thumbnailGrid) {
       const emptyMessage = document.createElement('div');
       emptyMessage.style.width = '100%';
       emptyMessage.style.textAlign = 'center';
       emptyMessage.style.color = '#888';
       emptyMessage.style.marginTop = '40px';
       emptyMessage.textContent = '表示対象の画像がありません';
-      this.thumbnailGrid.appendChild(emptyMessage);
+      this.elements.thumbnailGrid.appendChild(emptyMessage);
     }
 
     const CHUNK_SIZE = 100;
@@ -444,8 +455,8 @@ class UIManager {
         }
       });
 
-      if (this.fileListBody) this.fileListBody.appendChild(tableFragment);
-      if (this.thumbnailGrid) this.thumbnailGrid.appendChild(gridFragment);
+      if (this.elements.fileListBody) this.elements.fileListBody.appendChild(tableFragment);
+      if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.appendChild(gridFragment);
 
       // メインスレッドのブロック回避
       await new Promise(resolve => setTimeout(resolve, 0));
