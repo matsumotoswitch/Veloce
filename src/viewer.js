@@ -21,6 +21,7 @@ window.addEventListener('keydown', (e) => {
 
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
+import { debounce } from './utils.js';
 
 const CONFIG = {
   ZOOM_STEP: 1.1,         // マウスホイールでのズーム倍率
@@ -207,10 +208,7 @@ function applyFitState() {
   document.body.scrollLeft = 0;
 }
 
-let resizeTimer = null;
-window.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(async () => {
+window.addEventListener('resize', debounce(async () => {
     // リサイズ中にIPC通信（await invoke）を行うとOSのメッセージループが詰まり
     // 例外0xc000041dでクラッシュするため、ブラウザのAPIを用いて判定する
     const isMax = window.innerWidth >= window.screen.availWidth - 10 && window.innerHeight >= window.screen.availHeight - 10;
@@ -234,8 +232,7 @@ window.addEventListener('resize', () => {
     }
     
     updateFullscreenStyles();
-  }, 150); // ドラッグ中の高頻度なイベントを間引く
-});
+}, CONFIG.RESIZE_THROTTLE)); // ドラッグ中の高頻度なイベントを間引く
 
 /**
  * フルスクリーン（100%表示）時のスタイルを更新する。

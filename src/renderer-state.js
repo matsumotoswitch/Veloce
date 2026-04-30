@@ -37,7 +37,6 @@ class AppState {
     this.thumbnailRequestQueue = []; // サムネイル取得リクエストのキュー
     this.preloadCursor = 0;          // バックグラウンドプリロードの現在のインデックス
     this.isPreloadRunning = false;   // プリロード処理が実行中かどうか
-    this.searchTimeout = null;       // 検索入力のデバウンス用タイマー
 
     // トースト通知状態管理
     this.thumbnailTotalRequested = 0; // サムネイル生成リクエストの総数

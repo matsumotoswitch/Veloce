@@ -20,6 +20,7 @@ window.addEventListener('keydown', (e) => {
 // ============================================================================
 import { appState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
+import { debounce } from './utils.js';
 
 const CONFIG = {
   CHUNK_SIZE: 100,        // 一度にDOMに追加する要素数（レンダリング負荷軽減）
@@ -771,20 +772,16 @@ function clearMetadataUI() {
   }
 }
 
-function scheduleRefresh() {
-  clearTimeout(appState.searchTimeout); 
-  appState.searchTimeout = setTimeout(() => {
-    appState.preloadCursor = 0;
-    appState.applyFiltersAndSort();
-
-    uiManager.renderAll();
-    loadAllMetadataInBackground();
-    uiManager.updateSelectionUI();
-    if (appState.selectedIndex === -1) {
-      clearMetadataUI();
-    }
-  }, CONFIG.REFRESH_DELAY); 
-}
+const scheduleRefresh = debounce(() => {
+  appState.preloadCursor = 0;
+  appState.applyFiltersAndSort();
+  uiManager.renderAll();
+  loadAllMetadataInBackground();
+  uiManager.updateSelectionUI();
+  if (appState.selectedIndex === -1) {
+    clearMetadataUI();
+  }
+}, CONFIG.REFRESH_DELAY);
 
 function createTreeNode(folder, isRoot = false) {
   const li = document.createElement('li');
@@ -1904,10 +1901,7 @@ uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
   localStorage.setItem('thumbnailScale', e.target.value);
 });
 
-let windowStateTimer;
-window.addEventListener('resize', () => {
-  clearTimeout(windowStateTimer);
-  windowStateTimer = setTimeout(async () => {
+window.addEventListener('resize', debounce(async () => {
     if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
       const isMax = await window.veloceAPI.isViewerMaximized();
       localStorage.setItem('mainWinMaximized', isMax);
@@ -1918,8 +1912,7 @@ window.addEventListener('resize', () => {
         localStorage.setItem('mainWinY', window.screenY);
       }
     }
-  }, 500);
-});
+}, 500));
 
 window.addEventListener('beforeunload', () => {
   if (localStorage.getItem('mainWinMaximized') !== 'true') {
@@ -2175,13 +2168,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   updateThumbnailSize();
 
   if (uiManager.elements.searchBar) {
-    uiManager.elements.searchBar.addEventListener('input', (e) => {
-      clearTimeout(appState.searchTimeout);
-      appState.searchTimeout = setTimeout(() => {
-        appState.searchQuery = e.target.value;
-        scheduleRefresh();
-      }, CONFIG.SEARCH_DELAY);
-    });
+    uiManager.elements.searchBar.addEventListener('input', debounce((e) => {
+      appState.searchQuery = e.target.value;
+      scheduleRefresh();
+    }, CONFIG.SEARCH_DELAY));
   }
 
   if (uiManager.elements.searchClearBtn) {
