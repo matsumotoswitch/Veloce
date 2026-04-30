@@ -51,3 +51,4 @@ class ViewerUI {
 
 // インスタンス化
 window.viewerUI = new ViewerUI(window.viewerState);
+window.ViewerUI = ViewerUI;

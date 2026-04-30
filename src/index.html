@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Veloce - AI Image Manager</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
   <style>
     /* アプリ全体のフォントを統一 (Windows 8.1 向け) */
@@ -94,10 +95,10 @@
     </div>
   </div>
 
-  <script src="preload.js"></script>
-  <script src="renderer-state.js"></script>
-  <script src="renderer-ui.js"></script>
-  <script src="renderer.js"></script>
+  <script type="module" src="/preload.js"></script>
+  <script type="module" src="/renderer-state.js"></script>
+  <script type="module" src="/renderer-ui.js"></script>
+  <script type="module" src="/renderer.js"></script>
 
   <!-- トースト通知用コンテナ -->
   <div id="toast-container"></div>

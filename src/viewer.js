@@ -3,6 +3,7 @@
 // ============================================================================
 
 // 開発者ツール（F12, Ctrl+Shift+I）の強制ブロック
+/*
 window.addEventListener('keydown', (e) => {
   if (
     (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) ||
@@ -12,12 +13,14 @@ window.addEventListener('keydown', (e) => {
     e.stopPropagation(); // 他の処理への伝播を完全に遮断
   }
 }, true);
+*/
 
 // ============================================================================
 // 1. Setup & Window Initialization
 // ============================================================================
 
 const viewerImg = document.getElementById('viewer-img');
+const ViewerUI = window.ViewerUI;
 
 window.addEventListener('focus', () => {
   window.viewerState.lastFocusTime = Date.now();
@@ -398,6 +401,7 @@ function showNext() {
 // ============================================================================
 
 // ドラッグ、クリック、ダブルクリックを判別するための状態変数
+let isDragging = false;
 let hasMoved = false; // ドラッグ中に実際にマウスが移動したか
 let startX = 0, startY = 0; // ドラッグ開始時の座標
 let scrollLeftStart = 0, scrollTopStart = 0; // ドラッグ開始時のスクロール位置

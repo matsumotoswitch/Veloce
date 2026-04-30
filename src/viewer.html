@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Viewer - Veloce</title>
+  <link rel="icon" href="data:,">
   <style>
 	body, html {
 	  margin: 0; padding: 0; width: 100%; height: 100%;
@@ -19,9 +20,9 @@
 </head>
 <body>
   <img id="viewer-img" decoding="async" src="" alt="">
-  <script src="preload.js"></script>
-  <script src="viewer-state.js"></script>
-  <script src="viewer-ui.js"></script>
-  <script src="viewer.js"></script>
+  <script type="module" src="/preload.js"></script>
+  <script type="module" src="/viewer-state.js"></script>
+  <script type="module" src="/viewer-ui.js"></script>
+  <script type="module" src="/viewer.js"></script>
 </body>
 </html>

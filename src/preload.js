@@ -1,6 +1,9 @@
-const { invoke, convertFileSrc } = window.__TAURI__.tauri;
-const { listen } = window.__TAURI__.event;
-const { appWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
+const invoke = window.__TAURI__.invoke || (window.__TAURI__.tauri && window.__TAURI__.tauri.invoke) || (window.__TAURI__.core && window.__TAURI__.core.invoke);
+const convertFileSrc = window.__TAURI__.convertFileSrc || (window.__TAURI__.tauri && window.__TAURI__.tauri.convertFileSrc) || (window.__TAURI__.core && window.__TAURI__.core.convertFileSrc);
+const listen = (window.__TAURI__.event && window.__TAURI__.event.listen) || (window.__TAURI__.tauri && window.__TAURI__.tauri.listen) || (window.__TAURI__.core && window.__TAURI__.core.listen);
+const tauriWindow = window.__TAURI__.window || {};
+const appWindow = tauriWindow.appWindow || (tauriWindow.getCurrentWindow ? tauriWindow.getCurrentWindow() : null);
+const { LogicalSize, LogicalPosition } = tauriWindow;
 
 /**
  * @description

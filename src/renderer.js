@@ -3,6 +3,7 @@
 // ============================================================================
 
 // 開発者ツール（F12, Ctrl+Shift+I）の強制ブロック
+/*
 window.addEventListener('keydown', (e) => {
   if (
     (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) ||
@@ -12,10 +13,14 @@ window.addEventListener('keydown', (e) => {
     e.stopPropagation();
   }
 }, true);
+*/
 
 // ============================================================================
 // 1. Constants & Global Variables
 // ============================================================================
+const appState = window.appState;
+const UIManager = window.UIManager;
+
 const logicalCores = navigator.hardwareConcurrency || 8;
 const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
 
@@ -1124,186 +1129,6 @@ async function selectImage(index, event = null) {
 
   // インスペクターの更新
   renderMetadata(file);
-}
-
-function renderMetadata(meta) {
-  const promptText = document.getElementById('prompt-text');
-  let container = document.getElementById('metadata-container');
-  const rightPane = promptText ? promptText.parentElement : document.getElementById('right-pane');
-  
-  const hasAiMetadata = meta && (meta.prompt || meta.negativePrompt || meta.source || (meta.params && Object.keys(meta.params).length > 0));
-
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'metadata-container';
-    container.style.display = hasAiMetadata ? 'flex' : 'none';
-    container.style.flexDirection = 'column';
-    container.style.width = '100%';
-    container.style.boxSizing = 'border-box';
-    container.style.paddingRight = '8px'; 
-    
-    if (rightPane) {
-      rightPane.style.overflowY = 'auto';
-      Array.from(rightPane.children).forEach(child => {
-         child.style.display = 'none';
-      });
-      rightPane.appendChild(container);
-    }
-  } else {
-    container.style.display = hasAiMetadata ? 'flex' : 'none';
-  }
-  
-  container.innerHTML = '';
-
-  if (!hasAiMetadata) {
-    return; 
-  }
-
-  // --- 【最強版】検索キーワードの確実な取得 ---
-  let searchStr = '';
-  const searchInput = document.getElementById('search-bar'); // HTMLのIDに合わせて修正
-  if (searchInput && searchInput.value) {
-    searchStr = searchInput.value; // 検索ボックスから直接取得
-  } else if (typeof appState !== 'undefined' && appState.searchQuery) {
-    searchStr = appState.searchQuery; // フォールバック
-  }
-  
-  const terms = searchStr.trim() !== '' 
-    ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(t => t) 
-    : [];
-
-  const copyIconSvg = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-
-  const addField = (label, value, isTag = false) => {
-    if (value === undefined || value === null || value === '') return;
-    
-    const fieldDiv = document.createElement('div');
-    fieldDiv.className = 'inspector-section';
-    fieldDiv.style.marginBottom = '15px';
-
-    const titleHtml = `
-      <h3 style="color: #ffcc00; font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
-        <span>${label}</span>
-        <span class="diff-copy-btn" title="クリップボードにコピー" data-copy-text="${String(value).replace(/"/g, '&quot;')}">${copyIconSvg}</span>
-      </h3>
-    `;
-
-    let contentHtml = '';
-    if (isTag) {
-      const tags = String(value).split(',').map(t => t.trim()).filter(t => t);
-      if (tags.length === 0) {
-        contentHtml = '<span style="opacity:0.3">なし</span>';
-      } else {
-        contentHtml = tags.map(t => {
-          // --- 【修正】ハイライトの絶対発光処理 ---
-          const isMatch = terms.some(term => t.toLowerCase().includes(term));
-          
-          // isMatchがtrueなら、枠線・背景・文字色・光彩エフェクトを全て適用する
-          const matchStyle = isMatch 
-            ? 'border: 1px solid #ffcc00; background-color: rgba(255, 204, 0, 0.25); color: #ffcc00; font-weight: bold; box-shadow: 0 0 8px rgba(255,204,0,0.3);' 
-            : 'border: 1px solid transparent;';
-
-          const displayHtml = typeof highlightText === 'function' ? highlightText(t, terms) : t;
-          
-          return `<span class="diff-tag common" style="${matchStyle}">${displayHtml}</span>`;
-        }).join('');
-      }
-    } else {
-      const displayHtml = typeof highlightText === 'function' ? highlightText(String(value), terms) : String(value);
-      contentHtml = `<span class="diff-tag common">${displayHtml}</span>`;
-    }
-
-    const boxClass = isTag ? "prompt-look" : "prompt-look param-box";
-
-    fieldDiv.innerHTML = `
-      ${titleHtml}
-      <div class="${boxClass}">
-        ${contentHtml}
-      </div>
-    `;
-
-    const copyBtn = fieldDiv.querySelector('.diff-copy-btn');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(String(value));
-          if (typeof showNotification === 'function') showNotification("クリップボードにコピーしました");
-          else if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました");
-          
-          copyBtn.classList.add('glow');
-          setTimeout(() => {
-            copyBtn.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out';
-            copyBtn.classList.remove('glow');
-            setTimeout(() => { copyBtn.style.transition = ''; }, 600);
-          }, 200);
-        } catch (err) {}
-      });
-    }
-
-    // --- 【追加】ドラッグ選択コピー時のカンマ自動挿入ロジック ---
-    const lookDiv = fieldDiv.querySelector('.prompt-look');
-    if (isTag && lookDiv) {
-      lookDiv.addEventListener('copy', (e) => {
-        const selection = window.getSelection();
-        if (selection.isCollapsed) return;
-
-        // 選択された範囲のDOMをクローン
-        const clone = selection.getRangeAt(0).cloneContents();
-        const tempDiv = document.createElement('div');
-        tempDiv.appendChild(clone);
-
-        // 選択範囲に含まれる全てのタグ要素を取得し、末尾にカンマを追加
-        const tags = tempDiv.querySelectorAll('.diff-tag');
-        tags.forEach(tag => {
-          tag.textContent = tag.textContent + ", ";
-        });
-
-        // プレーンテキストとして抽出し、末尾の余分なカンマを削除
-        let copiedText = tempDiv.textContent;
-        copiedText = copiedText.replace(/,\s*$/, '').trim();
-
-        // クリップボードの標準動作を上書き
-        e.clipboardData.setData('text/plain', copiedText);
-        e.preventDefault();
-      });
-    }
-    // --- ここまで ---
-
-    container.appendChild(fieldDiv);
-  };
-
-  if (meta.source) addField('モデル / バージョン', meta.source, false);
-  addField('プロンプト', meta.prompt, true);
-  addField('除外したい要素', meta.negativePrompt, true);
-  
-  if (meta.params) {
-    if (Array.isArray(meta.params.characterPrompts)) {
-      meta.params.characterPrompts.forEach((char, idx) => {
-        addField(`キャラクター ${idx + 1} プロンプト`, char.prompt, true);
-        addField(`キャラクター ${idx + 1} 除外したい要素`, char.uc, true);
-      });
-    }
-    
-    const resolution = (meta.params.width && meta.params.height) 
-      ? `${meta.params.width}x${meta.params.height}` 
-      : (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
-    addField('画像サイズ', resolution, false);
-    
-    addField('シード値', meta.params.seed, false);
-    addField('ステップ', meta.params.steps, false);
-    
-    let sampler = meta.params.sampler;
-    if (sampler && meta.params.sm && !sampler.includes('karras')) sampler += " (karras)";
-    addField('サンプラー', sampler, false);
-    
-    addField('プロンプトガイダンス', meta.params.scale, false);
-    addField('プロンプトガイダンスの再調整', meta.params.cfg_rescale, false);
-    addField('除外したい要素の強さ', meta.params.uncond_scale, false);
-
-    if (meta.params.rawParameters) {
-      addField('生成パラメータ (Raw)', meta.params.rawParameters, true);
-    }
-  }
 }
 
 function openViewer(index) {

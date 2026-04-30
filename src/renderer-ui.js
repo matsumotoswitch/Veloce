@@ -442,3 +442,4 @@ class UIManager {
 
 // グローバルにインスタンスを一つだけ公開する
 window.uiManager = new UIManager(window.appState);
+window.UIManager = UIManager;
