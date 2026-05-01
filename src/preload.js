@@ -6,9 +6,48 @@ const appWindow = tauriWindow.appWindow || (tauriWindow.getCurrentWindow ? tauri
 const { LogicalSize, LogicalPosition } = tauriWindow;
 
 /**
+ * @typedef {Object} VeloceAPI
+ * @property {() => Promise<string[]>} getDrives
+ * @property {() => Promise<object|null>} selectDirectory
+ * @property {(path: string) => Promise<{path: string, imageFiles: import('./renderer-state.js').ImageFile[]}>} loadDirectory
+ * @property {(dirPath: string) => Promise<Array<{name: string, path: string}>>} getFolders
+ * @property {(filePaths: string[]) => Promise<any[]>} getFullMetadataBatch
+ * @property {(filePath: string) => Promise<string>} getThumbnail
+ * @property {(filePath: string) => Promise<any>} parseMetadata
+ * @property {(index: number) => Promise<{path: string, total: number}>} getViewerImage
+ * @property {(data: {currentIndex: number, width: number, height: number, monitorWidth: number, monitorHeight: number}) => Promise<void>} openViewer
+ * @property {() => Promise<boolean>} isViewerMaximized
+ * @property {() => Promise<boolean>} isViewerFullscreen
+ * @property {() => Promise<void>} toggleViewerFullscreen
+ * @property {() => Promise<void>} minimizeViewer
+ * @property {() => Promise<void>} maximizeViewer
+ * @property {(width: number, height: number) => Promise<void>} resizeViewerWindow
+ * @property {(width: number, height: number) => Promise<void>} setWindowSize
+ * @property {() => Promise<void>} startViewerDragging
+ * @property {(x: number, y: number) => Promise<void>} moveViewerWindow
+ * @property {(filePath: string) => Promise<void>} copyImageToClipboard
+ * @property {(filePath: string) => Promise<boolean>} trashFile
+ * @property {(callback: (payload: any) => void) => void} onFileChanged
+ * @property {(callback: (payload: string) => void) => void} onFileRemoved
+ * @property {(callback: () => void) => void} onDirectoryChanged
+ * @property {(parentDir: string, folderName: string) => Promise<{success: boolean, path?: string, error?: string}>} createFolder
+ * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
+ * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
+ * @property {(folderPath: string) => Promise<{success: boolean, error?: string}>} trashFolder
+ * @property {(sourcePath: string, targetDir: string) => Promise<{success: boolean, action: string, reason: string|null}>} moveOrCopyFile
+ * @property {(filePath: string) => string} convertFileSrc
+ * @property {() => void} toggleDevtools
+ * @property {() => void} closeWindow
+ * @property {() => Promise<void>} arrangeViewers
+ * @property {(paths: string[]) => Promise<void>} syncImagePaths
+ * @property {() => Promise<string>} getLicenseText
+ * @property {() => Promise<void>} openThumbnailCache
+ * @property {() => Promise<void>} clearThumbnailCache
+ */
+/**
  * @description
  * フロントエンド（Webページ）とTauriバックエンド（Rust）間の通信を確立します。
- * `window.veloceAPI` というグローバルオブジェクトにTauriの `invoke` と `listen` をラップして公開します。
+ * @type {VeloceAPI}
  */
 window.veloceAPI = {
   /**

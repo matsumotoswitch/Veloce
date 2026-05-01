@@ -43,6 +43,21 @@ class UIManager {
   constructor(state) {
     this.state = state;
     // 頻繁に操作するDOM要素はここで取得しておく
+    /**
+     * @type {{
+     *   fileListBody: HTMLElement,
+     *   thumbnailGrid: HTMLElement,
+     *   dirTree: HTMLElement,
+     *   thumbnailSizeSlider: HTMLInputElement,
+     *   resizerLeft: HTMLElement,
+     *   resizerRight: HTMLElement,
+     *   resizerCenter: HTMLElement,
+     *   searchBar: HTMLInputElement,
+     *   searchClearBtn: HTMLElement,
+     *   openCacheBtn: HTMLElement,
+     *   clearCacheBtn: HTMLElement
+     * }}
+     */
     this.elements = {
       fileListBody: document.getElementById('file-list-body'),
       thumbnailGrid: document.getElementById('center-bottom'),

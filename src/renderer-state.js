@@ -1,15 +1,39 @@
 /**
+ * @typedef {Object} ImageFile
+ * @property {string} name - ファイル名
+ * @property {string} ext - 拡張子
+ * @property {string} path - フルパス
+ * @property {number} size - ファイルサイズ(bytes)
+ * @property {number} mtime - 最終更新日時
+ * @property {number} [width] - 画像の幅
+ * @property {number} [height] - 画像の高さ
+ * @property {string} [prompt] - 生成プロンプト
+ * @property {string} [negativePrompt] - ネガティブプロンプト
+ * @property {string} [source] - 生成元モデル
+ * @property {Array<string|Object>} [charPrompts] - キャラクタープロンプト
+ * @property {boolean} [metaLoaded] - メタデータが読み込み済みかどうか
+ * @property {boolean} [hasThumbnailCache] - サムネイルキャッシュが存在するかどうか
+ */
+
+/**
  * メイン画面のアプリケーション全体の状態とデータを管理するクラス
  */
 class AppState {
   constructor() {
-    this.files = [];              // 読み込まれたすべての画像ファイルリスト
-    this.filteredFiles = [];      // 検索・ソート適用後のファイルリスト
-    this.sortConfig = { key: 'name', asc: true }; // 現在のソート設定
-    this.searchQuery = '';        // 検索クエリ文字列
-    this.selectedIndex = -1;      // 現在アクティブな選択アイテムのインデックス
-    this.selection = new Set();   // 複数選択されているアイテムのインデックス集合
-    this.currentDirectory = '';   // 現在表示中のディレクトリパス
+    /** @type {ImageFile[]} 読み込まれたすべての画像ファイルリスト */
+    this.files = [];
+    /** @type {ImageFile[]} 検索・ソート適用後のファイルリスト */
+    this.filteredFiles = [];
+    /** @type {{key: string, asc: boolean}} 現在のソート設定 */
+    this.sortConfig = { key: 'name', asc: true };
+    /** @type {string} 検索クエリ文字列 */
+    this.searchQuery = '';
+    /** @type {number} 現在アクティブな選択アイテムのインデックス */
+    this.selectedIndex = -1;
+    /** @type {Set<number>} 複数選択されているアイテムのインデックス集合 */
+    this.selection = new Set();
+    /** @type {string} 現在表示中のディレクトリパス */
+    this.currentDirectory = '';
 
     // レイアウト状態の管理
     this.layout = {
