@@ -1146,7 +1146,7 @@ function toggleHelpOverlay(forceShow) {
             <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + A</td><td style="padding: 6px 15px;">すべての画像を選択</td></tr>
             <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + F</td><td style="padding: 6px 15px;">検索バーに入力</td></tr>
             <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているビューワーを横一列に並べる</td></tr>
-            <tr><td style="padding: 6px 15px; font-weight: bold;">D</td><td style="padding: 6px 15px;">選択した2枚の画像のプロンプトを比較 (Diff)</td></tr>
+            <tr><td style="padding: 6px 15px; font-weight: bold;">D</td><td style="padding: 6px 15px;">選択した2枚の画像のプロンプトを比較</td></tr>
             <tr><td style="padding: 6px 15px; font-weight: bold;">F2</td><td style="padding: 6px 15px;">選択中のファイル / フォルダの名前を変更</td></tr>
             <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">選択中のファイル / フォルダをゴミ箱に移動</td></tr>
             <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をコピー</td></tr>
@@ -1161,23 +1161,22 @@ function toggleHelpOverlay(forceShow) {
       <div>
         <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">ビューワー画面</h3>
         <table style="border-collapse: collapse; width: 100%;">
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプの表示/非表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">← / →</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">右クリック</td><td style="padding: 6px 15px;">次の画像を表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">↑ / ↓</td><td style="padding: 6px 15px;">右 / 左に90度回転</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">← / →</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">左 / 右クリック</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">0</td><td style="padding: 6px 15px;">100%表示 (大きい画像はフィット)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">1</td><td style="padding: 6px 15px;">完全な100%表示 (画面外にはみ出す)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Enter</td><td style="padding: 6px 15px;">ズーム解除 / 強制フィット切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">フルスクリーン切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">W</td><td style="padding: 6px 15px;">ウィンドウを画像にフィット</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">B</td><td style="padding: 6px 15px;">ウィンドウ枠の表示/非表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">U</td><td style="padding: 6px 15px;">画像のシャープ / 滑らか表示切替</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">U</td><td style="padding: 6px 15px;">アンシャープマスク切替</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">左ドラッグ</td><td style="padding: 6px 15px;">ウィンドウの移動 (ズーム時は画像移動)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + 左ドラッグ</td><td style="padding: 6px 15px;">画像内を自由に移動 (パン操作)</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">画像をゴミ箱に移動して次へ</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">画像をクリップボードにコピー</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ビューワーを閉じる (ヘルプ表示時は閉じる)</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ビューワーを閉じる</td></tr>
         </table>
       </div>
     </div>
