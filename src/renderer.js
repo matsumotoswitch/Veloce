@@ -1133,7 +1133,7 @@ function toggleHelpOverlay(forceShow) {
   content.style.cursor = 'default';
   
   content.innerHTML = `
-    <h2 style="margin-top: 0; text-align: center; color: #ebc06d;">ヘルプ・ショートカット一覧</h2>
+    <h2 style="margin-top: 0; color: #ebc06d;">ヘルプ・ショートカット一覧</h2>
     <div style="display: flex; gap: 40px; font-size: inherit;">
       <div style="display: flex; flex-direction: column; justify-content: space-between;">
         <div>
@@ -1792,9 +1792,6 @@ function createResizerToggle(resizer, type) {
     z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
   `;
   
-  btn.addEventListener('mouseenter', () => btn.style.backgroundColor = '#444');
-  btn.addEventListener('mouseleave', () => btn.style.backgroundColor = '#333');
-
   const isVertical = type === 'center';
   btn.style.width = isVertical ? '30px' : '14px';
   btn.style.height = isVertical ? '14px' : '30px';

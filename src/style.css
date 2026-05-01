@@ -43,8 +43,12 @@ body {
   background-color: var(--border-color);
   cursor: col-resize;
   z-index: 10;
+  transition: background-color 0.2s;
 }
-.resizer:hover, .resizer.resizing { background-color: var(--accent-color); }
+/* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
+.resizer:hover:not(:has(.resizer-toggle:hover)), .resizer.resizing { 
+  background-color: var(--accent-color); 
+}
 
 .resizer-h {
   background-color: var(--border-color);
@@ -52,8 +56,24 @@ body {
   height: 5px;
   flex: none;
   z-index: 10;
+  transition: background-color 0.2s;
 }
-.resizer-h:hover, .resizer-h.resizing { background-color: var(--accent-color); }
+/* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
+.resizer-h:hover:not(:has(.resizer-toggle:hover)), .resizer-h.resizing { 
+  background-color: var(--accent-color); 
+}
+
+/* トグルスイッチの追加スタイル（JSで生成される要素用） */
+.resizer-toggle {
+  transition: background-color 0.2s, border-color 0.2s;
+}
+.resizer-toggle:hover {
+  background-color: var(--accent-color) !important;
+  border-color: var(--accent-color) !important;
+}
+.resizer-toggle:hover svg {
+  stroke: #fff;
+}
 
 /* Panes */
 #left-pane {
