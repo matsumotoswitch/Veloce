@@ -389,17 +389,11 @@ tr.selected { background: var(--accent-color); color: #fff; }
 .diff-column {
   flex: 1;
   min-width: 0; /* 折り返し防止 */
-  background: rgba(255, 255, 255, 0.03);
-  padding: 10px;
-  border-radius: 6px;
-  border: 1px solid #333;
-}
-.diff-column h4 {
-  margin: 0 0 10px 0;
-  font-size: 0.85em;
-  color: #ccc;
-  border-bottom: 1px solid #333;
-  padding-bottom: 5px;
+  /* インスペクターに合わせるため、背景色・ボーダー・パディングを削除 */
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  border: none;
 }
 
 /* メイン画面のプロンプトエリアに合わせた基本スタイル（文字サイズを 0.9em に戻す） */
