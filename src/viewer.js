@@ -3,7 +3,6 @@
 // ============================================================================
 
 // 開発者ツール（F12, Ctrl+Shift+I）の強制ブロック
-/*
 window.addEventListener('keydown', (e) => {
   if (
     (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) ||
@@ -13,7 +12,6 @@ window.addEventListener('keydown', (e) => {
     e.stopPropagation(); // 他の処理への伝播を完全に遮断
   }
 }, true);
-*/
 
 // ============================================================================
 // 1. Setup & Window Initialization
