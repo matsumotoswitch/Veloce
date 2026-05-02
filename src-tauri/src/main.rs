@@ -953,6 +953,8 @@ fn arrange_viewers(app: tauri::AppHandle) {
             }
         }
     }
+
+    let _ = app.emit_all("viewers-arranged", ());
 }
 
 #[tauri::command]

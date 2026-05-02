@@ -69,8 +69,8 @@ initUnsharpFilter();
 document.documentElement.style.overflow = 'hidden';
 document.body.style.margin = '0';
 document.body.style.padding = '0';
-document.body.style.width = '100vw';
-document.body.style.height = '100vh';
+document.body.style.width = '100%';
+document.body.style.height = '100%';
 document.body.style.backgroundColor = '#1e1e1e';
 document.body.style.display = 'flex';
 document.body.style.justifyContent = 'center';
@@ -114,6 +114,13 @@ window.addEventListener('DOMContentLoaded', () => {
     }).catch(() => {});
     
     loadImage();
+
+    const listen = (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen) || (window.__TAURI__ && window.__TAURI__.tauri && window.__TAURI__.tauri.listen) || (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.listen);
+    if (listen) {
+      listen('viewers-arranged', () => {
+        resetZoomAndFit();
+      });
+    }
 });
 
 // ============================================================================
@@ -192,6 +199,8 @@ function applyFitState() {
     // デフォルト（大きい画像のみ縮小、小さい画像はそのままのサイズ）
     viewerUI.elements.viewerImg.style.maxWidth = '100%';
     viewerUI.elements.viewerImg.style.maxHeight = '100%';
+    viewerUI.elements.viewerImg.style.minWidth = '0';
+    viewerUI.elements.viewerImg.style.minHeight = '0';
     viewerUI.elements.viewerImg.style.width = 'auto';
     viewerUI.elements.viewerImg.style.height = 'auto';
     viewerUI.elements.viewerImg.style.objectFit = 'contain';
