@@ -53,12 +53,8 @@ contextMenu.style.fontSize = '13px';
 // 2. Tauri API & Backend Communication
 // ============================================================================
 
-async function refreshFileList() {
-  if (!appState.currentDirectory || !window.veloceAPI.loadDirectory) return;
-  const result = await window.veloceAPI.loadDirectory(appState.currentDirectory);
-  if (!result) return;
-
-  appState.files = result.imageFiles || [];  
+function applyNewFileList(files) {
+  appState.files = files || [];
   resetThumbnailPreloader();
   appState.applyFiltersAndSort();
   uiManager.renderAll();
@@ -70,6 +66,14 @@ async function refreshFileList() {
   } else {
     clearMetadataUI();
   }
+}
+
+async function refreshFileList() {
+  if (!appState.currentDirectory || !window.veloceAPI.loadDirectory) return;
+  const result = await window.veloceAPI.loadDirectory(appState.currentDirectory);
+  if (!result) return;
+
+  applyNewFileList(result.imageFiles);
 }
 
 async function refreshTree() {
@@ -507,8 +511,6 @@ function initializeThumbnailObserver() {
                 }
             } else {
                 img.dataset.isVisible = 'false';
-                // 画面外に出たら、srcをクリアしてメモリを解放する
-                img.removeAttribute('src');
             }
         }
     }, options);
@@ -1100,15 +1102,6 @@ async function renderMetadata(file) {
       ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(t => t) 
       : [];
 
-    // ヘルパー: コピーアイコン生成
-    const createCopyIcon = (text) => {
-      if (!text || text === '-') return '';
-      const escaped = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `<span class="diff-copy-btn" title="コピー" data-copy-text="${escaped}">
-        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-      </span>`;
-    };
-
     // ヘルパー: セクション描画
     const renderSection = (title, text, isParam = false) => {
       if (!text || text === '-') return '';
@@ -1128,7 +1121,7 @@ async function renderMetadata(file) {
       return `
         <div class="inspector-section" style="margin-bottom: 15px;">
           <h3 style="font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
-            <span>${title}</span>${createCopyIcon(text)}
+            <span>${title}</span>${UIManager.createCopyButtonHTML(text)}
           </h3>
           <div class="${boxClass}">
             ${tagsHtml}
@@ -1417,12 +1410,7 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
     if (result) {
       appState.currentDirectory = result.path;
       localStorage.setItem('currentDirectory', appState.currentDirectory);
-      appState.files = result.imageFiles || [];
-      resetThumbnailPreloader();
-      appState.applyFiltersAndSort();
-      uiManager.renderAll();
-      loadAllMetadataInBackground();
-      clearMetadataUI();
+      applyNewFileList(result.imageFiles);
     }
   }
 
@@ -2026,12 +2014,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (result) {
       appState.currentDirectory = result.path;
       localStorage.setItem('currentDirectory', appState.currentDirectory); 
-      appState.files = result.imageFiles || [];
-      resetThumbnailPreloader();
-      appState.applyFiltersAndSort();
-      uiManager.renderAll();
-      loadAllMetadataInBackground(); 
-      clearMetadataUI();
+      applyNewFileList(result.imageFiles);
 
       await expandTreeToPath(appState.currentDirectory);
     }

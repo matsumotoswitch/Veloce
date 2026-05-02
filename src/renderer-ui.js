@@ -34,8 +34,22 @@ class UIManager {
     CHEVRON_DOWN: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="#888" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
     SORT_ASC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
     SORT_DESC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
-    ERASER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>`
+    ERASER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>`,
+    COPY: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`
   };
+
+  /**
+   * コピーボタンのHTMLを生成します。
+   * @param {string} text コピー対象のテキスト
+   * @returns {string} ボタンのHTML
+   */
+  static createCopyButtonHTML(text) {
+    if (!text || text === '-') return '';
+    const escaped = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<span class="diff-copy-btn" title="コピー" data-copy-text="${escaped}">
+        ${UIManager.ICONS.COPY}
+      </span>`;
+  }
 
   /**
    * @param {AppState} state - アプリケーション状態のインスタンス
@@ -375,16 +389,6 @@ class UIManager {
 
     const parse = (text) => text ? text.split(',').map(t => t.trim()).filter(t => t) : [];
     
-    const createCopyIcon = (text) => {
-      if (!text) return '';
-      const escaped = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `<span class="diff-copy-btn" title="クリップボードにコピー" data-copy-text="${escaped}">
-        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-        </svg>
-      </span>`;
-    };
 
     const extractData = (file, meta) => {
       const p = meta.params || {};
@@ -455,7 +459,7 @@ class UIManager {
           <div class="diff-column">
             <div class="diff-section">
               <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>${title}</span>${createCopyIcon(v1)}
+                <span>${title}</span>${UIManager.createCopyButtonHTML(v1)}
               </h3>
               <div class="${boxClass}">${renderTags(tags1, set2, 'left')}</div>
             </div>
@@ -463,7 +467,7 @@ class UIManager {
           <div class="diff-column">
             <div class="diff-section">
               <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>${title}</span>${createCopyIcon(v2)}
+                <span>${title}</span>${UIManager.createCopyButtonHTML(v2)}
               </h3>
               <div class="${boxClass}">${renderTags(tags2, set1, 'right')}</div>
             </div>
