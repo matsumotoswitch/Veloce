@@ -920,7 +920,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
 }
 
 #[tauri::command]
-fn arrange_viewers(app: tauri::AppHandle) {
+fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
     let windows = app.windows();
     let mut viewers: Vec<_> = windows
         .into_values()
@@ -930,7 +930,6 @@ fn arrange_viewers(app: tauri::AppHandle) {
     let count = viewers.len();
     if count == 0 { return; }
 
-    // ラベル名のタイムスタンプ（作成順）でソートして、左から古い順に並べる
     viewers.sort_by_key(|w| w.label().to_string());
 
     if let Some(first_viewer) = viewers.first() {
@@ -946,15 +945,37 @@ fn arrange_viewers(app: tauri::AppHandle) {
                 let x = position.x + (i as f64 * target_width);
                 let y = position.y;
 
-                let _ = window.unmaximize(); // 最大化されていると移動できないため解除
-                let _ = window.set_always_on_top(true); // タスクバーより前面に表示するために最前面に設定
+                let _ = window.unmaximize();
                 let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: target_width, height: target_height }));
                 let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+                
+                let _ = window.set_always_on_top(false);
+                let _ = window.set_always_on_top(true);
             }
         }
     }
 
     let _ = app.emit_all("viewers-arranged", ());
+
+    // Windows 8.1 強制前面化ハック
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(hwnd_ptr) = caller_window.hwnd() {
+            let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                unsafe {
+                    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE};
+                    let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    let _ = SetForegroundWindow(hwnd);
+                }
+            });
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = caller_window.set_focus();
+    }
 }
 
 #[tauri::command]
