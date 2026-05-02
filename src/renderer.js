@@ -2049,8 +2049,40 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (window.veloceAPI.onDirectoryChanged) {
-    window.veloceAPI.onDirectoryChanged(async () => {
+    const handleDirChange = debounce(async () => {
       await refreshTree();
+      
+      if (appState.currentDirectory) {
+        // 現在のディレクトリが存在するか確認
+        const result = await window.veloceAPI.loadDirectory(appState.currentDirectory);
+        if (!result || !result.imageFiles) {
+          // 削除・リネームされて存在しない場合は親フォルダへ自動遷移
+          const separator = appState.currentDirectory.includes('\\') ? '\\' : '/';
+          const parts = appState.currentDirectory.split(separator).filter(Boolean);
+          parts.pop(); // 一つ上の階層へ
+          let parentDir = parts.join(separator);
+          if (parentDir.length === 2 && parentDir.endsWith(':')) parentDir += separator; // ドライブ直下へのフォールバック
+          
+          if (parentDir) {
+            const parentResult = await window.veloceAPI.loadDirectory(parentDir);
+            if (parentResult && parentResult.imageFiles) {
+              appState.currentDirectory = parentResult.path;
+              localStorage.setItem('currentDirectory', appState.currentDirectory);
+              applyNewFileList(parentResult.imageFiles);
+              // 親フォルダまでツリーを展開して選択状態にする
+              await refreshTree();
+              await expandTreeToPath(appState.currentDirectory);
+            }
+          }
+        } else {
+          // 現在のディレクトリが存在する場合は、その場所までツリーを再度展開して表示を更新する
+          await expandTreeToPath(appState.currentDirectory);
+        }
+      }
+    }, 500);
+
+    window.veloceAPI.onDirectoryChanged(() => {
+      handleDirChange();
     });
   }
 

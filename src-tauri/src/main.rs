@@ -264,11 +264,17 @@ async fn load_directory(
                         },
                         _ => { // それ以外のすべてのイベント (Create, Modify, Remove, Renameなど)
                             let mut dir_changed = false;
-                            for path in &event.paths {
-                                // is_dir() は削除されたディレクトリにはfalseを返すため、拡張子がない場合もディレクトリ変更と見なす
-                                if path.is_dir() || path.extension().is_none() {
-                                    dir_changed = true;
-                                    break;
+                            
+                            // Renameイベントの場合は、フォルダ名変更の可能性が高いため無条件でツリー更新を通知
+                            if matches!(event.kind, EventKind::Modify(notify::event::ModifyKind::Name(_))) {
+                                dir_changed = true;
+                            } else {
+                                for path in &event.paths {
+                                    // 拡張子がない、または明示的にディレクトリと判定できる場合はツリー変更とみなす
+                                    if path.is_dir() || path.extension().is_none() {
+                                        dir_changed = true;
+                                        break;
+                                    }
                                 }
                             }
 
