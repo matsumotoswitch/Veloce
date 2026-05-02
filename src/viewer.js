@@ -623,23 +623,6 @@ window.addEventListener('wheel', (e) => {
   }
 }, { passive: false });
 
-/**
- * アイコンクリック時の共通発光エフェクトを適用する
- * @param {HTMLElement} el 対象の要素
- */
-function applyIconGlowEffect(el) {
-  if (!el) return;
-  el.style.transition = 'none';
-  el.style.color = '#fff';
-  el.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
-  setTimeout(() => {
-    el.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out';
-    el.style.color = '';
-    el.style.filter = 'none';
-    setTimeout(() => { el.style.transition = ''; }, 400);
-  }, 100);
-}
-
 window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
   if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
@@ -780,7 +763,9 @@ window.addEventListener('keydown', async (e) => {
 	if (viewerState.currentImagePath) {
 	  window.veloceAPI.copyImageToClipboard(viewerState.currentImagePath);
       // 共通の光るエフェクトを適用
-      applyIconGlowEffect(viewerUI.elements.viewerImg);
+      if (viewerUI.elements.viewerImg) {
+        viewerUI.applyGlowEffect(viewerUI.elements.viewerImg);
+      }
 	}
   }
 });

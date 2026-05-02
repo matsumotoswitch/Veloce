@@ -4,6 +4,10 @@
   --border-color: #333;
   --text-color: #ccc;
   --accent-color: #007acc;
+  --modal-bg: #2d2d2d;
+  --modal-border: #444;
+  --danger-red: #e81123;
+  --glow-gold: #ebc06d;
 }
 
 * {
@@ -21,6 +25,62 @@ body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   overflow: hidden;
 }
+
+/* --- Dialog Styles --- */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 10002;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.dialog-box {
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: 4px;
+  padding: 20px;
+  min-width: 300px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  color: #ccc;
+  font-family: inherit;
+}
+
+.dialog-message { margin-bottom: 20px; }
+.dialog-message.has-input { margin-bottom: 10px; }
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dialog-btn {
+  padding: 6px 16px;
+  cursor: pointer;
+  border: none;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: inherit;
+  color: #fff;
+  transition: opacity 0.2s, background-color 0.2s;
+}
+.dialog-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.dialog-btn.cancel { background-color: #444; }
+.dialog-btn.primary { background-color: var(--accent-color); }
+.dialog-btn.danger { background-color: var(--danger-red); }
+
+.dialog-input { width: 100%; box-sizing: border-box; padding: 6px; background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 4px; margin-bottom: 4px; font-family: inherit; font-size: inherit; outline: none; }
+.dialog-input.error { border-color: var(--danger-red); }
+
+.dialog-warning { color: var(--danger-red); font-size: 12px; min-height: 14px; margin-bottom: 10px; display: none; }
+.dialog-warning.show { display: block; }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
@@ -461,11 +521,11 @@ tr.selected { background: var(--accent-color); color: #fff; }
 }
 
 /* 発光状態のクラス */
-.diff-copy-btn.glow {
+.glow {
   color: #fff !important;
-  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 8px #ebc06d) drop-shadow(0 0 15px #ebc06d) !important;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 8px var(--glow-gold)) drop-shadow(0 0 15px var(--glow-gold)) !important;
 }
-.diff-copy-btn.glow svg {
+.glow svg {
   stroke: #fff !important;
 }
 

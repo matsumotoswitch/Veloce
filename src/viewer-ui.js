@@ -51,6 +51,21 @@ class ViewerUI {
   setCursor(type) {
     if (this.elements.viewerImg) this.elements.viewerImg.style.cursor = type;
   }
+
+  /**
+   * アイコンや要素を発光させます。
+   * @param {HTMLElement} el 対象の要素
+   */
+  applyGlowEffect(el) {
+    if (!el) return;
+    el.style.transition = 'none';
+    el.classList.add('glow');
+    setTimeout(() => {
+      el.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out, stroke 0.6s ease-out';
+      el.classList.remove('glow');
+      setTimeout(() => { el.style.transition = ''; }, 600);
+    }, 200);
+  }
 }
 
 export { ViewerUI };

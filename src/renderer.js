@@ -229,7 +229,7 @@ async function renameSelectedFolder() {
   const oldPath = selectedFolderEl.dataset.path;
   const oldName = selectedFolderEl.querySelector('.tree-label').textContent;
 
-  const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', oldName);
+  const newName = await uiManager.showPrompt('新しいフォルダ名を入力してください:', oldName);
   if (newName !== null && newName !== oldName) {
     if (newName.trim() === '') {
       showNotification('フォルダ名を入力してください。', 'warning');
@@ -267,7 +267,7 @@ async function deleteSelectedFolder() {
   const oldPath = selectedFolderEl.dataset.path;
   const folderName = selectedFolderEl.querySelector('.tree-label').textContent;
 
-  const isConfirmed = await showCustomConfirm(`本当にフォルダ「${folderName}」をゴミ箱に移動しますか？`);
+  const isConfirmed = await uiManager.showConfirm(`本当にフォルダ「${folderName}」をゴミ箱に移動しますか？`);
   if (isConfirmed) {
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
@@ -293,7 +293,7 @@ async function renameSelectedFile() {
   if (appState.selectedIndex > -1 && appState.filteredFiles[appState.selectedIndex]) {
     const file = appState.filteredFiles[appState.selectedIndex];
     const oldPath = file.path;
-    const newName = await showCustomPrompt('新しいファイル名を入力してください:', file.name, true);
+    const newName = await uiManager.showPrompt('新しいファイル名を入力してください:', file.name, true);
     if (newName !== null && newName !== file.name) {
       if (newName.trim() === '') {
       uiManager.showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
@@ -370,19 +370,6 @@ function showNotification(message, type = 'info') {
   uiManager.showToast(message, 3000, null, type);
 }
 
-function applyIconGlowEffect(el) {
-  if (!el) return;
-  el.style.transition = 'none';
-  el.style.color = '#fff';
-  el.style.filter = 'drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d)';
-  setTimeout(() => {
-    el.style.transition = 'color 0.4s ease-out, filter 0.4s ease-out';
-    el.style.color = '';
-    el.style.filter = 'none';
-    setTimeout(() => { el.style.transition = ''; }, 400);
-  }, 100);
-}
-
 const createMenuOption = (text, onClick) => {
   const option = document.createElement('div');
   option.textContent = text;
@@ -398,196 +385,6 @@ const createMenuOption = (text, onClick) => {
   });
   return option;
 };
-
-function createCustomDialogBase(message, contentElement) {
-  const overlay = document.createElement('div');
-  overlay.style.position = 'fixed';
-  overlay.style.top = '0';
-  overlay.style.left = '0';
-  overlay.style.width = '100vw';
-  overlay.style.height = '100vh';
-  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  overlay.style.zIndex = '10002'; // コンテキストメニューより上に表示
-  overlay.style.display = 'flex';
-  overlay.style.justifyContent = 'center';
-  overlay.style.alignItems = 'center';
-
-  const dialog = document.createElement('div');
-  dialog.style.backgroundColor = '#2d2d2d';
-  dialog.style.border = '1px solid #444';
-  dialog.style.borderRadius = '4px';
-  dialog.style.padding = '20px';
-  dialog.style.minWidth = '300px';
-  dialog.style.boxShadow = '0 4px 15px rgba(0,0,0,0.5)';
-  dialog.style.color = '#ccc';
-  dialog.style.fontFamily = 'inherit';
-
-  const messageEl = document.createElement('div');
-  messageEl.textContent = message;
-  messageEl.style.marginBottom = contentElement ? '10px' : '20px';
-
-  const buttonsDiv = document.createElement('div');
-  buttonsDiv.style.display = 'flex';
-  buttonsDiv.style.justifyContent = 'flex-end';
-  buttonsDiv.style.gap = '10px';
-
-  dialog.appendChild(messageEl);
-  if (contentElement) dialog.appendChild(contentElement);
-  dialog.appendChild(buttonsDiv);
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
-
-  const cleanup = () => {
-    if (document.body.contains(overlay)) {
-      document.body.removeChild(overlay);
-    }
-  };
-
-  return { buttonsDiv, cleanup };
-}
-
-function createDialogButton(text, bgColor) {
-  const btn = document.createElement('button');
-  btn.textContent = text;
-  btn.style.cssText = `padding: 6px 16px; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: inherit; background-color: ${bgColor}; color: #fff;`;
-  return btn;
-}
-
-function showCustomPrompt(message, defaultValue = '', selectBaseNameOnly = false) {
-  return new Promise((resolve) => {
-    const inputEl = document.createElement('input');
-    inputEl.type = 'text';
-    inputEl.value = defaultValue;
-    inputEl.spellcheck = false; // スペルチェックの赤線を無効化
-    inputEl.style.width = '100%';
-    inputEl.style.boxSizing = 'border-box';
-    inputEl.style.padding = '6px';
-    inputEl.style.backgroundColor = '#1e1e1e';
-    inputEl.style.color = '#d4d4d4';
-    inputEl.style.border = '1px solid #333';
-    inputEl.style.borderRadius = '4px';
-    inputEl.style.marginBottom = '4px';
-    inputEl.style.fontFamily = 'inherit';
-    inputEl.style.fontSize = 'inherit';
-    inputEl.style.outline = 'none';
-
-    const warningEl = document.createElement('div');
-    warningEl.style.color = '#e81123';
-    warningEl.style.fontSize = '12px';
-    warningEl.style.minHeight = '14px';
-    warningEl.style.marginBottom = '10px';
-    warningEl.style.display = 'none';
-
-    const inputContainer = document.createElement('div');
-    inputContainer.style.display = 'flex';
-    inputContainer.style.flexDirection = 'column';
-    inputContainer.appendChild(inputEl);
-    inputContainer.appendChild(warningEl);
-
-    const { buttonsDiv, cleanup } = createCustomDialogBase(message, inputContainer);
-
-    const cancelBtn = createDialogButton('キャンセル', '#444');
-    const okBtn = createDialogButton('OK', '#3a7afe');
-
-    buttonsDiv.appendChild(cancelBtn);
-    buttonsDiv.appendChild(okBtn);
-
-    const validateInput = () => {
-      const val = inputEl.value;
-      if (/[\\/:*?"<>|]/.test(val)) {
-        warningEl.textContent = '以下の文字は使用できません: \\ / : * ? " < > |';
-        warningEl.style.display = 'block';
-        inputEl.style.borderColor = '#e81123';
-        okBtn.disabled = true;
-        okBtn.style.opacity = '0.5';
-        okBtn.style.cursor = 'not-allowed';
-      } else if (val.trim() === '') {
-        warningEl.textContent = '名前を入力してください。';
-        warningEl.style.display = 'block';
-        inputEl.style.borderColor = '#333';
-        okBtn.disabled = true;
-        okBtn.style.opacity = '0.5';
-        okBtn.style.cursor = 'not-allowed';
-      } else {
-        warningEl.style.display = 'none';
-        inputEl.style.borderColor = '#333';
-        okBtn.disabled = false;
-        okBtn.style.opacity = '1';
-        okBtn.style.cursor = 'pointer';
-      }
-    };
-
-    inputEl.addEventListener('input', validateInput);
-    validateInput();
-
-    inputEl.focus();
-    if (selectBaseNameOnly && defaultValue.lastIndexOf('.') > 0) {
-      inputEl.setSelectionRange(0, defaultValue.lastIndexOf('.'));
-    } else {
-      inputEl.select();
-    }
-
-    okBtn.addEventListener('click', () => {
-      if (!okBtn.disabled) {
-        cleanup();
-        resolve(inputEl.value);
-      }
-    });
-
-    cancelBtn.addEventListener('click', () => {
-      cleanup();
-      resolve(null);
-    });
-
-    inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        if (!okBtn.disabled) {
-          cleanup();
-          resolve(inputEl.value);
-        }
-      } else if (e.key === 'Escape') {
-        cleanup();
-        resolve(null);
-      }
-    });
-  });
-}
-
-function showCustomConfirm(message) {
-  return new Promise((resolve) => {
-    const { buttonsDiv, cleanup } = createCustomDialogBase(message);
-
-    const cancelBtn = createDialogButton('キャンセル', '#444');
-    const okBtn = createDialogButton('削除', '#e81123'); // 削除アクションなので目立つ赤色
-
-    buttonsDiv.appendChild(cancelBtn);
-    buttonsDiv.appendChild(okBtn);
-
-    const keydownHandler = (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        document.removeEventListener('keydown', keydownHandler);
-        cleanup();
-        resolve(false);
-      }
-    };
-
-    document.addEventListener('keydown', keydownHandler);
-
-    okBtn.addEventListener('click', () => { 
-      document.removeEventListener('keydown', keydownHandler);
-      cleanup(); 
-      resolve(true); 
-    });
-    cancelBtn.addEventListener('click', () => { 
-      document.removeEventListener('keydown', keydownHandler);
-      cleanup(); 
-      resolve(false); 
-    });
-
-    cancelBtn.focus(); // 誤操作(Enter連打)を防ぐためデフォルトでキャンセルにフォーカス
-  });
-}
 
 function resetThumbnailPreloader() {
   appState.thumbnailRequestQueue = [];
@@ -1206,7 +1003,7 @@ function toggleHelpOverlay(forceShow) {
 
 const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
   if (!contextMenu.targetFolder) return;
-  const folderName = await showCustomPrompt('新しいフォルダ名を入力してください:');
+  const folderName = await uiManager.showPrompt('新しいフォルダ名を入力してください:');
   if (folderName !== null) {
     if (folderName.trim() === '') {
       showNotification('フォルダ名を入力してください。', 'warning');
@@ -1385,12 +1182,7 @@ async function renderMetadata(file) {
           await navigator.clipboard.writeText(text);
           if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました");
           else showNotification("クリップボードにコピーしました"); // 古い関数へのフォールバック
-          target.classList.add('glow');
-          setTimeout(() => {
-            target.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out';
-            target.classList.remove('glow');
-            setTimeout(() => { target.style.transition = ''; }, 600);
-          }, 200);
+          uiManager.applyGlowEffect(target);
         }
       });
     });
@@ -1426,7 +1218,7 @@ async function renderMetadata(file) {
 const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
-  const newName = await showCustomPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
+  const newName = await uiManager.showPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
   if (newName !== null && newName !== contextMenu.targetFolder.name) {
     if (newName.trim() === '') {
       showNotification('フォルダ名を入力してください。', 'warning');
@@ -1454,7 +1246,7 @@ const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
 const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
-  const isConfirmed = await showCustomConfirm(`本当にフォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しますか？`);
+  const isConfirmed = await uiManager.showConfirm(`本当にフォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しますか？`);
   if (isConfirmed) {
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
@@ -2034,7 +1826,7 @@ window.addEventListener('keydown', async (e) => {
       showNotification('画像をクリップボードにコピーしました');
 
       const applyFlash = (el) => {
-        applyIconGlowEffect(el);
+        uiManager.applyGlowEffect(el);
       };
 
       applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${appState.selectedIndex}"]`));
@@ -2183,22 +1975,22 @@ window.addEventListener('DOMContentLoaded', async () => {
         uiManager.elements.searchBar.value = '';
         appState.searchQuery = '';
         scheduleRefresh();
-        applyIconGlowEffect(uiManager.elements.searchClearBtn);
+        uiManager.applyGlowEffect(uiManager.elements.searchClearBtn);
       }
     });
   }
 
   if (uiManager.elements.openCacheBtn) {
     uiManager.elements.openCacheBtn.addEventListener('click', () => {
-      applyIconGlowEffect(uiManager.elements.openCacheBtn);
+      uiManager.applyGlowEffect(uiManager.elements.openCacheBtn);
       window.veloceAPI.openThumbnailCache();
     });
   }
 
   if (uiManager.elements.clearCacheBtn) {
     uiManager.elements.clearCacheBtn.addEventListener('click', async () => {
-      applyIconGlowEffect(uiManager.elements.clearCacheBtn);
-      const isConfirmed = await showCustomConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
+      uiManager.applyGlowEffect(uiManager.elements.clearCacheBtn);
+      const isConfirmed = await uiManager.showConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
       if (isConfirmed) {
         uiManager.showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
         try {

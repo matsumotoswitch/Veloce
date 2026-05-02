@@ -129,6 +129,204 @@ class UIManager {
   }
 
   /**
+   * カスタムプロンプトダイアログを表示します。
+   * @param {string} message 
+   * @param {string} defaultValue 
+   * @param {boolean} selectBaseNameOnly 
+   * @returns {Promise<string|null>}
+   */
+  showPrompt(message, defaultValue = '', selectBaseNameOnly = false) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'dialog-overlay';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog-box';
+
+      const messageEl = document.createElement('div');
+      messageEl.className = 'dialog-message has-input';
+      messageEl.textContent = message;
+
+      const inputEl = document.createElement('input');
+      inputEl.type = 'text';
+      inputEl.className = 'dialog-input';
+      inputEl.value = defaultValue;
+      inputEl.spellcheck = false;
+
+      const warningEl = document.createElement('div');
+      warningEl.className = 'dialog-warning';
+
+      const inputContainer = document.createElement('div');
+      inputContainer.style.display = 'flex';
+      inputContainer.style.flexDirection = 'column';
+      inputContainer.appendChild(inputEl);
+      inputContainer.appendChild(warningEl);
+
+      const buttonsDiv = document.createElement('div');
+      buttonsDiv.className = 'dialog-buttons';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'dialog-btn cancel';
+      cancelBtn.textContent = 'キャンセル';
+
+      const okBtn = document.createElement('button');
+      okBtn.className = 'dialog-btn primary';
+      okBtn.textContent = 'OK';
+
+      buttonsDiv.appendChild(cancelBtn);
+      buttonsDiv.appendChild(okBtn);
+
+      dialog.appendChild(messageEl);
+      dialog.appendChild(inputContainer);
+      dialog.appendChild(buttonsDiv);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+
+      const cleanup = () => {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+      };
+
+      const validateInput = () => {
+        const val = inputEl.value;
+        if (/[\\/:*?"<>|]/.test(val)) {
+          warningEl.textContent = '以下の文字は使用できません: \\ / : * ? " < > |';
+          warningEl.classList.add('show');
+          inputEl.classList.add('error');
+          okBtn.disabled = true;
+        } else if (val.trim() === '') {
+          warningEl.textContent = '名前を入力してください。';
+          warningEl.classList.add('show');
+          inputEl.classList.remove('error');
+          okBtn.disabled = true;
+        } else {
+          warningEl.classList.remove('show');
+          inputEl.classList.remove('error');
+          okBtn.disabled = false;
+        }
+      };
+
+      inputEl.addEventListener('input', validateInput);
+      validateInput();
+
+      inputEl.focus();
+      if (selectBaseNameOnly && defaultValue.lastIndexOf('.') > 0) {
+        inputEl.setSelectionRange(0, defaultValue.lastIndexOf('.'));
+      } else {
+        inputEl.select();
+      }
+
+      okBtn.addEventListener('click', () => {
+        if (!okBtn.disabled) {
+          cleanup();
+          resolve(inputEl.value);
+        }
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        cleanup();
+        resolve(null);
+      });
+
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          if (!okBtn.disabled) {
+            cleanup();
+            resolve(inputEl.value);
+          }
+        } else if (e.key === 'Escape') {
+          cleanup();
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  /**
+   * カスタム確認ダイアログを表示します。
+   * @param {string} message 
+   * @returns {Promise<boolean>}
+   */
+  showConfirm(message) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'dialog-overlay';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog-box';
+
+      const messageEl = document.createElement('div');
+      messageEl.className = 'dialog-message';
+      messageEl.textContent = message;
+
+      const buttonsDiv = document.createElement('div');
+      buttonsDiv.className = 'dialog-buttons';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'dialog-btn cancel';
+      cancelBtn.textContent = 'キャンセル';
+
+      const okBtn = document.createElement('button');
+      okBtn.className = 'dialog-btn danger';
+      okBtn.textContent = '削除';
+
+      buttonsDiv.appendChild(cancelBtn);
+      buttonsDiv.appendChild(okBtn);
+
+      dialog.appendChild(messageEl);
+      dialog.appendChild(buttonsDiv);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+
+      const cleanup = () => {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+      };
+
+      const keydownHandler = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          document.removeEventListener('keydown', keydownHandler);
+          cleanup();
+          resolve(false);
+        }
+      };
+
+      document.addEventListener('keydown', keydownHandler);
+
+      okBtn.addEventListener('click', () => { 
+        document.removeEventListener('keydown', keydownHandler);
+        cleanup(); 
+        resolve(true); 
+      });
+      cancelBtn.addEventListener('click', () => { 
+        document.removeEventListener('keydown', keydownHandler);
+        cleanup(); 
+        resolve(false); 
+      });
+
+      cancelBtn.focus();
+    });
+  }
+
+  /**
+   * アイコンや要素を発光させます。
+   * @param {HTMLElement} el 対象の要素
+   */
+  applyGlowEffect(el) {
+    if (!el) return;
+    el.style.transition = 'none';
+    el.classList.add('glow');
+    setTimeout(() => {
+      el.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out, stroke 0.6s ease-out';
+      el.classList.remove('glow');
+      setTimeout(() => { el.style.transition = ''; }, 600);
+    }, 200);
+  }
+
+  /**
    * リストとサムネイルグリッドの選択状態を表すUIを一括で更新します。
    */
   updateSelectionUI() {
@@ -324,12 +522,7 @@ class UIManager {
           try {
             await navigator.clipboard.writeText(text);
             this.showToast("クリップボードにコピーしました");
-            target.classList.add('glow');
-            setTimeout(() => {
-              target.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out';
-              target.classList.remove('glow');
-              setTimeout(() => { target.style.transition = ''; }, 600);
-            }, 200);
+            this.applyGlowEffect(target);
           } catch (err) {}
         }
       });
