@@ -53,11 +53,11 @@ contextMenu.style.fontSize = '13px';
 // 2. Tauri API & Backend Communication
 // ============================================================================
 
-function applyNewFileList(files) {
+function applyNewFileList(files, resetScroll = false) {
   appState.files = files || [];
   resetThumbnailPreloader();
   appState.applyFiltersAndSort();
-  uiManager.renderAll();
+  uiManager.renderAll(resetScroll);
   loadAllMetadataInBackground();
   
   uiManager.updateSelectionUI();
@@ -68,12 +68,12 @@ function applyNewFileList(files) {
   }
 }
 
-async function refreshFileList() {
+async function refreshFileList(resetScroll = false) {
   if (!appState.currentDirectory || !window.veloceAPI.loadDirectory) return;
   const result = await window.veloceAPI.loadDirectory(appState.currentDirectory);
   if (!result) return;
 
-  applyNewFileList(result.imageFiles);
+  applyNewFileList(result.imageFiles, resetScroll);
 }
 
 async function refreshTree() {
@@ -1410,7 +1410,7 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
     if (result) {
       appState.currentDirectory = result.path;
       localStorage.setItem('currentDirectory', appState.currentDirectory);
-      applyNewFileList(result.imageFiles);
+      applyNewFileList(result.imageFiles, true);
     }
   }
 
@@ -1716,7 +1716,7 @@ document.querySelectorAll('th').forEach(th => {
 	localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
 	updateSortIndicators();
 	appState.applyFiltersAndSort();
-	uiManager.renderAll();
+	uiManager.renderAll(true);
   });
 });
 
@@ -2015,7 +2015,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (result && result.imageFiles) {
       appState.currentDirectory = result.path;
       localStorage.setItem('currentDirectory', appState.currentDirectory); 
-      applyNewFileList(result.imageFiles);
+      applyNewFileList(result.imageFiles, true);
 
       await expandTreeToPath(appState.currentDirectory);
     }
@@ -2068,7 +2068,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (parentResult && parentResult.imageFiles) {
               appState.currentDirectory = parentResult.path;
               localStorage.setItem('currentDirectory', appState.currentDirectory);
-              applyNewFileList(parentResult.imageFiles);
+              applyNewFileList(parentResult.imageFiles, true);
               // 親フォルダまでツリーを展開して選択状態にする
               await refreshTree();
               await expandTreeToPath(appState.currentDirectory);

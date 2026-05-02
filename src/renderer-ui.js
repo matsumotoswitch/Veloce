@@ -565,7 +565,6 @@ class UIManager {
       }
       container.scrollTop = 0;
       
-      // 念のためモーダル全体がスクロール対象だった場合のカバー
       const diffModal = document.getElementById('diff-modal');
       if (diffModal) diffModal.scrollTop = 0;
     });
@@ -574,7 +573,7 @@ class UIManager {
   /**
    * ファイルリストとサムネイルグリッドの描画を非同期で行います。
    */
-  async renderAll() {
+  async renderAll(resetScroll = false) {
     if (!this.elements.fileListBody || !this.elements.thumbnailGrid) {
       this.elements.fileListBody = document.getElementById('file-list-body');
       this.elements.thumbnailGrid = document.getElementById('center-bottom');
@@ -609,8 +608,10 @@ class UIManager {
     }
 
     const fileListContainer = document.getElementById('center-top');
-    if (fileListContainer) fileListContainer.scrollTop = 0;
-    if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
+    if (resetScroll) {
+      if (fileListContainer) fileListContainer.scrollTop = 0;
+      if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
+    }
 
     if (this.state.filteredFiles.length === 0 && this.elements.thumbnailGrid) {
       const emptyMessage = document.createElement('div');
