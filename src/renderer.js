@@ -1683,9 +1683,9 @@ uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
   localStorage.setItem('thumbnailScale', e.target.value);
 });
 
-window.addEventListener('resize', debounce(async () => {
-    if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
-      const isMax = await window.veloceAPI.isViewerMaximized();
+window.addEventListener('resize', debounce(() => {
+  if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
+    window.veloceAPI.isViewerMaximized().then(isMax => {
       localStorage.setItem('mainWinMaximized', isMax);
       if (!isMax) {
         localStorage.setItem('mainWinWidth', window.outerWidth);
@@ -1693,7 +1693,8 @@ window.addEventListener('resize', debounce(async () => {
         localStorage.setItem('mainWinX', window.screenX);
         localStorage.setItem('mainWinY', window.screenY);
       }
-    }
+    });
+  }
 }, 500));
 
 window.addEventListener('beforeunload', () => {
@@ -2011,7 +2012,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (window.veloceAPI.loadDirectory) {
     const savedDirectory = localStorage.getItem('currentDirectory') || 'PC';
     const result = await window.veloceAPI.loadDirectory(savedDirectory);
-    if (result) {
+    if (result && result.imageFiles) {
       appState.currentDirectory = result.path;
       localStorage.setItem('currentDirectory', appState.currentDirectory); 
       applyNewFileList(result.imageFiles);
