@@ -1336,20 +1336,11 @@ window.addEventListener('click', (e) => {
 
 const dragTooltip = document.createElement('div');
 dragTooltip.id = 'drag-tooltip';
-dragTooltip.style.position = 'fixed';
-dragTooltip.style.pointerEvents = 'none'; 
-dragTooltip.style.zIndex = '10000';
-dragTooltip.style.padding = '4px 8px';
-dragTooltip.style.backgroundColor = 'rgba(0, 0, 0, 1.0)'; 
-dragTooltip.style.color = '#ffffff'; 
-dragTooltip.style.border = '1px solid #555'; 
-dragTooltip.style.borderRadius = '4px';
-dragTooltip.style.display = 'none';
-dragTooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5)';
+dragTooltip.className = 'custom-tooltip';
 document.body.appendChild(dragTooltip);
 
 document.addEventListener('dragend', async () => {
-  dragTooltip.style.display = 'none';
+  dragTooltip.classList.remove('show');
   appState.dragState.paths = [];
   appState.dragState.isAppDragging = false;
 
@@ -1536,9 +1527,9 @@ uiManager.elements.dirTree.addEventListener('dragover', (e) => {
   const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
   const countStr = appState.dragState.paths.length > 1 ? `${appState.dragState.paths.length}個のファイルを ` : '';
   dragTooltip.textContent = `${countStr}「${folderName}」へ${actionStr}`;
-  dragTooltip.style.display = 'block';
   dragTooltip.style.left = (e.clientX + 15) + 'px';
   dragTooltip.style.top = (e.clientY + 15) + 'px';
+  dragTooltip.classList.add('show');
 });
 
 uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
@@ -1546,7 +1537,7 @@ uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
   if (!itemDiv) return;
   if (!itemDiv.contains(e.relatedTarget)) {
     itemDiv.style.backgroundColor = '';
-    dragTooltip.style.display = 'none';
+    dragTooltip.classList.remove('show');
   }
 });
 
@@ -1555,7 +1546,7 @@ uiManager.elements.dirTree.addEventListener('drop', (e) => {
   if (!itemDiv) return;
   e.preventDefault();
   itemDiv.style.backgroundColor = '';
-  dragTooltip.style.display = 'none';
+  dragTooltip.classList.remove('show');
 
   const paths = getPathsFromDragEvent(e);
   if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
