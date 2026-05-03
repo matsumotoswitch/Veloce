@@ -187,32 +187,38 @@ function resetZoomAndFit() {
 function applyFitState() {
   if (viewerState.isZoomed) return;
 
+  const isSwapped = isRotationSwapped();
   if (viewerState.isFitToWindow) {
-    // 回転時のアスペクト比崩れを防ぐため、回転角度に応じて縦横の100%基準を入れ替える
-    const isSwapped = isRotationSwapped();
     viewerUI.elements.viewerImg.style.maxWidth = 'none';
     viewerUI.elements.viewerImg.style.maxHeight = 'none';
     viewerUI.elements.viewerImg.style.width = isSwapped ? '100vh' : '100vw';
     viewerUI.elements.viewerImg.style.height = isSwapped ? '100vw' : '100vh';
     viewerUI.elements.viewerImg.style.objectFit = 'contain';
   } else {
-    // デフォルト（大きい画像のみ縮小、小さい画像はそのままのサイズ）
+    // デフォルト（幅に合わせる）
     viewerUI.elements.viewerImg.style.maxWidth = '100%';
-    viewerUI.elements.viewerImg.style.maxHeight = '100%';
+    viewerUI.elements.viewerImg.style.maxHeight = 'none';
     viewerUI.elements.viewerImg.style.minWidth = '0';
     viewerUI.elements.viewerImg.style.minHeight = '0';
-    viewerUI.elements.viewerImg.style.width = 'auto';
+    viewerUI.elements.viewerImg.style.width = '100%';
     viewerUI.elements.viewerImg.style.height = 'auto';
     viewerUI.elements.viewerImg.style.objectFit = 'contain';
   }
   
   viewerUI.setCursor('default');
-  document.body.style.overflow = 'hidden';
+  document.body.style.overflowX = 'hidden';
+  document.body.style.overflowY = 'auto';
+  document.documentElement.style.overflowX = 'hidden';
+  document.documentElement.style.overflowY = 'auto';
   document.body.style.justifyContent = 'center';
-  document.body.style.alignItems = 'center';
+  document.body.style.alignItems = 'flex-start';
   viewerUI.elements.viewerImg.style.margin = '0';
+
+  window.scrollTo(0, 0);
   document.body.scrollTop = 0;
   document.body.scrollLeft = 0;
+  document.documentElement.scrollTop = 0;
+  document.documentElement.scrollLeft = 0;
 }
 
 window.addEventListener('resize', debounce(async () => {
@@ -231,11 +237,9 @@ window.addEventListener('resize', debounce(async () => {
       if (overlay) overlay.style.border = 'none';
       const controls = document.getElementById('window-controls');
       if (controls) controls.style.display = 'none';
-      setZoomState(true);
     } else if (!isFs && viewerState.isFullscreen) {
       viewerState.isFullscreen = false;
       viewerUI.applyBorderVisibility();
-      setZoomState(false);
     }
     
     updateFullscreenStyles();
@@ -248,8 +252,11 @@ window.addEventListener('resize', debounce(async () => {
 function updateFullscreenStyles() {
   if (!viewerState.isZoomed) {
     document.body.style.justifyContent = 'center';
-    document.body.style.alignItems = 'center';
+    document.body.style.alignItems = 'flex-start';
+    document.body.style.overflowX = 'hidden';
+    document.body.style.overflowY = 'auto';
     viewerUI.elements.viewerImg.style.margin = '0';
+    window.scrollTo(0, 0);
     return;
   }
 
