@@ -1927,6 +1927,20 @@ document.addEventListener('contextmenu', (e) => {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+  const minBtn = document.getElementById('titlebar-minimize');
+  const maxBtn = document.getElementById('titlebar-maximize');
+  const closeBtn = document.getElementById('titlebar-close');
+
+  if (minBtn) {
+    minBtn.addEventListener('click', () => window.veloceAPI.minimizeViewer());
+  }
+  if (maxBtn) {
+    maxBtn.addEventListener('click', () => window.veloceAPI.maximizeViewer());
+  }
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => window.veloceAPI.closeWindow());
+  }
+
   const savedWinW = localStorage.getItem('mainWinWidth');
   const savedWinH = localStorage.getItem('mainWinHeight');
   const savedWinX = localStorage.getItem('mainWinX');

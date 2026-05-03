@@ -34,6 +34,24 @@
   </style>
 </head>
 <body>
+  <div data-tauri-drag-region class="titlebar">
+    <div class="titlebar-left">
+      <img src="/assets/icon.png" alt="icon" class="titlebar-icon">
+      <span class="titlebar-title">Veloce</span>
+    </div>
+    <div class="titlebar-controls">
+      <div class="titlebar-button" id="titlebar-minimize">
+        <svg viewBox="0 0 10 10"><rect x="1" y="5" width="8" height="1" fill="currentColor"/></svg>
+      </div>
+      <div class="titlebar-button" id="titlebar-maximize">
+        <svg viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+      </div>
+      <div class="titlebar-button titlebar-close" id="titlebar-close">
+        <svg viewBox="0 0 10 10"><polygon points="1,1 9,9" stroke="currentColor" stroke-width="1"/><polygon points="9,1 1,9" stroke="currentColor" stroke-width="1"/></svg>
+      </div>
+    </div>
+  </div>
+  <div class="app-content">
   <!-- 左ペイン: ディレクトリツリー等 -->
   <div id="left-pane">
 	<div id="dir-tree"></div>
@@ -93,6 +111,7 @@
         画像を選択すると詳細が表示されます
       </div>
     </div>
+  </div>
   </div>
 
   <script type="module" src="/preload.js"></script>

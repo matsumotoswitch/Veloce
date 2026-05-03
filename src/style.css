@@ -14,16 +14,81 @@
   box-sizing: border-box;
 }
 
+.titlebar {
+  height: 30px;
+  background: #1e1e1e;
+  user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #333;
+  -webkit-app-region: drag; /* Tauri (Webkit) 向けドラッグ領域 */
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  pointer-events: none; /* ドラッグを阻害しない */
+}
+
+.titlebar-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+}
+
+.titlebar-title {
+  color: #ccc;
+  font-size: 12px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag; /* ボタン部分はドラッグ不可 */
+}
+
+.titlebar-button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 46px;
+  height: 100%;
+  color: #ccc;
+  cursor: default;
+  transition: background-color 0.1s;
+}
+
+.titlebar-button svg {
+  width: 10px;
+  height: 10px;
+}
+
+.titlebar-button:hover {
+  background-color: #333;
+}
+
+.titlebar-button.titlebar-close:hover {
+  background-color: #e81123;
+  color: white;
+}
+
 body {
   margin: 0;
+  padding: 0;
+  background-color: #1e1e1e; /* アプリ全体の背景色 */
+  overflow: hidden;
+}
+
+.app-content {
   display: grid;
   grid-template-columns: var(--left-width, 200px) 5px 1fr 5px var(--right-width, 300px);
   grid-template-rows: minmax(0, 1fr);
-  height: 100vh;
-  background-color: var(--bg-color);
+  height: calc(100vh - 30px); /* タイトルバーの高さを引く */
   color: var(--text-color);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  overflow: hidden;
 }
 
 /* --- Dialog Styles --- */
