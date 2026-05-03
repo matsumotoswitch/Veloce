@@ -494,7 +494,9 @@ window.processNextTask = function processNextTask() {
       setTimeout(window.processNextTask, 0); 
     });
 
-    if (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
+    // 空いている枠の数だけ、一気にタスクを補充する
+    const availableSlots = MAX_CONCURRENT_THUMBNAILS - appState.activeThumbnailTasks;
+    for (let i = 0; i < availableSlots; i++) {
       setTimeout(window.processNextTask, 0);
     }
     return;
@@ -566,7 +568,9 @@ window.processNextTask = function processNextTask() {
     setTimeout(window.processNextTask, 0);
   });
 
-  if (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
+  // 空いている枠の数だけ、一気にタスクを補充する
+  const availableSlots = MAX_CONCURRENT_THUMBNAILS - appState.activeThumbnailTasks;
+  for (let i = 0; i < availableSlots; i++) {
     setTimeout(window.processNextTask, 0);
   }
 };
