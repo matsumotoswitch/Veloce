@@ -446,7 +446,6 @@ window.processNextTask = function processNextTask() {
     const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
     const { filePath, requestRenderId, img } = req;
 
-    // フォルダ移動等でレンダリングIDが変わった場合は破棄して次へ
     if (appState.currentRenderId !== requestRenderId) {
       appState.pendingThumbnails.delete(filePath);
       setTimeout(window.processNextTask, 0);
@@ -472,21 +471,29 @@ window.processNextTask = function processNextTask() {
           updateThumbnailToast();
         }
       }
-      setTimeout(window.processNextTask, 0); // 完了後、次をキック
+      setTimeout(window.processNextTask, 0); 
     }).catch(() => {
       appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
       appState.pendingThumbnails.delete(filePath);
       
-      const fileObj = appState.files.find(f => f.path === filePath);
-      if (fileObj && !fileObj.hasThumbnailCache) {
-        fileObj.hasThumbnailCache = true;
-        appState.thumbnailCompleted++;
-        updateThumbnailToast();
+      // エラー時もフォールバックを登録して無限ループを防ぐ
+      if (appState.currentRenderId === requestRenderId) {
+        const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
+        appState.thumbnailUrls.set(filePath, fallbackUrl);
+        if (img.dataset.isVisible === 'true') {
+          img.src = fallbackUrl;
+        }
+
+        const fileObj = appState.files.find(f => f.path === filePath);
+        if (fileObj && !fileObj.hasThumbnailCache) {
+          fileObj.hasThumbnailCache = true;
+          appState.thumbnailCompleted++;
+          updateThumbnailToast();
+        }
       }
-      setTimeout(window.processNextTask, 0); // エラー時も次をキック
+      setTimeout(window.processNextTask, 0); 
     });
 
-    // 枠に余裕があればさらに並列でキック
     if (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
       setTimeout(window.processNextTask, 0);
     }
@@ -539,6 +546,10 @@ window.processNextTask = function processNextTask() {
     appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
     appState.pendingThumbnails.delete(targetFile);
 
+    // エラー時もフォールバックを登録して無限ループを防ぎ、Cursorを進める
+    const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
+    appState.thumbnailUrls.set(targetFile, fallbackUrl);
+
     const fileObj = appState.files.find(f => f.path === targetFile);
     if (fileObj && !fileObj.hasThumbnailCache) {
         fileObj.hasThumbnailCache = true;
@@ -546,10 +557,15 @@ window.processNextTask = function processNextTask() {
         updateThumbnailToast();
     }
 
+    const escapedPath = CSS.escape(targetFile);
+    const img = document.querySelector(`.thumbnail-item[data-filepath="${escapedPath}"]`);
+    if (img && img.dataset.isVisible === 'true' && !img.hasAttribute('src')) {
+      img.src = fallbackUrl;
+    }
+
     setTimeout(window.processNextTask, 0);
   });
 
-  // 枠に余裕があればさらに並列でキック
   if (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
     setTimeout(window.processNextTask, 0);
   }
