@@ -561,3 +561,29 @@ tr.selected { background: var(--accent-color); color: #fff; }
   max-height: 100%;
   object-fit: contain;
 }
+
+/* --- Custom Tooltip --- */
+.custom-tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 10005;
+  padding: 8px 12px;
+  background-color: rgba(30, 30, 30, 0.95);
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 6px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(5px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
+
+.custom-tooltip.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}

@@ -86,6 +86,43 @@ class UIManager {
       clearCacheBtn: document.getElementById('clear-cache-btn')
     };
     this.toastContainer = document.getElementById('toast-container');
+    this.initCustomTooltip();
+  }
+
+  initCustomTooltip() {
+    this.tooltipEl = document.createElement('div');
+    this.tooltipEl.className = 'custom-tooltip';
+    document.body.appendChild(this.tooltipEl);
+    this.isTooltipVisible = false;
+    this.lastMouseX = 0;
+    this.lastMouseY = 0;
+  }
+
+  showCustomTooltip(text, x, y) {
+    this.isTooltipVisible = true;
+    this.lastMouseX = x;
+    this.lastMouseY = y;
+    this.tooltipEl.textContent = text;
+
+    // DOMにテキストが反映された後にサイズを取得して位置を調整する
+    requestAnimationFrame(() => {
+      const rect = this.tooltipEl.getBoundingClientRect();
+      let posX = x + 15;
+      let posY = y + 15;
+
+      // 画面外にはみ出さないよう調整
+      if (posX + rect.width > window.innerWidth) posX = window.innerWidth - rect.width - 10;
+      if (posY + rect.height > window.innerHeight) posY = window.innerHeight - rect.height - 10;
+
+      this.tooltipEl.style.left = `${posX}px`;
+      this.tooltipEl.style.top = `${posY}px`;
+      this.tooltipEl.classList.add('show');
+    });
+  }
+
+  hideCustomTooltip() {
+    this.isTooltipVisible = false;
+    this.tooltipEl.classList.remove('show');
   }
 
   /**

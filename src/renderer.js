@@ -2005,39 +2005,76 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (uiManager.elements.searchClearBtn) {
     uiManager.elements.searchClearBtn.innerHTML = UIManager.ICONS.ERASER;
+    uiManager.elements.searchClearBtn.removeAttribute('title');
+    uiManager.elements.searchClearBtn.addEventListener('mouseenter', (e) => {
+      uiManager.showCustomTooltip('検索をクリア', e.clientX, e.clientY);
+    });
+    uiManager.elements.searchClearBtn.addEventListener('mousemove', (e) => {
+      uiManager.showCustomTooltip('検索をクリア', e.clientX, e.clientY);
+    });
+    uiManager.elements.searchClearBtn.addEventListener('mouseleave', () => {
+      uiManager.hideCustomTooltip();
+    });
     uiManager.elements.searchClearBtn.addEventListener('click', () => {
       if (uiManager.elements.searchBar) {
         uiManager.elements.searchBar.value = '';
         appState.searchQuery = '';
         scheduleRefresh();
         uiManager.applyGlowEffect(uiManager.elements.searchClearBtn);
+        uiManager.hideCustomTooltip();
       }
     });
   }
 
   if (uiManager.elements.openCacheBtn) {
-    uiManager.elements.openCacheBtn.addEventListener('mouseenter', async () => {
+    uiManager.elements.openCacheBtn.removeAttribute('title');
+    let openCacheText = 'サムネイルフォルダを開きます';
+    uiManager.elements.openCacheBtn.addEventListener('mouseenter', async (e) => {
+      uiManager.showCustomTooltip(openCacheText, e.clientX, e.clientY);
       if (window.veloceAPI.getThumbnailCacheInfo) {
         const info = await window.veloceAPI.getThumbnailCacheInfo();
-        uiManager.elements.openCacheBtn.title = `サムネイルフォルダを開きます\nパス: ${info.path}`;
+        openCacheText = `サムネイルフォルダを開きます\nパス: ${info.path}`;
+        if (uiManager.isTooltipVisible) {
+          uiManager.showCustomTooltip(openCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
+        }
       }
+    });
+    uiManager.elements.openCacheBtn.addEventListener('mousemove', (e) => {
+      uiManager.showCustomTooltip(openCacheText, e.clientX, e.clientY);
+    });
+    uiManager.elements.openCacheBtn.addEventListener('mouseleave', () => {
+      uiManager.hideCustomTooltip();
     });
     uiManager.elements.openCacheBtn.addEventListener('click', () => {
       uiManager.applyGlowEffect(uiManager.elements.openCacheBtn);
       window.veloceAPI.openThumbnailCache();
+      uiManager.hideCustomTooltip();
     });
   }
 
   if (uiManager.elements.clearCacheBtn) {
-    uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async () => {
+    uiManager.elements.clearCacheBtn.removeAttribute('title');
+    let clearCacheText = 'サムネイル画像を削除します';
+    uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async (e) => {
+      uiManager.showCustomTooltip(clearCacheText, e.clientX, e.clientY);
       if (window.veloceAPI.getThumbnailCacheInfo) {
         const info = await window.veloceAPI.getThumbnailCacheInfo();
         const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
-        uiManager.elements.clearCacheBtn.title = `サムネイル画像を削除します\n保存数: ${info.fileCount}枚\n合計サイズ: ${sizeMB} MB`;
+        clearCacheText = `サムネイル画像を削除します\n保存数: ${info.fileCount}枚\n合計サイズ: ${sizeMB} MB`;
+        if (uiManager.isTooltipVisible) {
+          uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
+        }
       }
+    });
+    uiManager.elements.clearCacheBtn.addEventListener('mousemove', (e) => {
+      uiManager.showCustomTooltip(clearCacheText, e.clientX, e.clientY);
+    });
+    uiManager.elements.clearCacheBtn.addEventListener('mouseleave', () => {
+      uiManager.hideCustomTooltip();
     });
     uiManager.elements.clearCacheBtn.addEventListener('click', async () => {
       uiManager.applyGlowEffect(uiManager.elements.clearCacheBtn);
+      uiManager.hideCustomTooltip();
       const isConfirmed = await uiManager.showConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
       if (isConfirmed) {
         uiManager.showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
