@@ -14,22 +14,32 @@
   box-sizing: border-box;
 }
 
+/* --- Titlebar & Inline Toolbar --- */
 .titlebar {
-  height: 30px;
+  height: 38px; /* 検索バーが収まるように高さを少し拡張 */
   background: #1e1e1e;
   user-select: none;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr minmax(250px, 500px) 1fr; /* 左:中央(検索):右 の割合 */
   align-items: center;
   border-bottom: 1px solid #333;
-  -webkit-app-region: drag; /* Tauri (Webkit) 向けドラッグ領域 */
+  -webkit-app-region: drag;
 }
 
 .titlebar-left {
   display: flex;
   align-items: center;
   padding-left: 10px;
-  pointer-events: none; /* ドラッグを阻害しない */
+  pointer-events: none;
+}
+
+.titlebar-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: 0 10px;
+  -webkit-app-region: no-drag; /* 検索バー操作のためドラッグ除外 */
 }
 
 .titlebar-icon {
@@ -46,8 +56,9 @@
 
 .titlebar-controls {
   display: flex;
+  justify-content: flex-end;
   height: 100%;
-  -webkit-app-region: no-drag; /* ボタン部分はドラッグ不可 */
+  -webkit-app-region: no-drag;
 }
 
 .titlebar-button {
@@ -61,19 +72,9 @@
   transition: background-color 0.1s;
 }
 
-.titlebar-button svg {
-  width: 10px;
-  height: 10px;
-}
-
-.titlebar-button:hover {
-  background-color: #333;
-}
-
-.titlebar-button.titlebar-close:hover {
-  background-color: #e81123;
-  color: white;
-}
+.titlebar-button svg { width: 10px; height: 10px; }
+.titlebar-button:hover { background-color: #333; }
+.titlebar-button.titlebar-close:hover { background-color: #e81123; color: white; }
 
 body {
   margin: 0;
@@ -86,7 +87,7 @@ body {
   display: grid;
   grid-template-columns: var(--left-width, 200px) 5px 1fr 5px var(--right-width, 300px);
   grid-template-rows: minmax(0, 1fr);
-  height: calc(100vh - 30px); /* タイトルバーの高さを引く */
+  height: calc(100vh - 38px); /* タイトルバー拡張に合わせる */
   color: var(--text-color);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
@@ -228,40 +229,45 @@ body {
   overflow-x: hidden; /* 不要な横揺れを防止 */
 }
 
-/* Search Bar */
+/* --- Search Bar (Inline Style) --- */
 #search-container {
-  background: var(--panel-bg);
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color);
-  flex: none;
   display: flex;
   align-items: center;
+  width: 100%;
+  height: 26px;
+  background: rgba(0, 0, 0, 0.25); /* タイトルバーより少し暗く凹ませる */
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0 8px;
+  transition: border-color 0.2s, background 0.2s;
 }
+
+#search-container:focus-within {
+  background: #1e1e1e;
+  border-color: var(--accent-color);
+}
+
 #search-clear-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: #888;
-  margin-right: 8px;
+  margin-right: 6px;
   transition: color 0.2s;
 }
-#search-clear-btn:hover {
-  color: var(--accent-color);
-}
+
+#search-clear-btn:hover { color: var(--accent-color); }
+
 #search-bar {
   flex: 1;
-  background: var(--bg-color);
+  background: transparent;
+  border: none;
   color: var(--text-color);
-  border: 1px solid var(--border-color);
-  padding: 6px 10px;
-  border-radius: 4px;
   outline: none;
   font-family: inherit;
-  font-size: 14px;
-}
-#search-bar:focus {
-  border-color: var(--accent-color);
+  font-size: 13px;
+  padding: 0;
 }
 
 /* Center Top: File List */

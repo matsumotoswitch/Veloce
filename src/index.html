@@ -39,6 +39,12 @@
       <img src="/assets/icon.png" alt="icon" class="titlebar-icon">
       <span class="titlebar-title">Veloce</span>
     </div>
+    <div class="titlebar-center">
+      <div id="search-container">
+        <span id="search-clear-btn"></span>
+        <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
+      </div>
+    </div>
     <div class="titlebar-controls">
       <div class="titlebar-button" id="titlebar-minimize">
         <svg viewBox="0 0 10 10"><rect x="1" y="5" width="8" height="1" fill="currentColor"/></svg>
@@ -61,10 +67,6 @@
 
   <!-- 中央ペイン: リストとグリッド -->
   <div id="center-pane">
-    <div id="search-container">
-      <span id="search-clear-btn" title="検索をクリア"></span>
-      <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
-    </div>
 	<div id="center-top">
 	  <table id="file-table">
 		<thead>
