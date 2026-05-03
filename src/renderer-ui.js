@@ -678,8 +678,8 @@ class UIManager {
     // バックグラウンド生成の再スタート
     if (!this.state.isPreloadRunning) {
       this.state.isPreloadRunning = true;
-      if (typeof processIdleThumbnails === 'function') {
-        requestIdleCallback(processIdleThumbnails);
+      if (typeof window.processNextTask === 'function') {
+        setTimeout(window.processNextTask, 50);
       }
     }
   }

@@ -313,8 +313,11 @@ async fn load_directory(
 
 #[tauri::command]
 async fn get_full_metadata_batch(file_paths: Vec<String>) -> Result<Vec<FullMetadata>, String> {
+    // rayonによるスレッドプール占有を防ぐため、通常のイテレータを使用する。
+    // I/Oバウンドな処理であり、フロントエンド側で既にチャンク化（100件ずつ等）
+    // されているため、Rust側では直列処理でも十分に高速かつ安全に動作します。
     Ok(tokio::task::spawn_blocking(move || {
-        file_paths.into_par_iter().map(|path| {
+        file_paths.into_iter().map(|path| {
             get_full_metadata_for_path(&path)
         }).collect()
     }).await.unwrap_or_default())
@@ -1122,6 +1125,43 @@ fn clear_thumbnail_cache() -> Result<(), String> {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailCacheInfo {
+    path: String,
+    file_count: usize,
+    total_size_bytes: u64,
+}
+
+#[tauri::command]
+fn get_thumbnail_cache_info() -> ThumbnailCacheInfo {
+    let mut path_str = String::new();
+    let mut file_count = 0;
+    let mut total_size_bytes = 0;
+
+    if let Some(mut path) = get_veloce_data_dir() {
+        path.push("Thumbnails");
+        path_str = path.to_string_lossy().to_string();
+        
+        if let Ok(entries) = std::fs::read_dir(&path) {
+            for entry in entries.filter_map(Result::ok) {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_file() {
+                        file_count += 1;
+                        total_size_bytes += metadata.len();
+                    }
+                }
+            }
+        }
+    }
+
+    ThumbnailCacheInfo {
+        path: path_str,
+        file_count,
+        total_size_bytes,
+    }
+}
+
 fn main() {
     let mut context = tauri::generate_context!();
     
@@ -1195,7 +1235,8 @@ fn main() {
             rename_file,
             rename_folder,
             open_thumbnail_folder,
-            clear_thumbnail_cache
+            clear_thumbnail_cache,
+            get_thumbnail_cache_info
         ])
         .run(context)
         .expect("error while running tauri application");

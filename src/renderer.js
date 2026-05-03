@@ -158,7 +158,8 @@ async function loadAllMetadataInBackground() {
 
   const batchId = ++appState.currentMetaBatchId;
   const pathsToLoad = filesToLoad.map(f => f.path);
-  const CHUNK_SIZE = CONFIG.CHUNK_SIZE; 
+  // サムネイル生成を阻害しないように、メタデータ取得のチャンクサイズを小さく設定する
+  const CHUNK_SIZE = Math.min(25, Math.max(10, Math.floor(CONFIG.CHUNK_SIZE / 4)));
 
   const processNextChunk = (chunkIndex) => {
     if (appState.currentMetaBatchId !== batchId) return;
@@ -166,13 +167,12 @@ async function loadAllMetadataInBackground() {
     if (chunkIndex >= pathsToLoad.length) {
       uiManager.showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
       if (['width', 'height'].includes(appState.sortConfig.key)) {
-        appState.applyFiltersAndSort();
-        uiManager.renderAll();
+        scheduleRefresh();
       }
       return;
     }
 
-    requestIdleCallback(async () => {
+    setTimeout(async () => {
       if (appState.currentMetaBatchId !== batchId) return;
       
       try {
@@ -215,7 +215,7 @@ async function loadAllMetadataInBackground() {
         console.error('Failed to load metadata in background:', error);
       }
       processNextChunk(chunkIndex + CHUNK_SIZE);
-    }, { timeout: 2000 });
+    }, 10); // アイドル状態を待たずにUIスレッドへ短く処理を譲りながら確実に実行する
   };
   processNextChunk(0);
 }
@@ -425,76 +425,135 @@ function updateThumbnailToast() {
   }
 }
 
-function processThumbnailQueue() {
-  // キューに空きがあり、かつタスクが残っている限り、連続でタスクを投入する（whileループ化）
-  while (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS && appState.thumbnailRequestQueue.length > 0) {
-    // 見えている画像の中から「一番最初（＝一番上）」にあるものを探す
+function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
+  return Promise.race([
+    window.veloceAPI.getThumbnail(filePath),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Thumbnail timeout')), timeoutMs))
+  ]);
+}
+
+window.processNextTask = function processNextTask() {
+  // 同時実行数の上限チェック（枠が空くまで待機）
+  if (appState.activeThumbnailTasks >= MAX_CONCURRENT_THUMBNAILS) return;
+
+  // 【優先処理】画面内に見えている画像
+  if (appState.thumbnailRequestQueue.length > 0) {
+    appState.isPreloadRunning = false;
+
     let targetIndex = appState.thumbnailRequestQueue.findIndex(req => req.img.dataset.isVisible === 'true');
+    if (targetIndex === -1) targetIndex = 0;
 
-    // 見えている画像がキュー内に無い場合は、一番最初（一番古いタスク）から処理してスキップ消化する
-    if (targetIndex === -1) {
-      targetIndex = 0;
-    }
-
-    // キューから該当するタスクを抜き出す
     const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
     const { filePath, requestRenderId, img } = req;
 
-    // 既に不要なリクエスト（画面外に出た、またはフォルダ移動した）場合はスキップ
-    if (appState.currentRenderId !== requestRenderId || img.dataset.isVisible !== 'true') {
+    // フォルダ移動等でレンダリングIDが変わった場合は破棄して次へ
+    if (appState.currentRenderId !== requestRenderId) {
       appState.pendingThumbnails.delete(filePath);
-      continue; // returnではなくcontinueで次のループへ
+      setTimeout(window.processNextTask, 0);
+      return;
     }
 
     appState.activeThumbnailTasks++;
-    window.veloceAPI.getThumbnail(filePath).then(url => {
+    fetchThumbnailWithTimeout(filePath).then(url => {
       appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
       appState.pendingThumbnails.delete(filePath);
 
-      if (appState.currentRenderId !== requestRenderId) {
-        processThumbnailQueue();
-        return;
-      }
-
-      if (url) {
-        appState.thumbnailUrls.set(filePath, url);
+      if (appState.currentRenderId === requestRenderId) {
+        const finalUrl = url || window.veloceAPI.convertFileSrc(filePath);
+        appState.thumbnailUrls.set(filePath, finalUrl);
         if (img.dataset.isVisible === 'true') {
-          img.src = url;
+          img.src = finalUrl;
         }
-      } else {
-        const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
-        appState.thumbnailUrls.set(filePath, fallbackUrl);
-        if (img.dataset.isVisible === 'true') img.src = fallbackUrl;
-      }
 
+        const fileObj = appState.files.find(f => f.path === filePath);
+        if (fileObj && !fileObj.hasThumbnailCache) {
+          fileObj.hasThumbnailCache = true;
+          appState.thumbnailCompleted++;
+          updateThumbnailToast();
+        }
+      }
+      setTimeout(window.processNextTask, 0); // 完了後、次をキック
+    }).catch(() => {
+      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
+      appState.pendingThumbnails.delete(filePath);
+      
       const fileObj = appState.files.find(f => f.path === filePath);
       if (fileObj && !fileObj.hasThumbnailCache) {
         fileObj.hasThumbnailCache = true;
         appState.thumbnailCompleted++;
         updateThumbnailToast();
       }
-
-      // 処理が完了したら、枠が空いたので次の画像を処理する
-      processThumbnailQueue();
-      
-      // キューが空になり、アクティブなタスクもなくなったらプリロードを開始する
-      if (appState.activeThumbnailTasks === 0 && appState.thumbnailRequestQueue.length === 0 && !appState.isPreloadRunning) {
-        appState.isPreloadRunning = true;
-        requestIdleCallback(processIdleThumbnails);
-      }
-    }).catch(() => {
-      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
-      appState.pendingThumbnails.delete(filePath);
-      processThumbnailQueue();
-      
-      // エラー時も同様にチェック
-      if (appState.activeThumbnailTasks === 0 && appState.thumbnailRequestQueue.length === 0 && !appState.isPreloadRunning) {
-        appState.isPreloadRunning = true;
-        requestIdleCallback(processIdleThumbnails);
-      }
+      setTimeout(window.processNextTask, 0); // エラー時も次をキック
     });
+
+    // 枠に余裕があればさらに並列でキック
+    if (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
+      setTimeout(window.processNextTask, 0);
+    }
+    return;
   }
-}
+
+  // 【バックグラウンド処理】優先キューが空の場合、画面外の画像を順次作成
+  appState.isPreloadRunning = true;
+  let targetFile = null;
+
+  while (appState.preloadCursor < appState.filteredFiles.length) {
+    const p = appState.filteredFiles[appState.preloadCursor].path;
+    if (!appState.thumbnailUrls.has(p) && !appState.pendingThumbnails.has(p)) {
+      targetFile = p;
+      break;
+    }
+    appState.preloadCursor++;
+  }
+
+  if (!targetFile) {
+    appState.isPreloadRunning = false;
+    return; // 全ての画像の処理が完了
+  }
+
+  appState.pendingThumbnails.add(targetFile);
+  appState.activeThumbnailTasks++;
+
+  fetchThumbnailWithTimeout(targetFile).then(url => {
+    appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
+    appState.pendingThumbnails.delete(targetFile);
+    
+    const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
+    appState.thumbnailUrls.set(targetFile, finalUrl);
+
+    const fileObj = appState.files.find(f => f.path === targetFile);
+    if (fileObj && !fileObj.hasThumbnailCache) {
+        fileObj.hasThumbnailCache = true; 
+        appState.thumbnailCompleted++;
+        updateThumbnailToast();
+    }
+
+    const escapedPath = CSS.escape(targetFile);
+    const img = document.querySelector(`.thumbnail-item[data-filepath="${escapedPath}"]`);
+    if (img && img.dataset.isVisible === 'true' && !img.hasAttribute('src')) {
+      img.src = finalUrl;
+    }
+
+    setTimeout(window.processNextTask, 0);
+  }).catch(() => {
+    appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
+    appState.pendingThumbnails.delete(targetFile);
+
+    const fileObj = appState.files.find(f => f.path === targetFile);
+    if (fileObj && !fileObj.hasThumbnailCache) {
+        fileObj.hasThumbnailCache = true;
+        appState.thumbnailCompleted++;
+        updateThumbnailToast();
+    }
+
+    setTimeout(window.processNextTask, 0);
+  });
+
+  // 枠に余裕があればさらに並列でキック
+  if (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
+    setTimeout(window.processNextTask, 0);
+  }
+};
 
 function initializeThumbnailObserver() {
     const options = {
@@ -519,10 +578,7 @@ function initializeThumbnailObserver() {
                         appState.pendingThumbnails.add(filePath);
                         appState.thumbnailRequestQueue.push({ filePath, requestRenderId, img });
                         
-                        // 画面内の生成が優先されるため、プリロードを一時停止
-                        appState.isPreloadRunning = false;
-                        
-                        processThumbnailQueue();
+                        window.processNextTask();
                     }
                 }
             } else {
@@ -530,52 +586,6 @@ function initializeThumbnailObserver() {
             }
         }
     }, options);
-}
-
-function processIdleThumbnails(deadline) {
-  if (appState.pendingThumbnails.size > 8) {
-    requestIdleCallback(processIdleThumbnails);
-    return;
-  }
-
-  let targetFile = null;
-  while (appState.preloadCursor < appState.filteredFiles.length) {
-    const filePath = appState.filteredFiles[appState.preloadCursor].path;
-    if (!appState.thumbnailUrls.has(filePath) && !appState.pendingThumbnails.has(filePath)) {
-      targetFile = filePath;
-      break;
-    }
-    appState.preloadCursor++;
-  }
-
-  if (!targetFile) {
-    appState.isPreloadRunning = false;
-    return;
-  }
-
-  appState.pendingThumbnails.add(targetFile);
-
-  window.veloceAPI.getThumbnail(targetFile).then(url => {
-    appState.pendingThumbnails.delete(targetFile);
-    
-    const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
-    appState.thumbnailUrls.set(targetFile, finalUrl);
-
-    const fileObj = appState.files.find(f => f.path === targetFile);
-    if (fileObj && !fileObj.hasThumbnailCache) {
-        fileObj.hasThumbnailCache = true; 
-        appState.thumbnailCompleted++;
-        updateThumbnailToast();
-    }
-
-    const escapedPath = CSS.escape(targetFile);
-    const img = document.querySelector(`.thumbnail-item[data-filepath="${escapedPath}"]`);
-    if (img && img.dataset.isVisible === 'true' && !img.hasAttribute('src')) {
-      img.src = finalUrl;
-    }
-  });
-
-  requestIdleCallback(processIdleThumbnails);
 }
 
 function clearMetadataUI() {
@@ -1986,6 +1996,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (uiManager.elements.openCacheBtn) {
+    uiManager.elements.openCacheBtn.addEventListener('mouseenter', async () => {
+      if (window.veloceAPI.getThumbnailCacheInfo) {
+        const info = await window.veloceAPI.getThumbnailCacheInfo();
+        uiManager.elements.openCacheBtn.title = `サムネイルフォルダを開きます\nパス: ${info.path}`;
+      }
+    });
     uiManager.elements.openCacheBtn.addEventListener('click', () => {
       uiManager.applyGlowEffect(uiManager.elements.openCacheBtn);
       window.veloceAPI.openThumbnailCache();
@@ -1993,6 +2009,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (uiManager.elements.clearCacheBtn) {
+    uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async () => {
+      if (window.veloceAPI.getThumbnailCacheInfo) {
+        const info = await window.veloceAPI.getThumbnailCacheInfo();
+        const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
+        uiManager.elements.clearCacheBtn.title = `サムネイル画像を削除します\n保存数: ${info.fileCount}枚\n合計サイズ: ${sizeMB} MB`;
+      }
+    });
     uiManager.elements.clearCacheBtn.addEventListener('click', async () => {
       uiManager.applyGlowEffect(uiManager.elements.clearCacheBtn);
       const isConfirmed = await uiManager.showConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');

@@ -43,6 +43,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<string>} getLicenseText
  * @property {() => Promise<void>} openThumbnailCache
  * @property {() => Promise<void>} clearThumbnailCache
+ * @property {() => Promise<{path: string, fileCount: number, totalSizeBytes: number}>} getThumbnailCacheInfo
  */
 /**
  * @description
@@ -304,5 +305,9 @@ window.veloceAPI = {
   /**
    * サムネイルキャッシュをすべて削除します。
    */
-  clearThumbnailCache: () => invoke('clear_thumbnail_cache')
+  clearThumbnailCache: () => invoke('clear_thumbnail_cache'),
+  /**
+   * サムネイルキャッシュの情報を取得します。
+   */
+  getThumbnailCacheInfo: () => invoke('get_thumbnail_cache_info')
 };
