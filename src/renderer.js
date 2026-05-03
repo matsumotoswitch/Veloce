@@ -476,10 +476,22 @@ function processThumbnailQueue() {
 
       // 処理が完了したら、枠が空いたので次の画像を処理する
       processThumbnailQueue();
+      
+      // キューが空になり、アクティブなタスクもなくなったらプリロードを開始する
+      if (appState.activeThumbnailTasks === 0 && appState.thumbnailRequestQueue.length === 0 && !appState.isPreloadRunning) {
+        appState.isPreloadRunning = true;
+        requestIdleCallback(processIdleThumbnails);
+      }
     }).catch(() => {
       appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
       appState.pendingThumbnails.delete(filePath);
       processThumbnailQueue();
+      
+      // エラー時も同様にチェック
+      if (appState.activeThumbnailTasks === 0 && appState.thumbnailRequestQueue.length === 0 && !appState.isPreloadRunning) {
+        appState.isPreloadRunning = true;
+        requestIdleCallback(processIdleThumbnails);
+      }
     });
   }
 }
@@ -506,6 +518,10 @@ function initializeThumbnailObserver() {
                         const requestRenderId = appState.currentRenderId;
                         appState.pendingThumbnails.add(filePath);
                         appState.thumbnailRequestQueue.push({ filePath, requestRenderId, img });
+                        
+                        // 画面内の生成が優先されるため、プリロードを一時停止
+                        appState.isPreloadRunning = false;
+                        
                         processThumbnailQueue();
                     }
                 }
@@ -841,8 +857,8 @@ async function showLicenseDialog() {
   content.style.padding = '20px';
   content.style.borderRadius = '8px';
   content.style.border = '1px solid #555';
-  content.style.width = '80%';
-  content.style.maxWidth = '800px';
+  content.style.width = '85%';
+  content.style.maxWidth = '850px';
   content.style.height = '80%';
   content.style.display = 'flex';
   content.style.flexDirection = 'column';
@@ -2084,10 +2100,5 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onDirectoryChanged(() => {
       handleDirChange();
     });
-  }
-
-  if (!appState.isPreloadRunning) {
-    appState.isPreloadRunning = true;
-    requestIdleCallback(processIdleThumbnails);
   }
 });
