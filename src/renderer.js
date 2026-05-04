@@ -1586,19 +1586,6 @@ function setupResizer(resizer, type, cursor) {
     resizingState[type] = true;
     resizer.classList.add('resizing');
     document.body.style.cursor = cursor;
-    if (type === 'left' && !appState.layout.leftVisible) {
-      appState.layout.leftVisible = true;
-      localStorage.setItem('leftVisible', 'true'); // ← これを追加
-      const btn = resizer.querySelector('.resizer-toggle');
-      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
-      uiManager.applyLayout();
-    } else if (type === 'right' && !appState.layout.rightVisible) {
-      appState.layout.rightVisible = true;
-      localStorage.setItem('rightVisible', 'true'); // ← これを追加
-      const btn = resizer.querySelector('.resizer-toggle');
-      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
-      uiManager.applyLayout();
-    }
   });
   createResizerToggle(resizer, type);
 }
@@ -1674,18 +1661,71 @@ window.addEventListener('mousemove', (e) => {
   if (resizerRafId) cancelAnimationFrame(resizerRafId);
   resizerRafId = requestAnimationFrame(() => {
     if (resizingState.left) {
-      const newWidth = Math.max(100, Math.min(e.clientX, window.innerWidth - 400));
-      appState.layout.leftWidth = newWidth;
-      uiManager.applyLayout();
+      let newWidth = e.clientX;
+      if (newWidth < 50) {
+        if (appState.layout.leftVisible) {
+          appState.layout.leftVisible = false;
+          localStorage.setItem('leftVisible', 'false');
+          const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
+          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+          uiManager.applyLayout();
+        }
+      } else {
+        newWidth = Math.max(100, Math.min(newWidth, window.innerWidth - 400));
+        appState.layout.leftWidth = newWidth;
+        if (!appState.layout.leftVisible) {
+          appState.layout.leftVisible = true;
+          localStorage.setItem('leftVisible', 'true');
+          const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
+          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
+        }
+        uiManager.applyLayout();
+      }
     } else if (resizingState.right) {
-      const newWidth = Math.max(150, Math.min(window.innerWidth - e.clientX, window.innerWidth - 400));
-      appState.layout.rightWidth = newWidth;
-      uiManager.applyLayout();
+      let newWidth = window.innerWidth - e.clientX;
+      if (newWidth < 50) {
+        if (appState.layout.rightVisible) {
+          appState.layout.rightVisible = false;
+          localStorage.setItem('rightVisible', 'false');
+          const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
+          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
+          uiManager.applyLayout();
+        }
+      } else {
+        newWidth = Math.max(150, Math.min(newWidth, window.innerWidth - 400));
+        appState.layout.rightWidth = newWidth;
+        if (!appState.layout.rightVisible) {
+          appState.layout.rightVisible = true;
+          localStorage.setItem('rightVisible', 'true');
+          const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
+          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+        }
+        uiManager.applyLayout();
+      }
     } else if (resizingState.center) {
       const centerPane = document.getElementById('center-pane');
       const rect = centerPane.getBoundingClientRect();
-      const newHeight = Math.max(50, Math.min(e.clientY - rect.top, rect.height - 50));
-      document.documentElement.style.setProperty('--top-height', `${newHeight}px`);
+      let newHeight = e.clientY - rect.top;
+      
+      if (newHeight < 50) {
+        const root = document.documentElement;
+        if (root.style.getPropertyValue('--top-height') !== '0px') {
+          localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
+          root.style.setProperty('--top-height', '0px');
+          localStorage.setItem('topHeight', '0px');
+          const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
+          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+        }
+      } else {
+        newHeight = Math.max(50, Math.min(newHeight, rect.height - 50));
+        const root = document.documentElement;
+        root.style.setProperty('--top-height', `${newHeight}px`);
+        
+        const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
+        if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
+          btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
+        }
+      }
     }
   });
 });
