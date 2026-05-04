@@ -90,6 +90,11 @@ body {
   height: calc(100vh - 38px); /* タイトルバー拡張に合わせる */
   color: var(--text-color);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  transition: grid-template-columns 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body.is-resizing .app-content {
+  transition: none;
 }
 
 /* --- Dialog Styles --- */
@@ -209,6 +214,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden; /* 幅が0になる時に中身がはみ出さないようにする */
 }
 
 #center-pane {
@@ -277,6 +283,11 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
+  transition: flex-basis 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body.is-resizing #center-top {
+  transition: none;
 }
 
 table#file-table { 

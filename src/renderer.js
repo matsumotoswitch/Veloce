@@ -1586,6 +1586,7 @@ function setupResizer(resizer, type, cursor) {
     resizingState[type] = true;
     resizer.classList.add('resizing');
     document.body.style.cursor = cursor;
+    document.body.classList.add('is-resizing'); // ドラッグ中フラグを追加
   });
   createResizerToggle(resizer, type);
 }
@@ -1747,6 +1748,7 @@ window.addEventListener('mouseup', () => {
     if (uiManager.elements.resizerCenter) uiManager.elements.resizerCenter.classList.remove('resizing');
   }
   document.body.style.cursor = 'default';
+  document.body.classList.remove('is-resizing'); // ドラッグ中フラグを解除
 });
 
 function updateThumbnailSize() {
