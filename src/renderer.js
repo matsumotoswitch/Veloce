@@ -2170,12 +2170,25 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (index > -1) {
         const oldFile = appState.files[index];
         if (oldFile.size !== newFile.size || oldFile.mtime !== newFile.mtime) {
-            appState.thumbnailUrls.delete(newFile.path);
-          appState.files[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0 };
+          appState.thumbnailUrls.delete(newFile.path);
+          
+          // --- 追加: エラー状態やリクエスト待ち状態をリセット ---
+          appState.pendingThumbnails.delete(newFile.path);
+          const qIdx = appState.thumbnailRequestQueue.findIndex(req => req.filePath === newFile.path);
+          if (qIdx > -1) appState.thumbnailRequestQueue.splice(qIdx, 1);
+
+          // --- 修正: metaLoaded: false を追加してメタデータを確実に再取得させる ---
+          appState.files[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0, metaLoaded: false };
+          
+          // --- 修正: 描画の遅延を待たずに、データ状態とRustのインデックスを即時同期 ---
+          appState.applyFiltersAndSort(); 
           scheduleRefresh();
         }
       } else {
         appState.files.push(newFile);
+        
+        // --- 修正: 描画の遅延を待たずに、データ状態とRustのインデックスを即時同期 ---
+        appState.applyFiltersAndSort();
         scheduleRefresh();
       }
     });
@@ -2186,6 +2199,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       const index = appState.files.findIndex(f => f.path === path);
       if (index > -1) {
         appState.files.splice(index, 1);
+        
+        // --- 修正: 描画の遅延を待たずに、データ状態とRustのインデックスを即時同期 ---
+        appState.applyFiltersAndSort();
         scheduleRefresh();
       }
     });
@@ -2218,6 +2234,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
           }
         } else {
+          // --- 修正: 結果をUIに反映し、Rust側のソート順を同期する処理を追加 ---
+          applyNewFileList(result.imageFiles, false);
+          
           // 現在のディレクトリが存在する場合は、その場所までツリーを再度展開して表示を更新する
           await expandTreeToPath(appState.currentDirectory);
         }

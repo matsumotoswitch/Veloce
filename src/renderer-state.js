@@ -109,10 +109,22 @@ class AppState {
       if (selectedPaths.has(f.path)) this.selection.add(i);
       if (f.path === selectedPath) this.selectedIndex = i;
     });
+    
+    // ソート完了後、即座にRust側と同期をとる
+    this.syncPathsToBackend();
+  }
 
+  /**
+   * 現在の filteredFiles のパス配列をRustのバックエンドと同期します。
+   * 競合を防ぐため Promise チェーンで順序を保証します。
+   */
+  syncPathsToBackend() {
     if (window.veloceAPI && window.veloceAPI.syncImagePaths) {
       const sortedPaths = this.filteredFiles.map(f => f.path);
-      window.veloceAPI.syncImagePaths(sortedPaths);
+      if (!this.syncPromise) this.syncPromise = Promise.resolve();
+      this.syncPromise = this.syncPromise
+        .then(() => window.veloceAPI.syncImagePaths(sortedPaths))
+        .catch(err => console.error('Failed to sync image paths:', err));
     }
   }
 }
