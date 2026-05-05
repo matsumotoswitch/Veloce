@@ -1487,7 +1487,7 @@ window.addEventListener('click', () => {
 // 各種モーダルの安全な閉じる処理
 window.addEventListener('click', (e) => {
   const diffModal = document.getElementById('diff-modal');
-  if (diffModal && (e.target.id === 'diff-close' || e.target === diffModal)) {
+  if (diffModal && e.target === diffModal) {
       diffModal.style.display = 'none';
   }
   const favModal = document.getElementById('edit-favorite-modal');
