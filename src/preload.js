@@ -44,6 +44,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<void>} openThumbnailCache
  * @property {() => Promise<void>} clearThumbnailCache
  * @property {() => Promise<{path: string, fileCount: number, totalSizeBytes: number}>} getThumbnailCacheInfo
+ * @property {(path: string) => Promise<void>} openInExplorer
  */
 /**
  * @description
@@ -309,5 +310,9 @@ window.veloceAPI = {
   /**
    * サムネイルキャッシュの情報を取得します。
    */
-  getThumbnailCacheInfo: () => invoke('get_thumbnail_cache_info')
+  getThumbnailCacheInfo: () => invoke('get_thumbnail_cache_info'),
+  /**
+   * 指定したパスをエクスプローラで開きます。
+   */
+  openInExplorer: (path) => invoke('open_in_explorer', { path })
 };

@@ -34,13 +34,17 @@ class AppState {
     this.selection = new Set();
     /** @type {string} 現在表示中のディレクトリパス */
     this.currentDirectory = '';
+    /** @type {Array<{id: string, name: string, path: string, icon: string}>} お気に入りリスト */
+    this.favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
 
     // レイアウト状態の管理
     this.layout = {
       leftWidth: 200,             // 左ペインの幅(px)
       rightWidth: 300,            // 右ペインの幅(px)
       leftVisible: true,          // 左ペインの表示状態
-      rightVisible: true          // 右ペインの表示状態
+      rightVisible: true,         // 右ペインの表示状態
+      leftTopHeight: parseInt(localStorage.getItem('leftTopHeight') || '150', 10),
+      leftTopVisible: localStorage.getItem('leftTopVisible') !== 'false'
     };
 
     // ドラッグ状態の管理

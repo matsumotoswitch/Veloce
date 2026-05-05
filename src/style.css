@@ -210,11 +210,84 @@ body.is-resizing .app-content {
 #left-pane {
   background: var(--panel-bg);
   border-right: none;
-  padding: 10px;
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden; /* 幅が0になる時に中身がはみ出さないようにする */
+  padding: 0; /* paddingをセクション側に移動 */
+}
+
+#favorites-section {
+  flex: 0 0 var(--left-top-height, 150px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 10px 0 10px;
+  transition: flex-basis 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#directories-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  padding: 0 10px 10px 10px;
+}
+
+body.is-resizing #favorites-section {
+  transition: none;
+}
+
+#favorites-list {
+  list-style: none; /* 中点を消す */
+  padding: 0;
+  margin: 0;
+}
+
+/* --- お気に入りペインのリサイザ --- */
+#resizer-left-pane {
+  background-color: var(--border-color);
+  cursor: row-resize;
+  height: 5px;
+  flex: none;
+  z-index: 10;
+  transition: background-color 0.2s;
+  position: relative; /* トグルスイッチの配置用 */
+}
+
+/* ホバー時の色変化（トグルスイッチホバー時は除く） */
+#resizer-left-pane:hover:not(:has(.resizer-toggle:hover)),
+#resizer-left-pane.resizing {
+  background-color: var(--accent-color);
+}
+
+/* --- お気に入りアイコン選択UI --- */
+.icon-selector {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-selector-item {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 1px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #ccc;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.icon-selector-item:hover {
+  background-color: #333;
+}
+
+.icon-selector-item.selected {
+  border-color: var(--accent-color);
+  background-color: rgba(0, 122, 204, 0.2);
+  color: var(--glow-gold);
 }
 
 #center-pane {

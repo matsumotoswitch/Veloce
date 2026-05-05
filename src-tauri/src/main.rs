@@ -1125,6 +1125,25 @@ fn clear_thumbnail_cache() -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn open_in_explorer(path: String) -> Result<(), String> {
+    let path_obj = std::path::Path::new(&path);
+    if !path_obj.exists() {
+        return Err("Path does not exist".to_string());
+    }
+    
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+
+    Ok(())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThumbnailCacheInfo {
@@ -1236,7 +1255,8 @@ fn main() {
             rename_folder,
             open_thumbnail_folder,
             clear_thumbnail_cache,
-            get_thumbnail_cache_info
+            get_thumbnail_cache_info,
+            open_in_explorer
         ])
         .run(context)
         .expect("error while running tauri application");

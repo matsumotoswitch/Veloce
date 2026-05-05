@@ -34,7 +34,8 @@ const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-const resizingState = { left: false, right: false, center: false };
+const resizingState = { left: false, right: false, center: false, leftTop: false };
+let draggedFavoriteId = null; // お気に入りのドラッグ状態を管理
 
 const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
@@ -366,6 +367,62 @@ async function deleteSelectedFiles() {
   }
 }
 
+function renderFavorites() {
+  const container = document.getElementById('favorites-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (appState.favorites.length === 0) {
+    const li = document.createElement('li');
+    li.style.padding = '20px 10px';
+    li.style.color = '#666';
+    li.style.fontSize = '12px';
+    li.style.textAlign = 'center';
+    li.style.lineHeight = '1.6';
+    li.style.pointerEvents = 'none'; // ドラッグ操作の邪魔にならないようにする
+    li.innerHTML = 'フォルダをここにドラッグして<br>お気に入りに追加できます';
+    container.appendChild(li);
+    return;
+  }
+  
+  appState.favorites.forEach(fav => {
+    const li = document.createElement('li');
+    li.className = 'tree-node';
+    
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'tree-item favorite-item';
+    itemDiv.dataset.path = fav.path;
+    itemDiv.dataset.id = fav.id;
+    itemDiv.dataset.isFavorite = 'true';
+    itemDiv.style.display = 'flex';
+    itemDiv.style.alignItems = 'center';
+    itemDiv.draggable = true; // ドラッグ可能にする
+    
+    const icon = document.createElement('span');
+    icon.className = 'tree-icon';
+    if (fav.icon && fav.icon.startsWith('FAV_')) {
+      icon.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
+      icon.style.color = '#ebc06d'; // お気に入りのデフォルト色
+    } else {
+      icon.textContent = fav.icon || '⭐';
+    }
+    icon.style.marginRight = '6px';
+    icon.style.marginLeft = '16px'; 
+    icon.style.fontSize = '14px';
+    icon.style.display = 'inline-flex';
+    icon.style.alignItems = 'center';
+
+    const label = document.createElement('span');
+    label.className = 'tree-label';
+    label.textContent = fav.name;
+
+    itemDiv.appendChild(icon);
+    itemDiv.appendChild(label);
+    li.appendChild(itemDiv);
+    container.appendChild(li);
+  });
+}
+
 // ============================================================================
 // 3. Core Business Logic & Helpers
 // ============================================================================
@@ -389,6 +446,18 @@ const createMenuOption = (text, onClick) => {
   });
   return option;
 };
+
+// メニューセパレーターの作成
+const createMenuSeparator = () => {
+  const separator = document.createElement('div');
+  separator.className = 'menu-separator';
+  separator.style.height = '1px';
+  separator.style.backgroundColor = '#444';
+  separator.style.margin = '4px 0';
+  return separator;
+};
+
+const menuSeparatorFav = createMenuSeparator();
 
 function resetThumbnailPreloader() {
   appState.thumbnailRequestQueue = [];
@@ -637,6 +706,7 @@ function createTreeNode(folder, isRoot = false) {
   itemDiv.dataset.isRoot = isRoot;
   itemDiv.style.display = 'flex';
   itemDiv.style.alignItems = 'center';
+  itemDiv.draggable = !isRoot; // ドライブ以外はドラッグ可能に
 
   // 展開・折りたたみ用のトグルアイコン
   const toggleIcon = document.createElement('span');
@@ -1310,11 +1380,95 @@ const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
 const menuRenameFile = createMenuOption('ファイル名変更', renameSelectedFile);
 const menuDeleteFile = createMenuOption('ファイル削除', deleteSelectedFiles);
 
+const menuAddFavorite = createMenuOption('お気に入りに追加', async () => {
+  if (!contextMenu.targetFolder) return;
+  const path = contextMenu.targetFolder.path;
+  const name = contextMenu.targetFolder.name;
+  if (appState.favorites.find(f => f.path === path)) {
+    showNotification(`「${name}」はすでにお気に入りにあります`, 'warning');
+    return;
+  }
+  appState.favorites.push({ id: Date.now().toString(), name, path, icon: 'FAV_STAR' });
+  localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+  renderFavorites();
+  showNotification(`「${name}」をお気に入りに追加しました`, 'success');
+});
+
+const FAV_ICONS_LIST = ['FAV_STAR', 'FAV_HEART', 'FAV_BOOKMARK', 'FAV_FLAG', 'FAV_TAG', 'FAV_FOLDER'];
+let selectedFavIcon = 'FAV_STAR';
+
+function renderFavIconSelector(currentIcon) {
+  const container = document.getElementById('fav-icon-selector');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  // 過去の絵文字データなどがある場合は星をデフォルト選択として扱う
+  selectedFavIcon = (currentIcon && currentIcon.startsWith('FAV_')) ? currentIcon : 'FAV_STAR';
+
+  FAV_ICONS_LIST.forEach(key => {
+    const item = document.createElement('div');
+    item.className = `icon-selector-item ${key === selectedFavIcon ? 'selected' : ''}`;
+    item.innerHTML = UIManager.ICONS[key];
+    item.addEventListener('click', () => {
+      selectedFavIcon = key;
+      Array.from(container.children).forEach(child => child.classList.remove('selected'));
+      item.classList.add('selected');
+    });
+    container.appendChild(item);
+  });
+}
+
+const menuEditFavorite = createMenuOption('お気に入りを編集...', () => {
+  if (!contextMenu.targetFavoriteId) return;
+  const fav = appState.favorites.find(f => f.id === contextMenu.targetFavoriteId);
+  if (fav) {
+    renderFavIconSelector(fav.icon);
+    document.getElementById('fav-name-input').value = fav.name;
+    document.getElementById('fav-path-input').value = fav.path;
+    contextMenu.editingFavoriteId = fav.id;
+    document.getElementById('edit-favorite-modal').style.display = 'flex';
+  }
+});
+
+const menuDeleteFavorite = createMenuOption('お気に入りを削除', async () => {
+  if (!contextMenu.targetFavoriteId) return;
+  const favIndex = appState.favorites.findIndex(f => f.id === contextMenu.targetFavoriteId);
+  if (favIndex > -1) {
+    const fav = appState.favorites[favIndex];
+    const isConfirmed = await uiManager.showConfirm(`「${fav.name}」をお気に入りから削除しますか？`);
+    if (isConfirmed) {
+      appState.favorites.splice(favIndex, 1);
+      localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+      renderFavorites();
+      showNotification(`お気に入りから削除しました`);
+    }
+  }
+});
+
+const menuOpenInExplorer = createMenuOption('エクスプローラで開く', async () => {
+  let path = '';
+  if (contextMenu.targetFavoritePath) path = contextMenu.targetFavoritePath;
+  else if (contextMenu.targetFolder) path = contextMenu.targetFolder.path;
+
+  if (path && window.veloceAPI.openInExplorer) {
+    try {
+      await window.veloceAPI.openInExplorer(path);
+    } catch (e) {
+      showNotification(`開けませんでした: ${e}`, 'error');
+    }
+  }
+});
+
 contextMenu.appendChild(menuNewFolder);
 contextMenu.appendChild(menuRenameFolder);
 contextMenu.appendChild(menuDeleteFolder);
 contextMenu.appendChild(menuRenameFile);
 contextMenu.appendChild(menuDeleteFile);
+contextMenu.appendChild(menuAddFavorite);
+contextMenu.appendChild(menuEditFavorite);
+contextMenu.appendChild(menuDeleteFavorite);
+contextMenu.appendChild(menuSeparatorFav);
+contextMenu.appendChild(menuOpenInExplorer);
 document.body.appendChild(contextMenu);
 
 window.addEventListener('click', () => {
@@ -1323,14 +1477,15 @@ window.addEventListener('click', () => {
   }
 });
 
-// Diffモーダルの安全な閉じる処理
+// 各種モーダルの安全な閉じる処理
 window.addEventListener('click', (e) => {
   const diffModal = document.getElementById('diff-modal');
-  if (!diffModal) return;
-  
-  // 閉じるボタン（x）が押された場合、またはモーダルの外側（背景）が押された場合
-  if (e.target.id === 'diff-close' || e.target === diffModal) {
-    diffModal.style.display = 'none';
+  if (diffModal && (e.target.id === 'diff-close' || e.target === diffModal)) {
+      diffModal.style.display = 'none';
+  }
+  const favModal = document.getElementById('edit-favorite-modal');
+  if (favModal && e.target === favModal) {
+    favModal.style.display = 'none';
   }
 });
 
@@ -1392,6 +1547,11 @@ function handleItemContextMenu(e, isGrid) {
   menuDeleteFolder.style.display = 'none';
   menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none'; 
   menuDeleteFile.style.display = 'block';
+  menuAddFavorite.style.display = 'none';
+  menuEditFavorite.style.display = 'none';
+  menuDeleteFavorite.style.display = 'none';
+  menuSeparatorFav.style.display = 'none';
+  menuOpenInExplorer.style.display = 'none';
 
   contextMenu.style.display = 'block';
   const rect = contextMenu.getBoundingClientRect();
@@ -1492,6 +1652,11 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
   menuDeleteFolder.style.display = isRoot ? 'none' : 'block';
   menuRenameFile.style.display = 'none';
   menuDeleteFile.style.display = 'none';
+  menuAddFavorite.style.display = isRoot ? 'none' : 'block';
+  menuEditFavorite.style.display = 'none';
+  menuDeleteFavorite.style.display = 'none';
+  menuSeparatorFav.style.display = 'none';
+  menuOpenInExplorer.style.display = 'none';
 
   contextMenu.style.display = 'block';
   const rect = contextMenu.getBoundingClientRect();
@@ -1504,7 +1669,25 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
   contextMenu.style.top = `${y}px`;
 });
 
+uiManager.elements.dirTree.addEventListener('dragstart', (e) => {
+  const itemDiv = e.target.closest('.tree-item');
+  // ルート要素はドラッグ不可
+  if (!itemDiv || itemDiv.dataset.isRoot === 'true') {
+    e.preventDefault();
+    return;
+  }
+  
+  const folderData = {
+    path: itemDiv.dataset.path,
+    name: itemDiv.dataset.name,
+    isRoot: false
+  };
+  e.dataTransfer.setData('application/json-folder', JSON.stringify(folderData));
+  e.dataTransfer.effectAllowed = 'copy';
+});
+
 uiManager.elements.dirTree.addEventListener('dragenter', (e) => {
+  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return; // お気に入り関連のドラッグ中は無視
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   e.preventDefault();
@@ -1512,6 +1695,7 @@ uiManager.elements.dirTree.addEventListener('dragenter', (e) => {
 });
 
 uiManager.elements.dirTree.addEventListener('dragover', (e) => {
+  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return;
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   e.preventDefault();
@@ -1533,6 +1717,7 @@ uiManager.elements.dirTree.addEventListener('dragover', (e) => {
 });
 
 uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
+  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return;
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   if (!itemDiv.contains(e.relatedTarget)) {
@@ -1542,6 +1727,7 @@ uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
 });
 
 uiManager.elements.dirTree.addEventListener('drop', (e) => {
+  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return;
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   e.preventDefault();
@@ -1602,7 +1788,7 @@ function createResizerToggle(resizer, type) {
     z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
   `;
   
-  const isVertical = type === 'center';
+  const isVertical = type === 'center' || type === 'leftTop';
   btn.style.width = isVertical ? '30px' : '14px';
   btn.style.height = isVertical ? '14px' : '30px';
   
@@ -1613,6 +1799,7 @@ function createResizerToggle(resizer, type) {
   
   if (type === 'left') btn.innerHTML = appState.layout.leftVisible ? openIcon : closeIcon;
   else if (type === 'right') btn.innerHTML = appState.layout.rightVisible ? openIcon : closeIcon;
+  else if (type === 'leftTop') btn.innerHTML = appState.layout.leftTopVisible ? openIcon : closeIcon;
   else btn.innerHTML = openIcon;
 
   btn.addEventListener('click', (e) => {
@@ -1643,6 +1830,22 @@ function createResizerToggle(resizer, type) {
         localStorage.setItem('topHeight', '0px');
         btn.innerHTML = closeIcon;
       }
+    } else if (type === 'leftTop') {
+      const root = document.documentElement;
+      const isCollapsed = root.style.getPropertyValue('--left-top-height') === '0px';
+      if (isCollapsed) {
+        const restoreHeight = localStorage.getItem('prevLeftTopHeight') || '150px';
+        root.style.setProperty('--left-top-height', restoreHeight);
+        localStorage.setItem('leftTopHeight', restoreHeight);
+        appState.layout.leftTopVisible = true;
+        btn.innerHTML = openIcon;
+      } else {
+        localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
+        root.style.setProperty('--left-top-height', '0px');
+        localStorage.setItem('leftTopHeight', '0px');
+        appState.layout.leftTopVisible = false;
+        btn.innerHTML = closeIcon;
+      }
     }
   });
 
@@ -1654,10 +1857,11 @@ function createResizerToggle(resizer, type) {
 setupResizer(uiManager.elements.resizerLeft, 'left', 'col-resize');
 setupResizer(uiManager.elements.resizerRight, 'right', 'col-resize');
 setupResizer(uiManager.elements.resizerCenter, 'center', 'row-resize');
+setupResizer(document.getElementById('resizer-left-pane'), 'leftTop', 'row-resize');
 
 let resizerRafId = null;
 window.addEventListener('mousemove', (e) => {
-  if (!resizingState.left && !resizingState.right && !resizingState.center) return;
+  if (!resizingState.left && !resizingState.right && !resizingState.center && !resizingState.leftTop) return;
 
   if (resizerRafId) cancelAnimationFrame(resizerRafId);
   resizerRafId = requestAnimationFrame(() => {
@@ -1727,6 +1931,31 @@ window.addEventListener('mousemove', (e) => {
           btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
         }
       }
+    } else if (resizingState.leftTop) {
+      const leftPane = document.getElementById('left-pane');
+      const rect = leftPane.getBoundingClientRect();
+      let newHeight = e.clientY - rect.top;
+      
+      if (newHeight < 30) {
+        const root = document.documentElement;
+        if (root.style.getPropertyValue('--left-top-height') !== '0px') {
+          localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
+          root.style.setProperty('--left-top-height', '0px');
+          localStorage.setItem('leftTopHeight', '0px');
+          const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
+          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+        }
+      } else {
+        newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
+        const root = document.documentElement;
+        root.style.setProperty('--left-top-height', `${newHeight}px`);
+        appState.layout.leftTopHeight = newHeight;
+        
+        const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
+        if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
+          btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
+        }
+      }
     }
   });
 });
@@ -1746,6 +1975,12 @@ window.addEventListener('mouseup', () => {
     localStorage.setItem('topHeight', document.documentElement.style.getPropertyValue('--top-height'));
     resizingState.center = false;
     if (uiManager.elements.resizerCenter) uiManager.elements.resizerCenter.classList.remove('resizing');
+  }
+  if (resizingState.leftTop) {
+    localStorage.setItem('leftTopHeight', document.documentElement.style.getPropertyValue('--left-top-height'));
+    resizingState.leftTop = false;
+    const el = document.getElementById('resizer-left-pane');
+    if (el) el.classList.remove('resizing');
   }
   document.body.style.cursor = 'default';
   document.body.classList.remove('is-resizing'); // ドラッグ中フラグを解除
@@ -1816,6 +2051,12 @@ window.addEventListener('keydown', async (e) => {
     if (diffModal && diffModal.style.display === 'flex') {
       e.preventDefault();
       diffModal.style.display = 'none';
+      return;
+    }
+    const favModal = document.getElementById('edit-favorite-modal');
+    if (favModal && favModal.style.display === 'flex') {
+      e.preventDefault();
+      favModal.style.display = 'none';
       return;
     }
     if (document.getElementById('help-overlay')) {
@@ -1969,6 +2210,8 @@ document.addEventListener('contextmenu', (e) => {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+  renderFavorites();
+
   const minBtn = document.getElementById('titlebar-minimize');
   const maxBtn = document.getElementById('titlebar-maximize');
   const closeBtn = document.getElementById('titlebar-close');
@@ -2031,6 +2274,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.documentElement.style.setProperty('--top-height', savedTopHeight);
     if (savedTopHeight === '0px' && uiManager.elements.resizerCenter) {
       const btn = uiManager.elements.resizerCenter.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+    }
+  }
+
+  const savedLeftTopHeight = localStorage.getItem('leftTopHeight');
+  if (savedLeftTopHeight) {
+    if (savedLeftTopHeight === '0px') {
+      const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
     }
   }
@@ -2138,6 +2389,199 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
     });
   }
+
+  const favListElement = document.getElementById('favorites-list');
+  if (favListElement) {
+    // --- お気に入りのドラッグ＆ドロップ並び替え処理 ---
+    favListElement.addEventListener('dragstart', (e) => {
+      const itemDiv = e.target.closest('.favorite-item');
+      if (!itemDiv) return;
+      draggedFavoriteId = itemDiv.dataset.id;
+      e.dataTransfer.effectAllowed = 'move';
+      // ドラッグ中の元アイテムを半透明にする
+      setTimeout(() => { itemDiv.style.opacity = '0.5'; }, 0);
+    });
+
+    favListElement.addEventListener('dragend', (e) => {
+      const itemDiv = e.target.closest('.favorite-item');
+      if (itemDiv) itemDiv.style.opacity = '1';
+      draggedFavoriteId = null;
+      // 全てのドロップインジケータ（線）をクリア
+      favListElement.querySelectorAll('.favorite-item').forEach(item => {
+        item.style.boxShadow = '';
+      });
+    });
+
+    favListElement.addEventListener('dragover', (e) => {
+      const isFolderDrop = Array.from(e.dataTransfer.types).includes('application/json-folder');
+      if (!draggedFavoriteId && !isFolderDrop) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = isFolderDrop ? 'copy' : 'move';
+
+      const itemDiv = e.target.closest('.favorite-item');
+      if (!itemDiv || (draggedFavoriteId && itemDiv.dataset.id === draggedFavoriteId)) {
+        favListElement.querySelectorAll('.favorite-item').forEach(item => item.style.boxShadow = '');
+        return;
+      }
+
+      // マウス位置がターゲットの半分より上か下かで線の位置を変える
+      const rect = itemDiv.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+
+      favListElement.querySelectorAll('.favorite-item').forEach(item => {
+        if (item !== itemDiv) item.style.boxShadow = '';
+      });
+
+      if (e.clientY < midY) {
+        itemDiv.style.boxShadow = '0 -2px 0 var(--accent-color)'; // 上に線
+      } else {
+        itemDiv.style.boxShadow = '0 2px 0 var(--accent-color)';  // 下に線
+      }
+    });
+
+    favListElement.addEventListener('dragleave', (e) => {
+      if (e.relatedTarget && favListElement.contains(e.relatedTarget)) return;
+      favListElement.querySelectorAll('.favorite-item').forEach(item => {
+        item.style.boxShadow = '';
+      });
+    });
+
+    favListElement.addEventListener('drop', (e) => {
+      const isFolderDrop = Array.from(e.dataTransfer.types).includes('application/json-folder');
+      if (!draggedFavoriteId && !isFolderDrop) return;
+      e.preventDefault();
+
+      favListElement.querySelectorAll('.favorite-item').forEach(item => item.style.boxShadow = '');
+
+      if (isFolderDrop) {
+        const jsonData = e.dataTransfer.getData('application/json-folder');
+        if (jsonData) {
+          try {
+            const folder = JSON.parse(jsonData);
+            if (appState.favorites.find(f => f.path === folder.path)) {
+              showNotification(`「${folder.name}」はすでにお気に入りにあります`, 'warning');
+              return;
+            }
+
+            let insertIndex = appState.favorites.length;
+            const itemDiv = e.target.closest('.favorite-item');
+            if (itemDiv) {
+              const targetId = itemDiv.dataset.id;
+              const rect = itemDiv.getBoundingClientRect();
+              const midY = rect.top + rect.height / 2;
+              const insertAfter = e.clientY >= midY;
+              const newIndex = appState.favorites.findIndex(f => f.id === targetId);
+              if (newIndex > -1) {
+                insertIndex = insertAfter ? newIndex + 1 : newIndex;
+              }
+            }
+
+            const newFav = { id: Date.now().toString(), name: folder.name, path: folder.path, icon: 'FAV_STAR' };
+            appState.favorites.splice(insertIndex, 0, newFav);
+            localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+            renderFavorites();
+            showNotification(`「${folder.name}」をお気に入りに追加しました`, 'success');
+          } catch (err) {}
+        }
+        return;
+      }
+
+      const itemDiv = e.target.closest('.favorite-item');
+      if (!itemDiv || itemDiv.dataset.id === draggedFavoriteId) return;
+
+      const targetId = itemDiv.dataset.id;
+      const rect = itemDiv.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const insertAfter = e.clientY >= midY;
+
+      const fromIndex = appState.favorites.findIndex(f => f.id === draggedFavoriteId);
+      const toIndex = appState.favorites.findIndex(f => f.id === targetId);
+
+      if (fromIndex > -1 && toIndex > -1) {
+        const [movedItem] = appState.favorites.splice(fromIndex, 1);
+        let newIndex = appState.favorites.findIndex(f => f.id === targetId);
+        if (insertAfter) newIndex += 1;
+        
+        // 並び替えた状態を保存して再描画
+        appState.favorites.splice(newIndex, 0, movedItem);
+        localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+        renderFavorites();
+      }
+    });
+
+    favListElement.addEventListener('click', async (e) => {
+      const itemDiv = e.target.closest('.tree-item');
+      if (!itemDiv) return;
+      
+      const path = itemDiv.dataset.path;
+      appState.selection.clear();
+      appState.selectedIndex = -1;
+      uiManager.updateSelectionUI();
+
+      if (window.veloceAPI.loadDirectory) {
+        const result = await window.veloceAPI.loadDirectory(path);
+        if (result) {
+          appState.currentDirectory = result.path;
+          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          applyNewFileList(result.imageFiles, true);
+          await expandTreeToPath(appState.currentDirectory);
+        } else {
+          uiManager.showToast('ディレクトリが存在しません', 3000, null, 'warning');
+        }
+      }
+    });
+
+    favListElement.addEventListener('contextmenu', (e) => {
+      const itemDiv = e.target.closest('.tree-item');
+      if (!itemDiv) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      contextMenu.targetFavoriteId = itemDiv.dataset.id;
+      contextMenu.targetFavoritePath = itemDiv.dataset.path;
+      contextMenu.targetFolder = null; 
+
+      menuNewFolder.style.display = 'none';
+      menuRenameFolder.style.display = 'none';
+      menuDeleteFolder.style.display = 'none';
+      menuRenameFile.style.display = 'none';
+      menuDeleteFile.style.display = 'none';
+      menuAddFavorite.style.display = 'none';
+      
+      menuEditFavorite.style.display = 'block';
+      menuDeleteFavorite.style.display = 'block';
+      menuSeparatorFav.style.display = 'block';
+      menuOpenInExplorer.style.display = 'block';
+
+      contextMenu.style.display = 'block';
+      const rect = contextMenu.getBoundingClientRect();
+      let x = e.clientX;
+      let y = e.clientY;
+      if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
+      if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
+
+      contextMenu.style.left = `${x}px`;
+      contextMenu.style.top = `${y}px`;
+    });
+  }
+
+  document.getElementById('fav-cancel-btn')?.addEventListener('click', () => {
+    document.getElementById('edit-favorite-modal').style.display = 'none';
+  });
+
+  document.getElementById('fav-save-btn')?.addEventListener('click', () => {
+    if (contextMenu.editingFavoriteId) {
+      const fav = appState.favorites.find(f => f.id === contextMenu.editingFavoriteId);
+      if (fav) {
+        fav.icon = selectedFavIcon;
+        fav.name = document.getElementById('fav-name-input').value;
+        fav.path = document.getElementById('fav-path-input').value;
+        localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+        renderFavorites();
+      }
+    }
+    document.getElementById('edit-favorite-modal').style.display = 'none';
+  });
 
   const savedSort = localStorage.getItem('currentSort');
   if (savedSort) {

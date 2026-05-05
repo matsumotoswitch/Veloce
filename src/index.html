@@ -60,7 +60,13 @@
   <div class="app-content">
   <!-- 左ペイン: ディレクトリツリー等 -->
   <div id="left-pane">
-	<div id="dir-tree"></div>
+    <div id="favorites-section">
+      <ul id="favorites-list" class="tree-root"></ul>
+    </div>
+    <div class="resizer-h" id="resizer-left-pane"></div>
+    <div id="directories-section">
+      <div id="dir-tree"></div>
+    </div>
   </div>
 
   <div class="resizer" id="resizer-left"></div>
@@ -129,6 +135,28 @@
       <h2 style="margin-top: 0; color: #ebc06d;">プロンプト差分比較 <span id="diff-close" class="close-btn" style="float: right; cursor: pointer; color: #888;">&times;</span></h2>
       <div id="diff-container">
         </div>
+    </div>
+  </div>
+
+  <div id="edit-favorite-modal" class="modal">
+    <div class="modal-content" style="max-width: 400px; width: 90%;">
+      <h2 style="margin-top: 0; color: #ebc06d; margin-bottom: 20px;">お気に入りを編集</h2>
+      <div style="margin-bottom: 15px;">
+        <label style="display:block; margin-bottom: 5px; color: #ccc;">アイコン</label>
+        <div id="fav-icon-selector" class="icon-selector"></div>
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label for="fav-name-input" style="display:block; margin-bottom: 5px; color: #ccc;">名前</label>
+        <input type="text" id="fav-name-input" class="dialog-input" placeholder="表示名">
+      </div>
+      <div style="margin-bottom: 25px;">
+        <label for="fav-path-input" style="display:block; margin-bottom: 5px; color: #ccc;">パス</label>
+        <input type="text" id="fav-path-input" class="dialog-input" placeholder="ディレクトリパス">
+      </div>
+      <div class="dialog-buttons">
+        <button id="fav-cancel-btn" class="dialog-btn cancel">キャンセル</button>
+        <button id="fav-save-btn" class="dialog-btn primary">保存</button>
+      </div>
     </div>
   </div>
 </body>
