@@ -1,13 +1,15 @@
 :root {
-  --bg-color: #1e1e1e;
-  --panel-bg: #252526;
-  --border-color: #333;
-  --text-color: #ccc;
-  --accent-color: #007acc;
-  --modal-bg: #2d2d2d;
-  --modal-border: #444;
-  --danger-red: #e81123;
-  --glow-gold: #ebc06d;
+  --bg-color: #131b1e;
+  --panel-bg: #131b1e;
+  --border-color: #2b3d41;
+  --text-color: #cddbe0;
+  --accent-color: #257e8c; /* 落ち着いた青緑に変更 */
+  --accent-hover: #2e96a6;
+  --modal-bg: #131b1e;
+  --modal-border: #364b50;
+  --danger-red: #ff3366;
+  --glow-gold: #ffcc00;
+  --resizer-color: #1c282c; /* 背景とボーダーの中間の暗さ */
 }
 
 * {
@@ -17,12 +19,12 @@
 /* --- Titlebar & Inline Toolbar --- */
 .titlebar {
   height: 38px; /* 検索バーが収まるように高さを少し拡張 */
-  background: #1e1e1e;
+  background: var(--bg-color);
   user-select: none;
   display: grid;
   grid-template-columns: 1fr minmax(250px, 500px) 1fr; /* 左:中央(検索):右 の割合 */
   align-items: center;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-color);
   -webkit-app-region: drag;
 }
 
@@ -49,7 +51,7 @@
 }
 
 .titlebar-title {
-  color: #ccc;
+  color: var(--text-color);
   font-size: 12px;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
@@ -67,19 +69,19 @@
   align-items: center;
   width: 46px;
   height: 100%;
-  color: #ccc;
+  color: var(--text-color);
   cursor: default;
   transition: background-color 0.1s;
 }
 
 .titlebar-button svg { width: 10px; height: 10px; }
-.titlebar-button:hover { background-color: #333; }
-.titlebar-button.titlebar-close:hover { background-color: #e81123; color: white; }
+.titlebar-button:hover { background-color: rgba(37, 126, 140, 0.15); }
+.titlebar-button.titlebar-close:hover { background-color: var(--danger-red); color: white; }
 
 body {
   margin: 0;
   padding: 0;
-  background-color: #1e1e1e; /* アプリ全体の背景色 */
+  background-color: var(--bg-color); /* アプリ全体の背景色 */
   overflow: hidden;
 }
 
@@ -118,7 +120,7 @@ body.is-resizing .app-content {
   padding: 20px;
   min-width: 300px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-  color: #ccc;
+  color: var(--text-color);
   font-family: inherit;
 }
 
@@ -143,11 +145,14 @@ body.is-resizing .app-content {
 }
 .dialog-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.dialog-btn.cancel { background-color: #444; }
+.dialog-btn:hover:not(:disabled) { filter: brightness(1.2); }
+
+.dialog-btn.cancel { background-color: var(--modal-border); }
 .dialog-btn.primary { background-color: var(--accent-color); }
 .dialog-btn.danger { background-color: var(--danger-red); }
 
-.dialog-input { width: 100%; box-sizing: border-box; padding: 6px; background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 4px; margin-bottom: 4px; font-family: inherit; font-size: inherit; outline: none; }
+.dialog-input { width: 100%; box-sizing: border-box; padding: 6px; background-color: rgba(0, 0, 0, 0.2); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 4px; font-family: inherit; font-size: inherit; outline: none; transition: border-color 0.2s; }
+.dialog-input:focus { border-color: var(--accent-color); }
 .dialog-input.error { border-color: var(--danger-red); }
 
 .dialog-warning { color: var(--danger-red); font-size: 12px; min-height: 14px; margin-bottom: 10px; display: none; }
@@ -162,16 +167,16 @@ body.is-resizing .app-content {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #555;
+  background: var(--modal-border); /* 青緑がかったグレー (#364b50) に変更 */
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #777;
+  background: #4a676e; /* ホバー時もテーマに合わせた明るいティールグレーに変更 */
 }
 
 /* Resizers */
 .resizer {
-  background-color: var(--border-color);
+  background-color: var(--resizer-color);
   cursor: col-resize;
   z-index: 10;
   transition: background-color 0.2s;
@@ -182,7 +187,7 @@ body.is-resizing .app-content {
 }
 
 .resizer-h {
-  background-color: var(--border-color);
+  background-color: var(--resizer-color);
   cursor: row-resize;
   height: 5px;
   flex: none;
@@ -196,14 +201,13 @@ body.is-resizing .app-content {
 
 /* トグルスイッチの追加スタイル（JSで生成される要素用） */
 .resizer-toggle {
-  transition: background-color 0.2s, border-color 0.2s;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s, opacity 0.2s;
 }
 .resizer-toggle:hover {
   background-color: var(--accent-color) !important;
   border-color: var(--accent-color) !important;
-}
-.resizer-toggle:hover svg {
-  stroke: #fff;
+  color: #fff !important;
+  opacity: 1 !important;
 }
 
 /* Panes */
@@ -246,7 +250,7 @@ body.is-resizing #favorites-section {
 
 /* --- お気に入りペインのリサイザ --- */
 #resizer-left-pane {
-  background-color: var(--border-color);
+  background-color: var(--resizer-color);
   cursor: row-resize;
   height: 5px;
   flex: none;
@@ -273,20 +277,21 @@ body.is-resizing #favorites-section {
   display: flex;
   justify-content: center;
   align-items: center;
-  border: 1px solid #444;
+  border: 1px solid var(--modal-border);
   border-radius: 4px;
   cursor: pointer;
-  color: #ccc;
+  color: var(--text-color);
   transition: background-color 0.2s, border-color 0.2s, color 0.2s;
 }
 
 .icon-selector-item:hover {
-  background-color: #333;
+  background-color: rgba(37, 126, 140, 0.15);
+  border-color: var(--accent-color);
 }
 
 .icon-selector-item.selected {
   border-color: var(--accent-color);
-  background-color: rgba(0, 122, 204, 0.2);
+  background-color: rgba(37, 126, 140, 0.2);
   color: var(--glow-gold);
 }
 
@@ -315,7 +320,7 @@ body.is-resizing #favorites-section {
   width: 100%;
   height: 26px;
   background: rgba(0, 0, 0, 0.25); /* タイトルバーより少し暗く凹ませる */
-  border: 1px solid #333;
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 0 8px;
   transition: border-color 0.2s, background 0.2s;
@@ -331,12 +336,13 @@ body.is-resizing #favorites-section {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #888;
+  color: var(--text-color);
+  opacity: 0.6;
   margin-right: 6px;
-  transition: color 0.2s;
+  transition: color 0.2s, opacity 0.2s;
 }
 
-#search-clear-btn:hover { color: var(--accent-color); }
+#search-clear-btn:hover { color: var(--accent-color); opacity: 1; }
 
 #search-bar {
   flex: 1;
@@ -376,10 +382,14 @@ table#file-table {
 #file-table th:nth-child(5) { width: 10%; }
 #file-table th:nth-child(6) { width: 25%; }
 
-th, td { padding: 4px 8px; border-bottom: 1px solid #333; cursor: pointer; }
-th { background: #2d2d30; position: sticky; top: 0; z-index: 2; }
-tr:hover { background: #2a2d2e; }
-tr.selected { background: var(--accent-color); color: #fff; }
+#file-table th, #file-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-color); cursor: pointer; }
+#file-table th { background: var(--panel-bg); position: sticky; top: 0; z-index: 2; }
+#file-table tr:hover { background: rgba(37, 126, 140, 0.15); }
+#file-table tr.selected { 
+  background: var(--accent-color); 
+  color: #fff; 
+  font-weight: normal; 
+}
 
 #file-table td {
   white-space: nowrap;
@@ -398,13 +408,13 @@ tr.selected { background: var(--accent-color); color: #fff; }
   border-bottom: 1px solid var(--border-color);
   gap: 8px;
 }
-#thumbnail-controls label { font-size: 12px; color: #aaa; }
+#thumbnail-controls label { font-size: 12px; color: var(--text-color); opacity: 0.8; }
 #thumbnail-controls input { cursor: pointer; }
 
 .control-divider {
   width: 1px;
   height: 16px;
-  background-color: #555;
+  background-color: var(--border-color);
   margin: 0 4px;
 }
 
@@ -417,13 +427,44 @@ tr.selected { background: var(--accent-color); color: #fff; }
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  color: #a0a0a0;
-  transition: background-color 0.2s, color 0.2s;
+  color: var(--text-color);
+  opacity: 0.8;
+  transition: background-color 0.2s, color 0.2s, opacity 0.2s;
 }
 
 .icon-btn:hover {
   background-color: transparent;
   color: #fff;
+  opacity: 1;
+}
+
+/* --- Slider (Range Input) --- */
+input[type="range"] {
+  -webkit-appearance: none;
+  background: transparent;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+  background: var(--text-color);
+  margin-top: -4px;
+  cursor: pointer;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--accent-color);
+  box-shadow: 0 0 6px rgba(37, 126, 140, 0.6);
+}
+input[type="range"]:focus {
+  outline: none;
 }
 
 .icon-btn svg {
@@ -432,11 +473,11 @@ tr.selected { background: var(--accent-color); color: #fff; }
 }
 
 #open-cache-btn:hover svg {
-  stroke: #ebc06d;
+  stroke: var(--glow-gold);
 }
 
 #clear-cache-btn:hover svg {
-  stroke: #ff4d4d;
+  stroke: var(--danger-red);
 }
 
 @keyframes true-original-glow {
@@ -479,17 +520,20 @@ tr.selected { background: var(--accent-color); color: #fff; }
   will-change: border-color;
 }
 
-.thumbnail-item:hover { border-color: #555; }
-.thumbnail-item.selected { border-color: var(--accent-color); }
+.thumbnail-item:hover { border-color: var(--border-color); }
+.thumbnail-item.selected { 
+  border-color: var(--accent-color); 
+  box-shadow: 0 0 6px rgba(37, 126, 140, 0.6);
+}
 
 /* Right Pane: Inspector */
 .inspector-data { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.inspector-data label { font-size: 0.85em; margin: 10px 0 5px 0; color: #999; }
+.inspector-data label { font-size: 0.85em; margin: 10px 0 5px 0; color: var(--text-color); opacity: 0.7; }
 .inspector-data textarea {
   flex: 1;
-  background: #1e1e1e;
-  color: #fff;
-  border: 1px solid #333;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
   padding: 5px;
   resize: none;
   font-family: inherit;
@@ -527,20 +571,49 @@ tr.selected { background: var(--accent-color); color: #fff; }
   user-select: none;
   border-radius: 4px;
   white-space: nowrap;
+  color: var(--text-color);
+  transition: color 0.2s, background-color 0.2s;
 }
 
-#dir-tree .tree-item:hover { background: #2a2d2e; }
+#dir-tree .tree-item:hover,
+#favorites-list .tree-item:hover {
+  background: rgba(37, 126, 140, 0.15);
+  color: #fff;
+}
 
-#dir-tree .tree-item.selected {
+#dir-tree .tree-item.selected,
+#favorites-list .tree-item.selected {
   background: var(--accent-color);
   color: #fff;
 }
 
-#dir-tree .tree-icon {
+#dir-tree .tree-icon,
+#favorites-list .tree-icon {
   margin-right: 6px;
   font-size: 14px;
 }
 
+/* トグルアイコンのベース色とホバー連動 */
+.toggle-icon {
+  color: #888;
+  transition: color 0.2s;
+}
+.tree-item:hover .toggle-icon,
+.tree-item.selected .toggle-icon {
+  color: #fff;
+}
+
+/* フォルダアイコンの色（var(--accent-color) が指定されているがホバー時に上書きする） */
+.tree-item:hover .tree-icon svg,
+.tree-item.selected .tree-icon svg {
+  stroke: #fff !important;
+}
+
+/* お気に入りアイコンの色（var(--glow-gold) が指定されているがホバー時に上書きする） */
+.favorite-item:hover .tree-icon,
+.favorite-item.selected .tree-icon {
+  color: #fff !important;
+}
 /* --- トースト通知 --- */
 #toast-container {
   position: fixed;
@@ -555,9 +628,9 @@ tr.selected { background: var(--accent-color); color: #fff; }
 }
 
 .toast-message {
-  background-color: rgba(30, 30, 30, 0.95);
-  color: #ccc;
-  border: 1px solid #555;
+  background-color: rgba(19, 27, 30, 0.95);
+  color: var(--text-color);
+  border: 1px solid var(--modal-border);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 13px;
@@ -574,36 +647,36 @@ tr.selected { background: var(--accent-color); color: #fff; }
 }
 
 .toast-message.warning {
-  background-color: rgba(50, 40, 25, 0.95);
-  border-color: #d97706;
-  color: #fcd34d;
+  background-color: rgba(255, 204, 0, 0.15);
+  border-color: var(--glow-gold);
+  color: #ffe680;
 }
 
 .toast-message.success {
-  background-color: rgba(30, 45, 35, 0.95);
-  border-color: #28a745;
-  color: #a3f7b5;
+  background-color: rgba(37, 126, 140, 0.2);
+  border-color: var(--accent-color);
+  color: #61c7d6;
 }
 
 .toast-message.error {
-  background-color: rgba(50, 25, 30, 0.95);
-  border-color: #dc3545;
-  color: #f8babb;
+  background-color: rgba(255, 51, 102, 0.15);
+  border-color: var(--danger-red);
+  color: #ff99b3;
 }
 
 /* --- ライセンス画面：最終デザイン確定版 --- */
 #license-text {
-  color: #ccc;
+  color: var(--text-color);
   line-height: 1.5;
 }
 
 /* 見出し：黄色 */
 #license-text h1, #license-text h2, #license-text h3 {
-  color: #ffcc00 !important;
+  color: var(--glow-gold) !important;
   margin: 1em 0 0.5em 0 !important; /* 適切な隙間に調整 */
 }
-#license-text h1 { font-size: 1.5em; border-bottom: 1px solid #444; padding-bottom: 4px; }
-#license-text h2 { font-size: 1.25em; border-bottom: 1px solid #333; padding-bottom: 2px; }
+#license-text h1 { font-size: 1.5em; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
+#license-text h2 { font-size: 1.25em; border-bottom: 1px solid var(--border-color); padding-bottom: 2px; }
 
 /* 引用：背景を暗くし、左バーを強調 */
 .md-blockquote {
@@ -611,22 +684,30 @@ tr.selected { background: var(--accent-color); color: #fff; }
   margin: 1em 0 !important;
   padding: 10px 16px !important;
   background: rgba(0, 0, 0, 0.25) !important; /* 周囲より暗い背景 */
-  border-left: 4px solid #666 !important;     /* グレーの縦線 */
-  color: #bbb !important;
+  border-left: 4px solid var(--accent-color) !important;
+  color: var(--text-color) !important;
   border-radius: 0 4px 4px 0;
 }
 
 /* リスト：隙間ゼロ */
 #license-text ul { list-style: none !important; padding-left: 0 !important; margin: 0.5em 0 !important; }
 #license-text li { position: relative !important; padding-left: 1.2em !important; line-height: 1.6 !important; }
-#license-text li::before { content: "•" !important; position: absolute; left: 2px; color: #888; }
+#license-text li::before { content: "•" !important; position: absolute; left: 2px; color: var(--border-color); }
 
-#license-text hr { border: 0; height: 1px; background: #333; margin: 1.5em 0 !important; }
+#license-text hr { border: 0; height: 1px; background: var(--border-color); margin: 1.5em 0 !important; }
 #license-text strong { color: #fff !important; }
 
 /* --- Diff Modal --- */
 .modal { display: none; position: fixed; z-index: 10005; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.modal-content { background-color: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+.modal-content { background-color: var(--modal-bg); border: 1px solid var(--modal-border); border-radius: 8px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+
+/* ダイアログやモーダルの閉じるボタン */
+.close-btn {
+  transition: color 0.2s, filter 0.2s;
+}
+.close-btn:hover {
+  color: var(--danger-red) !important;
+}
 
 /* 左右分割レイアウト用 */
 .diff-columns {
@@ -646,8 +727,8 @@ tr.selected { background: var(--accent-color); color: #fff; }
 
 /* メイン画面のプロンプトエリアに合わせた基本スタイル（文字サイズを 0.9em に戻す） */
 .prompt-look {
-  background-color: #111;
-  border: 1px solid #333;
+  background-color: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
   padding: 10px;
   border-radius: 4px;
   min-height: 120px;
@@ -655,7 +736,7 @@ tr.selected { background: var(--accent-color); color: #fff; }
   overflow-y: auto;
   font-size: 0.9em; /* ここを1.1emから0.9emに修正 */
   line-height: 1.5;
-  color: #ccc;
+  color: var(--text-color);
 }
 
 /* パラメータ表示用の高さ調整 */
@@ -668,24 +749,30 @@ tr.selected { background: var(--accent-color); color: #fff; }
 }
 
 .diff-section { margin-bottom: 20px; }
-.diff-section h3 { color: #ccc; margin-bottom: 8px; font-size: 0.9em; border-bottom: 1px solid #444; padding-bottom: 4px; transition: color 0.2s; }
-.diff-section h3.has-diff { color: #ffcc00; }
+.diff-section h3 { color: var(--text-color); margin-bottom: 8px; font-size: 0.9em; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; transition: color 0.2s; }
+.diff-section h3.has-diff { color: var(--glow-gold); }
 
 /* Diffモーダル内のコピーボタン */
 .diff-copy-btn {
   cursor: pointer;
-  color: #888;
+  color: var(--text-color);
+  opacity: 0.6;
   display: inline-flex;
   align-items: center;
-  transition: color 0.1s, filter 0.1s;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s, filter 0.2s, background-color 0.2s, opacity 0.2s;
 }
 .diff-copy-btn:hover {
-  color: #3a7afe;
+  color: var(--accent-color);
+  opacity: 1;
+  background-color: rgba(37, 126, 140, 0.15);
 }
 
 /* --- Diff Copy Button Glow Effect --- */
 .diff-copy-btn svg {
-  transition: stroke 0.1s, filter 0.1s;
+  transition: stroke 0.2s, filter 0.2s;
 }
 
 /* 発光状態のクラス */
@@ -703,14 +790,14 @@ tr.selected { background: var(--accent-color); color: #fff; }
   padding: 2px 6px;
   margin: 2px;
   border-radius: 3px;
-  background-color: #333;
-  color: #ccc;
+  background-color: rgba(37, 126, 140, 0.1);
+  color: var(--text-color);
   font-family: inherit;
   word-break: break-all;
 }
-.diff-tag.added { background-color: rgba(40, 167, 69, 0.2); color: #a3f7b5; border: 1px solid #28a745; }
-.diff-tag.removed { background-color: rgba(220, 53, 69, 0.2); color: #f8babb; border: 1px solid #dc3545; }
-.diff-tag.common { opacity: 0.6; border: 1px solid transparent; }
+.diff-tag.added { background-color: rgba(37, 126, 140, 0.25); color: #61c7d6; border: 1px solid var(--accent-color); }
+.diff-tag.removed { background-color: rgba(255, 51, 102, 0.15); color: var(--danger-red); border: 1px solid var(--danger-red); }
+.diff-tag.common { opacity: 0.85; border: 1px solid var(--border-color); }
 
 /* Diffモーダル内のサムネイル表示用 */
 .diff-thumbnail-container {
@@ -719,7 +806,7 @@ tr.selected { background: var(--accent-color); color: #fff; }
   align-items: center;
   height: 250px; /* サムネイルの最大高さ */
   background: rgba(0, 0, 0, 0.2);
-  border: 1px solid #333;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   overflow: hidden;
   margin-top: 10px;
@@ -736,11 +823,13 @@ tr.selected { background: var(--accent-color); color: #fff; }
   pointer-events: none;
   z-index: 10005;
   padding: 8px 12px;
-  background-color: rgba(30, 30, 30, 0.95);
-  color: #ccc;
-  border: 1px solid #555;
+  background-color: rgba(19, 27, 30, 0.85);
+  color: var(--text-color);
+  border: 1px solid var(--accent-color);
   border-radius: 6px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), 0 0 8px rgba(37, 126, 140, 0.3);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   font-size: 13px;
   line-height: 1.4;
   white-space: pre-wrap;

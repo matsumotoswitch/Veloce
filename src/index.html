@@ -22,8 +22,8 @@
       font-size: 0.9em;
     }
     #file-table th, #file-table td {
-      border-right: 1px dotted #444;
-      border-bottom: 1px solid #444;
+      border-right: 1px dotted var(--border-color);
+      border-bottom: 1px solid var(--border-color);
     }
     #file-table th {
       font-weight: normal;
@@ -115,7 +115,7 @@
   <!-- 右ペイン: インスペクター -->
   <div id="right-pane">
     <div id="inspector-content" class="inspector-data">
-      <div style="color: #666; text-align: center; margin-top: 50px;">
+      <div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 50px;">
         画像を選択すると詳細が表示されます
       </div>
     </div>
@@ -132,7 +132,7 @@
 
   <div id="diff-modal" class="modal">
     <div class="modal-content" style="max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto;">
-      <h2 style="margin-top: 0; color: #ebc06d;">プロンプト差分比較 <span id="diff-close" class="close-btn" style="float: right; cursor: pointer; color: #888;">&times;</span></h2>
+      <h2 style="margin-top: 0; color: var(--glow-gold);">プロンプト差分比較 <span id="diff-close" class="close-btn" style="float: right; cursor: pointer; color: var(--text-color); opacity: 0.6;">&times;</span></h2>
       <div id="diff-container">
         </div>
     </div>
@@ -140,17 +140,17 @@
 
   <div id="edit-favorite-modal" class="modal">
     <div class="modal-content" style="max-width: 400px; width: 90%;">
-      <h2 style="margin-top: 0; color: #ebc06d; margin-bottom: 20px;">お気に入りを編集</h2>
+      <h2 style="margin-top: 0; color: var(--glow-gold); margin-bottom: 20px;">お気に入りを編集</h2>
       <div style="margin-bottom: 15px;">
-        <label style="display:block; margin-bottom: 5px; color: #ccc;">アイコン</label>
+        <label style="display:block; margin-bottom: 5px; color: var(--text-color); opacity: 0.8;">アイコン</label>
         <div id="fav-icon-selector" class="icon-selector"></div>
       </div>
       <div style="margin-bottom: 15px;">
-        <label for="fav-name-input" style="display:block; margin-bottom: 5px; color: #ccc;">名前</label>
+        <label for="fav-name-input" style="display:block; margin-bottom: 5px; color: var(--text-color); opacity: 0.8;">名前</label>
         <input type="text" id="fav-name-input" class="dialog-input" placeholder="表示名">
       </div>
       <div style="margin-bottom: 25px;">
-        <label for="fav-path-input" style="display:block; margin-bottom: 5px; color: #ccc;">パス</label>
+        <label for="fav-path-input" style="display:block; margin-bottom: 5px; color: var(--text-color); opacity: 0.8;">パス</label>
         <input type="text" id="fav-path-input" class="dialog-input" placeholder="ディレクトリパス">
       </div>
       <div class="dialog-buttons">

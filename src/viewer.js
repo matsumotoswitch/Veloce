@@ -71,7 +71,7 @@ document.body.style.margin = '0';
 document.body.style.padding = '0';
 document.body.style.width = '100%';
 document.body.style.height = '100%';
-document.body.style.backgroundColor = '#1e1e1e';
+document.body.style.backgroundColor = '#131b1e';
 document.body.style.display = 'flex';
 document.body.style.justifyContent = 'center';
 document.body.style.alignItems = 'center';
@@ -88,7 +88,7 @@ borderOverlay.style.width = '100vw';
 borderOverlay.style.height = '100vh';
 borderOverlay.style.pointerEvents = 'none'; // マウス操作（ドラッグ等）を透過して邪魔しない
 borderOverlay.style.boxSizing = 'border-box';
-borderOverlay.style.border = viewerState.isBorderVisible ? '1px solid #3a7afe' : 'none';
+borderOverlay.style.border = viewerState.isBorderVisible ? '1px solid var(--accent-color)' : 'none';
 borderOverlay.style.zIndex = '9998'; // コントロールボタンの下、画像の上に配置
 document.body.appendChild(borderOverlay);
 
@@ -504,10 +504,10 @@ function createWindowControls() {
   // 閉じるボタン
   const closeBtn = document.createElement('div');
   closeBtn.style.cssText = buttonStyle;
-  closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.2)';
+  closeBtn.style.backgroundColor = 'rgba(255, 51, 102, 0.1)';
   closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="#fff" stroke-width="1"/></svg>`;
-  closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.5)'; // Windowsの閉じるボタンの赤色（半透明）
-  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(232, 17, 35, 0.2)';
+  closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = 'rgba(255, 51, 102, 0.6)';
+  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(255, 51, 102, 0.1)';
   closeBtn.onclick = () => {
     if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };

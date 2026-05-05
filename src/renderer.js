@@ -41,8 +41,8 @@ const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
 contextMenu.style.position = 'fixed';
 contextMenu.style.display = 'none';
-contextMenu.style.backgroundColor = '#2d2d2d';
-contextMenu.style.border = '1px solid #444';
+contextMenu.style.backgroundColor = 'var(--modal-bg)';
+contextMenu.style.border = '1px solid var(--modal-border)';
 contextMenu.style.borderRadius = '4px';
 contextMenu.style.padding = '4px 0';
 contextMenu.style.zIndex = '10001';
@@ -375,7 +375,8 @@ function renderFavorites() {
   if (appState.favorites.length === 0) {
     const li = document.createElement('li');
     li.style.padding = '20px 10px';
-    li.style.color = '#666';
+    li.style.color = 'var(--text-color)';
+    li.style.opacity = '0.5';
     li.style.fontSize = '12px';
     li.style.textAlign = 'center';
     li.style.lineHeight = '1.6';
@@ -402,7 +403,7 @@ function renderFavorites() {
     icon.className = 'tree-icon';
     if (fav.icon && fav.icon.startsWith('FAV_')) {
       icon.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
-      icon.style.color = '#ebc06d'; // お気に入りのデフォルト色
+      icon.style.color = 'var(--glow-gold)'; // お気に入りのデフォルト色
     } else {
       icon.textContent = fav.icon || '⭐';
     }
@@ -436,9 +437,15 @@ const createMenuOption = (text, onClick) => {
   option.textContent = text;
   option.style.padding = '6px 16px';
   option.style.cursor = 'pointer';
-  option.style.color = '#ccc';
-  option.onmouseenter = () => option.style.backgroundColor = '#3a7afe';
-  option.onmouseleave = () => option.style.backgroundColor = 'transparent';
+  option.style.color = 'var(--text-color)';
+  option.onmouseenter = () => {
+    option.style.backgroundColor = 'var(--accent-color)';
+    option.style.color = '#fff';
+  };
+  option.onmouseleave = () => {
+    option.style.backgroundColor = 'transparent';
+    option.style.color = 'var(--text-color)';
+  };
   option.addEventListener('click', (e) => {
     e.stopPropagation();
     contextMenu.style.display = 'none';
@@ -452,7 +459,7 @@ const createMenuSeparator = () => {
   const separator = document.createElement('div');
   separator.className = 'menu-separator';
   separator.style.height = '1px';
-  separator.style.backgroundColor = '#444';
+  separator.style.backgroundColor = 'var(--modal-border)';
   separator.style.margin = '4px 0';
   return separator;
 };
@@ -680,7 +687,7 @@ function initializeThumbnailObserver() {
 function clearMetadataUI() {
   const container = document.getElementById('inspector-content');
   if (container) {
-    container.innerHTML = '<div style="color: #666; text-align: center; margin-top: 50px;">画像を選択すると詳細が表示されます</div>';
+    container.innerHTML = '<div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 50px;">画像を選択すると詳細が表示されます</div>';
   }
 }
 
@@ -953,10 +960,10 @@ async function showLicenseDialog() {
   overlay.style.alignItems = 'center';
   
   const content = document.createElement('div');
-  content.style.backgroundColor = '#1e1e1e';
+  content.style.backgroundColor = 'var(--modal-bg)';
   content.style.padding = '20px';
   content.style.borderRadius = '8px';
-  content.style.border = '1px solid #555';
+  content.style.border = '1px solid var(--modal-border)';
   content.style.width = '85%';
   content.style.maxWidth = '850px';
   content.style.height = '80%';
@@ -982,11 +989,11 @@ async function showLicenseDialog() {
   const parsedText = parseLicenseMarkdown(combinedText);
 
   content.innerHTML = `
-    <h2 style="margin-top: 0; color: #ebc06d;">ライセンス情報</h2>
-    <div style="background-color: rgba(232, 17, 35, 0.1); border: 1px solid #e81123; border-radius: 4px; padding: 12px; margin-bottom: 15px; color: #ff6b6b; font-weight: bold; font-size: 14px;">
+    <h2 style="margin-top: 0; color: var(--glow-gold);">ライセンス情報</h2>
+    <div style="background-color: rgba(255, 51, 102, 0.15); border: 1px solid var(--danger-red); border-radius: 4px; padding: 12px; margin-bottom: 15px; color: #ff99b3; font-weight: bold; font-size: 14px;">
       ※本ソフトウェアは商用利用不可です。無保証・無サポートで提供されており、すべて自己責任でのご利用となります。
     </div>
-    <div id="license-text" style="flex: 1; overflow-y: auto; background-color: #2d2d2d; padding: 0px 20px 20px 20px; border: 1px solid #444; border-radius: 4px; color: #ccc; font-family: sans-serif; white-space: normal; font-size: 14px; line-height: 1.6;">${parsedText}</div>
+    <div id="license-text" style="flex: 1; overflow-y: auto; background-color: rgba(0, 0, 0, 0.2); padding: 0px 20px 20px 20px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color); font-family: sans-serif; white-space: normal; font-size: 14px; line-height: 1.6;">${parsedText}</div>
   `;
   
   const cleanup = () => {
@@ -1040,19 +1047,19 @@ function toggleHelpOverlay(forceShow) {
   overlay.style.cursor = 'pointer';
   
   const content = document.createElement('div');
-  content.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
+  content.style.backgroundColor = 'rgba(19, 27, 30, 0.85)';
   content.style.padding = '30px';
   content.style.borderRadius = '10px';
-  content.style.border = '1px solid #555';
+  content.style.border = '1px solid var(--modal-border)';
   content.style.boxShadow = '0 4px 15px rgba(0,0,0,0.5)';
   content.style.cursor = 'default';
   
   content.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-      <h2 style="margin: 0; color: #ebc06d;">ヘルプ・ショートカット一覧</h2>
-      <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid #555; border-radius: 20px; color: #bbb; font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(255, 255, 255, 0.05);"
-        onmouseover="this.style.backgroundColor='rgba(58, 122, 254, 0.15)'; this.style.borderColor='#3a7afe'; this.style.color='#fff';"
-        onmouseout="this.style.backgroundColor='rgba(255, 255, 255, 0.05)'; this.style.borderColor='#555'; this.style.color='#bbb';">
+      <h2 style="margin: 0; color: var(--glow-gold);">ヘルプ・ショートカット一覧</h2>
+      <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid var(--modal-border); border-radius: 20px; color: var(--text-color); font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(0, 0, 0, 0.2);"
+        onmouseover="this.style.backgroundColor='rgba(37, 126, 140, 0.15)'; this.style.borderColor='var(--accent-color)'; this.style.color='#fff';"
+        onmouseout="this.style.backgroundColor='rgba(0, 0, 0, 0.2)'; this.style.borderColor='var(--modal-border)'; this.style.color='var(--text-color)';">
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="8" r="7"></circle>
           <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
@@ -1062,7 +1069,7 @@ function toggleHelpOverlay(forceShow) {
     </div>
     <div style="display: flex; gap: 40px; font-size: inherit;">
       <div>
-        <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
+        <h3 style="color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
         <table style="border-collapse: collapse; width: 100%;">
           <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプの表示/非表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">矢印キー</td><td style="padding: 6px 15px;">画像の選択を移動</td></tr>
@@ -1080,7 +1087,7 @@ function toggleHelpOverlay(forceShow) {
         </table>
       </div>
       <div>
-        <h3 style="color: #ccc; border-bottom: 1px solid #555; padding-bottom: 5px; margin-top: 0;">ビューワー画面</h3>
+        <h3 style="color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 0;">ビューワー画面</h3>
         <table style="border-collapse: collapse; width: 100%;">
           <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">左 / 右クリック</td><td style="padding: 6px 15px;">次の画像を表示</td></tr>
@@ -1228,7 +1235,7 @@ async function renderMetadata(file) {
         const isMatch = terms.some(term => t.toLowerCase().includes(term));
         const matchStyle = isMatch 
           ? 'border: 1px solid #ffcc00; background-color: rgba(255, 204, 0, 0.25); color: #ffcc00; font-weight: bold; box-shadow: 0 0 8px rgba(255,204,0,0.3);' 
-          : 'border: 1px solid transparent;';
+          : '';
           
         const displayHtml = typeof highlightText === 'function' ? highlightText(t, terms) : t;
         return `<span class="diff-tag common" style="${matchStyle}">${displayHtml}</span>`;
@@ -1236,7 +1243,7 @@ async function renderMetadata(file) {
 
       return `
         <div class="inspector-section" style="margin-bottom: 15px;">
-          <h3 style="font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
             <span>${title}</span>${UIManager.createCopyButtonHTML(text)}
           </h3>
           <div class="${boxClass}">
@@ -1269,14 +1276,14 @@ async function renderMetadata(file) {
       if (rawMetaStr !== '{}' && rawMetaStr !== 'null') {
         const escapedMeta = rawMetaStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         html = `
-          <div style="padding: 10px; color: #ccc;">
-            <h3 style="font-size: 1em; border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 10px;">未対応のメタデータ形式</h3>
+          <div style="padding: 10px; color: var(--text-color);">
+            <h3 style="font-size: 1em; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; margin-bottom: 10px;">未対応のメタデータ形式</h3>
             <p style="font-size: 0.85em; margin-bottom: 10px; line-height: 1.4;">データは読み込めていますが、NovelAIなどの特殊な格納形式になっています。以下の生データを確認してください：</p>
             <div class="prompt-look" style="white-space: pre-wrap; font-family: Consolas, monospace; font-size: 0.85em; word-break: break-all; max-height: 400px; overflow-y: auto;">${escapedMeta}</div>
           </div>
         `;
       } else {
-        html = '<div style="color: #666; text-align: center; margin-top: 50px;">メタデータが含まれていないか、読み取れませんでした。</div>';
+        html = '<div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 50px;">メタデータが含まれていないか、読み取れませんでした。</div>';
       }
     }
 
@@ -1320,7 +1327,7 @@ async function renderMetadata(file) {
     });
     // --- ここまで ---
   } catch (error) {
-    container.innerHTML = `<div style="color:#ff4d4d; padding:10px; font-size:0.9em; border:1px solid #ff4d4d;">描画エラー: ${error.message}</div>`;
+    container.innerHTML = `<div style="color:var(--danger-red); padding:10px; font-size:0.9em; border:1px solid var(--danger-red);">描画エラー: ${error.message}</div>`;
   }
 }
 
@@ -1691,7 +1698,7 @@ uiManager.elements.dirTree.addEventListener('dragenter', (e) => {
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   e.preventDefault();
-  itemDiv.style.backgroundColor = 'rgba(58, 122, 254, 0.3)';
+  itemDiv.style.backgroundColor = 'rgba(37, 126, 140, 0.3)';
 });
 
 uiManager.elements.dirTree.addEventListener('dragover', (e) => {
@@ -1783,8 +1790,8 @@ function createResizerToggle(resizer, type) {
   const btn = document.createElement('div');
   btn.className = 'resizer-toggle';
   btn.style.cssText = `
-    position: absolute; display: flex; justify-content: center; align-items: center;
-    background-color: #333; border: 1px solid #555; border-radius: 2px; cursor: pointer;
+    position: absolute; display: flex; justify-content: center; align-items: center; opacity: 0.6;
+    background-color: var(--border-color); border: 1px solid var(--modal-border); border-radius: 2px; cursor: pointer; color: var(--text-color);
     z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
   `;
   

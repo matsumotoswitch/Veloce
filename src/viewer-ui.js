@@ -36,7 +36,7 @@ class ViewerUI {
   applyBorderVisibility() {
     if (this.state.isFullscreen) return;
     const overlay = document.getElementById('border-overlay');
-    if (overlay) overlay.style.border = this.state.isBorderVisible ? '1px solid #3a7afe' : 'none';
+    if (overlay) overlay.style.border = this.state.isBorderVisible ? '1px solid var(--accent-color)' : 'none';
     const controls = document.getElementById('window-controls');
     if (controls) {
       controls.style.display = 'flex';
