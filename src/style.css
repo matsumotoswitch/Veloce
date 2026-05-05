@@ -223,7 +223,6 @@ body.is-resizing .app-content {
   flex: 0 0 var(--left-top-height, 150px);
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 10px 10px 0 10px;
   transition: flex-basis 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -242,7 +241,7 @@ body.is-resizing #favorites-section {
 
 #favorites-list {
   list-style: none; /* 中点を消す */
-  padding: 0;
+  padding: 10px 10px 0 10px;
   margin: 0;
 }
 
@@ -601,10 +600,16 @@ input[type="range"]:focus {
   color: #fff;
 }
 
-/* フォルダアイコンの色（var(--accent-color) が指定されているがホバー時に上書きする） */
+/* フォルダアイコン等の色（ホバー・選択時に白で上書きする） */
 .tree-item:hover .tree-icon svg,
 .tree-item.selected .tree-icon svg {
   stroke: #fff !important;
+}
+
+/* 塗りつぶしアイコンの場合も白くする（DRIVE等の fill="none" のものは除外） */
+.tree-item:hover .tree-icon svg:not([fill="none"]),
+.tree-item.selected .tree-icon svg:not([fill="none"]) {
+  fill: #fff !important;
 }
 
 /* お気に入りアイコンの色（var(--glow-gold) が指定されているがホバー時に上書きする） */

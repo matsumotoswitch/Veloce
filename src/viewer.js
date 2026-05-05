@@ -485,29 +485,29 @@ function createWindowControls() {
   // 最小化ボタン
   const minBtn = document.createElement('div');
   minBtn.style.cssText = buttonStyle;
-  minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+  minBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
   minBtn.innerHTML = `<svg viewBox="0 0 10 1" width="10" height="1"><rect width="10" height="1" fill="#fff"/></svg>`;
-  minBtn.onmouseenter = () => minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  minBtn.onmouseleave = () => minBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+  minBtn.onmouseenter = () => minBtn.style.backgroundColor = '#257e8c';
+  minBtn.onmouseleave = () => minBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
   minBtn.onclick = () => window.veloceAPI.minimizeViewer();
 
   // 最大化/元に戻すボタン
   const maxBtn = document.createElement('div');
   maxBtn.id = 'window-max-btn';
   maxBtn.style.cssText = buttonStyle;
-  maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+  maxBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
   maxBtn.innerHTML = ViewerUI.ICONS.MAXIMIZE;
-  maxBtn.onmouseenter = () => maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  maxBtn.onmouseleave = () => maxBtn.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+  maxBtn.onmouseenter = () => maxBtn.style.backgroundColor = '#257e8c';
+  maxBtn.onmouseleave = () => maxBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
   maxBtn.onclick = () => window.veloceAPI.maximizeViewer();
 
   // 閉じるボタン
   const closeBtn = document.createElement('div');
   closeBtn.style.cssText = buttonStyle;
-  closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.1)';
+  closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.4)';
   closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="#fff" stroke-width="1"/></svg>`;
-  closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.6)';
-  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.1)';
+  closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = '#e05263';
+  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.4)';
   closeBtn.onclick = () => {
     if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };
