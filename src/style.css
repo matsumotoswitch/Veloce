@@ -7,8 +7,8 @@
   --accent-hover: #2e96a6;
   --modal-bg: #131b1e;
   --modal-border: #364b50;
-  --danger-red: #ff3366;
-  --glow-gold: #ffcc00;
+  --danger-red: #e05263; /* 落ち着いたソフトレッドに変更 */
+  --glow-gold: #e6c762; /* 落ち着いたシャンパンゴールドに変更 */
   --resizer-color: #1c282c; /* 背景とボーダーの中間の暗さ */
 }
 
@@ -53,7 +53,6 @@
 .titlebar-title {
   color: var(--text-color);
   font-size: 12px;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .titlebar-controls {
@@ -91,7 +90,6 @@ body {
   grid-template-rows: minmax(0, 1fr);
   height: calc(100vh - 38px); /* タイトルバー拡張に合わせる */
   color: var(--text-color);
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   transition: grid-template-columns 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -659,9 +657,9 @@ input[type="range"]:focus {
 }
 
 .toast-message.error {
-  background-color: rgba(255, 51, 102, 0.15);
+  background-color: rgba(224, 82, 99, 0.15);
   border-color: var(--danger-red);
-  color: #ff99b3;
+  color: #f08a96;
 }
 
 /* --- ライセンス画面：最終デザイン確定版 --- */
@@ -749,7 +747,7 @@ input[type="range"]:focus {
 }
 
 .diff-section { margin-bottom: 20px; }
-.diff-section h3 { color: var(--text-color); margin-bottom: 8px; font-size: 0.9em; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; transition: color 0.2s; }
+.diff-section h3 { color: var(--text-color); margin-bottom: 4px; font-size: 0.9em; transition: color 0.2s; }
 .diff-section h3.has-diff { color: var(--glow-gold); }
 
 /* Diffモーダル内のコピーボタン */
@@ -796,7 +794,7 @@ input[type="range"]:focus {
   word-break: break-all;
 }
 .diff-tag.added { background-color: rgba(37, 126, 140, 0.25); color: #61c7d6; border: 1px solid var(--accent-color); }
-.diff-tag.removed { background-color: rgba(255, 51, 102, 0.15); color: var(--danger-red); border: 1px solid var(--danger-red); }
+.diff-tag.removed { background-color: rgba(224, 82, 99, 0.15); color: var(--danger-red); border: 1px solid var(--danger-red); }
 .diff-tag.common { opacity: 0.85; border: 1px solid var(--border-color); }
 
 /* Diffモーダル内のサムネイル表示用 */

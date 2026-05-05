@@ -504,10 +504,10 @@ function createWindowControls() {
   // 閉じるボタン
   const closeBtn = document.createElement('div');
   closeBtn.style.cssText = buttonStyle;
-  closeBtn.style.backgroundColor = 'rgba(255, 51, 102, 0.1)';
+  closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.1)';
   closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="#fff" stroke-width="1"/></svg>`;
-  closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = 'rgba(255, 51, 102, 0.6)';
-  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(255, 51, 102, 0.1)';
+  closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.6)';
+  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.1)';
   closeBtn.onclick = () => {
     if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };

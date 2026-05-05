@@ -990,7 +990,7 @@ async function showLicenseDialog() {
 
   content.innerHTML = `
     <h2 style="margin-top: 0; color: var(--glow-gold);">ライセンス情報</h2>
-    <div style="background-color: rgba(255, 51, 102, 0.15); border: 1px solid var(--danger-red); border-radius: 4px; padding: 12px; margin-bottom: 15px; color: #ff99b3; font-weight: bold; font-size: 14px;">
+    <div style="background-color: rgba(224, 82, 99, 0.15); border: 1px solid var(--danger-red); border-radius: 4px; padding: 12px; margin-bottom: 15px; color: #f08a96; font-weight: bold; font-size: 14px;">
       ※本ソフトウェアは商用利用不可です。無保証・無サポートで提供されており、すべて自己責任でのご利用となります。
     </div>
     <div id="license-text" style="flex: 1; overflow-y: auto; background-color: rgba(0, 0, 0, 0.2); padding: 0px 20px 20px 20px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color); font-family: sans-serif; white-space: normal; font-size: 14px; line-height: 1.6;">${parsedText}</div>
@@ -1243,7 +1243,7 @@ async function renderMetadata(file) {
 
       return `
         <div class="inspector-section" style="margin-bottom: 15px;">
-          <h3 style="font-size: 0.9em; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
+          <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
             <span>${title}</span>${UIManager.createCopyButtonHTML(text)}
           </h3>
           <div class="${boxClass}">
@@ -1277,7 +1277,7 @@ async function renderMetadata(file) {
         const escapedMeta = rawMetaStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         html = `
           <div style="padding: 10px; color: var(--text-color);">
-            <h3 style="font-size: 1em; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; margin-bottom: 10px;">未対応のメタデータ形式</h3>
+            <h3 style="font-size: 1em; margin-bottom: 10px;">未対応のメタデータ形式</h3>
             <p style="font-size: 0.85em; margin-bottom: 10px; line-height: 1.4;">データは読み込めていますが、NovelAIなどの特殊な格納形式になっています。以下の生データを確認してください：</p>
             <div class="prompt-look" style="white-space: pre-wrap; font-family: Consolas, monospace; font-size: 0.85em; word-break: break-all; max-height: 400px; overflow-y: auto;">${escapedMeta}</div>
           </div>
