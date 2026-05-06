@@ -95,6 +95,226 @@ class UIManager {
     this.initCustomTooltip();
   }
 
+  // タブのスクロール状態をチェックし、グラデーションの表示/非表示を切り替える
+  updateTabScrollState() {
+    const container = document.getElementById('tab-container');
+    const newTabBtn = document.getElementById('new-tab-btn');
+    if (!container || !newTabBtn) return;
+
+    const scrollRight = container.scrollWidth - container.clientWidth - container.scrollLeft;
+    if (container.scrollWidth > container.clientWidth && scrollRight > 2) {
+      newTabBtn.classList.add('is-overflowing');
+    } else {
+      newTabBtn.classList.remove('is-overflowing');
+    }
+  }
+
+  renderTabs() {
+    const container = document.getElementById('tab-container');
+    if (!container) return;
+
+    if (!this.state.tabs || this.state.tabs.length === 0) return;
+    const newTabBtn = document.getElementById('new-tab-btn');
+
+    // 「＋」ボタンへのドラッグ＆ドロップ対応（一番後ろへ移動）
+    if (newTabBtn && !newTabBtn.dataset.dragInitialized) {
+      newTabBtn.dataset.dragInitialized = 'true';
+      newTabBtn.addEventListener('dragover', (e) => {
+        if (!Array.from(e.dataTransfer.types).includes('application/json-tab')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const container = document.getElementById('tab-container');
+        if (container) {
+          container.querySelectorAll('.tab-item').forEach(item => {
+            if (item !== newTabBtn) {
+              item.classList.remove('drag-over-left', 'drag-over-right');
+              item.style.zIndex = '';
+            }
+          });
+        }
+        newTabBtn.classList.add('drag-over-left');
+      });
+      newTabBtn.addEventListener('dragleave', (e) => {
+        if (!Array.from(e.dataTransfer.types).includes('application/json-tab')) return;
+        newTabBtn.classList.remove('drag-over-left');
+      });
+      newTabBtn.addEventListener('drop', (e) => {
+        if (!Array.from(e.dataTransfer.types).includes('application/json-tab')) return;
+        e.preventDefault();
+        newTabBtn.classList.remove('drag-over-left');
+        const fromIndexStr = e.dataTransfer.getData('application/json-tab');
+        if (fromIndexStr && window.onTabMove) window.onTabMove(parseInt(fromIndexStr, 10), this.state.tabs.length - 1, true);
+      });
+    }
+
+    // DOMの再生成を防ぎ、既存のタブ要素を再利用してアニメーションが途切れないようにする
+    // 削除アニメーション中のタブ（.tab-fade-out）は再利用対象から除外する
+    const existingTabs = Array.from(container.querySelectorAll('.tab-item:not(#new-tab-btn):not(.tab-fade-out)'));
+    const tabCount = this.state.tabs.length;
+
+    if (existingTabs.length > tabCount) {
+      for (let i = tabCount; i < existingTabs.length; i++) {
+        existingTabs[i].remove();
+      }
+      existingTabs.length = tabCount;
+    }
+
+    this.state.tabs.forEach((tab, index) => {
+      let tabEl = existingTabs[index];
+
+      if (!tabEl) {
+        tabEl = document.createElement('div');
+        tabEl.className = 'tab-item';
+        tabEl.draggable = true;
+
+        const label = document.createElement('span');
+        label.className = 'tab-label';
+        tabEl.appendChild(label);
+        
+        tabEl.addEventListener('mouseenter', (e) => {
+          const currentTab = this.state.tabs[parseInt(tabEl.dataset.index, 10)];
+          if (currentTab) this.showCustomTooltip(`${currentTab.name}\n${currentTab.path}`, e.clientX, e.clientY);
+        });
+        tabEl.addEventListener('mousemove', (e) => {
+          const currentTab = this.state.tabs[parseInt(tabEl.dataset.index, 10)];
+          if (currentTab) this.showCustomTooltip(`${currentTab.name}\n${currentTab.path}`, e.clientX, e.clientY);
+        });
+        tabEl.addEventListener('mouseleave', () => {
+          this.hideCustomTooltip();
+        });
+
+        const closeBtn = document.createElement('span');
+        closeBtn.className = 'tab-close-btn';
+        closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="8" height="8"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
+        closeBtn.addEventListener('mouseenter', (e) => {
+          e.stopPropagation();
+          this.showCustomTooltip('タブを閉じる', e.clientX, e.clientY);
+        });
+        closeBtn.addEventListener('mousemove', (e) => {
+          e.stopPropagation();
+          this.showCustomTooltip('タブを閉じる', e.clientX, e.clientY);
+        });
+        closeBtn.addEventListener('mouseleave', (e) => {
+          e.stopPropagation();
+          this.hideCustomTooltip();
+        });
+        closeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.hideCustomTooltip();
+          if (window.onTabClose) window.onTabClose(parseInt(tabEl.dataset.index, 10));
+        });
+        tabEl.appendChild(closeBtn);
+
+        tabEl.addEventListener('click', () => {
+          if (window.onTabClick) window.onTabClick(parseInt(tabEl.dataset.index, 10));
+        });
+        
+        tabEl.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+        
+        tabEl.addEventListener('auxclick', (e) => {
+          if (e.button === 1) { 
+            e.stopPropagation();
+            if (window.onTabClose) window.onTabClose(parseInt(tabEl.dataset.index, 10));
+          }
+        });
+
+        tabEl.addEventListener('contextmenu', (e) => {
+          if (window.onTabContextMenu) window.onTabContextMenu(e, parseInt(tabEl.dataset.index, 10));
+        });
+
+        tabEl.addEventListener('dragstart', (e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('application/json-tab', tabEl.dataset.index);
+          setTimeout(() => { tabEl.style.opacity = '0.5'; }, 0); 
+        });
+        tabEl.addEventListener('dragend', (e) => {
+          tabEl.style.opacity = '1';
+          const container = document.getElementById('tab-container');
+          if (container) {
+            container.querySelectorAll('.tab-item').forEach(item => item.classList.remove('drag-over-left', 'drag-over-right'));
+          }
+        });
+        tabEl.addEventListener('dragover', (e) => {
+          if (!Array.from(e.dataTransfer.types).includes('application/json-tab')) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          
+          const container = document.getElementById('tab-container');
+          if (container) {
+            container.querySelectorAll('.tab-item').forEach(item => {
+              if (item !== tabEl) {
+                item.classList.remove('drag-over-left', 'drag-over-right');
+                item.style.zIndex = '';
+              }
+            });
+          }
+          const rect = tabEl.getBoundingClientRect();
+          const midX = rect.left + rect.width / 2;
+          if (e.clientX < midX) {
+            tabEl.classList.add('drag-over-left');
+            tabEl.classList.remove('drag-over-right');
+          } else {
+            tabEl.classList.add('drag-over-right');
+            tabEl.classList.remove('drag-over-left');
+          }
+          tabEl.style.zIndex = '3'; // ドロップインジケーターが他のタブやボタンに隠れないように最前面へ
+        });
+        tabEl.addEventListener('dragleave', (e) => {
+          if (!Array.from(e.dataTransfer.types).includes('application/json-tab')) return;
+          tabEl.classList.remove('drag-over-left', 'drag-over-right');
+          tabEl.style.zIndex = '';
+        });
+        tabEl.addEventListener('drop', (e) => {
+          if (!Array.from(e.dataTransfer.types).includes('application/json-tab')) return;
+          e.preventDefault();
+          tabEl.classList.remove('drag-over-left', 'drag-over-right');
+          tabEl.style.zIndex = '';
+          const fromIndexStr = e.dataTransfer.getData('application/json-tab');
+          if (!fromIndexStr) return;
+          const rect = tabEl.getBoundingClientRect();
+          const midX = rect.left + rect.width / 2;
+          if (window.onTabMove) window.onTabMove(parseInt(fromIndexStr, 10), parseInt(tabEl.dataset.index, 10), e.clientX >= midX);
+        });
+
+        if (newTabBtn) {
+          container.insertBefore(tabEl, newTabBtn);
+        } else {
+          container.appendChild(tabEl);
+        }
+      }
+
+      // --- 状態の更新 ---
+      if (tab.isNew) {
+        tabEl.classList.remove('tab-fade-in');
+        void tabEl.offsetWidth; // リフローを強制してアニメーションを再トリガー
+        tabEl.classList.add('tab-fade-in');
+        tab.isNew = false;
+      }
+
+      // 再利用されたDOMに削除アニメーションのクラスやスタイルが残っていればリセット
+      tabEl.classList.remove('tab-fade-out');
+      tabEl.style.width = '';
+      tabEl.style.minWidth = '';
+
+      tabEl.dataset.index = index;
+
+      if (index === this.state.activeTabIndex) {
+        tabEl.classList.add('active');
+      } else {
+        tabEl.classList.remove('active');
+      }
+
+      const label = tabEl.querySelector('.tab-label');
+      if (label && label.textContent !== tab.name) {
+        label.textContent = tab.name;
+      }
+    });
+
+    requestAnimationFrame(() => {
+      this.updateTabScrollState();
+    });
+  }
+
   initCustomTooltip() {
     this.tooltipEl = document.createElement('div');
     this.tooltipEl.className = 'custom-tooltip';
@@ -105,6 +325,16 @@ class UIManager {
   }
 
   showCustomTooltip(text, x, y) {
+    const tabMenu = document.getElementById('tab-list-menu');
+    // タブ一覧メニューが開いている時はツールチップを出さず、メニューも消さない
+    if (tabMenu && tabMenu.style.display === 'block') {
+      return;
+    }
+
+    const ctxMenu = document.getElementById('context-menu');
+    // 右クリックメニューが開いている場合はメニューを消す（前回の要望を維持）
+    if (ctxMenu && ctxMenu.style.display === 'block') ctxMenu.style.display = 'none';
+
     this.isTooltipVisible = true;
     this.lastMouseX = x;
     this.lastMouseY = y;

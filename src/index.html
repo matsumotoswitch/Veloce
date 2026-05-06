@@ -76,17 +76,196 @@
       -webkit-text-fill-color: var(--text-color) !important;
       transition: background-color 5000s ease-in-out 0s !important;
     }
+
+    /* タイトルバーをタブの絶対配置の基準にする */
+    .titlebar {
+      position: relative;
+    }
+
+    /* タブコンテナ */
+    #tab-container {
+      position: absolute;
+      bottom: 0;
+      left: 8px;
+      right: 190px; /* ウィンドウコントロールとタブ一覧ボタンの領域を避ける */
+      height: 31px; /* タイトルバーの高さ - 1px */
+      -webkit-app-region: no-drag; /* この領域はドラッグ不可にする */
+      display: flex;
+      align-items: flex-end;
+      padding: 0 0 0 5px;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    #tab-container::-webkit-scrollbar { display: none; }
+
+    .tab-item {
+      display: flex;
+      align-items: center;
+      padding: 0 24px 0 10px;
+      position: relative;
+      height: 100%;
+      background-color: transparent;
+      border: 1px solid var(--border-color);
+      border-bottom: none;
+      border-top-left-radius: 4px;
+      border-top-right-radius: 4px;
+      margin-right: -1px; /* 境界線を重ねる */
+      cursor: pointer;
+      color: var(--text-color);
+      opacity: 0.7;
+      font-size: 13px;
+      max-width: 250px;
+      min-width: 120px;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+
+    /* ドラッグ＆ドロップ時のインジケーター（角丸の影響を受けない直線） */
+    .tab-item.drag-over-left::after,
+    .tab-item.drag-over-right::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background-color: var(--glow-gold);
+      z-index: 10;
+      pointer-events: none;
+    }
+    .tab-item.drag-over-left::after { left: -2px; }
+    .tab-item.drag-over-right::after { right: -2px; }
+
+    .tab-item:hover { 
+      background-color: rgba(255,255,255, 0.1); 
+      opacity: 1; 
+    }
+    .tab-item.active {
+      background-color: var(--accent-color);
+      color: #fff;
+      opacity: 1;
+      border-color: var(--accent-color);
+      z-index: 1;
+    }
+    @keyframes tabFadeIn {
+      from { opacity: 0; transform: translateX(-15px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .tab-item.tab-fade-in {
+      animation: tabFadeIn 0.25s ease-out;
+    }
+    .tab-item.tab-fade-out {
+      opacity: 0 !important;
+      transform: translateX(-15px) !important;
+      min-width: 0 !important;
+      width: 0 !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+      margin-right: 0 !important;
+      border-width: 0 !important;
+      transition: opacity 0.15s ease-out, transform 0.15s ease-out, width 0.2s ease-out, padding 0.2s ease-out, margin-right 0.2s ease-out, min-width 0.2s ease-out;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .tab-item.new-tab-btn {
+      min-width: 32px;
+      padding: 0;
+      justify-content: center;
+      border: none;
+      border-radius: 0;
+    }
+    #new-tab-btn {
+      position: sticky;
+      right: 0;
+      background-color: var(--bg-color); /* 重なったときに後ろのタブが透けないようにする */
+      opacity: 1; /* .tab-item の透明度を上書きして完全に不透明にする */
+      z-index: 2;
+      -webkit-app-region: no-drag;
+      margin-left: 1px; /* 左隣のタブの右枠線が隠れないように重なりを相殺 */
+    }
+    /* タブ追加ボタンの左側に、タブが下に潜り込むようなグラデーションを追加 */
+    #new-tab-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -20px;
+      width: 20px;
+      height: 100%;
+      background: linear-gradient(to right, transparent, var(--bg-color));
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    #new-tab-btn.is-overflowing::before {
+      opacity: 1;
+    }
+    #new-tab-btn::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background-color: transparent;
+      transition: background-color 0.15s ease;
+      z-index: 0;
+    }
+    #new-tab-btn:hover::after {
+      background-color: var(--accent-color);
+    }
+    #new-tab-btn svg {
+      position: relative;
+      z-index: 1;
+    }
+    #new-tab-btn:hover {
+      color: #fff;
+    }
+    .tab-close-btn {
+      position: absolute;
+      right: 6px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: all 0.1s ease;
+    }
+    .tab-item:hover .tab-close-btn { opacity: 1; }
+    .tab-close-btn:hover { background-color: rgba(255,255,255, 0.2); }
+    
+    .tab-label {
+      display: block;
+      width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      -webkit-mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
+      mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
+    }
+
+    /* ウィンドウコントロールボタンを右端に寄せる */
+    .titlebar-controls {
+      position: absolute;
+      right: 0;
+      top: 0;
+      height: 100%;
+      display: flex;
+    }
   </style>
 </head>
 <body>
   <div data-tauri-drag-region class="titlebar">
-    <div class="titlebar-left">
-      <img src="/assets/icon.png" alt="icon" class="titlebar-icon">
-      <span class="titlebar-title">Veloce</span>
-    </div>
-    <div class="titlebar-center">
+    <div id="tab-container">
+      <div id="new-tab-btn" class="tab-item new-tab-btn">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      </div>
     </div>
     <div class="titlebar-controls">
+      <div class="titlebar-button" id="titlebar-tab-list" style="margin-right: 8px;">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </div>
       <div class="titlebar-button" id="titlebar-minimize">
         <svg viewBox="0 0 10 10"><rect x="1" y="5" width="8" height="1" fill="currentColor"/></svg>
       </div>
@@ -173,6 +352,13 @@
   <script type="module" src="/renderer-state.js"></script>
   <script type="module" src="/renderer-ui.js"></script>
   <script type="module" src="/renderer.js"></script>
+
+  <script>
+    // 右クリック時にイベント伝播が止められていても、キャプチャフェーズで強制的にツールチップを消す
+    window.addEventListener('contextmenu', () => {
+      document.querySelector('.custom-tooltip.show')?.classList.remove('show');
+    }, true);
+  </script>
 
   <!-- トースト通知用コンテナ -->
   <div id="toast-container"></div>
