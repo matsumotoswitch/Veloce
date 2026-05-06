@@ -2,12 +2,12 @@ import { appState } from './renderer-state.js';
 
 const CHUNK_SIZE = 100;
 
-function formatSize(bytes) {
+export function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return '-';
   return bytes.toLocaleString();
 }
 
-function formatDate(timestamp) {
+export function formatDate(timestamp) {
   if (!timestamp) return '-';
   // Rust側のUnixタイムスタンプ(秒)とJSのミリ秒の違いを吸収
   const ms = timestamp < 1000000000000 ? timestamp * 1000 : timestamp;
@@ -652,6 +652,9 @@ class UIManager {
 
     const lTopHeight = this.state.layout.leftTopVisible ? `${this.state.layout.leftTopHeight}px` : '0px';
     root.style.setProperty('--left-top-height', lTopHeight);
+
+    const rTopHeight = this.state.layout.rightTopVisible ? `${this.state.layout.rightTopHeight}px` : '0px';
+    root.style.setProperty('--right-top-height', rTopHeight);
   }
 
   /**
@@ -684,13 +687,23 @@ class UIManager {
           uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : ''
         }));
       }
-      const res = (p.width && p.height) ? `${p.width}x${p.height}` : (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
+
+      const formatNumber = (num) => {
+        if (num === null || num === undefined) return null;
+        const n = Number(num);
+        return !isNaN(n) ? n.toLocaleString() : num;
+      };
+
+      const w = p.width || meta.width;
+      const h = p.height || meta.height;
+      const res = (w && h) ? `${formatNumber(w)}x${formatNumber(h)}` : null;
+
       let sampler = p.sampler || file.sampler || null;
       if (sampler !== '-' && p.sm && !sampler.includes('karras')) sampler += " (karras)";
       data.params = {
         resolution: res,
         seed: p.seed ?? file.seed ?? null,
-        steps: p.steps ?? file.steps ?? null,
+        steps: formatNumber(p.steps ?? file.steps ?? null),
         sampler: sampler,
         scale: p.scale ?? file.scale ?? null,
         cfg_rescale: p.cfg_rescale ?? file.cfg_rescale ?? null,

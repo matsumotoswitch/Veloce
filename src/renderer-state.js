@@ -5,6 +5,7 @@
  * @property {string} path - フルパス
  * @property {number} size - ファイルサイズ(bytes)
  * @property {number} mtime - 最終更新日時
+ * @property {number} [ctime] - 作成日時
  * @property {number} [width] - 画像の幅
  * @property {number} [height] - 画像の高さ
  * @property {string} [prompt] - 生成プロンプト
@@ -44,7 +45,9 @@ class AppState {
       leftVisible: true,          // 左ペインの表示状態
       rightVisible: true,         // 右ペインの表示状態
       leftTopHeight: parseInt(localStorage.getItem('leftTopHeight') || '150', 10),
-      leftTopVisible: localStorage.getItem('leftTopVisible') !== 'false'
+      leftTopVisible: localStorage.getItem('leftTopVisible') !== 'false',
+      rightTopHeight: parseInt(localStorage.getItem('rightTopHeight') || '200', 10),
+      rightTopVisible: localStorage.getItem('rightTopVisible') !== 'false'
     };
 
     // ドラッグ状態の管理

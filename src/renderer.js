@@ -17,7 +17,7 @@ window.addEventListener('keydown', (e) => {
 // 1. Constants & Global Variables
 // ============================================================================
 import { appState } from './renderer-state.js';
-import { UIManager, uiManager } from './renderer-ui.js';
+import { UIManager, uiManager, formatSize, formatDate } from './renderer-ui.js';
 import { debounce } from './utils.js';
 
 const CONFIG = {
@@ -38,7 +38,7 @@ const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-const resizingState = { left: false, right: false, center: false, leftTop: false };
+const resizingState = { left: false, right: false, center: false, leftTop: false, rightTop: false };
 let draggedFavoriteId = null; // お気に入りのドラッグ状態を管理
 
 const contextMenu = document.createElement('div');
@@ -713,6 +713,10 @@ function clearMetadataUI() {
   const container = document.getElementById('inspector-content');
   if (container) {
     container.innerHTML = '<div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 50px;">画像を選択すると詳細が表示されます</div>';
+  }
+  const infoContainer = document.getElementById('file-info-content');
+  if (infoContainer) {
+    infoContainer.innerHTML = '<div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 20px;">画像を選択してください</div>';
   }
 }
 
@@ -1416,6 +1420,7 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
  */
 async function renderMetadata(file) {
   const container = document.getElementById('inspector-content');
+  const infoContainer = document.getElementById('file-info-content');
   if (!file || !container) return;
 
   try {
@@ -1441,18 +1446,81 @@ async function renderMetadata(file) {
           uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : ''
         }));
       }
-      const res = (p.width && p.height) ? `${p.width}x${p.height}` : (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
+      
+      const formatNumber = (num) => {
+        if (num === null || num === undefined) return null;
+        const n = Number(num);
+        return !isNaN(n) ? n.toLocaleString() : num;
+      };
+
+      const w = p.width || meta.width;
+      const h = p.height || meta.height;
+      const res = (w && h) ? `${formatNumber(w)}x${formatNumber(h)}` : null;
+
       let sampler = p.sampler || file.sampler || null;
       if (sampler && p.sm && !sampler.includes('karras')) sampler += " (karras)";
       data.params = {
         resolution: res, seed: p.seed ?? file.seed ?? null,
-        steps: p.steps ?? file.steps ?? null, sampler: sampler,
+        steps: formatNumber(p.steps ?? file.steps ?? null), sampler: sampler,
         scale: p.scale ?? file.scale ?? null, cfg_rescale: p.cfg_rescale ?? file.cfg_rescale ?? null,
         uncond_scale: p.uncond_scale ?? file.uncond_scale ?? null,
         rawParameters: p.rawParameters ?? file.rawParameters ?? null
       };
       return data;
     };
+
+    if (infoContainer) {
+      const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+      const getAspectRatio = (w, h) => {
+        if (!w || !h) return '';
+        const d = gcd(w, h);
+        const rw = w / d;
+        const rh = h / d;
+        if (rw > 100 || rh > 100) {
+          return `${(w / h).toFixed(2)}:1`;
+        }
+        return `${rw}:${rh}`;
+      };
+
+      let cleanExt = file.ext || '';
+      if (cleanExt.startsWith('.')) cleanExt = cleanExt.substring(1);
+      const fullName = cleanExt && !file.name.toLowerCase().endsWith('.' + cleanExt.toLowerCase()) ? `${file.name}.${cleanExt}` : file.name;
+      const sizeStr = file.size ? `${formatSize(file.size)} bytes` : '-';
+      const resStr = (file.width && file.height) ? `${Number(file.width).toLocaleString()} x ${Number(file.height).toLocaleString()}` : '-';
+      const ratioStr = (file.width && file.height) ? ` (${getAspectRatio(file.width, file.height)})` : '';
+      const mtimeStr = file.mtime ? formatDate(file.mtime) : '-';
+      
+      let ctimeValue = file.ctime;
+      if (!ctimeValue && meta) {
+        const metaDate = meta.timestamp || meta.date || meta.CreationTime || meta['Creation Time'];
+        if (metaDate) {
+          const parsed = Date.parse(metaDate);
+          if (!isNaN(parsed)) ctimeValue = parsed;
+        }
+      }
+      const ctimeStr = ctimeValue ? formatDate(ctimeValue) : '-';
+      
+      const renderInfoSection = (title, text) => {
+        return `
+          <div class="inspector-section" style="margin-bottom: 15px;">
+            <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
+              <span>${title}</span>
+            </h3>
+            <div class="prompt-look param-box" style="height: auto; min-height: 34px;">
+              <span class="diff-tag common" style="border: none; background: transparent; padding: 0; word-break: break-all; white-space: normal;">${text}</span>
+            </div>
+          </div>
+        `;
+      };
+
+      infoContainer.innerHTML = `
+        ${renderInfoSection('ファイル名', fullName)}
+        ${renderInfoSection('ファイルサイズ', sizeStr)}
+        ${renderInfoSection('解像度とアスペクト比', `${resStr}${ratioStr}`)}
+        ${renderInfoSection('作成日時', ctimeStr)}
+        ${renderInfoSection('更新日時', mtimeStr)}
+      `;
+    }
 
     const d = extractData();
 
@@ -1532,8 +1600,12 @@ async function renderMetadata(file) {
 
     container.innerHTML = html;
 
-    // コピーイベントの登録
-    container.querySelectorAll('.diff-copy-btn').forEach(btn => {
+    // コピーイベントの登録 (ファイル情報ペインとインスペクターの両方)
+    const newCopyBtns = [];
+    if (container) newCopyBtns.push(...container.querySelectorAll('.diff-copy-btn'));
+    if (infoContainer) newCopyBtns.push(...infoContainer.querySelectorAll('.diff-copy-btn'));
+
+    newCopyBtns.forEach(btn => {
       btn.addEventListener('click', async (e) => {
         const target = e.currentTarget;
         const text = target.getAttribute('data-copy-text');
@@ -1547,7 +1619,11 @@ async function renderMetadata(file) {
     });
 
     // --- 【追加】ドラッグ選択コピー時のカンマ自動挿入ロジック ---
-    container.querySelectorAll('.prompt-look').forEach(lookDiv => {
+    const newPromptLooks = [];
+    if (container) newPromptLooks.push(...container.querySelectorAll('.prompt-look'));
+    if (infoContainer) newPromptLooks.push(...infoContainer.querySelectorAll('.prompt-look'));
+
+    newPromptLooks.forEach(lookDiv => {
       lookDiv.addEventListener('copy', (e) => {
         const selection = window.getSelection();
         if (selection.isCollapsed) return;
@@ -2334,7 +2410,7 @@ function createResizerToggle(resizer, type) {
     z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
   `;
   
-  const isVertical = type === 'center' || type === 'leftTop';
+  const isVertical = type === 'center' || type === 'leftTop' || type === 'rightTop';
   btn.style.width = isVertical ? '30px' : '14px';
   btn.style.height = isVertical ? '14px' : '30px';
   
@@ -2392,6 +2468,22 @@ function createResizerToggle(resizer, type) {
         appState.layout.leftTopVisible = false;
         btn.innerHTML = closeIcon;
       }
+    } else if (type === 'rightTop') {
+      const root = document.documentElement;
+      const isCollapsed = root.style.getPropertyValue('--right-top-height') === '0px';
+      if (isCollapsed) {
+        const restoreHeight = localStorage.getItem('prevRightTopHeight') || '200px';
+        root.style.setProperty('--right-top-height', restoreHeight);
+        localStorage.setItem('rightTopHeight', restoreHeight);
+        appState.layout.rightTopVisible = true;
+        btn.innerHTML = openIcon;
+      } else {
+        localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
+        root.style.setProperty('--right-top-height', '0px');
+        localStorage.setItem('rightTopHeight', '0px');
+        appState.layout.rightTopVisible = false;
+        btn.innerHTML = closeIcon;
+      }
     }
   });
 
@@ -2404,10 +2496,11 @@ setupResizer(uiManager.elements.resizerLeft, 'left', 'col-resize');
 setupResizer(uiManager.elements.resizerRight, 'right', 'col-resize');
 setupResizer(uiManager.elements.resizerCenter, 'center', 'row-resize');
 setupResizer(document.getElementById('resizer-left-pane'), 'leftTop', 'row-resize');
+setupResizer(document.getElementById('resizer-right-pane'), 'rightTop', 'row-resize');
 
 let resizerRafId = null;
 window.addEventListener('mousemove', (e) => {
-  if (!resizingState.left && !resizingState.right && !resizingState.center && !resizingState.leftTop) return;
+  if (!resizingState.left && !resizingState.right && !resizingState.center && !resizingState.leftTop && !resizingState.rightTop) return;
 
   if (resizerRafId) cancelAnimationFrame(resizerRafId);
   resizerRafId = requestAnimationFrame(() => {
@@ -2502,6 +2595,31 @@ window.addEventListener('mousemove', (e) => {
           btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
         }
       }
+    } else if (resizingState.rightTop) {
+      const rightPane = document.getElementById('right-pane');
+      const rect = rightPane.getBoundingClientRect();
+      let newHeight = e.clientY - rect.top;
+      
+      if (newHeight < 30) {
+        const root = document.documentElement;
+        if (root.style.getPropertyValue('--right-top-height') !== '0px') {
+          localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
+          root.style.setProperty('--right-top-height', '0px');
+          localStorage.setItem('rightTopHeight', '0px');
+          const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
+          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+        }
+      } else {
+        newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
+        const root = document.documentElement;
+        root.style.setProperty('--right-top-height', `${newHeight}px`);
+        appState.layout.rightTopHeight = newHeight;
+        
+        const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
+        if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
+          btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
+        }
+      }
     }
   });
 });
@@ -2526,6 +2644,12 @@ window.addEventListener('mouseup', () => {
     localStorage.setItem('leftTopHeight', document.documentElement.style.getPropertyValue('--left-top-height'));
     resizingState.leftTop = false;
     const el = document.getElementById('resizer-left-pane');
+    if (el) el.classList.remove('resizing');
+  }
+  if (resizingState.rightTop) {
+    localStorage.setItem('rightTopHeight', document.documentElement.style.getPropertyValue('--right-top-height'));
+    resizingState.rightTop = false;
+    const el = document.getElementById('resizer-right-pane');
     if (el) el.classList.remove('resizing');
   }
   document.body.style.cursor = 'default';
@@ -3089,6 +3213,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (savedLeftTopHeight) {
     if (savedLeftTopHeight === '0px') {
       const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
+      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+    }
+  }
+
+  const savedRightTopHeight = localStorage.getItem('rightTopHeight');
+  if (savedRightTopHeight) {
+    if (savedRightTopHeight === '0px') {
+      const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
     }
   }
