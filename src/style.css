@@ -631,9 +631,9 @@ input[type="range"]:focus {
 }
 
 .toast-message {
-  background-color: rgba(19, 27, 30, 0.95);
-  color: var(--text-color);
-  border: 1px solid var(--modal-border);
+  background-color: var(--modal-border);
+  color: #fff;
+  border: 1px solid var(--accent-color);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 13px;
@@ -650,21 +650,21 @@ input[type="range"]:focus {
 }
 
 .toast-message.warning {
-  background-color: rgba(255, 204, 0, 0.15);
+  background-color: var(--glow-gold);
   border-color: var(--glow-gold);
-  color: #ffe680;
+  color: var(--bg-color);
 }
 
 .toast-message.success {
-  background-color: rgba(37, 126, 140, 0.2);
+  background-color: var(--modal-border);
   border-color: var(--accent-color);
-  color: #61c7d6;
+  color: #fff;
 }
 
 .toast-message.error {
-  background-color: rgba(224, 82, 99, 0.15);
+  background-color: var(--danger-red);
   border-color: var(--danger-red);
-  color: #f08a96;
+  color: #fff;
 }
 
 /* --- ライセンス画面：最終デザイン確定版 --- */

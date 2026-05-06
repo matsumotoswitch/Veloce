@@ -247,7 +247,7 @@ async function renameSelectedFolder() {
 
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
-      showNotification(`フォルダ名を「${newName}」に変更しました`);
+      showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (appState.currentDirectory.startsWith(oldPath)) {
         appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
         localStorage.setItem('currentDirectory', appState.currentDirectory);
@@ -1142,7 +1142,7 @@ const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
     const parentPath = contextMenu.targetFolder.path;
     const result = await window.veloceAPI.createFolder(parentPath, folderName);
     if (result && result.success) {
-      showNotification(`フォルダ「${folderName}」を作成しました`);
+      showNotification(`フォルダ「${folderName}」を作成しました`, 'success');
       await refreshTree();
 
       await expandTreeToPath(parentPath, true);
@@ -1296,8 +1296,8 @@ async function renderMetadata(file) {
         const text = target.getAttribute('data-copy-text');
         if (text) {
           await navigator.clipboard.writeText(text);
-          if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました");
-          else showNotification("クリップボードにコピーしました"); // 古い関数へのフォールバック
+          if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました", 3000, null, 'success');
+          else showNotification("クリップボードにコピーしました", 'success'); // 古い関数へのフォールバック
           uiManager.applyGlowEffect(target);
         }
       });
@@ -1347,7 +1347,7 @@ const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
 
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
-      showNotification(`フォルダ名を「${newName}」に変更しました`);
+      showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (appState.currentDirectory.startsWith(oldPath)) {
         appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
         localStorage.setItem('currentDirectory', appState.currentDirectory);
@@ -1447,7 +1447,7 @@ const menuDeleteFavorite = createMenuOption('お気に入りを削除', async ()
       appState.favorites.splice(favIndex, 1);
       localStorage.setItem('favorites', JSON.stringify(appState.favorites));
       renderFavorites();
-      showNotification(`お気に入りから削除しました`);
+      showNotification(`お気に入りから削除しました`, 'success');
     }
   }
 });
@@ -2133,13 +2133,13 @@ window.addEventListener('keydown', async (e) => {
 
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
     if (window.getSelection().toString()) {
-      showNotification('テキストをクリップボードにコピーしました');
+      showNotification('テキストをクリップボードにコピーしました', 'success');
       return;
     }
 
     if (appState.selectedIndex > -1 && appState.filteredFiles[appState.selectedIndex]) {
       window.veloceAPI.copyImageToClipboard(appState.filteredFiles[appState.selectedIndex].path);
-      showNotification('画像をクリップボードにコピーしました');
+      showNotification('画像をクリップボードにコピーしました', 'success');
 
       const applyFlash = (el) => {
         uiManager.applyGlowEffect(el);

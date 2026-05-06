@@ -571,7 +571,7 @@ class UIManager {
         if (text && text !== '-') {
           try {
             await navigator.clipboard.writeText(text);
-            this.showToast("クリップボードにコピーしました");
+            this.showToast("クリップボードにコピーしました", 3000, null, 'success');
             this.applyGlowEffect(target);
           } catch (err) {}
         }
