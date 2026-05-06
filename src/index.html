@@ -50,6 +50,32 @@
     .tree-toggle.expanded {
       transform: rotate(0deg);
     }
+
+    /* 中央ペインに移動した検索バーのレイアウト調整 */
+    .center-search-wrapper {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .center-search-wrapper #search-container {
+      flex: 1;
+      max-width: none;
+    }
+    /* テキストボックス内への絶対配置をリセット */
+    #search-clear-btn {
+      position: static !important;
+      transform: none !important;
+    }
+
+    /* オートコンプリート(自動補完)時の背景色・文字色の変化を防ぐ */
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-text-fill-color: var(--text-color) !important;
+      transition: background-color 5000s ease-in-out 0s !important;
+    }
   </style>
 </head>
 <body>
@@ -59,10 +85,6 @@
       <span class="titlebar-title">Veloce</span>
     </div>
     <div class="titlebar-center">
-      <div id="search-container">
-        <span id="search-clear-btn"></span>
-        <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
-      </div>
     </div>
     <div class="titlebar-controls">
       <div class="titlebar-button" id="titlebar-minimize">
@@ -92,6 +114,12 @@
 
   <!-- 中央ペイン: リストとグリッド -->
   <div id="center-pane">
+    <div class="center-search-wrapper">
+      <div id="search-container">
+        <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
+      </div>
+      <button id="search-clear-btn" class="icon-btn"></button>
+    </div>
 	<div id="center-top">
 	  <table id="file-table">
 		<thead>
