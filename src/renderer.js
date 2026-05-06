@@ -2774,7 +2774,11 @@ window.addEventListener('keydown', async (e) => {
 
   if (e.key === 'a' || e.key === 'A') {
     e.preventDefault();
-    if (window.veloceAPI.arrangeViewers) window.veloceAPI.arrangeViewers();
+    if (window.veloceAPI.arrangeViewers) {
+      window.veloceAPI.arrangeViewers().then(() => {
+        if (window.veloceAPI.focusWindow) window.veloceAPI.focusWindow();
+      });
+    }
   }
 
   if (e.key === 'd' || e.key === 'D') {

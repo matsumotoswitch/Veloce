@@ -39,6 +39,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => void} toggleDevtools
  * @property {() => void} closeWindow
  * @property {() => Promise<void>} arrangeViewers
+ * @property {() => void} focusWindow
  * @property {(paths: string[]) => Promise<void>} syncImagePaths
  * @property {() => Promise<string>} getLicenseText
  * @property {() => Promise<void>} openThumbnailCache
@@ -290,6 +291,15 @@ window.veloceAPI = {
    * 開いているすべてのビューアーウィンドウを横一列に並べます。
    */
   arrangeViewers: () => invoke('arrange_viewers'),
+  /**
+   * 現在のウィンドウにフォーカスを当てて最前面にします。
+   */
+  focusWindow: () => {
+    if (appWindow && appWindow.setFocus) {
+      appWindow.setFocus();
+    }
+    window.focus();
+  },
   /**
    * Rust側の画像パス配列をフロントエンドのソート結果と同期します。
    * @param {string[]} paths - ソート済みの画像パス配列
