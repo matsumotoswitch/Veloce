@@ -717,13 +717,7 @@ function createTreeNode(folder, isRoot = false) {
 
   // 展開・折りたたみ用のトグルアイコン
   const toggleIcon = document.createElement('span');
-  toggleIcon.className = 'toggle-icon';
-  toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
-  toggleIcon.style.cursor = 'pointer';
-  toggleIcon.style.marginRight = '5px';
-  toggleIcon.style.display = 'inline-flex';
-  toggleIcon.style.alignItems = 'center';
-  toggleIcon.style.width = '14px';
+  toggleIcon.className = 'tree-toggle toggle-icon';
 
   const icon = document.createElement('span');
   icon.className = 'tree-icon';
@@ -752,15 +746,36 @@ function createTreeNode(folder, isRoot = false) {
   const expandNode = async () => {
     if (!isLoaded) {
       const subFolders = await window.veloceAPI.getFolders(folder.path);
+      
+      // もし開いたフォルダ自身にサブフォルダがない場合は、自身の展開アイコンを隠して終了する
+      if (subFolders.length === 0) {
+        toggleIcon.style.visibility = 'hidden';
+        isLoaded = true;
+        return;
+      }
+
       subFolders.forEach(subFolder => {
-        childrenUl.appendChild(createTreeNode(subFolder));
+        const childNode = createTreeNode(subFolder);
+        childrenUl.appendChild(childNode);
+
+        // 1つ下位のフォルダについて、更に下位フォルダ(孫)の有無を非同期で確認し、空ならアイコンを非表示にする
+        window.veloceAPI.getFolders(subFolder.path).then(grandChildren => {
+          if (grandChildren && grandChildren.length === 0) {
+            const childToggle = childNode.querySelector('.tree-toggle');
+            if (childToggle) childToggle.style.visibility = 'hidden';
+          }
+        }).catch(err => console.error('Failed to check subfolders:', err));
       });
       isLoaded = true;
     }
-    childrenUl.style.display = 'block';
-    childrenUl.classList.remove('collapsed');
-    childrenUl.classList.add('expanded');
-    toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+
+    // 中身のサブフォルダが存在する場合のみ、展開アニメーションとクラスの付与を行う
+    if (childrenUl.children.length > 0) {
+      childrenUl.style.display = 'block';
+      childrenUl.classList.remove('collapsed');
+      childrenUl.classList.add('expanded');
+      toggleIcon.classList.add('expanded');
+    }
   };
 
   // 外部から展開処理を呼び出せるように要素に紐付ける
@@ -771,7 +786,7 @@ function createTreeNode(folder, isRoot = false) {
     childrenUl.style.display = 'none';
     childrenUl.classList.remove('expanded');
     childrenUl.classList.add('collapsed');
-    toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+    toggleIcon.classList.remove('expanded');
   };
   itemDiv.collapseNode = collapseNode;
 
