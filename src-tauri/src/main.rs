@@ -3,7 +3,7 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -33,7 +33,7 @@ pub struct LoadDirectoryResult {
     image_files: Vec<ImageFile>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FullMetadata {
     path: String,
@@ -326,6 +326,38 @@ async fn get_full_metadata_batch(file_paths: Vec<String>) -> Result<Vec<FullMeta
 // --- バイナリ解析パーサー群 (JSの実装をRustへ移植) ---
 
 fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
+    let mtime = std::fs::metadata(file_path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::UNIX_EPOCH)
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let cache_dir = get_veloce_data_dir().map(|mut p| {
+        p.push("Metadata");
+        p
+    });
+
+    let cache_file_path = if let Some(dir) = &cache_dir {
+        let _ = std::fs::create_dir_all(dir);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{}_{}", file_path, mtime).hash(&mut hasher);
+        let hash = hasher.finish();
+        Some(dir.join(format!("{}.json", hash)))
+    } else {
+        None
+    };
+
+    if let Some(cache_path) = &cache_file_path {
+        if cache_path.exists() {
+            if let Ok(json_str) = std::fs::read_to_string(cache_path) {
+                if let Ok(cached_meta) = serde_json::from_str::<FullMetadata>(&json_str) {
+                    return cached_meta;
+                }
+            }
+        }
+    }
+
     let (width, height) = image::image_dimensions(file_path).unwrap_or((0, 0));
 
     let mut raw_description = String::new();
@@ -453,7 +485,15 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
         }
     }
 
-    FullMetadata { path: file_path.to_string(), prompt, negative_prompt, width, height, params, source }
+    let meta = FullMetadata { path: file_path.to_string(), prompt, negative_prompt, width, height, params, source };
+
+    if let Some(cache_path) = &cache_file_path {
+        if let Ok(json_str) = serde_json::to_string(&meta) {
+            let _ = std::fs::write(cache_path, json_str);
+        }
+    }
+
+    meta
 }
 
 fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
@@ -1162,6 +1202,20 @@ fn get_thumbnail_cache_info() -> ThumbnailCacheInfo {
         path.push("Thumbnails");
         path_str = path.to_string_lossy().to_string();
         
+        if let Ok(entries) = std::fs::read_dir(&path) {
+            for entry in entries.filter_map(Result::ok) {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_file() {
+                        file_count += 1;
+                        total_size_bytes += metadata.len();
+                    }
+                }
+            }
+        }
+
+        // メタデータキャッシュの情報も合算する
+        path.pop();
+        path.push("Metadata");
         if let Ok(entries) = std::fs::read_dir(&path) {
             for entry in entries.filter_map(Result::ok) {
                 if let Ok(metadata) = entry.metadata() {
