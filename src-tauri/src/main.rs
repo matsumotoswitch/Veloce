@@ -1167,9 +1167,8 @@ fn rename_folder(old_path: String, new_name: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn open_thumbnail_folder() -> Result<(), String> {
-    if let Some(mut path) = get_veloce_data_dir() {
-        path.push("Thumbnails");
+fn open_cache_folder() -> Result<(), String> {
+    if let Some(path) = get_veloce_data_dir() {
         if !path.exists() {
             let _ = std::fs::create_dir_all(&path);
         }
@@ -1237,8 +1236,9 @@ fn get_thumbnail_cache_info() -> ThumbnailCacheInfo {
     let mut total_size_bytes = 0;
 
     if let Some(mut path) = get_veloce_data_dir() {
+        path_str = path.to_string_lossy().to_string(); // 親ディレクトリ(Veloce)のパスを保持
+
         path.push("Thumbnails");
-        path_str = path.to_string_lossy().to_string();
         
         if let Ok(entries) = std::fs::read_dir(&path) {
             for entry in entries.filter_map(Result::ok) {
@@ -1353,7 +1353,7 @@ fn main() {
             get_license_text,
             rename_file,
             rename_folder,
-            open_thumbnail_folder,
+            open_cache_folder,
             clear_thumbnail_cache,
             get_thumbnail_cache_info,
             open_in_explorer

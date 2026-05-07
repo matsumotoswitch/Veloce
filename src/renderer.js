@@ -3271,12 +3271,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (uiManager.elements.openCacheBtn) {
     uiManager.elements.openCacheBtn.removeAttribute('title');
-    let openCacheText = 'サムネイルフォルダを開きます';
+    let openCacheText = 'キャッシュフォルダを開きます';
     uiManager.elements.openCacheBtn.addEventListener('mouseenter', async (e) => {
       uiManager.showCustomTooltip(openCacheText, e.clientX, e.clientY);
       if (window.veloceAPI.getThumbnailCacheInfo) {
         const info = await window.veloceAPI.getThumbnailCacheInfo();
-        openCacheText = `サムネイルフォルダを開きます\nパス: ${info.path}`;
+        openCacheText = `キャッシュフォルダを開きます\nパス: ${info.path}`;
         if (uiManager.isTooltipVisible) {
           uiManager.showCustomTooltip(openCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
         }
@@ -3290,20 +3290,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
     uiManager.elements.openCacheBtn.addEventListener('click', () => {
       uiManager.applyGlowEffect(uiManager.elements.openCacheBtn);
-      window.veloceAPI.openThumbnailCache();
+      window.veloceAPI.openCacheFolder();
       uiManager.hideCustomTooltip();
     });
   }
 
   if (uiManager.elements.clearCacheBtn) {
     uiManager.elements.clearCacheBtn.removeAttribute('title');
-    let clearCacheText = 'サムネイル画像を削除します';
+    let clearCacheText = 'キャッシュを削除します';
     uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async (e) => {
       uiManager.showCustomTooltip(clearCacheText, e.clientX, e.clientY);
       if (window.veloceAPI.getThumbnailCacheInfo) {
         const info = await window.veloceAPI.getThumbnailCacheInfo();
         const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
-        clearCacheText = `サムネイル画像を削除します\n保存数: ${info.fileCount}枚\n合計サイズ: ${sizeMB} MB`;
+        clearCacheText = `キャッシュを削除します\n保存数: ${info.fileCount}枚\n合計サイズ: ${sizeMB} MB`;
         if (uiManager.isTooltipVisible) {
           uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
         }
@@ -3318,9 +3318,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     uiManager.elements.clearCacheBtn.addEventListener('click', async () => {
       uiManager.applyGlowEffect(uiManager.elements.clearCacheBtn);
       uiManager.hideCustomTooltip();
-      const isConfirmed = await uiManager.showConfirm('すべてのサムネイルキャッシュを削除しますか？\nこの操作は元に戻せません。');
+      const isConfirmed = await uiManager.showConfirm('すべてのキャッシュを削除しますか？\nこの操作は元に戻せません。');
       if (isConfirmed) {
-        uiManager.showToast('サムネイルキャッシュを削除しています...', 0, 'cache-clear', 'info');
+        uiManager.showToast('キャッシュを削除しています...', 0, 'cache-clear', 'info');
         try {
           await window.veloceAPI.clearThumbnailCache();
           appState.thumbnailUrls.clear(); 
