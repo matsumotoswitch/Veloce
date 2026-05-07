@@ -414,6 +414,7 @@ function renderFavorites() {
   appState.favorites.forEach(fav => {
     const li = document.createElement('li');
     li.className = 'tree-node';
+    li.style.fontSize = '0.9em';
     
     const itemDiv = document.createElement('div');
     itemDiv.className = 'tree-item favorite-item';
@@ -433,7 +434,7 @@ function renderFavorites() {
       icon.textContent = fav.icon || '⭐';
     }
     icon.style.marginRight = '4px';
-    icon.style.marginLeft = '16px'; 
+    icon.style.marginLeft = '2px'; 
     icon.style.display = 'inline-flex';
     icon.style.alignItems = 'center';
 
@@ -2669,14 +2670,27 @@ uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
   localStorage.setItem('thumbnailScale', e.target.value);
 });
 
+// リサイズイベント発生時にディレイなしで枠線の表示・非表示を切り替える
+window.addEventListener('resize', () => {
+  const isMax = window.innerWidth >= window.screen.availWidth - 10 && window.innerHeight >= window.screen.availHeight - 10;
+  const borderOverlay = document.getElementById('border-overlay');
+  if (borderOverlay) {
+    borderOverlay.style.display = isMax ? 'none' : 'block';
+  }
+  const maxBtn = document.getElementById('titlebar-maximize');
+  if (maxBtn) {
+    maxBtn.innerHTML = isMax ? UIManager.ICONS.WINDOW_RESTORE : UIManager.ICONS.WINDOW_MAXIMIZE;
+  }
+});
+
 window.addEventListener('resize', debounce(() => {
   if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
     window.veloceAPI.isViewerMaximized().then(isMax => {
       localStorage.setItem('mainWinMaximized', isMax);
       updateTabLayout(); // ウィンドウサイズ変更時にタブレイアウトも更新
       if (!isMax) {
-        localStorage.setItem('mainWinWidth', window.outerWidth);
-        localStorage.setItem('mainWinHeight', window.outerHeight);
+        localStorage.setItem('mainWinWidth', Math.max(800, window.outerWidth));
+        localStorage.setItem('mainWinHeight', Math.max(600, window.outerHeight));
         localStorage.setItem('mainWinX', window.screenX);
         localStorage.setItem('mainWinY', window.screenY);
       }
@@ -3153,12 +3167,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (minBtn) {
+    minBtn.innerHTML = UIManager.ICONS.WINDOW_MINIMIZE;
     minBtn.addEventListener('click', () => window.veloceAPI.minimizeViewer());
   }
   if (maxBtn) {
+    maxBtn.innerHTML = UIManager.ICONS.WINDOW_MAXIMIZE;
     maxBtn.addEventListener('click', () => window.veloceAPI.maximizeViewer());
   }
   if (closeBtn) {
+    closeBtn.innerHTML = UIManager.ICONS.WINDOW_CLOSE;
     closeBtn.addEventListener('click', () => window.veloceAPI.closeWindow());
   }
 
@@ -3169,7 +3186,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   const savedWinMax = localStorage.getItem('mainWinMaximized');
 
   if (savedWinW && savedWinH && window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
-    window.veloceAPI.resizeViewerWindow(parseInt(savedWinW, 10), parseInt(savedWinH, 10));
+    const w = Math.max(800, parseInt(savedWinW, 10));
+    const h = Math.max(600, parseInt(savedWinH, 10));
+    window.veloceAPI.resizeViewerWindow(w, h);
   }
   if (savedWinX && savedWinY && window.veloceAPI && window.veloceAPI.moveViewerWindow) {
     window.veloceAPI.moveViewerWindow(parseInt(savedWinX, 10), parseInt(savedWinY, 10));
@@ -3726,5 +3745,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onDirectoryChanged(() => {
       handleDirChange();
     });
+  }
+
+  if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
+    window.veloceAPI.isViewerMaximized().then(isMax => {
+      const borderOverlay = document.getElementById('border-overlay');
+      if (borderOverlay) borderOverlay.style.display = isMax ? 'none' : 'block';
+      const maxBtn = document.getElementById('titlebar-maximize');
+      if (maxBtn) maxBtn.innerHTML = isMax ? UIManager.ICONS.WINDOW_RESTORE : UIManager.ICONS.WINDOW_MAXIMIZE;
+    }).catch(() => {});
   }
 });

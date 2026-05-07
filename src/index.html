@@ -136,7 +136,7 @@
     .tab-item.drag-over-right::after { right: -2px; }
 
     .tab-item:hover { 
-      background-color: rgba(255,255,255, 0.1); 
+      background-color: #162a2f; 
       opacity: 1; 
     }
     .tab-item.active {
@@ -256,6 +256,7 @@
   </style>
 </head>
 <body>
+  <div id="border-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; box-sizing: border-box; border: 1px solid var(--accent-color); z-index: 9998; display: none;"></div>
   <div data-tauri-drag-region class="titlebar">
     <div id="tab-container">
       <div id="new-tab-btn" class="tab-item new-tab-btn">

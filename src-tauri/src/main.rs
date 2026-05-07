@@ -1294,6 +1294,7 @@ fn main() {
             for config in window_configs {
                 tauri::WindowBuilder::from_config(app, config)
                     .data_directory(data_dir.clone())
+                    .min_inner_size(800.0, 600.0)
                     .build()?;
             }
 
