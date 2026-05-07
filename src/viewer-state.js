@@ -15,6 +15,7 @@ class ViewerState {
     this.imageDragStartX = 0;       // パン操作の開始X座標
     this.imageDragStartY = 0;       // パン操作の開始Y座標
     this.isFitToWindow = false;     // ウィンドウサイズに強制フィット（拡大処理あり）させるかどうか
+    this.isImmersiveArranged = false; // 整列表示時の没入（余白なしカバー）モード
     this.isFullscreen = false;      // フルスクリーン状態かどうか
     this.isBorderVisible = true;    // ウィンドウ枠を表示するかどうか
     this.previousWindowSize = null; // ウィンドウフィット前のサイズ保存用

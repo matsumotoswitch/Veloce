@@ -118,6 +118,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const listen = (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen) || (window.__TAURI__ && window.__TAURI__.tauri && window.__TAURI__.tauri.listen) || (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.listen);
     if (listen) {
       listen('viewers-arranged', () => {
+        viewerState.isImmersiveArranged = true;
         resetZoomAndFit();
       });
     }
@@ -188,7 +189,13 @@ function applyFitState() {
   if (viewerState.isZoomed) return;
 
   const isSwapped = isRotationSwapped();
-  if (viewerState.isFitToWindow) {
+  if (viewerState.isImmersiveArranged) {
+    viewerUI.elements.viewerImg.style.maxWidth = 'none';
+    viewerUI.elements.viewerImg.style.maxHeight = 'none';
+    viewerUI.elements.viewerImg.style.width = isSwapped ? '100vh' : '100vw';
+    viewerUI.elements.viewerImg.style.height = isSwapped ? '100vw' : '100vh';
+    viewerUI.elements.viewerImg.style.objectFit = 'cover';
+  } else if (viewerState.isFitToWindow) {
     viewerUI.elements.viewerImg.style.maxWidth = 'none';
     viewerUI.elements.viewerImg.style.maxHeight = 'none';
     viewerUI.elements.viewerImg.style.width = isSwapped ? '100vh' : '100vw';
@@ -317,7 +324,7 @@ function updateFullscreenStyles() {
  * 回転を考慮した画像本来のサイズに合わせてウィンドウをリサイズします。
  */
 function resizeWindowToFitImage() {
-  if (viewerState.isFullscreen || document.fullscreenElement) return;
+  if (viewerState.isFullscreen || document.fullscreenElement || viewerState.isImmersiveArranged) return;
 
   const { width: natW, height: natH } = getNaturalDimensions();
   const maxWindowWidth = window.screen.width;
@@ -421,6 +428,26 @@ function showNext() {
 
 function clampTranslate() {
   if (!viewerUI.elements.viewerImg) return;
+
+  if (viewerState.isImmersiveArranged) {
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+    const { width: natW, height: natH } = getNaturalDimensions();
+    
+    if (natW > 0 && natH > 0) {
+      const scale = Math.max(winW / natW, winH / natH);
+      const coverW = natW * scale;
+      const coverH = natH * scale;
+      
+      const maxTx = Math.max(0, (coverW - winW) / 2);
+      const maxTy = Math.max(0, (coverH - winH) / 2);
+      
+      viewerState.currentTranslateX = Math.max(-maxTx, Math.min(viewerState.currentTranslateX, maxTx));
+      viewerState.currentTranslateY = Math.max(-maxTy, Math.min(viewerState.currentTranslateY, maxTy));
+    }
+    return;
+  }
+
   const img = viewerUI.elements.viewerImg;
   const rect = img.getBoundingClientRect();
   const winW = window.innerWidth;
@@ -644,6 +671,7 @@ window.addEventListener('contextmenu', (e) => {
 window.addEventListener('wheel', (e) => {
   if (e.ctrlKey) {
     e.preventDefault(); // ブラウザ標準のズームを無効化
+    viewerState.isImmersiveArranged = false; // 手動ズームで解除
 
     // ホイールの回転方向に応じてスケールを増減（約10%ずつなめらかに変化）
     if (e.deltaY < 0) {
@@ -701,6 +729,7 @@ window.addEventListener('keydown', async (e) => {
       break;
     case '0': {
       e.preventDefault();
+      viewerState.isImmersiveArranged = false;
       const { width: natW, height: natH } = getNaturalDimensions();
 
       const monitorW = window.screen.availWidth;
@@ -725,6 +754,7 @@ window.addEventListener('keydown', async (e) => {
     }
     case '1': {
       e.preventDefault();
+      viewerState.isImmersiveArranged = false;
       const { width: natW, height: natH } = getNaturalDimensions();
 
       if (window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
@@ -740,6 +770,7 @@ window.addEventListener('keydown', async (e) => {
     case 'Enter':
       e.preventDefault();
       viewerState.isZoomed = false; // 100%ズームを解除
+      viewerState.isImmersiveArranged = false;
       viewerState.isFitToWindow = !viewerState.isFitToWindow; // 強制フィット状態をトグル
       applyFitState();
       updateFullscreenStyles();
@@ -750,6 +781,7 @@ window.addEventListener('keydown', async (e) => {
       break;
     case 'w':
     case 'W':
+      viewerState.isImmersiveArranged = false;
       if (!viewerState.isFullscreen) {
         if (viewerState.previousWindowSize) { // 既にフィットしている場合は元のサイズに戻す
           window.veloceAPI.resizeViewerWindow(viewerState.previousWindowSize.width, viewerState.previousWindowSize.height);

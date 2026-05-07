@@ -27,7 +27,29 @@ class ViewerUI {
     let filters = [];
     if (this.state.isUnsharped) filters.push('url(#unsharp-filter)');
     this.elements.viewerImg.style.filter = filters.length > 0 ? filters.join(' ') : 'none';
-    this.elements.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+    
+    if (this.state.isImmersiveArranged) {
+      let r = ((this.state.currentRotation % 360) + 360) % 360;
+      let posX = this.state.currentTranslateX;
+      let posY = this.state.currentTranslateY;
+
+      if (r === 90) {
+        posX = this.state.currentTranslateY;
+        posY = -this.state.currentTranslateX;
+      } else if (r === 180) {
+        posX = -this.state.currentTranslateX;
+        posY = -this.state.currentTranslateY;
+      } else if (r === 270) {
+        posX = -this.state.currentTranslateY;
+        posY = this.state.currentTranslateX;
+      }
+      
+      this.elements.viewerImg.style.objectPosition = `calc(50% + ${posX}px) calc(50% + ${posY}px)`;
+      this.elements.viewerImg.style.transform = `translate(0px, 0px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+    } else {
+      this.elements.viewerImg.style.objectPosition = '50% 50%';
+      this.elements.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+    }
   }
 
   /**
