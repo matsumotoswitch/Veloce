@@ -1034,7 +1034,8 @@ async function showLicenseDialog() {
   content.innerHTML = `
     <h2 style="margin-top: 0; color: var(--glow-gold);">ライセンス情報</h2>
     <div style="background-color: rgba(224, 82, 99, 0.15); border: 1px solid var(--danger-red); border-radius: 4px; padding: 12px; margin-bottom: 15px; color: #f08a96; font-weight: bold; font-size: 14px;">
-      ※本ソフトウェアは商用利用不可です。無保証・無サポートで提供されており、すべて自己責任でのご利用となります。
+      ※本ソフトウェア自体の販売や有償提供は禁止されていますが、本ツールを利用して管理・選別した画像の販売（クリエイターによる商用利用）は許可されています。
+      本ソフトウェアは無保証・無サポートで提供されており、すべて自己責任でのご利用となります。詳細は以下のライセンス本文をご確認ください。
     </div>
     <div id="license-text" style="flex: 1; overflow-y: auto; background-color: rgba(0, 0, 0, 0.2); padding: 0px 20px 20px 20px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color); font-family: sans-serif; white-space: normal; font-size: 14px; line-height: 1.6;">${parsedText}</div>
   `;
