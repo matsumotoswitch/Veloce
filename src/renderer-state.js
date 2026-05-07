@@ -99,13 +99,26 @@ class AppState {
     }
 
     files.sort((a, b) => {
-      let valA = a[this.sortConfig.key] !== undefined ? a[this.sortConfig.key] : 0;
-      let valB = b[this.sortConfig.key] !== undefined ? b[this.sortConfig.key] : 0;
-      if (typeof valA === 'string') valA = valA.toLowerCase();
-      if (typeof valB === 'string') valB = valB.toLowerCase();
-      if (valA < valB) return this.sortConfig.asc ? -1 : 1;
-      if (valA > valB) return this.sortConfig.asc ? 1 : -1;
-      return 0;
+      let valA = a[this.sortConfig.key];
+      let valB = b[this.sortConfig.key];
+
+      // 未定義プロパティ（メタデータ読み込み前など）のフォールバック
+      if (valA === undefined) valA = 0;
+      if (valB === undefined) valB = 0;
+
+      let cmp = 0;
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        // OS標準のエクスプローラに近い「自然順（1, 2, 10...）」で比較する
+        cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+      } else {
+        if (valA < valB) cmp = -1;
+        else if (valA > valB) cmp = 1;
+      }
+
+      if (cmp !== 0) return this.sortConfig.asc ? cmp : -cmp;
+
+      // 値が同じ場合（同じサイズや同じ日時など）は、ファイル名（自然順）で安定ソートする
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
 
     this.filteredFiles = files;

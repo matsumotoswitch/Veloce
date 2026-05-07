@@ -81,6 +81,7 @@ pub struct AppState {
     image_paths: Mutex<Vec<String>>,
     current_dir: Mutex<String>,
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    viewer_paths: Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
 // --- ユーティリティ ---
@@ -692,15 +693,19 @@ async fn parse_metadata(file_path: String) -> Result<ParseMetadataResult, String
 
 #[tauri::command]
 fn get_viewer_image(
+    window: tauri::Window,
     state: tauri::State<'_, AppState>,
     index: usize,
 ) -> Option<ViewerImageResult> {
-    if let Ok(paths) = state.image_paths.lock() {
-        if let Some(path) = paths.get(index) {
-            return Some(ViewerImageResult {
-                path: path.clone(),
-                total: paths.len(),
-            });
+    let label = window.label();
+    if let Ok(viewer_paths) = state.viewer_paths.lock() {
+        if let Some(paths) = viewer_paths.get(label) {
+            if let Some(path) = paths.get(index) {
+                return Some(ViewerImageResult {
+                    path: path.clone(),
+                    total: paths.len(),
+                });
+            }
         }
     }
     None
@@ -716,11 +721,11 @@ async fn open_viewer(
     monitor_width: f64,
     monitor_height: f64,
 ) -> Result<(), String> {
-    let target_path = {
+    let (target_path, current_paths) = {
         if let Ok(paths) = state.image_paths.lock() {
-            paths.get(current_index).cloned()
+            (paths.get(current_index).cloned(), paths.clone())
         } else {
-            None
+            (None, Vec::new())
         }
     };
 
@@ -747,6 +752,10 @@ async fn open_viewer(
     }
 
     let label = format!("viewer_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+
+    if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+        viewer_paths.insert(label.clone(), current_paths);
+    }
 
     let data_dir = get_veloce_data_dir().unwrap_or_default();
 
@@ -1022,9 +1031,30 @@ fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
 }
 
 #[tauri::command]
-fn sync_image_paths(state: tauri::State<'_, AppState>, paths: Vec<String>) {
+fn sync_image_paths(app: tauri::AppHandle, state: tauri::State<'_, AppState>, paths: Vec<String>) {
     if let Ok(mut lock) = state.image_paths.lock() {
-        *lock = paths;
+        *lock = paths.clone();
+    }
+
+    let target_dir = if let Some(first_path) = paths.first() {
+        Some(Path::new(first_path).parent().unwrap_or(Path::new("")).to_string_lossy().to_string())
+    } else {
+        state.current_dir.lock().ok().map(|d| d.clone())
+    };
+
+    if let Some(dir_str) = target_dir {
+        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+            for (label, viewer_list) in viewer_paths.iter_mut() {
+                let v_dir = viewer_list.first()
+                    .and_then(|p| Path::new(p).parent())
+                    .map(|p| p.to_string_lossy().to_string());
+                
+                if v_dir == Some(dir_str.clone()) {
+                    *viewer_list = paths.clone();
+                    let _ = app.emit_to(label, "viewer-list-updated", paths.clone());
+                }
+            }
+        }
     }
 }
 
@@ -1247,6 +1277,7 @@ fn main() {
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
             watcher: Mutex::new(None),
+            viewer_paths: Mutex::new(std::collections::HashMap::new()),
         })
         .setup(move |app| {
             let data_dir = get_veloce_data_dir().unwrap_or_default();
@@ -1285,8 +1316,15 @@ fn main() {
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event.event() {
-                if event.window().label() == "main" {
+                let label = event.window().label().to_string();
+                if label == "main" {
                     std::process::exit(0);
+                } else if label.starts_with("viewer_") {
+                    // ビューアウィンドウが閉じられた際にキャッシュを破棄
+                    let state = event.window().state::<AppState>();
+                    if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+                        viewer_paths.remove(&label);
+                    };
                 }
             }
         })

@@ -121,6 +121,28 @@ window.addEventListener('DOMContentLoaded', () => {
         viewerState.isImmersiveArranged = true;
         resetZoomAndFit();
       });
+      listen('viewer-list-updated', (event) => {
+        const newPaths = event.payload; // 更新されたファイルパスのリスト
+        const newIndex = newPaths.indexOf(viewerState.currentImagePath);
+        
+        // ソートやフィルタで順序が変わったため、古いインデックスのキャッシュをすべて破棄
+        viewerState.preloadCache.clear();
+
+        if (newIndex !== -1) {
+          // 現在表示中の画像が新しいリスト内にも存在する場合、インデックスと総数を更新
+          viewerState.currentIndex = newIndex;
+          viewerState.totalImages = newPaths.length;
+          document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
+          preloadAdjacentImages(); // 新しいリスト順で前後の画像をプリロードし直す
+        } else if (newPaths.length > 0) {
+          // フィルタリング等で画像が消滅したが、他の画像は残っている場合
+          viewerState.currentIndex = Math.min(viewerState.currentIndex, newPaths.length - 1);
+          loadImage();
+        } else {
+          // リストが空になった場合（すべての画像が除外・削除された等）はビューアを閉じる
+          if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
+        }
+      });
     }
 });
 
