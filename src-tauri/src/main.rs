@@ -23,6 +23,7 @@ pub struct ImageFile {
     path: String,
     size: u64,
     mtime: u64,
+    ctime: u64,
     has_thumbnail_cache: bool,
 }
 
@@ -110,9 +111,15 @@ fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>, cache_
     let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
     let mut size = 0;
     let mut mtime = 0;
+    let mut ctime = 0;
     if let Ok(metadata) = std::fs::metadata(path) {
         size = metadata.len();
         mtime = metadata.modified()
+            .unwrap_or(UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        ctime = metadata.created()
             .unwrap_or(UNIX_EPOCH)
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -139,6 +146,7 @@ fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>, cache_
         path: clean_path,
         size,
         mtime,
+        ctime,
         has_thumbnail_cache,
     })
 }

@@ -1499,25 +1499,29 @@ async function renderMetadata(file) {
       }
       const ctimeStr = ctimeValue ? formatDate(ctimeValue) : '-';
       
-      const renderInfoSection = (title, text) => {
+      const renderTableRow = (title, text) => {
         return `
-          <div class="inspector-section" style="margin-bottom: 15px;">
-            <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
-              <span>${title}</span>
-            </h3>
-            <div class="prompt-look param-box" style="height: auto; min-height: 34px;">
-              <span class="diff-tag common" style="border: none; background: transparent; padding: 0; word-break: break-all; white-space: normal;">${text}</span>
-            </div>
-          </div>
+          <tr>
+            <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
+              <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">${title}</h3>
+            </td>
+            <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
+              <span>${text}</span>
+            </td>
+          </tr>
         `;
       };
 
       infoContainer.innerHTML = `
-        ${renderInfoSection('ファイル名', fullName)}
-        ${renderInfoSection('ファイルサイズ', sizeStr)}
-        ${renderInfoSection('解像度とアスペクト比', `${resStr}${ratioStr}`)}
-        ${renderInfoSection('作成日時', ctimeStr)}
-        ${renderInfoSection('更新日時', mtimeStr)}
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; color: var(--text-color);">
+          <tbody>
+            ${renderTableRow('ファイル名', fullName)}
+            ${renderTableRow('ファイルサイズ', sizeStr)}
+            ${renderTableRow('解像度・比率', `${resStr}${ratioStr}`)}
+            ${renderTableRow('作成日時', ctimeStr)}
+            ${renderTableRow('更新日時', mtimeStr)}
+          </tbody>
+        </table>
       `;
     }
 
@@ -1599,10 +1603,9 @@ async function renderMetadata(file) {
 
     container.innerHTML = html;
 
-    // コピーイベントの登録 (ファイル情報ペインとインスペクターの両方)
+    // コピーイベントの登録 (インスペクターのみ)
     const newCopyBtns = [];
     if (container) newCopyBtns.push(...container.querySelectorAll('.diff-copy-btn'));
-    if (infoContainer) newCopyBtns.push(...infoContainer.querySelectorAll('.diff-copy-btn'));
 
     newCopyBtns.forEach(btn => {
       btn.addEventListener('click', async (e) => {
@@ -1620,7 +1623,6 @@ async function renderMetadata(file) {
     // --- 【追加】ドラッグ選択コピー時のカンマ自動挿入ロジック ---
     const newPromptLooks = [];
     if (container) newPromptLooks.push(...container.querySelectorAll('.prompt-look'));
-    if (infoContainer) newPromptLooks.push(...infoContainer.querySelectorAll('.prompt-look'));
 
     newPromptLooks.forEach(lookDiv => {
       lookDiv.addEventListener('copy', (e) => {
