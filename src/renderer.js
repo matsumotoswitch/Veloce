@@ -402,7 +402,7 @@ function renderFavorites() {
     li.style.padding = '20px 10px';
     li.style.color = 'var(--text-color)';
     li.style.opacity = '0.5';
-    li.style.fontSize = '12px';
+    li.style.fontSize = '0.9em';
     li.style.textAlign = 'center';
     li.style.lineHeight = '1.6';
     li.style.pointerEvents = 'none'; // ドラッグ操作の邪魔にならないようにする
@@ -432,9 +432,8 @@ function renderFavorites() {
     } else {
       icon.textContent = fav.icon || '⭐';
     }
-    icon.style.marginRight = '6px';
+    icon.style.marginRight = '4px';
     icon.style.marginLeft = '16px'; 
-    icon.style.fontSize = '14px';
     icon.style.display = 'inline-flex';
     icon.style.alignItems = 'center';
 
@@ -3333,7 +3332,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  const favListElement = document.getElementById('favorites-list');
+  // D&Dの受け入れ範囲を広げるため、リストではなくセクション全体を取得
+  const favListElement = document.getElementById('favorites-section') || document.getElementById('favorites-list');
   if (favListElement) {
     // --- お気に入りのドラッグ＆ドロップ並び替え処理 ---
     favListElement.addEventListener('dragstart', (e) => {
@@ -3362,18 +3362,24 @@ window.addEventListener('DOMContentLoaded', async () => {
       e.dataTransfer.dropEffect = isFolderDrop ? 'copy' : 'move';
 
       const itemDiv = e.target.closest('.favorite-item');
+
+      favListElement.querySelectorAll('.favorite-item').forEach(item => item.style.boxShadow = '');
+
       if (!itemDiv || (draggedFavoriteId && itemDiv.dataset.id === draggedFavoriteId)) {
-        favListElement.querySelectorAll('.favorite-item').forEach(item => item.style.boxShadow = '');
+        // 余白にドラッグしている場合、一番最後のアイテムの下にインジケータを表示する
+        const items = favListElement.querySelectorAll('.favorite-item');
+        if (items.length > 0) {
+          const lastItem = items[items.length - 1];
+          if (lastItem.dataset.id !== draggedFavoriteId) {
+            lastItem.style.boxShadow = '0 2px 0 var(--glow-gold)';
+          }
+        }
         return;
       }
 
       // マウス位置がターゲットの半分より上か下かで線の位置を変える
       const rect = itemDiv.getBoundingClientRect();
       const midY = rect.top + rect.height / 2;
-
-      favListElement.querySelectorAll('.favorite-item').forEach(item => {
-        if (item !== itemDiv) item.style.boxShadow = '';
-      });
 
       if (e.clientY < midY) {
         itemDiv.style.boxShadow = '0 -2px 0 var(--glow-gold)'; // 上に線
@@ -3430,20 +3436,25 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
 
       const itemDiv = e.target.closest('.favorite-item');
-      if (!itemDiv || itemDiv.dataset.id === draggedFavoriteId) return;
-
-      const targetId = itemDiv.dataset.id;
-      const rect = itemDiv.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      const insertAfter = e.clientY >= midY;
+      if (itemDiv && itemDiv.dataset.id === draggedFavoriteId) return;
 
       const fromIndex = appState.favorites.findIndex(f => f.id === draggedFavoriteId);
-      const toIndex = appState.favorites.findIndex(f => f.id === targetId);
-
-      if (fromIndex > -1 && toIndex > -1) {
+      if (fromIndex > -1) {
         const [movedItem] = appState.favorites.splice(fromIndex, 1);
-        let newIndex = appState.favorites.findIndex(f => f.id === targetId);
-        if (insertAfter) newIndex += 1;
+        let newIndex = appState.favorites.length; // デフォルトは末尾
+
+        if (itemDiv) {
+          const targetId = itemDiv.dataset.id;
+          newIndex = appState.favorites.findIndex(f => f.id === targetId);
+          if (newIndex > -1) {
+            const rect = itemDiv.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            const insertAfter = e.clientY >= midY;
+            if (insertAfter) newIndex += 1;
+          } else {
+            newIndex = appState.favorites.length;
+          }
+        }
         
         // 並び替えた状態を保存して再描画
         appState.favorites.splice(newIndex, 0, movedItem);
