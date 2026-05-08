@@ -8,8 +8,8 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
 /**
  * @typedef {Object} VeloceAPI
  * @property {() => Promise<string[]>} getDrives
- * @property {() => Promise<object|null>} selectDirectory
- * @property {(path: string) => Promise<{path: string, imageFiles: import('./renderer-state.js').ImageFile[]}>} loadDirectory
+ * @property {(path: string) => Promise<void>} loadDirectory
+ * @property {(callback: (payload: {path: string, files: import('./renderer-state.js').ImageFile[], is_complete: boolean}) => void) => void} onDirectoryChunk
  * @property {(dirPath: string) => Promise<Array<{name: string, path: string}>>} getFolders
  * @property {(filePaths: string[]) => Promise<any[]>} getFullMetadataBatch
  * @property {(filePath: string) => Promise<string>} getThumbnail
@@ -59,16 +59,16 @@ window.veloceAPI = {
    */
   getDrives: () => invoke('get_drives'),
   /**
-   * [非推奨] ディレクトリ選択ダイアログを開き、選択されたディレクトリの情報を返します。
-   * @returns {Promise<object|null>} 選択されたディレクトリのパスと画像ファイルのリスト。キャンセルされた場合はnull。
-   */
-  selectDirectory: () => invoke('select_directory'),
-  /**
-   * 指定されたパスのディレクトリを読み込み、画像ファイルのリストを返します。
+   * 指定されたパスのディレクトリのプログレッシブ読み込みを開始します。
+   * 結果は onDirectoryChunk イベントで受信します。
    * @param {string} path - 読み込むディレクトリのパス。
-   * @returns {Promise<object>} ディレクトリのパスと画像ファイルのリスト。
+   * @returns {Promise<void>}
    */
   loadDirectory: (path) => invoke('load_directory', { targetPath: path }),
+  /**
+   * ディレクトリ読み込みのチャンクデータを受信したときの通知を受け取ります。
+   */
+  onDirectoryChunk: (callback) => listen('directory-chunk', (event) => callback(event.payload)),
   /**
    * 指定されたパス内のサブフォルダのリストを取得します。
    * @param {string} path - 調査するディレクトリのパス。

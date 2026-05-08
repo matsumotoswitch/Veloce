@@ -76,27 +76,31 @@ document.body.appendChild(tabListMenu);
 // 2. Tauri API & Backend Communication
 // ============================================================================
 
-function applyNewFileList(files, resetScroll = false) {
-  appState.files = files || [];
-  resetThumbnailPreloader();
-  appState.applyFiltersAndSort();
-  uiManager.renderAll(resetScroll);
-  loadAllMetadataInBackground();
-  
-  uiManager.updateSelectionUI();
-  if (appState.selectedIndex > -1) {
-    renderMetadata(appState.filteredFiles[appState.selectedIndex]);
-  } else {
-    clearMetadataUI();
+async function refreshFileList(showToast = false) {
+  if (!appState.currentDirectory) return;
+
+  if (showToast) {
+    uiManager.showToast('フォルダを読み込み中...', 0, 'dir-load-progress', 'info');
   }
-}
 
-async function refreshFileList(resetScroll = false) {
-  if (!appState.currentDirectory || !window.veloceAPI.loadDirectory) return;
-  const result = await window.veloceAPI.loadDirectory(appState.currentDirectory);
-  if (!result) return;
+  // UIとデータの初期化
+  appState.files = [];
+  appState.filteredFiles = [];
+  appState.selection.clear();
+  appState.selectedIndex = -1;
+  if (uiManager.elements.searchBar) {
+    uiManager.elements.searchBar.value = '';
+  }
+  appState.searchQuery = '';
+  uiManager.renderAll();
 
-  applyNewFileList(result.imageFiles, resetScroll);
+  try {
+    // Rust側のバックグラウンドストリーミング処理をキックする
+    // ※結果は await せず、onDirectoryChunk リスナー側で随時受け取る
+    await window.veloceAPI.loadDirectory(appState.currentDirectory);
+  } catch (error) {
+    console.error('Failed to start loading directory:', error);
+  }
 }
 
 async function refreshTree() {
@@ -537,150 +541,86 @@ function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
 }
 
 window.processNextTask = function processNextTask() {
-  // 同時実行数の上限チェック（枠が空くまで待機）
-  if (appState.activeThumbnailTasks >= MAX_CONCURRENT_THUMBNAILS) return;
+  // 実行中のタスクが上限に達するまで、同期的にタスクを補充する
+  while (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
+    let targetFile = null;
+    let requestRenderId = null;
 
-  // 【優先処理】画面内に見えている画像
-  if (appState.thumbnailRequestQueue.length > 0) {
-    appState.isPreloadRunning = false;
+    // 【優先処理】画面内に見えている画像
+    if (appState.thumbnailRequestQueue.length > 0) {
+      appState.isPreloadRunning = false;
 
-    // 仮想スクロール対応: 現在DOMに存在している（＝画面内にある）ものを優先して探す
-    let targetIndex = appState.thumbnailRequestQueue.findIndex(req => {
-      return document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(req.filePath)}"]`) !== null;
-    });
-    if (targetIndex === -1) targetIndex = 0; // 見つからなければ先頭のものを処理
+      // 仮想スクロール対応: 現在DOMに存在しているものを優先して探す
+      let targetIndex = appState.thumbnailRequestQueue.findIndex(req => {
+        return document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(req.filePath)}"]`) !== null;
+      });
+      if (targetIndex === -1) targetIndex = 0;
 
-    const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
-    const { filePath, requestRenderId } = req; // 破棄される可能性がある img への直接参照は使わない
-
-    if (appState.currentRenderId !== requestRenderId) {
-      appState.pendingThumbnails.delete(filePath);
-      setTimeout(window.processNextTask, 0);
-      return;
-    }
-
-    appState.activeThumbnailTasks++;
-    fetchThumbnailWithTimeout(filePath).then(url => {
-      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
-      appState.pendingThumbnails.delete(filePath);
-
-      if (appState.currentRenderId === requestRenderId) {
-        const finalUrl = url || window.veloceAPI.convertFileSrc(filePath);
-        appState.thumbnailUrls.set(filePath, finalUrl);
-
-        // 通信完了時に毎回最新のDOMを検索して反映する
-        const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(filePath)}"]`);
-        if (currentImg) {
-          currentImg.src = finalUrl;
-        }
-
-        const fileObj = appState.files.find(f => f.path === filePath);
-        if (fileObj && !fileObj.hasThumbnailCache) {
-          fileObj.hasThumbnailCache = true;
-          appState.thumbnailCompleted++;
-          updateThumbnailToast();
-        }
-      }
-      setTimeout(window.processNextTask, 0); 
-    }).catch(() => {
-      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
-      appState.pendingThumbnails.delete(filePath);
+      const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
       
-      if (appState.currentRenderId === requestRenderId) {
-        const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
-        appState.thumbnailUrls.set(filePath, fallbackUrl);
-
-        const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(filePath)}"]`);
-        if (currentImg) {
-          currentImg.src = fallbackUrl;
-        }
-
-        const fileObj = appState.files.find(f => f.path === filePath);
-        if (fileObj && !fileObj.hasThumbnailCache) {
-          fileObj.hasThumbnailCache = true;
-          appState.thumbnailCompleted++;
-          updateThumbnailToast();
-        }
+      // 古いレンダリングIDのリクエストは破棄して次を探す
+      if (appState.currentRenderId !== req.requestRenderId) {
+        continue; 
       }
-      setTimeout(window.processNextTask, 0); 
-    });
+      
+      targetFile = req.filePath;
+      requestRenderId = req.requestRenderId;
+    } 
+    // 【バックグラウンド処理】優先キューが空の場合
+    else {
+      appState.isPreloadRunning = true;
+      while (appState.preloadCursor < appState.filteredFiles.length) {
+        const p = appState.filteredFiles[appState.preloadCursor].path;
+        if (!appState.thumbnailUrls.has(p) && !appState.pendingThumbnails.has(p)) {
+          targetFile = p;
+          break;
+        }
+        appState.preloadCursor++;
+      }
 
-    // 空いている枠の数だけ、一気にタスクを補充する
-    const availableSlots = MAX_CONCURRENT_THUMBNAILS - appState.activeThumbnailTasks;
-    for (let i = 0; i < availableSlots; i++) {
-      setTimeout(window.processNextTask, 0);
-    }
-    return;
-  }
-
-  // 【バックグラウンド処理】優先キューが空の場合、画面外の画像を順次作成
-  appState.isPreloadRunning = true;
-  let targetFile = null;
-
-  while (appState.preloadCursor < appState.filteredFiles.length) {
-    const p = appState.filteredFiles[appState.preloadCursor].path;
-    if (!appState.thumbnailUrls.has(p) && !appState.pendingThumbnails.has(p)) {
-      targetFile = p;
-      break;
-    }
-    appState.preloadCursor++;
-  }
-
-  if (!targetFile) {
-    appState.isPreloadRunning = false;
-    return; // 全ての画像の処理が完了
-  }
-
-  appState.pendingThumbnails.add(targetFile);
-  appState.activeThumbnailTasks++;
-
-  fetchThumbnailWithTimeout(targetFile).then(url => {
-    appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
-    appState.pendingThumbnails.delete(targetFile);
-    
-    const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
-    appState.thumbnailUrls.set(targetFile, finalUrl);
-
-    const fileObj = appState.files.find(f => f.path === targetFile);
-    if (fileObj && !fileObj.hasThumbnailCache) {
-        fileObj.hasThumbnailCache = true; 
-        appState.thumbnailCompleted++;
-        updateThumbnailToast();
+      if (!targetFile) {
+        appState.isPreloadRunning = false;
+        break; // 完全に処理する画像がなくなったので補充ループを抜ける
+      }
     }
 
-    // 仮想スクロールではプレースホルダーがセットされており src属性を既に持つため、hasAttributeによるチェックを除外
-    const img = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
-    if (img) {
-      img.src = finalUrl;
-    }
+    // タスクの開始を登録
+    appState.pendingThumbnails.add(targetFile);
+    appState.activeThumbnailTasks++;
 
-    setTimeout(window.processNextTask, 0);
-  }).catch(() => {
-    appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
-    appState.pendingThumbnails.delete(targetFile);
+    // 非同期でサムネイルを取得
+    fetchThumbnailWithTimeout(targetFile).then(url => {
+      const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
+      appState.thumbnailUrls.set(targetFile, finalUrl);
 
-    const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
-    appState.thumbnailUrls.set(targetFile, fallbackUrl);
+      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
+      if (currentImg) currentImg.src = finalUrl;
 
-    const fileObj = appState.files.find(f => f.path === targetFile);
-    if (fileObj && !fileObj.hasThumbnailCache) {
+      const fileObj = appState.files.find(f => f.path === targetFile);
+      if (fileObj && !fileObj.hasThumbnailCache) {
         fileObj.hasThumbnailCache = true;
         appState.thumbnailCompleted++;
         updateThumbnailToast();
-    }
+      }
+    }).catch(() => {
+      const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
+      appState.thumbnailUrls.set(targetFile, fallbackUrl);
 
-    const img = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
-    if (img) {
-      img.src = fallbackUrl;
-    }
+      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
+      if (currentImg) currentImg.src = fallbackUrl;
 
-    setTimeout(window.processNextTask, 0);
-  });
-
-  // 空いている枠の数だけ、一気にタスクを補充する
-  const availableSlots = MAX_CONCURRENT_THUMBNAILS - appState.activeThumbnailTasks;
-  for (let i = 0; i < availableSlots; i++) {
-    setTimeout(window.processNextTask, 0);
+      const fileObj = appState.files.find(f => f.path === targetFile);
+      if (fileObj && !fileObj.hasThumbnailCache) {
+        fileObj.hasThumbnailCache = true;
+        appState.thumbnailCompleted++;
+        updateThumbnailToast();
+      }
+    }).finally(() => {
+      // 成功・失敗に関わらず、タスクが1つ終わったら枠を空けて次を1つだけキックする
+      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
+      appState.pendingThumbnails.delete(targetFile);
+      setTimeout(window.processNextTask, 0);
+    });
   }
 };
 
@@ -1210,38 +1150,23 @@ window.onTabClick = async (index) => {
   appState.activeTabIndex = index;
   uiManager.renderTabs();
   
-  const tab = appState.tabs[index];
-  
-  appState.searchQuery = tab.searchQuery || '';
-  if (uiManager.elements.searchBar) {
-    uiManager.elements.searchBar.value = appState.searchQuery;
-  }
-  
-  if (tab.sortConfig) {
-    appState.sortConfig = JSON.parse(JSON.stringify(tab.sortConfig));
-    localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
-    updateSortIndicators();
-  }
+  const tab = appState.tabs[index];  
+  appState.searchQuery = tab.searchQuery || '';  
+  if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;  
+  if (tab.sortConfig) { appState.sortConfig = JSON.parse(JSON.stringify(tab.sortConfig)); localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig)); updateSortIndicators(); }
 
   if (window.veloceAPI.loadDirectory) {
-    const result = await window.veloceAPI.loadDirectory(tab.path);
-    if (result && result.imageFiles) {
-      appState.currentDirectory = result.path;
-      tab.path = result.path;
-      tab.name = getTabNameForPath(result.path);
-      localStorage.setItem('currentDirectory', appState.currentDirectory);
-      applyNewFileList(result.imageFiles, false); // スクロールを0にリセットしない
-      
-      setTimeout(() => {
-        if (uiManager.elements.thumbnailGrid && tab.scrollTop !== undefined) {
-          uiManager.elements.thumbnailGrid.scrollTop = tab.scrollTop;
-        }
-      }, 100);
+    appState.currentDirectory = tab.path;
+    localStorage.setItem('currentDirectory', appState.currentDirectory);
 
-      await expandTreeToPath(appState.currentDirectory);
-      uiManager.renderTabs();
-      saveTabsState();
-    }
+    appState.files = [];
+    uiManager.renderAll(true);
+    clearMetadataUI();
+    uiManager.showToast('フォルダを読み込み中...', 0, 'dir-load-progress', 'info');
+    window.veloceAPI.loadDirectory(tab.path);
+
+    await expandTreeToPath(appState.currentDirectory);
+    saveTabsState();
   }
 };
 
@@ -2183,21 +2108,17 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
     // アクティブなタブの内容を更新する
     const activeTab = appState.tabs[appState.activeTabIndex];
     if (activeTab) {
-      const result = await window.veloceAPI.loadDirectory(path);
-      if (result) {
-        // タブの状態を更新
-        activeTab.path = result.path;
-        activeTab.name = getTabNameForPath(result.path);
-        activeTab.scrollTop = 0; // 別フォルダ移動時はスクロールリセット
-        
-        // グローバルな状態も更新して既存の関数との互換性を保つ
-        appState.currentDirectory = result.path;
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
-
-        applyNewFileList(result.imageFiles, true);
-        uiManager.renderTabs(); // タブ名の変更をUIに反映
-        saveTabsState();
-      }
+      activeTab.path = path;
+      activeTab.name = getTabNameForPath(path);
+      activeTab.scrollTop = 0;
+      appState.currentDirectory = path;
+      localStorage.setItem('currentDirectory', path);
+      uiManager.renderTabs();
+      saveTabsState();
+      
+      // 古い applyNewFileList ではなく、refreshFileList を呼んで非同期ロードを開始する
+      refreshFileList(true);
+      await expandTreeToPath(path);
     }
   }
 
@@ -2911,6 +2832,29 @@ document.addEventListener('contextmenu', (e) => {
 window.addEventListener('DOMContentLoaded', async () => {
   renderFavorites();
 
+  if (window.veloceAPI.onDirectoryChunk) {
+    window.veloceAPI.onDirectoryChunk((payload) => {
+      // 別のタブ等による非同期のズレを防ぐ
+      if (payload.path !== appState.currentDirectory) return;
+
+      if (payload.files && payload.files.length > 0) {
+        appState.files.push(...payload.files);
+        scheduleRefresh(); // UIの更新を要求
+      }
+
+      if (payload.isComplete) {
+        setTimeout(() => {
+          const t = document.getElementById('toast-dir-load-progress');
+          if (t) {
+            t.classList.remove('show');
+            setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+          }
+        }, 100); // 描画の安定を待ってから確実に削除
+        loadAllMetadataInBackground();
+      }
+    });
+  }
+
   const minBtn = document.getElementById('titlebar-minimize');
   const maxBtn = document.getElementById('titlebar-maximize');
   const closeBtn = document.getElementById('titlebar-close');
@@ -3467,20 +3411,16 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (window.veloceAPI.loadDirectory) {
         const activeTab = appState.tabs[appState.activeTabIndex];
         if (activeTab) {
-          const result = await window.veloceAPI.loadDirectory(path);
-          if (result) {
-            activeTab.path = result.path;
-            activeTab.name = getTabNameForPath(result.path);
-            activeTab.scrollTop = 0; // 別フォルダ移動時はスクロールリセット
-            appState.currentDirectory = result.path;
-            localStorage.setItem('currentDirectory', appState.currentDirectory);
-            applyNewFileList(result.imageFiles, true);
-            await expandTreeToPath(appState.currentDirectory);
-            uiManager.renderTabs();
-            saveTabsState();
-          } else {
-            uiManager.showToast('ディレクトリが存在しません', 3000, null, 'warning');
-          }
+          activeTab.path = path;
+          activeTab.name = getTabNameForPath(path);
+          activeTab.scrollTop = 0; 
+          appState.currentDirectory = path;
+          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          uiManager.renderTabs();
+          saveTabsState();
+
+          refreshFileList(true);
+          await expandTreeToPath(path);
         }
       }
     });
@@ -3598,24 +3538,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (window.veloceAPI.loadDirectory) {
-    const result = await window.veloceAPI.loadDirectory(currentTab.path);
-    if (result && result.imageFiles) {
-      appState.currentDirectory = result.path;
-      currentTab.path = result.path; // 正確なパスに更新
-      currentTab.name = getTabNameForPath(result.path);
-      localStorage.setItem('currentDirectory', appState.currentDirectory); 
-      applyNewFileList(result.imageFiles, false); // スクロールリセットしない
-      
-      setTimeout(() => {
-        if (uiManager.elements.thumbnailGrid && currentTab.scrollTop !== undefined) {
-          uiManager.elements.thumbnailGrid.scrollTop = currentTab.scrollTop;
-        }
-      }, 100);
+    appState.currentDirectory = currentTab.path;
+    localStorage.setItem('currentDirectory', appState.currentDirectory);
+    appState.files = [];
+    uiManager.renderAll(true);
+    clearMetadataUI();
+    uiManager.showToast('フォルダを読み込み中...', 0, 'dir-load-progress', 'info');
+    window.veloceAPI.loadDirectory(currentTab.path);
 
-      await expandTreeToPath(appState.currentDirectory);
-      uiManager.renderTabs(); // パス解決後の名前で再描画
-      saveTabsState();
-    }
+    await expandTreeToPath(appState.currentDirectory);
+    saveTabsState();
   }
 
   if (window.veloceAPI.onFileChanged) {
@@ -3666,34 +3598,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       await refreshTree();
       
       if (appState.currentDirectory) {
-        // 現在のディレクトリが存在するか確認
-        const result = await window.veloceAPI.loadDirectory(appState.currentDirectory);
-        if (!result || !result.imageFiles) {
-          // 削除・リネームされて存在しない場合は親フォルダへ自動遷移
-          const separator = appState.currentDirectory.includes('\\') ? '\\' : '/';
-          const parts = appState.currentDirectory.split(separator).filter(Boolean);
-          parts.pop(); // 一つ上の階層へ
-          let parentDir = parts.join(separator);
-          if (parentDir.length === 2 && parentDir.endsWith(':')) parentDir += separator; // ドライブ直下へのフォールバック
-          
-          if (parentDir) {
-            const parentResult = await window.veloceAPI.loadDirectory(parentDir);
-            if (parentResult && parentResult.imageFiles) {
-              appState.currentDirectory = parentResult.path;
-              localStorage.setItem('currentDirectory', appState.currentDirectory);
-              applyNewFileList(parentResult.imageFiles, true);
-              // 親フォルダまでツリーを展開して選択状態にする
-              await refreshTree();
-              await expandTreeToPath(appState.currentDirectory);
-            }
-          }
-        } else {
-          // --- 修正: 結果をUIに反映し、Rust側のソート順を同期する処理を追加 ---
-          applyNewFileList(result.imageFiles, false);
-          
-          // 現在のディレクトリが存在する場合は、その場所までツリーを再度展開して表示を更新する
-          await expandTreeToPath(appState.currentDirectory);
-        }
+        refreshFileList(false);
+        await expandTreeToPath(appState.currentDirectory);
       }
     }, 500);
 

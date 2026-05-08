@@ -4,15 +4,12 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use std::io::Read; // flate2のread_to_stringやバイナリ解析用
 use std::sync::Mutex;
 use std::hash::{Hash, Hasher};
-use rayon::prelude::*;
 use tauri::Manager;
-use notify::{Watcher, RecursiveMode, EventKind};
 
 // --- データ構造の定義 ---
 #[derive(Serialize, Clone)]
@@ -27,11 +24,12 @@ pub struct ImageFile {
     has_thumbnail_cache: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LoadDirectoryResult {
+pub struct DirectoryChunkPayload {
     path: String,
-    image_files: Vec<ImageFile>,
+    files: Vec<ImageFile>,
+    is_complete: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -81,7 +79,6 @@ pub struct ViewerImageResult {
 pub struct AppState {
     image_paths: Mutex<Vec<String>>,
     current_dir: Mutex<String>,
-    watcher: Mutex<Option<notify::RecommendedWatcher>>,
     viewer_paths: Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
@@ -92,62 +89,6 @@ fn get_veloce_data_dir() -> Option<std::path::PathBuf> {
     tauri::api::path::local_data_dir().map(|mut p| {
         p.push("Veloce");
         p
-    })
-}
-
-/// 指定されたパスがサポート対象の画像であれば、ImageFile構造体を生成して返す
-fn create_image_file(path: &Path, cache_dir: &Option<std::path::PathBuf>, cache_set: Option<&std::collections::HashSet<String>>) -> Option<ImageFile> {
-    if !path.is_file() {
-        return None;
-    }
-    let ext_os = path.extension()?;
-    let ext = format!(".{}", ext_os.to_string_lossy().to_lowercase());
-    let supported = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
-    if !supported.contains(&ext.as_str()) {
-        return None;
-    }
-
-    // Windows固有の長いパス修飾子プレフィックスを除去
-    let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
-    let mut size = 0;
-    let mut mtime = 0;
-    let mut ctime = 0;
-    if let Ok(metadata) = std::fs::metadata(path) {
-        size = metadata.len();
-        mtime = metadata.modified()
-            .unwrap_or(UNIX_EPOCH)
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        ctime = metadata.created()
-            .unwrap_or(UNIX_EPOCH)
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-    }
-
-    let has_thumbnail_cache = if let Some(dir) = cache_dir {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{}_{}", &clean_path, mtime).hash(&mut hasher);
-        let hash = hasher.finish();
-        let file_name = format!("{}.jpg", hash);
-        if let Some(set) = cache_set {
-            set.contains(&file_name)
-        } else {
-            dir.join(&file_name).exists()
-        }
-    } else {
-        false
-    };
-
-    Some(ImageFile {
-        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-        ext,
-        path: clean_path,
-        size,
-        mtime,
-        ctime,
-        has_thumbnail_cache,
     })
 }
 
@@ -182,142 +123,93 @@ fn get_drives() -> Vec<String> {
 }
 
 #[tauri::command]
-async fn load_directory(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    target_path: String,
-) -> Result<Option<LoadDirectoryResult>, String> {
-    let dir_path = target_path.clone();
+fn load_directory(window: tauri::Window, target_path: String) -> Result<(), String> {
+    let path_clone = target_path.clone();
+    let app_clone = window.app_handle();
+    
+    tauri::async_runtime::spawn(async move {
+        // Veloceのキャッシュディレクトリ構造に合わせる
+        let cache_dir_path = get_veloce_data_dir()
+            .map(|p| p.join("Thumbnails"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
 
-    let res = tokio::task::spawn_blocking(move || {
-        let mut path_str = dir_path;
-        if path_str.is_empty() || path_str.to_uppercase() == "PC" {
-            path_str = std::env::var("USERPROFILE")
-                .or_else(|_| std::env::var("HOME"))
-                .unwrap_or_else(|_| "/".to_string());
-        }
+        let mut files = Vec::new();
+        let mut all_paths = Vec::new(); // ビューアー用にパスを保持する
+        let walker = walkdir::WalkDir::new(&path_clone).max_depth(1).into_iter().filter_map(|e| e.ok());
 
-        let path = Path::new(&path_str);
-        if !path.exists() {
-            return None;
-        }
-
-        let actual_dir = if path.is_dir() {
-            path.to_path_buf()
-        } else {
-            path.parent().unwrap_or(path).to_path_buf()
-        };
-
-        let cache_dir = get_veloce_data_dir().map(|mut p| {
-            p.push("Thumbnails");
-            p
-        });
-
-        let mut cache_set = std::collections::HashSet::new();
-        if let Some(ref dir) = cache_dir {
-            if let Ok(entries) = fs::read_dir(dir) {
-                for entry in entries.filter_map(Result::ok) {
-                    if let Ok(name) = entry.file_name().into_string() {
-                        cache_set.insert(name);
-                    }
-                }
-            }
-        }
-
-        let mut image_files = Vec::new();
-        let mut paths = Vec::new();
-
-        if let Ok(read_dir) = fs::read_dir(&actual_dir) {
-            let entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
-            
-            // create_image_file はI/Oを含むため、rayonで並列化して高速化する
-            let mut results: Vec<_> = entries.into_par_iter().filter_map(|entry| {
-                create_image_file(&entry.path(), &cache_dir, Some(&cache_set))
-            }).collect();
-
-            // ファイル名の順番を安定させるためソート
-            results.sort_by(|a, b| a.path.cmp(&b.path));
-
-            for file in results {
-                paths.push(file.path.clone());
-                image_files.push(file);
-            }
-        }
-        Some((actual_dir, image_files, paths))
-    }).await.unwrap_or(None);
-
-    if let Some((actual_dir, image_files, paths)) = res {
-        // 確実にロックを取得し、パスのリストを更新する
-        let mut lock = state.image_paths.lock().unwrap();
-        *lock = paths;
-
-        if let Ok(mut dir_lock) = state.current_dir.lock() {
-            *dir_lock = actual_dir.to_string_lossy().to_string();
-        }
-
-        // --- フォルダ監視 (File Watching) の設定 ---
-        if let Ok(mut watcher_lock) = state.watcher.lock() {
-            let app_handle = app.clone();
-            *watcher_lock = None; // 別のフォルダに移動した際、古いウォッチャーを破棄する
-            
-            let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(event) = res {
-                    let cache_dir = get_veloce_data_dir().map(|mut p| {
-                        p.push("Thumbnails");
-                        p
-                    });
-
-                    match &event.kind {
-                        EventKind::Access(_) => {
-                            // ファイル/フォルダへのアクセスイベントは大量に発生するため無視する
-                        },
-                        _ => { // それ以外のすべてのイベント (Create, Modify, Remove, Renameなど)
-                            let mut dir_changed = false;
+        for entry in walker {
+            let p = entry.path();
+            if p.is_file() {
+                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                        if let Ok(metadata) = std::fs::metadata(p) {
+                            let size = metadata.len();
+                            // 既存UIのフォーマットとキャッシュ生成用にミリ秒単位で取得
+                            let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                            let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                             
-                            // Renameイベントの場合は、フォルダ名変更の可能性が高いため無条件でツリー更新を通知
-                            if matches!(event.kind, EventKind::Modify(notify::event::ModifyKind::Name(_))) {
-                                dir_changed = true;
-                            } else {
-                                for path in &event.paths {
-                                    // 拡張子がない、または明示的にディレクトリと判定できる場合はツリー変更とみなす
-                                    if path.is_dir() || path.extension().is_none() {
-                                        dir_changed = true;
-                                        break;
-                                    }
-                                }
-                            }
+                            let file_name = entry.file_name().to_string_lossy().into_owned();
+                            let full_path = p.to_string_lossy().into_owned();
+                            let clean_path = full_path.replace("\\\\?\\", "");
 
-                            if dir_changed {
-                                let _ = app_handle.emit_all("directory-changed", ());
-                            } else {
-                                for path in event.paths {
-                                    if let EventKind::Remove(_) = &event.kind {
-                                        let clean_path = path.to_string_lossy().replace("\\\\?\\", "");
-                                        let _ = app_handle.emit_all("file-removed", clean_path);
-                                    } else if let Some(img_file) = create_image_file(&path, &cache_dir, None) {
-                                        let _ = app_handle.emit_all("file-changed", img_file);
-                                    }
-                                }
+                            // キャッシュの存在確認 (Veloceの仕様に合わせる)
+                            let cache_file_name = format!("{}_{}", clean_path, mtime);
+                            let cache_path = cache_dir_path.join(format!("{}.jpg", {
+                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                cache_file_name.hash(&mut hasher);
+                                hasher.finish()
+                            }));
+                            let has_thumbnail_cache = cache_path.exists();
+
+                            all_paths.push(clean_path.clone());
+
+                            files.push(ImageFile {
+                                name: file_name,
+                                ext: format!(".{}", ext_lower),
+                                path: clean_path,
+                                size,
+                                mtime,
+                                ctime,
+                                has_thumbnail_cache,
+                            });
+
+                            // 200件ごとにフロントエンドへ送信
+                            if files.len() >= 200 {
+                                let payload = DirectoryChunkPayload {
+                                    path: path_clone.clone(),
+                                    files: files.clone(),
+                                    is_complete: false,
+                                };
+                                let _ = window.emit("directory-chunk", payload);
+                                files.clear();
                             }
                         }
                     }
                 }
-            }).ok();
-
-            if let Some(w) = watcher.as_mut() {
-                let _ = w.watch(actual_dir.as_path(), RecursiveMode::NonRecursive);
             }
-            *watcher_lock = watcher;
         }
-        // --- 監視設定ここまで ---
 
-        Ok(Some(LoadDirectoryResult {
-            path: actual_dir.to_string_lossy().to_string(),
-            image_files,
-        }))
-    } else {
-        Ok(None)
-    }
+        // 残りのファイルと完了フラグを送信
+        let payload = DirectoryChunkPayload {
+            path: path_clone.clone(),
+            files,
+            is_complete: true,
+        };
+        let _ = window.emit("directory-chunk", payload);
+
+        // Rust側のStateにパス一覧を保存（画像ビューア等で必要）
+        if let Some(state) = app_clone.try_state::<AppState>() {
+            if let Ok(mut lock) = state.image_paths.lock() {
+                *lock = all_paths;
+            }
+            if let Ok(mut dir_lock) = state.current_dir.lock() {
+                *dir_lock = path_clone;
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1284,7 +1176,6 @@ fn main() {
         .manage(AppState { 
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
-            watcher: Mutex::new(None),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
         })
         .setup(move |app| {
