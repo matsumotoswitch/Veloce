@@ -544,11 +544,14 @@ window.processNextTask = function processNextTask() {
   if (appState.thumbnailRequestQueue.length > 0) {
     appState.isPreloadRunning = false;
 
-    let targetIndex = appState.thumbnailRequestQueue.findIndex(req => req.img.dataset.isVisible === 'true');
-    if (targetIndex === -1) targetIndex = 0;
+    // 仮想スクロール対応: 現在DOMに存在している（＝画面内にある）ものを優先して探す
+    let targetIndex = appState.thumbnailRequestQueue.findIndex(req => {
+      return document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(req.filePath)}"]`) !== null;
+    });
+    if (targetIndex === -1) targetIndex = 0; // 見つからなければ先頭のものを処理
 
     const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
-    const { filePath, requestRenderId, img } = req;
+    const { filePath, requestRenderId } = req; // 破棄される可能性がある img への直接参照は使わない
 
     if (appState.currentRenderId !== requestRenderId) {
       appState.pendingThumbnails.delete(filePath);
@@ -564,8 +567,11 @@ window.processNextTask = function processNextTask() {
       if (appState.currentRenderId === requestRenderId) {
         const finalUrl = url || window.veloceAPI.convertFileSrc(filePath);
         appState.thumbnailUrls.set(filePath, finalUrl);
-        if (img.dataset.isVisible === 'true') {
-          img.src = finalUrl;
+
+        // 通信完了時に毎回最新のDOMを検索して反映する
+        const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(filePath)}"]`);
+        if (currentImg) {
+          currentImg.src = finalUrl;
         }
 
         const fileObj = appState.files.find(f => f.path === filePath);
@@ -580,12 +586,13 @@ window.processNextTask = function processNextTask() {
       appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
       appState.pendingThumbnails.delete(filePath);
       
-      // エラー時もフォールバックを登録して無限ループを防ぐ
       if (appState.currentRenderId === requestRenderId) {
         const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
         appState.thumbnailUrls.set(filePath, fallbackUrl);
-        if (img.dataset.isVisible === 'true') {
-          img.src = fallbackUrl;
+
+        const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(filePath)}"]`);
+        if (currentImg) {
+          currentImg.src = fallbackUrl;
         }
 
         const fileObj = appState.files.find(f => f.path === filePath);
@@ -641,9 +648,9 @@ window.processNextTask = function processNextTask() {
         updateThumbnailToast();
     }
 
-    const escapedPath = CSS.escape(targetFile);
-    const img = document.querySelector(`.thumbnail-item[data-filepath="${escapedPath}"]`);
-    if (img && img.dataset.isVisible === 'true' && !img.hasAttribute('src')) {
+    // 仮想スクロールではプレースホルダーがセットされており src属性を既に持つため、hasAttributeによるチェックを除外
+    const img = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
+    if (img) {
       img.src = finalUrl;
     }
 
@@ -652,7 +659,6 @@ window.processNextTask = function processNextTask() {
     appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
     appState.pendingThumbnails.delete(targetFile);
 
-    // エラー時もフォールバックを登録して無限ループを防ぎ、Cursorを進める
     const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
     appState.thumbnailUrls.set(targetFile, fallbackUrl);
 
@@ -663,9 +669,8 @@ window.processNextTask = function processNextTask() {
         updateThumbnailToast();
     }
 
-    const escapedPath = CSS.escape(targetFile);
-    const img = document.querySelector(`.thumbnail-item[data-filepath="${escapedPath}"]`);
-    if (img && img.dataset.isVisible === 'true' && !img.hasAttribute('src')) {
+    const img = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
+    if (img) {
       img.src = fallbackUrl;
     }
 
@@ -678,39 +683,6 @@ window.processNextTask = function processNextTask() {
     setTimeout(window.processNextTask, 0);
   }
 };
-
-function initializeThumbnailObserver() {
-    const options = {
-        root: document.getElementById('center-bottom'), // 正しいスクロールコンテナを指定
-        rootMargin: '400px 0px 400px 0px', // 少し広めに範囲を取る
-    };
-    appState.thumbnailObserver = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            const img = entry.target;
-            const filePath = img.dataset.filepath;
-            if (entry.isIntersecting) {
-                img.dataset.isVisible = 'true';
-                if (filePath && !img.hasAttribute('src')) {
-                    if (appState.thumbnailUrls.has(filePath)) {
-                        // すでにキャッシュがあればそれを使う
-                        img.src = appState.thumbnailUrls.get(filePath);
-                    } else if (!appState.pendingThumbnails.has(filePath)) {
-                        // プレースホルダーを入れて二重リクエストを防止
-                        img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-                        
-                        const requestRenderId = appState.currentRenderId;
-                        appState.pendingThumbnails.add(filePath);
-                        appState.thumbnailRequestQueue.push({ filePath, requestRenderId, img });
-                        
-                        window.processNextTask();
-                    }
-                }
-            } else {
-                img.dataset.isVisible = 'false';
-            }
-        }
-    }, options);
-}
 
 function clearMetadataUI() {
   const container = document.getElementById('inspector-content');
@@ -909,15 +881,25 @@ async function selectImage(index, event = null) {
   
   uiManager.updateSelectionUI();
 
-  // 選択した画像やリスト行が画面内に表示されるように自動スクロール
-  const items = uiManager.elements.thumbnailGrid.children;
-  if (items[index]) {
-    if (items[index].scrollIntoViewIfNeeded) {
-      items[index].scrollIntoViewIfNeeded(false);
-    } else {
-      items[index].scrollIntoView({ block: 'nearest' });
+  // 選択した画像が画面内に表示されるように自動スクロール (仮想スクロール対応)
+  const container = uiManager.elements.thumbnailGrid;
+  if (container) {
+    const itemSize = parseFloat(uiManager.elements.thumbnailSizeSlider?.value) || 120;
+    const gap = 8;
+    const padding = 8;
+    const width = container.clientWidth - (padding * 2);
+    const cols = Math.max(1, Math.floor((width + gap) / (itemSize + gap)));
+    
+    const row = Math.floor(index / cols);
+    const targetY = row * (itemSize + gap);
+
+    if (targetY < container.scrollTop) {
+      container.scrollTop = targetY;
+    } else if (targetY + itemSize + gap > container.scrollTop + container.clientHeight) {
+      container.scrollTop = targetY + itemSize + gap - container.clientHeight + padding * 2;
     }
   }
+
   const rows = uiManager.elements.fileListBody.children;
   if (rows[index]) {
     const thead = document.querySelector('#file-table thead');
@@ -2651,7 +2633,10 @@ function updateThumbnailSize() {
   document.body.style.setProperty('--thumbnail-size', `${size}px`);
 }
 
-uiManager.elements.thumbnailSizeSlider.addEventListener('input', updateThumbnailSize);
+uiManager.elements.thumbnailSizeSlider.addEventListener('input', () => {
+  updateThumbnailSize();
+  if (typeof uiManager.updateVirtualGrid === 'function') uiManager.updateVirtualGrid(true);
+});
 
 uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
   localStorage.setItem('thumbnailScale', e.target.value);
@@ -3185,8 +3170,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (!isMax) window.veloceAPI.maximizeViewer();
     });
   }
-
-  initializeThumbnailObserver();
 
   const savedLeftWidth = localStorage.getItem('leftWidth');
   if (savedLeftWidth) appState.layout.leftWidth = parseInt(savedLeftWidth, 10);

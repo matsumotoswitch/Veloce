@@ -58,7 +58,6 @@ class AppState {
     };
 
     // システム状態・サムネイル管理
-    this.thumbnailObserver = null;   // サムネイルの遅延読み込み用IntersectionObserver
     this.currentMetaBatchId = 0;     // メタデータ一括読み込みのバッチID（非同期キャンセル用）
     this.currentMetaRequestId = 0;   // メタデータ個別読み込みのリクエストID
     this.currentRenderId = 0;        // リスト描画のリクエストID

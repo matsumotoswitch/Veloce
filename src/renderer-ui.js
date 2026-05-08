@@ -636,10 +636,12 @@ class UIManager {
 
     // 新たに選択された要素のみにクラスを付与する
     const rows = this.elements.fileListBody.children;
-    const thumbs = this.elements.thumbnailGrid.children;
     for (const i of this.state.selection) {
       if (rows[i]) rows[i].classList.add('selected');
-      if (thumbs[i]) thumbs[i].classList.add('selected');
+      
+      // 仮想スクロール対応: DOMの順番ではなく、data-index属性を使って対象の画像を探す
+      const thumb = this.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${i}"]`);
+      if (thumb) thumb.classList.add('selected');
     }
   }
 
@@ -890,15 +892,6 @@ class UIManager {
     }
 
     if (this.elements.fileListBody) this.elements.fileListBody.innerHTML = '';
-    if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.innerHTML = '';
-
-    if (this.elements.thumbnailGrid) {
-      this.elements.thumbnailGrid.style.display = 'flex';
-      this.elements.thumbnailGrid.style.flexWrap = 'wrap';
-      this.elements.thumbnailGrid.style.gap = '8px';
-      this.elements.thumbnailGrid.style.justifyContent = 'flex-start';
-      this.elements.thumbnailGrid.style.alignContent = 'flex-start';
-    }
 
     const fileListContainer = document.getElementById('center-top');
     if (resetScroll) {
@@ -906,23 +899,11 @@ class UIManager {
       if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
     }
 
-    if (this.state.filteredFiles.length === 0 && this.elements.thumbnailGrid) {
-      const emptyMessage = document.createElement('div');
-      emptyMessage.style.width = '100%';
-      emptyMessage.style.textAlign = 'center';
-      emptyMessage.style.color = 'var(--text-color)';
-      emptyMessage.style.opacity = '0.6';
-      emptyMessage.style.marginTop = '40px';
-      emptyMessage.textContent = '表示対象の画像がありません';
-      this.elements.thumbnailGrid.appendChild(emptyMessage);
-    }
-
     for (let i = 0; i < this.state.filteredFiles.length; i += CHUNK_SIZE) {
       if (renderId !== this.state.currentRenderId) return;
 
       const chunk = this.state.filteredFiles.slice(i, i + CHUNK_SIZE);
       const tableFragment = document.createDocumentFragment();
-      const gridFragment = document.createDocumentFragment();
 
       chunk.forEach((file, chunkIndex) => {
         const index = i + chunkIndex;
@@ -943,30 +924,16 @@ class UIManager {
         
         tr.draggable = true;
         tableFragment.appendChild(tr);
-
-        // --- サムネイルの作成 ---
-        const img = document.createElement('img');
-        if (isSelected) img.classList.add('selected');
-        img.decoding = "async";
-        img.dataset.filepath = file.path;
-        img.dataset.index = index;
-        img.className = 'thumbnail-item';
-        img.style.objectFit = 'contain';
-        img.style.width = 'var(--thumbnail-size)';
-        img.style.height = 'var(--thumbnail-size)';
-        
-        img.draggable = true;
-        gridFragment.appendChild(img);
-        if (this.state.thumbnailObserver) {
-          this.state.thumbnailObserver.observe(img);
-        }
       });
 
       if (this.elements.fileListBody) this.elements.fileListBody.appendChild(tableFragment);
-      if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.appendChild(gridFragment);
 
       // メインスレッドのブロック回避
       await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    if (typeof this.updateVirtualGrid === 'function') {
+      this.updateVirtualGrid(true);
     }
 
     // バックグラウンド生成の再スタート
@@ -976,6 +943,112 @@ class UIManager {
         setTimeout(window.processNextTask, 50);
       }
     }
+  }
+
+  updateVirtualGrid(force = false) {
+    if (!this.elements.thumbnailGrid) return;
+    const container = this.elements.thumbnailGrid;
+
+    // 仮想スクロール用の初期化
+    let content = container.querySelector('.virtual-content');
+    let spacer = container.querySelector('.virtual-spacer');
+
+    if (!content || !spacer) {
+      container.innerHTML = `
+        <div class="virtual-spacer" style="width: 1px; visibility: hidden; pointer-events: none;"></div>
+        <div class="virtual-content" style="position: absolute; top: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumbnail-size), 1fr)); gap: 8px; padding: 0 8px; justify-content: center;"></div>
+      `;
+      content = container.querySelector('.virtual-content');
+      spacer = container.querySelector('.virtual-spacer');
+
+      container.style.position = 'relative';
+      container.addEventListener('scroll', () => this.updateVirtualGrid(), { passive: true });
+      window.addEventListener('resize', () => {
+        if (this._resizeTimeout) clearTimeout(this._resizeTimeout);
+        this._resizeTimeout = setTimeout(() => this.updateVirtualGrid(true), 100);
+      });
+    }
+
+    if (!appState.filteredFiles || appState.filteredFiles.length === 0) {
+      content.innerHTML = '';
+      spacer.style.height = '0px';
+      return;
+    }
+
+    const itemSize = parseFloat(this.elements.thumbnailSizeSlider?.value) || 120;
+    const gap = 8;
+    const padding = 8;
+    const width = container.clientWidth - (padding * 2);
+
+    // カラム数と行数の計算
+    const cols = Math.max(1, Math.floor((width + gap) / (itemSize + gap)));
+    const rows = Math.ceil(appState.filteredFiles.length / cols);
+    const rowHeight = itemSize + gap;
+    const totalHeight = rows * rowHeight + (padding * 2);
+
+    spacer.style.height = `${totalHeight}px`;
+
+    const scrollTop = container.scrollTop;
+    const containerHeight = container.clientHeight || window.innerHeight;
+
+    // 表示すべき行の計算 (上下に2行ずつのバッファ)
+    const startRow = Math.floor(Math.max(0, scrollTop - padding) / rowHeight);
+    const safeStartRow = Math.max(0, startRow - 2);
+    const endRow = Math.min(rows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 2);
+
+    const startIndex = safeStartRow * cols;
+    const endIndex = Math.min(appState.filteredFiles.length - 1, ((endRow + 1) * cols) - 1);
+
+    // スクロール位置が変わっていなければスキップ
+    if (!force && this.lastGridStartIndex === startIndex && this.lastGridEndIndex === endIndex) {
+      return;
+    }
+
+    this.lastGridStartIndex = startIndex;
+    this.lastGridEndIndex = endIndex;
+
+    // コンテンツ領域をスクロール位置に合わせて移動
+    const offsetY = (safeStartRow * rowHeight) + padding;
+    content.style.transform = `translateY(${offsetY}px)`;
+
+    // DOMの再構築
+    content.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    for (let i = startIndex; i <= endIndex; i++) {
+      const file = appState.filteredFiles[i];
+      if (!file) continue;
+
+      const isSelected = appState.selection.has(i);
+      const img = document.createElement('img');
+      if (isSelected) img.classList.add('selected');
+      img.decoding = "async";
+      img.dataset.filepath = file.path;
+      img.dataset.index = i;
+      img.className = 'thumbnail-item';
+      img.style.objectFit = 'contain';
+      img.style.width = '100%';
+      img.style.height = `${itemSize}px`;
+      img.draggable = true;
+
+      // 仮想スクロールでは常に表示領域内となるため直接フラグを立てる
+      img.dataset.isVisible = 'true';
+
+      if (appState.thumbnailUrls.has(file.path)) {
+          img.src = appState.thumbnailUrls.get(file.path);
+      } else {
+          img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+          if (!appState.pendingThumbnails.has(file.path)) {
+            appState.pendingThumbnails.add(file.path);
+            appState.thumbnailRequestQueue.push({ filePath: file.path, requestRenderId: appState.currentRenderId || Date.now(), img });
+          }
+      }
+      fragment.appendChild(img);
+    }
+    content.appendChild(fragment);
+
+    // 画像読み込みタスクをキック
+    if (typeof window.processNextTask === 'function') window.processNextTask();
   }
 }
 
