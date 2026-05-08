@@ -28,6 +28,8 @@ class UIManager {
   static ICONS = {
     DRIVE: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"></line><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line></svg>`,
     FOLDER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="none" fill="#4da8da" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+    FOLDER_OPEN: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>`,
+    FLAME: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>`,
     CHEVRON_LEFT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>`,
     CHEVRON_RIGHT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`,
     CHEVRON_UP: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`,
@@ -814,6 +816,16 @@ class UIManager {
     container.innerHTML = headerHtml + contentHtml;
 
     container.querySelectorAll('.diff-copy-btn').forEach(btn => {
+      btn.removeAttribute('title');
+      btn.addEventListener('mouseenter', (e) => {
+        this.showCustomTooltip('コピー', e.clientX, e.clientY);
+      });
+      btn.addEventListener('mousemove', (e) => {
+        this.showCustomTooltip('コピー', e.clientX, e.clientY);
+      });
+      btn.addEventListener('mouseleave', () => {
+        this.hideCustomTooltip();
+      });
       btn.addEventListener('click', async (e) => {
         const target = e.currentTarget;
         const text = target.getAttribute('data-copy-text');
@@ -822,6 +834,7 @@ class UIManager {
             await navigator.clipboard.writeText(text);
             this.showToast("クリップボードにコピーしました", 3000, null, 'success');
             this.applyGlowEffect(target);
+            this.hideCustomTooltip();
           } catch (err) {}
         }
       });

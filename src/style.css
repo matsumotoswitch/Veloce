@@ -360,7 +360,7 @@ body.is-resizing #file-info-section {
   background: rgba(0, 0, 0, 0.25); /* タイトルバーより少し暗く凹ませる */
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  padding: 0 8px;
+  padding: 0 2px;
   transition: border-color 0.2s, background 0.2s;
 }
 
@@ -375,8 +375,8 @@ body.is-resizing #file-info-section {
   justify-content: center;
   cursor: pointer;
   color: var(--text-color);
-  opacity: 0.6;
-  margin-right: 6px;
+  opacity: 0.8;
+  margin-right: 0;
   transition: color 0.2s, opacity 0.2s;
 }
 
@@ -811,7 +811,6 @@ input[type="range"]:focus {
 .diff-copy-btn:hover {
   color: var(--accent-color);
   opacity: 1;
-  background-color: rgba(37, 126, 140, 0.15);
 }
 
 /* --- Diff Copy Button Glow Effect --- */

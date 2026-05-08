@@ -80,7 +80,7 @@ async function refreshFileList(showToast = false) {
   if (!appState.currentDirectory) return;
 
   if (showToast) {
-    uiManager.showToast('フォルダを読み込み中...', 0, 'dir-load-progress', 'info');
+    uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
   }
 
   // UIとデータの初期化
@@ -194,7 +194,7 @@ function updateMetadataToast() {
     return;
   }
 
-  const msg = `ファイル情報を読み込み中... (${current}/${total})`;
+  const msg = `ファイル情報を読み込み中 (${current}/${total})`;
   uiManager.showToast(msg, 0, 'metadata-load', 'info');
 }
 
@@ -969,7 +969,7 @@ async function showLicenseDialog() {
   content.style.boxShadow = '0 4px 20px rgba(0,0,0,0.8)';
   content.style.cursor = 'default';
   
-  let licenseText = "ライセンス情報を読み込み中...";
+  let licenseText = "ライセンス情報を読み込み中";
   try {
     if (window.__TAURI__ && window.__TAURI__.invoke) {
       licenseText = await window.__TAURI__.invoke('get_license_text');
@@ -1190,7 +1190,7 @@ window.onTabClick = async (index) => {
     appState.files = [];
     uiManager.renderAll(true);
     clearMetadataUI();
-    uiManager.showToast('フォルダを読み込み中...', 0, 'dir-load-progress', 'info');
+    uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
     window.veloceAPI.loadDirectory(tab.path);
 
     await expandTreeToPath(appState.currentDirectory);
@@ -1548,6 +1548,16 @@ async function renderMetadata(file) {
     if (container) newCopyBtns.push(...container.querySelectorAll('.diff-copy-btn'));
 
     newCopyBtns.forEach(btn => {
+      btn.removeAttribute('title');
+      btn.addEventListener('mouseenter', (e) => {
+        uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
+      });
+      btn.addEventListener('mousemove', (e) => {
+        uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
+      });
+      btn.addEventListener('mouseleave', () => {
+        uiManager.hideCustomTooltip();
+      });
       btn.addEventListener('click', async (e) => {
         const target = e.currentTarget;
         const text = target.getAttribute('data-copy-text');
@@ -1556,6 +1566,7 @@ async function renderMetadata(file) {
           if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました", 3000, null, 'success');
           else showNotification("クリップボードにコピーしました", 'success'); // 古い関数へのフォールバック
           uiManager.applyGlowEffect(target);
+          uiManager.hideCustomTooltip();
         }
       });
     });
@@ -2276,7 +2287,7 @@ uiManager.elements.dirTree.addEventListener('drop', (e) => {
       actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
     }
 
-    uiManager.showToast(`${paths.length}件のファイルを${actionStr}中...`, 0, 'file-move', 'info');
+    uiManager.showToast(`${paths.length}件のファイルを${actionStr}中`, 0, 'file-move', 'info');
 
     setTimeout(async () => {
       let successCount = 0;
@@ -2717,7 +2728,7 @@ window.addEventListener('keydown', async (e) => {
       const file2 = appState.filteredFiles[indices[1]];
       
       // 完全なメタデータを取得してからDiffモーダルを開く
-      uiManager.showToast('比較データを読み込み中...', 0, 'diff-loading', 'info');
+      uiManager.showToast('比較データを読み込み中', 0, 'diff-loading', 'info');
       Promise.all([
         window.veloceAPI.parseMetadata(file1.path),
         window.veloceAPI.parseMetadata(file2.path)
@@ -3251,6 +3262,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (uiManager.elements.openCacheBtn) {
+    uiManager.elements.openCacheBtn.innerHTML = UIManager.ICONS.FOLDER_OPEN;
     uiManager.elements.openCacheBtn.removeAttribute('title');
     let openCacheText = 'キャッシュフォルダを開きます';
     uiManager.elements.openCacheBtn.addEventListener('mouseenter', async (e) => {
@@ -3277,6 +3289,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (uiManager.elements.clearCacheBtn) {
+    uiManager.elements.clearCacheBtn.innerHTML = UIManager.ICONS.FLAME;
     uiManager.elements.clearCacheBtn.removeAttribute('title');
     let clearCacheText = 'キャッシュを削除します';
     uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async (e) => {
@@ -3284,7 +3297,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (window.veloceAPI.getThumbnailCacheInfo) {
         const info = await window.veloceAPI.getThumbnailCacheInfo();
         const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
-        clearCacheText = `キャッシュを削除します\n保存数: ${info.fileCount}枚\n合計サイズ: ${sizeMB} MB`;
+        clearCacheText = `キャッシュを削除します\n保存数: ${info.fileCount.toLocaleString()}枚\n合計サイズ: ${sizeMB} MB`;
         if (uiManager.isTooltipVisible) {
           uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
         }
@@ -3301,7 +3314,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       uiManager.hideCustomTooltip();
       const isConfirmed = await uiManager.showConfirm('すべてのキャッシュを削除しますか？\nこの操作は元に戻せません。');
       if (isConfirmed) {
-        uiManager.showToast('キャッシュを削除しています...', 0, 'cache-clear', 'info');
+        uiManager.showToast('キャッシュを削除しています', 0, 'cache-clear', 'info');
         try {
           await window.veloceAPI.clearThumbnailCache();
           appState.thumbnailUrls.clear(); 
@@ -3591,7 +3604,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     appState.files = [];
     uiManager.renderAll(true);
     clearMetadataUI();
-    uiManager.showToast('フォルダを読み込み中...', 0, 'dir-load-progress', 'info');
+    uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
     window.veloceAPI.loadDirectory(currentTab.path);
 
     await expandTreeToPath(appState.currentDirectory);
