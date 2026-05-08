@@ -1454,7 +1454,7 @@ async function renderMetadata(file) {
     // ヘルパー: セクション描画
     const renderSection = (title, text, isParam = false) => {
       if (!text || text === '-') return '';
-      const tags = String(text).split(',').map(t => t.trim()).filter(t => t);
+      const tags = isParam ? [String(text)] : String(text).split(',').map(t => t.trim()).filter(t => t);
       const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
       
       const tagsHtml = tags.map(t => {
