@@ -22,6 +22,7 @@ pub struct ImageFile {
     mtime: u64,
     ctime: u64,
     has_thumbnail_cache: bool,
+    has_metadata_cache: bool,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -132,6 +133,9 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
         let cache_dir_path = get_veloce_data_dir()
             .map(|p| p.join("Thumbnails"))
             .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
+        let meta_cache_dir_path = get_veloce_data_dir()
+            .map(|p| p.join("Metadata"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
 
         let mut files = Vec::new();
         let mut all_paths = Vec::new(); // ビューアー用にパスを保持する
@@ -161,6 +165,13 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
                                 hasher.finish()
                             }));
                             let has_thumbnail_cache = cache_path.exists();
+                            
+                            let meta_cache_path = meta_cache_dir_path.join(format!("{}.json", {
+                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                cache_file_name.hash(&mut hasher);
+                                hasher.finish()
+                            }));
+                            let has_metadata_cache = meta_cache_path.exists();
 
                             all_paths.push(clean_path.clone());
 
@@ -172,6 +183,7 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
                                 mtime,
                                 ctime,
                                 has_thumbnail_cache,
+                                has_metadata_cache,
                             });
 
                             // 200件ごとにフロントエンドへ送信

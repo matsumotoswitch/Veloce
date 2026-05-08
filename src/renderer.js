@@ -181,53 +181,74 @@ async function expandTreeToPath(targetPath, disableScroll = false, rootElement =
   }
 }
 
+function updateMetadataToast() {
+  const total = appState.metadataTargetCount;
+  const current = appState.metadataCompleted;
+
+  if (total === 0 || current >= total) {
+    const t = document.getElementById('toast-metadata-load');
+    if (t) {
+      t.classList.remove('show');
+      setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+    }
+    return;
+  }
+
+  const msg = `ファイル情報を読み込み中... (${current}/${total})`;
+  uiManager.showToast(msg, 0, 'metadata-load', 'info');
+}
+
 async function loadAllMetadataInBackground() {
   if (!window.veloceAPI.getFullMetadataBatch) return;
-  const filesToLoad = appState.files.filter(f => !f.metaLoaded);
-  if (filesToLoad.length === 0) return;
+  // まだメタデータが読み込まれていないファイルのみを対象にする
+  const targets = appState.files.filter(f => !f.metaLoaded);
+  
+  // プログレス表示用の分母と分子は、「キャッシュがなく、実際に抽出が必要なファイル数」をベースにする
+  const noCacheFiles = appState.files.filter(f => !f.hasMetadataCache);
+  const noCacheTargets = targets.filter(f => !f.hasMetadataCache);
+  appState.metadataTargetCount = noCacheFiles.length;
+  appState.metadataCompleted = noCacheFiles.length - noCacheTargets.length;
+
+  // 対象がゼロなら通知を出さずに終了
+  if (targets.length === 0) {
+    updateMetadataToast();
+    return;
+  }
 
   const batchId = ++appState.currentMetaBatchId;
-  const pathsToLoad = filesToLoad.map(f => f.path);
-  // サムネイル生成を阻害しないように、メタデータ取得のチャンクサイズを小さく設定する
-  const CHUNK_SIZE = Math.min(25, Math.max(10, Math.floor(CONFIG.CHUNK_SIZE / 4)));
+  const BATCH_SIZE = 50;
 
-  const processNextChunk = (chunkIndex) => {
-    if (appState.currentMetaBatchId !== batchId) return;
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    // フォルダ切り替えなどでリセットされた場合は中断
+    if (appState.currentMetaBatchId !== batchId || appState.metadataTargetCount === 0) return;
 
-    if (chunkIndex >= pathsToLoad.length) {
-      uiManager.showToast(`情報の読み込み完了 (${pathsToLoad.length}/${pathsToLoad.length})`, 1000, 'meta-progress');
-      if (['width', 'height'].includes(appState.sortConfig.key)) {
-        scheduleRefresh();
-      }
-      return;
-    }
+    const batch = targets.slice(i, i + BATCH_SIZE);
+    const paths = batch.map(f => f.path);
 
-    setTimeout(async () => {
+    try {
+      const results = await window.veloceAPI.getFullMetadataBatch(paths);
       if (appState.currentMetaBatchId !== batchId) return;
+
+      const pathToIndex = new Map();
+      appState.files.forEach((f, idx) => pathToIndex.set(f.path, idx));
       
-      try {
-        const chunkPaths = pathsToLoad.slice(chunkIndex, chunkIndex + CHUNK_SIZE);
-        uiManager.showToast(`情報の読み込み中... (${Math.min(chunkIndex + CHUNK_SIZE, pathsToLoad.length)}/${pathsToLoad.length})`, 0, 'meta-progress', 'info');
-        
-        const metadataList = await window.veloceAPI.getFullMetadataBatch(chunkPaths);
-        if (appState.currentMetaBatchId !== batchId) return;
-
-        const pathToIndex = new Map();
-        appState.files.forEach((f, i) => pathToIndex.set(f.path, i));
-
-        metadataList.forEach(meta => {
-          const fileIndex = pathToIndex.get(meta.path);
-          if (fileIndex !== undefined && fileIndex > -1) {
-            const file = appState.files[fileIndex];
+      results.forEach(meta => {
+        const fileIndex = pathToIndex.get(meta.path);
+        if (fileIndex !== undefined && fileIndex > -1) {
+          const file = appState.files[fileIndex];
+          if (!file.metaLoaded) {
             file.width = meta.width;
             file.height = meta.height;
             file.prompt = meta.prompt || '';
             file.negativePrompt = meta.negativePrompt || '';
             file.source = meta.source || '';
             if (meta.params && Array.isArray(meta.params.characterPrompts)) {
-                file.charPrompts = meta.params.characterPrompts;
+              file.charPrompts = meta.params.characterPrompts;
             }
             file.metaLoaded = true;
+            if (!file.hasMetadataCache) {
+              appState.metadataCompleted++;
+            }
 
             const tableIndex = appState.filteredFiles.findIndex(f => f.path === meta.path);
             if (tableIndex !== -1 && uiManager.elements.fileListBody.children[tableIndex]) {
@@ -236,18 +257,25 @@ async function loadAllMetadataInBackground() {
               row.children[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
             }
           }
-        });
-
-        if (appState.searchQuery.trim() !== '') {
-            scheduleRefresh();
         }
-      } catch (error) {
-        console.error('Failed to load metadata in background:', error);
-      }
-      processNextChunk(chunkIndex + CHUNK_SIZE);
-    }, 10); // アイドル状態を待たずにUIスレッドへ短く処理を譲りながら確実に実行する
-  };
-  processNextChunk(0);
+      });
+      
+      updateMetadataToast();
+      
+      // メインスレッドをブロックしないよう少し休止
+      await new Promise(resolve => setTimeout(resolve, 10));
+    } catch (error) {
+      console.error('Failed to load metadata batch:', error);
+    }
+  }
+
+  if (appState.currentMetaBatchId === batchId) {
+    if (['width', 'height'].includes(appState.sortConfig.key)) {
+      scheduleRefresh();
+    } else if (appState.searchQuery.trim() !== '') {
+      scheduleRefresh();
+    }
+  }
 }
 
 async function renameSelectedFolder() {
@@ -3564,7 +3592,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           if (qIdx > -1) appState.thumbnailRequestQueue.splice(qIdx, 1);
 
           // --- 修正: metaLoaded: false を追加してメタデータを確実に再取得させる ---
-          appState.files[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0, metaLoaded: false };
+          appState.files[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0, metaLoaded: false, hasThumbnailCache: false, hasMetadataCache: false };
           
           // --- 修正: 描画の遅延を待たずに、データ状態とRustのインデックスを即時同期 ---
           appState.applyFiltersAndSort(); 

@@ -14,6 +14,7 @@
  * @property {Array<string|Object>} [charPrompts] - キャラクタープロンプト
  * @property {boolean} [metaLoaded] - メタデータが読み込み済みかどうか
  * @property {boolean} [hasThumbnailCache] - サムネイルキャッシュが存在するかどうか
+ * @property {boolean} [hasMetadataCache] - メタデータキャッシュが存在するかどうか
  */
 
 /**
@@ -73,6 +74,8 @@ class AppState {
     this.thumbnailCompleted = 0;      // サムネイル生成完了数
     this.thumbnailToastTimeout = null; // トースト通知を消すためのタイマー
     this.lastThumbnailToastTime = 0;  // 最後にトースト通知を更新した時刻
+    this.metadataTargetCount = 0;     // メタデータ取得リクエストの総数
+    this.metadataCompleted = 0;       // メタデータ取得完了数
   }
 
   /**
