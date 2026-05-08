@@ -489,7 +489,10 @@ const createMenuSeparator = () => {
   return separator;
 };
 
-const menuSeparatorFav = createMenuSeparator();
+const menuSeparator1 = createMenuSeparator();
+const menuSeparator2 = createMenuSeparator();
+const menuSeparator3 = createMenuSeparator();
+const menuSeparator4 = createMenuSeparator();
 
 function resetThumbnailPreloader() {
   appState.thumbnailRequestQueue = [];
@@ -1910,8 +1913,6 @@ const menuTabCloseRight = createMenuOption('右側のタブをすべて閉じる
   }
 });
 
-const menuSeparatorTab1 = createMenuSeparator();
-
 const menuTabOpenExplorer = createMenuOption('エクスプローラで開く', async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const tab = appState.tabs[contextMenu.targetTabIndex];
@@ -1938,8 +1939,6 @@ const menuTabCopyPath = createMenuOption('パスをコピー', async () => {
     }
   }
 });
-
-const menuSeparatorTab2 = createMenuSeparator();
 
 const menuTabAddFavorite = createMenuOption('お気に入りに追加', () => {
   if (contextMenu.targetTabIndex !== undefined) {
@@ -1970,25 +1969,37 @@ const menuTabAddFavorite = createMenuOption('お気に入りに追加', () => {
   }
 });
 
-contextMenu.appendChild(menuNewFolder);
-contextMenu.appendChild(menuRenameFolder);
-contextMenu.appendChild(menuDeleteFolder);
-contextMenu.appendChild(menuRenameFile);
-contextMenu.appendChild(menuDeleteFile);
-contextMenu.appendChild(menuAddFavorite);
-contextMenu.appendChild(menuEditFavorite);
-contextMenu.appendChild(menuDeleteFavorite);
-contextMenu.appendChild(menuSeparatorFav);
-contextMenu.appendChild(menuOpenInExplorer);
+// 1. 開く・パス操作 (OS連携・頻出)
 contextMenu.appendChild(menuOpenInNewTab);
-contextMenu.appendChild(menuTabClose);
-contextMenu.appendChild(menuTabDuplicate);
-contextMenu.appendChild(menuTabCloseOthers);
-contextMenu.appendChild(menuTabCloseRight);
-contextMenu.appendChild(menuSeparatorTab1);
+contextMenu.appendChild(menuOpenInExplorer);
 contextMenu.appendChild(menuTabOpenExplorer);
 contextMenu.appendChild(menuTabCopyPath);
-contextMenu.appendChild(menuSeparatorTab2);
+contextMenu.appendChild(menuSeparator1);
+
+// 2. タブ操作 (タブ管理)
+contextMenu.appendChild(menuTabDuplicate);
+contextMenu.appendChild(menuTabClose);
+contextMenu.appendChild(menuTabCloseOthers);
+contextMenu.appendChild(menuTabCloseRight);
+contextMenu.appendChild(menuSeparator2);
+
+// 3. 新規作成
+contextMenu.appendChild(menuNewFolder);
+contextMenu.appendChild(menuSeparator3);
+
+// 4. 編集・変更系 (安全)
+contextMenu.appendChild(menuRenameFolder);
+contextMenu.appendChild(menuRenameFile);
+contextMenu.appendChild(menuEditFavorite);
+
+// 5. 削除系 (危険な操作は下にまとめる)
+contextMenu.appendChild(menuDeleteFolder);
+contextMenu.appendChild(menuDeleteFile);
+contextMenu.appendChild(menuDeleteFavorite);
+contextMenu.appendChild(menuSeparator4);
+
+// 6. お気に入り管理
+contextMenu.appendChild(menuAddFavorite);
 contextMenu.appendChild(menuTabAddFavorite);
 document.body.appendChild(contextMenu);
 
@@ -2002,14 +2013,14 @@ window.onTabContextMenu = (e, index) => {
   // メニューを一度すべて非表示にする
   Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-  menuTabClose.style.display = 'block';
-  menuTabDuplicate.style.display = 'block';
-  menuTabCloseOthers.style.display = 'block';
-  menuTabCloseRight.style.display = 'block';
-  menuSeparatorTab1.style.display = 'block';
   menuTabOpenExplorer.style.display = 'block';
   menuTabCopyPath.style.display = 'block';
-  menuSeparatorTab2.style.display = 'block';
+  menuSeparator1.style.display = 'block';
+  menuTabDuplicate.style.display = 'block';
+  menuTabClose.style.display = 'block';
+  menuTabCloseOthers.style.display = 'block';
+  menuTabCloseRight.style.display = 'block';
+  menuSeparator2.style.display = 'block';
   menuTabAddFavorite.style.display = 'block';
 
   // 「お気に入りに追加」の状態制御
@@ -2132,27 +2143,10 @@ function handleItemContextMenu(e, isGrid) {
 
   if (!appState.selection.has(index)) selectImage(index);
 
-  menuNewFolder.style.display = 'none';
-  menuRenameFolder.style.display = 'none';
-  menuDeleteFolder.style.display = 'none';
+  Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+
   menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none'; 
   menuDeleteFile.style.display = 'block';
-  menuAddFavorite.style.display = 'none';
-  menuEditFavorite.style.display = 'none';
-  menuDeleteFavorite.style.display = 'none';
-  menuSeparatorFav.style.display = 'none';
-  menuOpenInExplorer.style.display = 'none';
-  menuOpenInNewTab.style.display = 'none';
-
-  menuTabClose.style.display = 'none';
-  menuTabDuplicate.style.display = 'none';
-  menuTabCloseOthers.style.display = 'none';
-  menuTabCloseRight.style.display = 'none';
-  menuSeparatorTab1.style.display = 'none';
-  menuTabOpenExplorer.style.display = 'none';
-  menuTabCopyPath.style.display = 'none';
-  menuSeparatorTab2.style.display = 'none';
-  menuTabAddFavorite.style.display = 'none';
 
   contextMenu.style.display = 'block';
   const rect = contextMenu.getBoundingClientRect();
@@ -2261,27 +2255,20 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
   };
   contextMenu.isRoot = isRoot;
 
-  menuNewFolder.style.display = 'block';
-  menuRenameFolder.style.display = isRoot ? 'none' : 'block';
-  menuDeleteFolder.style.display = isRoot ? 'none' : 'block';
-  menuRenameFile.style.display = 'none';
-  menuDeleteFile.style.display = 'none';
-  menuAddFavorite.style.display = isRoot ? 'none' : 'block';
-  menuEditFavorite.style.display = 'none';
-  menuDeleteFavorite.style.display = 'none';
-  menuSeparatorFav.style.display = 'none';
-  menuOpenInExplorer.style.display = 'none';
-  menuOpenInNewTab.style.display = 'block';
+  Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-  menuTabClose.style.display = 'none';
-  menuTabDuplicate.style.display = 'none';
-  menuTabCloseOthers.style.display = 'none';
-  menuTabCloseRight.style.display = 'none';
-  menuSeparatorTab1.style.display = 'none';
-  menuTabOpenExplorer.style.display = 'none';
-  menuTabCopyPath.style.display = 'none';
-  menuSeparatorTab2.style.display = 'none';
-  menuTabAddFavorite.style.display = 'none';
+  menuOpenInNewTab.style.display = 'block';
+  menuOpenInExplorer.style.display = 'block';
+  menuSeparator1.style.display = 'block';
+  menuNewFolder.style.display = 'block';
+
+  if (!isRoot) {
+    menuSeparator3.style.display = 'block';
+    menuRenameFolder.style.display = 'block';
+    menuDeleteFolder.style.display = 'block';
+    menuSeparator4.style.display = 'block';
+    menuAddFavorite.style.display = 'block';
+  }
 
   contextMenu.style.display = 'block';
   const rect = contextMenu.getBoundingClientRect();
@@ -3525,28 +3512,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       contextMenu.targetFavoritePath = itemDiv.dataset.path;
       contextMenu.targetFolder = null; 
 
-      menuNewFolder.style.display = 'none';
-      menuRenameFolder.style.display = 'none';
-      menuDeleteFolder.style.display = 'none';
-      menuRenameFile.style.display = 'none';
-      menuDeleteFile.style.display = 'none';
-      menuAddFavorite.style.display = 'none';
-      
+      Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+
+      menuOpenInNewTab.style.display = 'block';
+      menuOpenInExplorer.style.display = 'block';
+      menuSeparator1.style.display = 'block';
       menuEditFavorite.style.display = 'block';
       menuDeleteFavorite.style.display = 'block';
-      menuSeparatorFav.style.display = 'block';
-      menuOpenInExplorer.style.display = 'block';
-      menuOpenInNewTab.style.display = 'block';
-
-      menuTabClose.style.display = 'none';
-      menuTabDuplicate.style.display = 'none';
-      menuTabCloseOthers.style.display = 'none';
-      menuTabCloseRight.style.display = 'none';
-      menuSeparatorTab1.style.display = 'none';
-      menuTabOpenExplorer.style.display = 'none';
-      menuTabCopyPath.style.display = 'none';
-      menuSeparatorTab2.style.display = 'none';
-      menuTabAddFavorite.style.display = 'none';
 
       contextMenu.style.display = 'block';
       const rect = contextMenu.getBoundingClientRect();
