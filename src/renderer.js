@@ -3135,7 +3135,36 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.resizeViewerWindow(w, h);
   }
   if (savedWinX && savedWinY && window.veloceAPI && window.veloceAPI.moveViewerWindow) {
-    window.veloceAPI.moveViewerWindow(parseInt(savedWinX, 10), parseInt(savedWinY, 10));
+    let x = parseInt(savedWinX, 10);
+    let y = parseInt(savedWinY, 10);
+
+    const checkAndMove = async () => {
+      try {
+        if (window.__TAURI__ && window.__TAURI__.window && window.__TAURI__.window.availableMonitors) {
+          const monitors = await window.__TAURI__.window.availableMonitors();
+          const isVisible = monitors.some(m => {
+            const scale = m.scaleFactor || 1;
+            const mx = m.position.x / scale;
+            const my = m.position.y / scale;
+            const mw = m.size.width / scale;
+            const mh = m.size.height / scale;
+            // タイトルバー付近がモニター内にあるか判定
+            return x >= mx - 100 && x < mx + mw - 100 && y >= my - 50 && y < my + mh - 50;
+          });
+          
+          if (!isVisible && monitors.length > 0) {
+            const primary = monitors[0];
+            const scale = primary.scaleFactor || 1;
+            x = Math.round(primary.position.x / scale) + 100;
+            y = Math.round(primary.position.y / scale) + 100;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to check monitors:", err);
+      }
+      window.veloceAPI.moveViewerWindow(x, y);
+    };
+    checkAndMove();
   }
   if (savedWinMax === 'true' && window.veloceAPI && window.veloceAPI.isViewerMaximized && window.veloceAPI.maximizeViewer) {
     window.veloceAPI.isViewerMaximized().then(isMax => {
