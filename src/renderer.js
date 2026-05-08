@@ -2150,16 +2150,7 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
     }
   }
 
-  const wasSelected = itemDiv.classList.contains('selected');
-  const icon = e.target.closest('.tree-icon');
-
-  if (icon || wasSelected) {
-    if (isExpanded) {
-      if (itemDiv.collapseNode) itemDiv.collapseNode();
-    } else {
-      if (itemDiv.expandNode) await itemDiv.expandNode();
-    }
-  } else {
+  if (!isExpanded) {
     if (itemDiv.expandNode) await itemDiv.expandNode();
   }
 
