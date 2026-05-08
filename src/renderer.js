@@ -220,7 +220,7 @@ async function loadAllMetadataInBackground() {
 
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
     // フォルダ切り替えなどでリセットされた場合は中断
-    if (appState.currentMetaBatchId !== batchId || appState.metadataTargetCount === 0) return;
+    if (appState.currentMetaBatchId !== batchId) return;
 
     const batch = targets.slice(i, i + BATCH_SIZE);
     const paths = batch.map(f => f.path);
