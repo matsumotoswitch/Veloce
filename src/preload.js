@@ -40,6 +40,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => void} closeWindow
  * @property {() => Promise<void>} arrangeViewers
  * @property {() => void} focusWindow
+ * @property {() => Promise<void>} showWindow
  * @property {(paths: string[]) => Promise<void>} syncImagePaths
  * @property {() => Promise<string>} getLicenseText
  * @property {() => Promise<void>} openCacheFolder
@@ -300,6 +301,10 @@ window.veloceAPI = {
     }
     window.focus();
   },
+  /**
+   * Rust側にウィンドウの表示を要求します。
+   */
+  showWindow: () => invoke('show_window'),
   /**
    * Rust側の画像パス配列をフロントエンドのソート結果と同期します。
    * @param {string[]} paths - ソート済みの画像パス配列

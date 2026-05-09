@@ -930,6 +930,19 @@ function openViewer(index) {
       path: file.path,
       total: appState.filteredFiles.length
     }));
+
+    // IPC通信を排除するため、リストのパス配列を丸ごとビューアに渡す
+    try {
+      const paths = appState.filteredFiles.map(f => f.path);
+      localStorage.setItem('viewerPaths', JSON.stringify(paths));
+    } catch (e) {
+      // LocalStorageの容量制限(5MB)を超えた場合は周辺の数千件のみ渡すフォールバック
+      const start = Math.max(0, index - 2000);
+      const end = Math.min(appState.filteredFiles.length, index + 2000);
+      const paths = appState.filteredFiles.slice(start, end).map(f => f.path);
+      localStorage.setItem('viewerPaths', JSON.stringify(paths));
+      localStorage.setItem('viewerStartIndex', start.toString());
+    }
   }
 
   window.veloceAPI.openViewer({ 

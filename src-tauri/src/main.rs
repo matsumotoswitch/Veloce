@@ -676,10 +676,17 @@ async fn open_viewer(
         .inner_size(win_width as f64, win_height as f64)
         .data_directory(data_dir)
         .decorations(false)
+        .visible(false)
         .build()
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[tauri::command]
+fn show_window(window: tauri::Window) {
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 // --- サムネイル生成コマンド ---
@@ -1247,6 +1254,7 @@ fn main() {
             parse_metadata,
             get_viewer_image,
             open_viewer,
+            show_window,
             get_thumbnail,
             arrange_viewers,
             sync_image_paths,

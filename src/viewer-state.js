@@ -5,6 +5,7 @@ class ViewerState {
   constructor() {
     this.currentIndex = 0;          // 現在表示中の画像のインデックス
     this.totalImages = 0;           // 全画像数
+    this.paths = [];                // メイン画面から引き継いだ全画像パスの配列
     this.currentImagePath = '';     // 現在表示中の画像のパス
     this.isZoomed = false;          // 100%表示（ズーム）状態かどうか
     this.currentRotation = 0;       // 現在の回転角度（度）

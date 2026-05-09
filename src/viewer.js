@@ -113,6 +113,27 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }).catch(() => {});
 
+    const pathsJson = localStorage.getItem('viewerPaths');
+    let initialTotal = 0;
+    if (pathsJson) {
+      try {
+        const parsedPaths = JSON.parse(pathsJson);
+        const startIndexStr = localStorage.getItem('viewerStartIndex');
+        if (startIndexStr) {
+          const startIndex = parseInt(startIndexStr, 10);
+          const initialData = JSON.parse(localStorage.getItem('viewerInitialData') || '{}');
+          initialTotal = initialData.total || parsedPaths.length;
+          const fullPaths = new Array(initialTotal).fill(null);
+          for (let i = 0; i < parsedPaths.length; i++) fullPaths[startIndex + i] = parsedPaths[i];
+          viewerState.paths = fullPaths;
+        } else {
+          viewerState.paths = parsedPaths;
+        }
+      } catch (e) {}
+      localStorage.removeItem('viewerPaths');
+      localStorage.removeItem('viewerStartIndex');
+    }
+
     // 画像のロードイベントを初期化時に1度だけ設定
     if (viewerUI.elements.viewerImg) {
       viewerUI.elements.viewerImg.decoding = 'sync'; // 非同期デコードによる一瞬の遅延（黒い画面）を防ぐ
@@ -131,6 +152,7 @@ window.addEventListener('DOMContentLoaded', () => {
         viewerState.currentImagePath = initialData.path;
         viewerState.totalImages = initialData.total;
         
+        if (!initialTotal) viewerState.paths = new Array(initialData.total).fill(null); // フォールバック時の初期化
         const assetUrl = window.veloceAPI.convertFileSrc(initialData.path);
         if (viewerUI.elements.viewerImg) {
           viewerUI.elements.viewerImg.src = assetUrl;
@@ -150,6 +172,7 @@ window.addEventListener('DOMContentLoaded', () => {
       });
       listen('viewer-list-updated', (event) => {
         const newPaths = event.payload; // 更新されたファイルパスのリスト
+        viewerState.paths = newPaths;
         const newIndex = newPaths.indexOf(viewerState.currentImagePath);
         
         // ソートやフィルタで順序が変わったため、古いインデックスのキャッシュをすべて破棄
@@ -397,36 +420,94 @@ function resizeWindowToFitImage() {
 // 3. Image Navigation & Loading
 // ============================================================================
 
-/*現在のインデックス (`currentIndex`) に基づいて画像を表示し、ウィンドウタイトルを更新する。
- * 表示後、前後の画像をバックグラウンドでプリロードする。
+/**
+ * インデックスから画像のパスを取得します。ローカルに無い場合はIPCでフォールバックします。
  */
+async function getImagePath(index) {
+  if (viewerState.paths && viewerState.paths[index]) {
+    return viewerState.paths[index];
+  }
+  const result = await window.veloceAPI.getViewerImage(index);
+  if (result) {
+    if (viewerState.paths) viewerState.paths[index] = result.path;
+    return result.path;
+  }
+  return null;
+}
+
+let currentViewerImg = document.getElementById('viewer-img');
+if (currentViewerImg) currentViewerImg.style.flexShrink = '0';
+
+/**
+ * DOM Swap方式：新しい画像を背面に用意しておき、表示する瞬間に要素を切り替えることでラグを無くします。
+ */
+function swapImageElement(newImg) {
+  if (currentViewerImg === newImg) return;
+  
+  newImg.id = 'viewer-img';
+  newImg.style.flexShrink = '0'; // Flexboxによる自動縮小を防ぎ、回転時の正しいアスペクト比を維持する
+  viewerUI.elements.viewerImg = newImg;
+  
+  const borderOverlay = document.getElementById('border-overlay');
+  if (borderOverlay && borderOverlay.parentNode) {
+    document.body.insertBefore(newImg, borderOverlay);
+  } else {
+    document.body.appendChild(newImg);
+  }
+
+  if (currentViewerImg && currentViewerImg.parentNode) {
+    currentViewerImg.remove();
+  }
+  
+  currentViewerImg = newImg;
+
+  const onImageReady = async () => {
+    setZoomState(viewerState.isZoomed);
+    viewerUI.updateImageRendering();
+    resizeWindowToFitImage();
+
+    try {
+      // Rust側へウィンドウの表示命令を出す
+      if (window.veloceAPI && window.veloceAPI.showWindow) await window.veloceAPI.showWindow();
+    } catch (e) {}
+  };
+
+  if (newImg.complete) {
+    onImageReady();
+  } else {
+    newImg.onload = onImageReady;
+  }
+}
+
 async function loadImage() {
   viewerState.currentScale = 1.0;
   viewerState.currentTranslateX = 0;
   viewerState.currentTranslateY = 0;
   viewerState.currentRotation = 0;
-  // RustのStateから現在表示すべき画像のパスと全体枚数を取得
-  const result = await window.veloceAPI.getViewerImage(viewerState.currentIndex);
-  if (result) {
-    viewerState.currentImagePath = result.path;
-    viewerState.totalImages = result.total;
+
+  const path = await getImagePath(viewerState.currentIndex);
+  if (path) {
+    viewerState.currentImagePath = path;
+    if (viewerState.paths && viewerState.paths.length > 0) {
+      viewerState.totalImages = viewerState.paths.length;
+    }
     viewerState.previousWindowSize = null; // トグル状態をリセット
 
+    let targetImg;
     if (viewerState.preloadCache.has(viewerState.currentIndex)) {
       const cachedData = viewerState.preloadCache.get(viewerState.currentIndex);
-      viewerState.currentImagePath = cachedData.path; // パスを更新
-      if (viewerUI.elements.viewerImg) {
-        viewerUI.elements.viewerImg.src = cachedData.img.src;
-      }
-    } else {
-      const assetUrl = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
-      if (viewerUI.elements.viewerImg) {
-        // LocalStorage経由で既に同じ画像がセットされている場合は再セットによるチラつきを防ぐ
-        if (viewerUI.elements.viewerImg.src !== assetUrl) {
-          viewerUI.elements.viewerImg.src = assetUrl;
-        }
+      if (cachedData.path === viewerState.currentImagePath) {
+        targetImg = cachedData.img;
       }
     }
+
+    if (!targetImg) {
+      targetImg = document.createElement('img');
+      targetImg.decoding = 'sync';
+      targetImg.src = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
+    }
+
+    swapImageElement(targetImg);
     preloadAdjacentImages();
 
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
@@ -437,15 +518,13 @@ async function preloadAdjacentImages() {
   const indicesToPreload = [viewerState.currentIndex + 1, viewerState.currentIndex - 1];
   for (const idx of indicesToPreload) {
     if (idx >= 0 && idx < viewerState.totalImages && !viewerState.preloadCache.has(idx)) {
-      const result = await window.veloceAPI.getViewerImage(idx);
-      if (result) {
-        const url = window.veloceAPI.convertFileSrc(result.path);
-        const img = new Image();
-        img.src = url; // ブラウザのメモリキャッシュに読み込ませる
-        viewerState.preloadCache.set(idx, { 
-          img: img, 
-          path: result.path 
-        });
+      const path = await getImagePath(idx);
+      if (path) {
+        const url = window.veloceAPI.convertFileSrc(path);
+        const img = document.createElement('img');
+        img.decoding = 'async'; // プリロードはバックグラウンドで行う
+        img.src = url;
+        viewerState.preloadCache.set(idx, { img: img, path: path });
       }
     }
   }
@@ -458,18 +537,18 @@ async function preloadAdjacentImages() {
 }
 
 /**
- * 前の画像を表示する。
+ * 次の画像を表示する (Next)
  */
-function showPrev() {
-  viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
+function showNext() {
+  viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
   loadImage();
 }
 
 /**
- * 次の画像を表示する。
+ * 前の画像を表示する (Prev)
  */
-function showNext() {
-  viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
+function showPrev() {
+  viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
   loadImage();
 }
 
@@ -675,8 +754,8 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 'Control' && !viewerState.isImageDragging) viewerUI.setCursor('default');
 });
 // ドラッグ開始（Ctrlを押している時のみ）
-viewerUI.elements.viewerImg.addEventListener('mousedown', (e) => {
-  if (e.ctrlKey && e.button === 0) {
+window.addEventListener('mousedown', (e) => {
+  if (e.target && e.target.id === 'viewer-img' && e.ctrlKey && e.button === 0) {
     e.preventDefault(); // Macの右クリック化やOSの標準ドラッグを防止
     e.stopPropagation(); // 既存のウィンドウドラッグ処理との競合を防止
     viewerState.isImageDragging = true;
@@ -703,7 +782,7 @@ window.addEventListener('mousemove', (e) => {
 
 // ドラッグ終了
 window.addEventListener('mouseup', (e) => {
-  if (viewerState.isImageDragging && e.button === 0) {
+  if (viewerState.isImageDragging) {
     viewerState.isImageDragging = false;
     viewerUI.setCursor(e.ctrlKey ? 'grab' : 'default');
   }
@@ -877,14 +956,15 @@ window.addEventListener('keydown', async (e) => {
 	if (viewerState.currentImagePath) {
 	  const success = await window.veloceAPI.trashFile(viewerState.currentImagePath);
 	  if (success) {
+        viewerState.paths.splice(viewerState.currentIndex, 1);
+        viewerState.totalImages = viewerState.paths.length;
+
         // 削除成功時、ビューアーを閉じずに次の画像（最後なら前の画像）へ移動する
-        if (viewerState.currentIndex < viewerState.totalImages - 1) {
-          viewerState.totalImages--; // 全体枚数を減らす
-          loadImage(); // currentIndexを維持したままロード＝次の画像になる
-        } else if (viewerState.currentIndex > 0) {
-          viewerState.totalImages--;
-          viewerState.currentIndex--; // 最後の画像だった場合は1つ前に戻る
-          loadImage();
+        if (viewerState.paths.length > 0) {
+          if (viewerState.currentIndex >= viewerState.paths.length) {
+            viewerState.currentIndex = viewerState.paths.length - 1;
+          }
+          loadImage(); 
         } else {
           // 画像が1枚もなくなった場合はウィンドウを閉じる
           if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
