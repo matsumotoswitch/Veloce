@@ -924,6 +924,14 @@ async function selectImage(index, event = null) {
 function openViewer(index) {
   const file = appState.filteredFiles[index];
 
+  // IPC通信の遅延を回避するため、初期表示用のデータを LocalStorage に保存して直接渡す
+  if (file) {
+    localStorage.setItem('viewerInitialData', JSON.stringify({
+      path: file.path,
+      total: appState.filteredFiles.length
+    }));
+  }
+
   window.veloceAPI.openViewer({ 
     currentIndex: index,
     width: file ? file.width : 0,

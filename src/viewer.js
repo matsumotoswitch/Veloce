@@ -112,6 +112,33 @@ window.addEventListener('DOMContentLoaded', () => {
         if (maxBtn) maxBtn.innerHTML = ViewerUI.ICONS.RESTORE;
       }
     }).catch(() => {});
+
+    // 画像のロードイベントを初期化時に1度だけ設定
+    if (viewerUI.elements.viewerImg) {
+      viewerUI.elements.viewerImg.decoding = 'sync'; // 非同期デコードによる一瞬の遅延（黒い画面）を防ぐ
+      viewerUI.elements.viewerImg.onload = () => {
+        setZoomState(viewerState.isZoomed);
+        viewerUI.updateImageRendering();
+        resizeWindowToFitImage();
+      };
+    }
+
+    // IPC通信のラグを隠蔽するため、LocalStorageから初期データを取得して即座に描画を開始する
+    const initialDataJson = localStorage.getItem('viewerInitialData');
+    if (initialDataJson) {
+      try {
+        const initialData = JSON.parse(initialDataJson);
+        viewerState.currentImagePath = initialData.path;
+        viewerState.totalImages = initialData.total;
+        
+        const assetUrl = window.veloceAPI.convertFileSrc(initialData.path);
+        if (viewerUI.elements.viewerImg) {
+          viewerUI.elements.viewerImg.src = assetUrl;
+        }
+        document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
+      } catch (e) {}
+      localStorage.removeItem('viewerInitialData');
+    }
     
     loadImage();
 
@@ -394,17 +421,15 @@ async function loadImage() {
     } else {
       const assetUrl = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
       if (viewerUI.elements.viewerImg) {
-        viewerUI.elements.viewerImg.src = assetUrl;
+        // LocalStorage経由で既に同じ画像がセットされている場合は再セットによるチラつきを防ぐ
+        if (viewerUI.elements.viewerImg.src !== assetUrl) {
+          viewerUI.elements.viewerImg.src = assetUrl;
+        }
       }
     }
     preloadAdjacentImages();
 
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
-    viewerUI.elements.viewerImg.onload = () => {
-      setZoomState(viewerState.isZoomed);
-      viewerUI.updateImageRendering();
-      resizeWindowToFitImage();
-    };
   }
 }
 
