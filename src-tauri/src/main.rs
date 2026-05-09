@@ -1231,6 +1231,154 @@ fn main() {
                 }
             });
 
+            // --- ファイルシステムの変更監視（軽量ポーリング） ---
+            // ゴミ箱からの復元やブラウザからの保存など、外部からの変更を検知してフロントエンドに通知する
+            let app_handle = app.handle();
+            std::thread::spawn(move || {
+                let mut last_dir = String::new();
+                let mut known_files: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
+                let mut known_folders: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    
+                    let current_dir = {
+                        let state = app_handle.state::<AppState>();
+                        let dir = if let Ok(dir_lock) = state.current_dir.lock() {
+                            dir_lock.clone()
+                        } else {
+                            String::new()
+                        };
+                        dir
+                    };
+
+                    if current_dir.is_empty() {
+                        continue;
+                    }
+
+                    let parent_dir = std::path::Path::new(&current_dir)
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string());
+
+                    if current_dir != last_dir {
+                        last_dir = current_dir.clone();
+                        known_files.clear();
+                        known_folders.clear();
+                        
+                        if let Ok(entries) = std::fs::read_dir(&current_dir) {
+                            for entry in entries.filter_map(Result::ok) {
+                                let p = entry.path();
+                                if p.is_file() {
+                                    if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                                        let ext_lower = ext.to_lowercase();
+                                        if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                                            if let Ok(meta) = entry.metadata() {
+                                                let size = meta.len();
+                                                let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                                known_files.insert(p.to_string_lossy().to_string(), (size, mtime));
+                                            }
+                                        }
+                                    }
+                                } else if p.is_dir() {
+                                    known_folders.insert(p.to_string_lossy().to_string());
+                                }
+                            }
+                        }
+                        if let Some(ref parent) = parent_dir {
+                            if let Ok(entries) = std::fs::read_dir(parent) {
+                                for entry in entries.filter_map(Result::ok) {
+                                    let p = entry.path();
+                                    if p.is_dir() {
+                                        known_folders.insert(p.to_string_lossy().to_string());
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    let mut current_files: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
+                    let mut current_folders: std::collections::HashSet<String> = std::collections::HashSet::new();
+                    let mut folder_changed = false;
+
+                    if let Ok(entries) = std::fs::read_dir(&current_dir) {
+                        for entry in entries.filter_map(Result::ok) {
+                            let p = entry.path();
+                            if p.is_file() {
+                                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                                    let ext_lower = ext.to_lowercase();
+                                    if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                                        if let Ok(meta) = entry.metadata() {
+                                            let size = meta.len();
+                                            let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                            let path_str = p.to_string_lossy().to_string();
+                                            current_files.insert(path_str.clone(), (size, mtime));
+
+                                            if let Some(&(old_size, old_mtime)) = known_files.get(&path_str) {
+                                                if old_size != size || old_mtime != mtime {
+                                                    let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                                    let file_name = entry.file_name().to_string_lossy().into_owned();
+                                                    let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false };
+                                                    let _ = app_handle.emit_all("file-changed", img_file);
+                                                }
+                                            } else {
+                                                let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                                let file_name = entry.file_name().to_string_lossy().into_owned();
+                                                let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false };
+                                                let _ = app_handle.emit_all("file-changed", img_file);
+                                            }
+                                        }
+                                    }
+                                }
+                            } else if p.is_dir() {
+                                let path_str = p.to_string_lossy().to_string();
+                                current_folders.insert(path_str.clone());
+                                if !known_folders.contains(&path_str) {
+                                    folder_changed = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(ref parent) = parent_dir {
+                        if let Ok(entries) = std::fs::read_dir(parent) {
+                            for entry in entries.filter_map(Result::ok) {
+                                let p = entry.path();
+                                if p.is_dir() {
+                                    let path_str = p.to_string_lossy().to_string();
+                                    current_folders.insert(path_str.clone());
+                                    if !known_folders.contains(&path_str) {
+                                        folder_changed = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !folder_changed {
+                        for folder in &known_folders {
+                            if !current_folders.contains(folder) {
+                                folder_changed = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    for path_str in known_files.keys() {
+                        if !current_files.contains_key(path_str) {
+                            let _ = app_handle.emit_all("file-removed", path_str.clone());
+                        }
+                    }
+
+                    if folder_changed {
+                        let _ = app_handle.emit_all("directory-changed", ());
+                    }
+
+                    known_files = current_files;
+                    known_folders = current_folders;
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|event| {

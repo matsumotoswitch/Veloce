@@ -425,6 +425,14 @@ async function deleteSelectedFiles() {
 
     if (trashedCount > 0) {
       uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
+      
+      // アプリ内で削除したアイテムを即座にリストから除外して画面を更新する
+      pathsToDelete.forEach(path => {
+        const index = appState.files.findIndex(f => f.path === path);
+        if (index > -1) appState.files.splice(index, 1);
+      });
+      appState.applyFiltersAndSort();
+      scheduleRefresh();
     } else {
       uiManager.showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
     }
