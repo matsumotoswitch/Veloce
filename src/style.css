@@ -634,26 +634,26 @@ input[type="range"]:focus {
 /* トグルアイコンのベース色とホバー連動 */
 .toggle-icon {
   color: #888;
+  margin-right: 8px;
+  cursor: pointer;
   transition: color 0.2s;
 }
+
+.toggle-icon svg {
+  transition: transform 0.2s ease;
+}
+.toggle-icon.expanded svg {
+  transform: rotate(90deg);
+}
+
 .tree-item:hover .toggle-icon,
 .tree-item.selected .toggle-icon {
   color: #fff;
 }
 
-/* フォルダアイコン等の色（ホバー・選択時に白で上書きする） */
-.tree-item:hover .tree-icon svg,
-.tree-item.selected .tree-icon svg {
-  stroke: #fff !important;
-}
-
-/* 塗りつぶしアイコンの場合も白くする（DRIVE等の fill="none" のものは除外） */
-.tree-item:hover .tree-icon svg:not([fill="none"]),
-.tree-item.selected .tree-icon svg:not([fill="none"]) {
-  fill: #fff !important;
-}
-
-/* お気に入りアイコンの色（var(--glow-gold) が指定されているがホバー時に上書きする） */
+/* アイコンのホバー・選択時の色反転処理 */
+.tree-item:hover .tree-icon,
+.tree-item.selected .tree-icon,
 .favorite-item:hover .tree-icon,
 .favorite-item.selected .tree-icon {
   color: #fff !important;
@@ -886,4 +886,42 @@ input[type="range"]:focus {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+}
+
+/* --- コンテキストメニュー サブメニュー対応 --- */
+.context-menu-item {
+  position: relative;
+}
+
+.submenu {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 100%;
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: 4px;
+  min-width: 150px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  z-index: 10002;
+  padding: 4px 0;
+}
+
+.context-menu-item:hover > .submenu {
+  display: block;
+}
+
+.menu-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--accent-color);
+}
+
+/* 矢印アイコンが塗りつぶされて三角形になるのを確実に防ぐ */
+.toggle-icon svg, .toggle-icon svg path,
+.resizer-toggle svg, .resizer-toggle svg path,
+th[data-sort] svg, th[data-sort] svg path {
+  fill: none !important;
 }

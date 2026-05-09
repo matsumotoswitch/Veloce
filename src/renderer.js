@@ -491,12 +491,13 @@ function showNotification(message, type = 'info') {
 
 const createMenuOption = (text, onClick) => {
   const option = document.createElement('div');
+  option.className = 'context-menu-item';
   option.textContent = text;
   option.style.padding = '6px 16px';
   option.style.cursor = 'pointer';
   option.style.color = 'var(--text-color)';
   option.onmouseenter = () => {
-    option.style.backgroundColor = 'var(--accent-color)';
+    option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
     option.style.color = '#fff';
   };
   option.onmouseleave = () => {
@@ -690,6 +691,9 @@ function createTreeNode(folder, isRoot = false) {
   // 展開・折りたたみ用のトグルアイコン
   const toggleIcon = document.createElement('span');
   toggleIcon.className = 'tree-toggle toggle-icon';
+  toggleIcon.style.display = 'inline-flex';
+  toggleIcon.style.alignItems = 'center';
+  toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
 
   const icon = document.createElement('span');
   icon.className = 'tree-icon';
@@ -697,6 +701,9 @@ function createTreeNode(folder, isRoot = false) {
   icon.style.marginRight = '4px';
   icon.style.display = 'inline-flex';
   icon.style.alignItems = 'center';
+  if (!isRoot) {
+    icon.style.color = '#4da8da';
+  }
 
   const label = document.createElement('span');
   label.className = 'tree-label';
@@ -1312,7 +1319,7 @@ window.onTabMove = (fromIndex, toIndex, insertAfter) => {
 // 4. Event Handlers (User Interactions)
 // ============================================================================
 
-const menuNewFolder = createMenuOption('フォルダ新規作成', async () => {
+const menuNewFolder = createMenuOption('フォルダを新規作成', async () => {
   if (!contextMenu.targetFolder) return;
   const folderName = await uiManager.showPrompt('新しいフォルダ名を入力してください:');
   if (folderName !== null) {
@@ -1602,7 +1609,7 @@ async function renderMetadata(file) {
   }
 }
 
-const menuRenameFolder = createMenuOption('フォルダ名変更', async () => {
+const menuRenameFolder = createMenuOption('フォルダ名を変更...', async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
   const newName = await uiManager.showPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
@@ -1657,6 +1664,101 @@ const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
 
 const menuRenameFile = createMenuOption('ファイル名変更', renameSelectedFile);
 const menuDeleteFile = createMenuOption('ファイル削除', deleteSelectedFiles);
+
+// --- コンテキストメニュー「並べ替え」の作成 ---
+const menuSortRoot = document.createElement('div');
+menuSortRoot.className = 'context-menu-item';
+menuSortRoot.style.padding = '6px 16px';
+menuSortRoot.style.cursor = 'pointer';
+menuSortRoot.style.color = 'var(--text-color)';
+menuSortRoot.style.display = 'flex';
+menuSortRoot.style.justifyContent = 'space-between';
+menuSortRoot.style.alignItems = 'center';
+menuSortRoot.innerHTML = `<span>並べ替え</span><span style="font-size: 0.8em; margin-left: 8px;">▶</span>`;
+
+menuSortRoot.onmouseenter = () => {
+  menuSortRoot.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
+  menuSortRoot.style.color = '#fff';
+};
+menuSortRoot.onmouseleave = () => {
+  menuSortRoot.style.backgroundColor = 'transparent';
+  menuSortRoot.style.color = 'var(--text-color)';
+};
+
+const sortSubmenu = document.createElement('div');
+sortSubmenu.className = 'submenu';
+
+const sortOptions = [
+  { key: 'name', label: '名前' },
+  { key: 'ext', label: '拡張子' },
+  { key: 'width', label: '幅' },
+  { key: 'height', label: '高さ' },
+  { key: 'size', label: 'サイズ' },
+  { key: 'mtime', label: '更新日時' }
+];
+
+const updateSortCheckmarks = () => {
+  Array.from(sortSubmenu.children).forEach(child => {
+    if (child.dataset.sortKey) {
+      const check = child.querySelector('.menu-check');
+      if (check) check.innerHTML = appState.sortConfig.key === child.dataset.sortKey ? UIManager.ICONS.CHECK : '';
+    }
+    if (child.dataset.sortOrder) {
+      const check = child.querySelector('.menu-check');
+      const isAsc = child.dataset.sortOrder === 'asc';
+      if (check) check.innerHTML = appState.sortConfig.asc === isAsc ? UIManager.ICONS.CHECK : '';
+    }
+  });
+};
+
+const handleSortChange = (key, asc) => {
+  if (key) appState.sortConfig.key = key;
+  if (asc !== undefined) appState.sortConfig.asc = asc;
+  localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+  updateSortIndicators();
+  appState.applyFiltersAndSort();
+  scheduleRefresh();
+  contextMenu.style.display = 'none';
+};
+
+const createSubOption = (label, onClick, dataKey, dataVal) => {
+  const opt = document.createElement('div');
+  opt.style.padding = '6px 16px';
+  opt.style.cursor = 'pointer';
+  opt.style.color = 'var(--text-color)';
+  opt.style.display = 'flex';
+  opt.style.alignItems = 'center';
+  if (dataKey === 'sortKey') opt.dataset.sortKey = dataVal;
+  if (dataKey === 'sortOrder') opt.dataset.sortOrder = dataVal;
+  opt.innerHTML = `<span class="menu-check"></span><span>${label}</span>`;
+  
+  opt.onmouseenter = () => {
+    opt.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
+    opt.style.color = '#fff';
+  };
+  opt.onmouseleave = () => {
+    opt.style.backgroundColor = 'transparent';
+    opt.style.color = 'var(--text-color)';
+  };
+  opt.addEventListener('click', (e) => {
+    e.stopPropagation();
+    onClick();
+  });
+  return opt;
+};
+
+sortOptions.forEach(opt => {
+  sortSubmenu.appendChild(createSubOption(opt.label, () => handleSortChange(opt.key, undefined), 'sortKey', opt.key));
+});
+
+const menuSeparatorSortSub = createMenuSeparator();
+sortSubmenu.appendChild(menuSeparatorSortSub);
+sortSubmenu.appendChild(createSubOption('昇順', () => handleSortChange(undefined, true), 'sortOrder', 'asc'));
+sortSubmenu.appendChild(createSubOption('降順', () => handleSortChange(undefined, false), 'sortOrder', 'desc'));
+
+menuSortRoot.appendChild(sortSubmenu);
+
+const menuSeparatorSort = createMenuSeparator();
 
 const menuAddFavorite = createMenuOption('お気に入りに追加', async () => {
   if (!contextMenu.targetFolder) return;
@@ -1941,6 +2043,11 @@ contextMenu.appendChild(menuEditFavorite);
 // 5. 削除系 (危険な操作は下にまとめる)
 contextMenu.appendChild(menuDeleteFolder);
 contextMenu.appendChild(menuDeleteFile);
+
+// 並べ替え (ファイル操作メニュー時に表示)
+contextMenu.appendChild(menuSeparatorSort);
+contextMenu.appendChild(menuSortRoot);
+
 contextMenu.appendChild(menuDeleteFavorite);
 contextMenu.appendChild(menuSeparator4);
 
@@ -2084,7 +2191,31 @@ function handleItemContextMenu(e, isGrid) {
   e.stopPropagation();
 
   const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  if (!item || !item.dataset.index) return;
+  
+  if (!item || !item.dataset.index) {
+    if (!isGrid) return;
+    
+    appState.selection.clear();
+    appState.selectedIndex = -1;
+    uiManager.updateSelectionUI();
+
+    Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+    
+    updateSortCheckmarks();
+    menuSortRoot.style.display = 'flex';
+
+    contextMenu.style.display = 'block';
+    const rect = contextMenu.getBoundingClientRect();
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
+    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
+    
+    contextMenu.style.left = `${x}px`;
+    contextMenu.style.top = `${y}px`;
+    return;
+  }
+  
   const index = parseInt(item.dataset.index, 10);
 
   if (!appState.selection.has(index)) selectImage(index);
@@ -2093,6 +2224,12 @@ function handleItemContextMenu(e, isGrid) {
 
   menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none'; 
   menuDeleteFile.style.display = 'block';
+
+  if (isGrid) {
+    menuSeparatorSort.style.display = 'block';
+    updateSortCheckmarks();
+    menuSortRoot.style.display = 'flex';
+  }
 
   contextMenu.style.display = 'block';
   const rect = contextMenu.getBoundingClientRect();
@@ -2955,6 +3092,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
         } else {
           iconHtml = UIManager.ICONS.FOLDER;
+          iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : '#4da8da';
         }
         
         const iconSpan = document.createElement('span');
@@ -3034,7 +3172,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         option.appendChild(closeBtn);
 
         option.onmouseenter = () => {
-          option.style.backgroundColor = 'var(--accent-color)';
+          option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
           option.style.color = '#fff';
           if (iconColor) iconSpan.style.color = '#fff';
           closeBtn.style.opacity = '1';
