@@ -672,17 +672,32 @@ input[type="range"]:focus {
 }
 
 .toast-message {
-  background-color: var(--modal-border);
+  position: relative;
+  background-color: #1a2327;
   color: #fff;
-  border: 1px solid var(--accent-color);
-  border-radius: 6px;
-  padding: 8px 12px;
+  border: 1px solid #0d1315;
+  border-radius: 8px;
+  padding: 8px 12px 8px 16px; /* バーの幅(4px)だけ左の余白を増やす */
   font-size: 13px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  box-shadow: 
+    0 12px 28px rgba(0, 0, 0, 0.6), 
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   opacity: 0;
   transform: translateY(5px);
   transition: opacity 0.2s ease, transform 0.2s ease;
   white-space: nowrap;
+  overflow: hidden;
+}
+
+.toast-message::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: var(--accent-color);
 }
 
 .toast-message.show {
@@ -690,22 +705,16 @@ input[type="range"]:focus {
   transform: translateY(0);
 }
 
-.toast-message.warning {
+.toast-message.warning::before {
   background-color: var(--glow-gold);
-  border-color: var(--glow-gold);
-  color: var(--bg-color);
 }
 
-.toast-message.success {
-  background-color: var(--modal-border);
-  border-color: var(--accent-color);
-  color: #fff;
+.toast-message.success::before {
+  background-color: var(--accent-color);
 }
 
-.toast-message.error {
+.toast-message.error::before {
   background-color: var(--danger-red);
-  border-color: var(--danger-red);
-  color: #fff;
 }
 
 /* --- ライセンス画面：最終デザイン確定版 --- */
@@ -866,13 +875,11 @@ input[type="range"]:focus {
   pointer-events: none;
   z-index: 10005;
   padding: 8px 12px;
-  background-color: rgba(19, 27, 30, 0.85);
+  background-color: #1a2327;
   color: var(--text-color);
-  border: 1px solid var(--accent-color);
+  border: 1px solid #0d1315;
   border-radius: 6px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), 0 0 8px rgba(37, 126, 140, 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   font-size: 13px;
   line-height: 1.4;
   white-space: pre-wrap;
