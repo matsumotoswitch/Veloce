@@ -888,23 +888,96 @@ input[type="range"]:focus {
   transform: translateY(0);
 }
 
+/* --- コンテキストメニュー --- */
+#context-menu, .submenu, #tab-list-menu {
+  /* 透過やぼかしを一切やめる */
+  background-color: #1a2327; /* 背景よりほんの少し明るいリッチなダークグレー */
+  border: 1px solid #0d1315; /* 外側は暗く引き締める */
+  border-radius: 8px;
+  
+  /* 影で浮遊感を出し、内側の白線(0.05)でエッジを立たせる */
+  box-shadow: 
+    0 12px 28px rgba(0, 0, 0, 0.6), 
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 1px 0 0 rgba(255, 255, 255, 0.02);
+}
+
+#context-menu, #tab-list-menu {
+  position: fixed;
+  z-index: 10001;
+  padding: 6px 0;
+  display: none;
+  font-size: 13px;
+  transform-origin: top left;
+}
+
+#context-menu {
+  min-width: 220px;
+}
+
+#tab-list-menu {
+  min-width: 200px;
+  max-width: 400px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* セパレータ */
+.menu-separator {
+  height: 1px;
+  background-color: var(--modal-border);
+  margin: 6px 0;
+}
+
 /* --- コンテキストメニュー サブメニュー対応 --- */
 .context-menu-item {
   position: relative;
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px; /* アイコンとテキストの隙間 */
+  color: var(--text-color);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.context-menu-item svg,
+.context-menu-item > div[style*="width:16px"] {
+  width: 15px !important;
+  height: 15px !important;
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+  position: relative;
+  top: 2px;
+  left: -5px;
+}
+
+.context-menu-item:hover {
+  background-color: rgba(37, 126, 140, 0.3); /* アクセントカラーの透過 */
+  color: #ffffff;
+}
+
+.context-menu-item:hover svg {
+  opacity: 1;
+}
+
+/* 危険な操作（削除など）のホバーエフェクト */
+.context-menu-item.danger:hover {
+  background-color: rgba(224, 82, 99, 0.3); /* 赤の透過 */
+  color: #ffffff;
 }
 
 .submenu {
   display: none;
   position: absolute;
-  top: 0;
-  left: 100%;
-  background-color: var(--modal-bg);
-  border: 1px solid var(--modal-border);
-  border-radius: 4px;
+  top: -7px;
+  left: calc(100% + 2px);
   min-width: 150px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
   z-index: 10002;
-  padding: 4px 0;
+  padding: 6px 0;
 }
 
 .context-menu-item:hover > .submenu {

@@ -43,33 +43,10 @@ let draggedFavoriteId = null; // お気に入りのドラッグ状態を管理
 
 const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
-contextMenu.style.position = 'fixed';
-contextMenu.style.display = 'none';
-contextMenu.style.backgroundColor = 'var(--modal-bg)';
-contextMenu.style.border = '1px solid var(--modal-border)';
-contextMenu.style.borderRadius = '4px';
-contextMenu.style.padding = '4px 0';
-contextMenu.style.zIndex = '10001';
-contextMenu.style.boxShadow = '0 2px 10px rgba(0,0,0,0.5)';
-contextMenu.style.minWidth = '150px';
-contextMenu.style.fontSize = '13px';
 
 // タブ一覧メニュー
 const tabListMenu = document.createElement('div');
 tabListMenu.id = 'tab-list-menu';
-tabListMenu.style.position = 'fixed';
-tabListMenu.style.display = 'none';
-tabListMenu.style.backgroundColor = 'var(--modal-bg)';
-tabListMenu.style.border = '1px solid var(--modal-border)';
-tabListMenu.style.borderRadius = '4px';
-tabListMenu.style.padding = '4px 0';
-tabListMenu.style.zIndex = '10001';
-tabListMenu.style.boxShadow = '0 2px 10px rgba(0,0,0,0.5)';
-tabListMenu.style.minWidth = '200px';
-tabListMenu.style.maxWidth = '400px';
-tabListMenu.style.maxHeight = '70vh';
-tabListMenu.style.overflowY = 'auto';
-tabListMenu.style.fontSize = '13px';
 document.body.appendChild(tabListMenu);
 
 /**
@@ -519,36 +496,29 @@ function showNotification(message, type = 'info') {
   uiManager.showToast(message, 3000, null, type);
 }
 
-const createMenuOption = (text, onClick) => {
-  const option = document.createElement('div');
-  option.className = 'context-menu-item';
-  option.textContent = text;
-  option.style.padding = '6px 16px';
-  option.style.cursor = 'pointer';
-  option.style.color = 'var(--text-color)';
-  option.onmouseenter = () => {
-    option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
-    option.style.color = '#fff';
-  };
-  option.onmouseleave = () => {
-    option.style.backgroundColor = 'transparent';
-    option.style.color = 'var(--text-color)';
-  };
-  option.addEventListener('click', (e) => {
+// アイコン付きメニュー項目の生成ヘルパー
+function createMenuItem(label, iconSvg, onClick, isDanger = false) {
+  const item = document.createElement('div');
+  item.className = 'context-menu-item';
+  if (isDanger) item.classList.add('danger');
+  
+  item.innerHTML = `
+    ${iconSvg || '<div style="width:16px;height:16px;"></div>'}
+    <span>${label}</span>
+  `;
+  
+  item.addEventListener('click', (e) => {
     e.stopPropagation();
     contextMenu.style.display = 'none';
-    onClick();
+    if (onClick) onClick();
   });
-  return option;
-};
+  return item;
+}
 
 // メニューセパレーターの作成
 const createMenuSeparator = () => {
   const separator = document.createElement('div');
   separator.className = 'menu-separator';
-  separator.style.height = '1px';
-  separator.style.backgroundColor = 'var(--modal-border)';
-  separator.style.margin = '4px 16px';
   return separator;
 };
 
@@ -1370,7 +1340,7 @@ window.onTabMove = (fromIndex, toIndex, insertAfter) => {
 // 4. Event Handlers (User Interactions)
 // ============================================================================
 
-const menuNewFolder = createMenuOption('フォルダを新規作成', async () => {
+const menuNewFolder = createMenuItem('フォルダを新規作成', UIManager.ICONS.FOLDER_PLUS, async () => {
   if (!contextMenu.targetFolder) return;
   const folderName = await uiManager.showPrompt('新しいフォルダ名を入力してください:');
   if (folderName !== null) {
@@ -1660,7 +1630,7 @@ async function renderMetadata(file) {
   }
 }
 
-const menuRenameFolder = createMenuOption('フォルダ名を変更...', async () => {
+const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager.ICONS.FOLDER_PEN, async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
   const newName = await uiManager.showPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
@@ -1688,7 +1658,7 @@ const menuRenameFolder = createMenuOption('フォルダ名を変更...', async (
   }
 });
 
-const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
+const menuDeleteFolder = createMenuItem('フォルダ削除', UIManager.ICONS.FOLDER_X, async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
   const isConfirmed = await uiManager.showConfirm(`本当にフォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しますか？`);
@@ -1711,35 +1681,26 @@ const menuDeleteFolder = createMenuOption('フォルダ削除', async () => {
       alert('フォルダの削除に失敗しました:\n' + (result ? result.error : 'Unknown error'));
     }
   }
-});
+}, true);
 
-const menuRenameFile = createMenuOption('ファイル名変更', renameSelectedFile);
-const menuDeleteFile = createMenuOption('ファイル削除', deleteSelectedFiles);
+const menuRenameFile = createMenuItem('ファイル名変更', UIManager.ICONS.FILE_PEN, renameSelectedFile);
+const menuDeleteFile = createMenuItem('ファイル削除', UIManager.ICONS.FILE_X, deleteSelectedFiles, true);
 
 // --- コンテキストメニュー「並べ替え」の作成 ---
 const menuSortRoot = document.createElement('div');
 menuSortRoot.className = 'context-menu-item';
-menuSortRoot.style.padding = '6px 16px';
-menuSortRoot.style.cursor = 'pointer';
-menuSortRoot.style.color = 'var(--text-color)';
-menuSortRoot.style.display = 'flex';
-menuSortRoot.style.justifyContent = 'space-between';
-menuSortRoot.style.alignItems = 'center';
-menuSortRoot.innerHTML = `<span>並べ替え</span><span style="display: inline-flex; align-items: center; margin-left: 8px; opacity: 0.7;">${UIManager.ICONS.CHEVRON_RIGHT}</span>`;
+menuSortRoot.innerHTML = `
+  ${UIManager.ICONS.SORT || '<div style="width:16px;height:16px;"></div>'}
+  <span style="flex: 1;">並べ替え</span>
+  <span style="display: inline-flex; align-items: center; opacity: 0.7;">${UIManager.ICONS.CHEVRON_RIGHT}</span>
+`;
 
 menuSortRoot.onmouseenter = () => {
-  menuSortRoot.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
-  menuSortRoot.style.color = '#fff';
-
   sortSubmenu.style.transformOrigin = 'top left';
   sortSubmenu.animate([
     { opacity: 0, transform: 'scale(0.95)' },
     { opacity: 1, transform: 'scale(1)' }
   ], { duration: 80, easing: 'cubic-bezier(0, 0, 0.2, 1)', fill: 'forwards' });
-};
-menuSortRoot.onmouseleave = () => {
-  menuSortRoot.style.backgroundColor = 'transparent';
-  menuSortRoot.style.color = 'var(--text-color)';
 };
 
 const sortSubmenu = document.createElement('div');
@@ -1780,23 +1741,11 @@ const handleSortChange = (key, asc) => {
 
 const createSubOption = (label, onClick, dataKey, dataVal) => {
   const opt = document.createElement('div');
-  opt.style.padding = '6px 16px';
-  opt.style.cursor = 'pointer';
-  opt.style.color = 'var(--text-color)';
-  opt.style.display = 'flex';
-  opt.style.alignItems = 'center';
+  opt.className = 'context-menu-item';
   if (dataKey === 'sortKey') opt.dataset.sortKey = dataVal;
   if (dataKey === 'sortOrder') opt.dataset.sortOrder = dataVal;
-  opt.innerHTML = `<span class="menu-check"></span><span>${label}</span>`;
+  opt.innerHTML = `<span class="menu-check" style="width:16px;height:16px;display:inline-flex;justify-content:center;align-items:center;"></span><span>${label}</span>`;
   
-  opt.onmouseenter = () => {
-    opt.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
-    opt.style.color = '#fff';
-  };
-  opt.onmouseleave = () => {
-    opt.style.backgroundColor = 'transparent';
-    opt.style.color = 'var(--text-color)';
-  };
   opt.addEventListener('click', (e) => {
     e.stopPropagation();
     onClick();
@@ -1817,7 +1766,7 @@ menuSortRoot.appendChild(sortSubmenu);
 
 const menuSeparatorSort = createMenuSeparator();
 
-const menuAddFavorite = createMenuOption('お気に入りに追加', async () => {
+const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICONS.STAR, async () => {
   if (!contextMenu.targetFolder) return;
   const path = contextMenu.targetFolder.path;
   const name = contextMenu.targetFolder.name;
@@ -1866,7 +1815,7 @@ function renderFavIconSelector(currentIcon) {
   });
 }
 
-const menuEditFavorite = createMenuOption('お気に入りを編集...', () => {
+const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager.ICONS.EDIT, () => {
   if (!contextMenu.targetFavoriteId) return;
   const fav = appState.favorites.find(f => f.id === contextMenu.targetFavoriteId);
   if (fav) {
@@ -1878,7 +1827,7 @@ const menuEditFavorite = createMenuOption('お気に入りを編集...', () => {
   }
 });
 
-const menuDeleteFavorite = createMenuOption('お気に入りを削除', async () => {
+const menuDeleteFavorite = createMenuItem('お気に入りを削除', UIManager.ICONS.TRASH, async () => {
   if (!contextMenu.targetFavoriteId) return;
   const favIndex = appState.favorites.findIndex(f => f.id === contextMenu.targetFavoriteId);
   if (favIndex > -1) {
@@ -1902,9 +1851,9 @@ const menuDeleteFavorite = createMenuOption('お気に入りを削除', async ()
       showNotification(`お気に入りから削除しました`, 'success');
     }
   }
-});
+}, true);
 
-const menuOpenInExplorer = createMenuOption('エクスプローラで開く', async () => {
+const menuOpenInExplorer = createMenuItem('エクスプローラで開く', UIManager.ICONS.FOLDER_OPEN, async () => {
   let path = '';
   if (contextMenu.targetFavoritePath) path = contextMenu.targetFavoritePath;
   else if (contextMenu.targetFolder) path = contextMenu.targetFolder.path;
@@ -1918,7 +1867,7 @@ const menuOpenInExplorer = createMenuOption('エクスプローラで開く', as
   }
 });
 
-const menuOpenInNewTab = createMenuOption('新しいタブで開く', async () => {
+const menuOpenInNewTab = createMenuItem('新しいタブで開く', UIManager.ICONS.FILE_PLUS, async () => {
   let path = '';
   let name = '';
   if (contextMenu.targetFavoritePath) {
@@ -1953,13 +1902,13 @@ const menuOpenInNewTab = createMenuOption('新しいタブで開く', async () =
 });
 
 // --- タブ用メニューの作成 ---
-const menuTabClose = createMenuOption('閉じる', () => {
+const menuTabClose = createMenuItem('閉じる', UIManager.ICONS.X, () => {
   if (contextMenu.targetTabIndex !== undefined) {
     window.onTabClose(contextMenu.targetTabIndex);
   }
 });
 
-const menuTabDuplicate = createMenuOption('タブを複製', async () => {
+const menuTabDuplicate = createMenuItem('タブを複製', UIManager.ICONS.COPY, async () => {
   if (contextMenu.targetTabIndex === undefined) return;
 
   const sourceIndex = contextMenu.targetTabIndex;
@@ -1988,7 +1937,7 @@ const menuTabDuplicate = createMenuOption('タブを複製', async () => {
   await window.onTabClick(insertAtIndex);
 });
 
-const menuTabCloseOthers = createMenuOption('他のタブをすべて閉じる', async () => {
+const menuTabCloseOthers = createMenuItem('他のタブをすべて閉じる', UIManager.ICONS.X, async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const targetTab = appState.tabs[contextMenu.targetTabIndex];
     appState.tabs = [targetTab];
@@ -1999,7 +1948,7 @@ const menuTabCloseOthers = createMenuOption('他のタブをすべて閉じる',
   }
 });
 
-const menuTabCloseRight = createMenuOption('右側のタブをすべて閉じる', async () => {
+const menuTabCloseRight = createMenuItem('右側のタブをすべて閉じる', UIManager.ICONS.X, async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const targetIndex = contextMenu.targetTabIndex;
     if (targetIndex >= appState.tabs.length - 1) return;
@@ -2018,7 +1967,7 @@ const menuTabCloseRight = createMenuOption('右側のタブをすべて閉じる
   }
 });
 
-const menuTabOpenExplorer = createMenuOption('エクスプローラで開く', async () => {
+const menuTabOpenExplorer = createMenuItem('エクスプローラで開く', UIManager.ICONS.FOLDER_OPEN, async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const tab = appState.tabs[contextMenu.targetTabIndex];
     if (tab && window.veloceAPI.openInExplorer) {
@@ -2031,7 +1980,7 @@ const menuTabOpenExplorer = createMenuOption('エクスプローラで開く', a
   }
 });
 
-const menuTabCopyPath = createMenuOption('パスをコピー', async () => {
+const menuTabCopyPath = createMenuItem('パスをコピー', UIManager.ICONS.COPY, async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const tab = appState.tabs[contextMenu.targetTabIndex];
     if (tab) {
@@ -2045,7 +1994,7 @@ const menuTabCopyPath = createMenuOption('パスをコピー', async () => {
   }
 });
 
-const menuTabAddFavorite = createMenuOption('お気に入りに追加', () => {
+const menuTabAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICONS.STAR, () => {
   if (contextMenu.targetTabIndex !== undefined) {
     if (menuTabAddFavorite.disabled) return;
     const tab = appState.tabs[contextMenu.targetTabIndex];
