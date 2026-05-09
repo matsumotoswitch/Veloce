@@ -72,6 +72,36 @@ tabListMenu.style.overflowY = 'auto';
 tabListMenu.style.fontSize = '13px';
 document.body.appendChild(tabListMenu);
 
+/**
+ * メニューを特定の位置にアニメーション付きで表示します。
+ */
+function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) {
+  menuElement.style.display = 'block';
+  const rect = menuElement.getBoundingClientRect();
+  let x = startX;
+  let y = startY;
+  let originX = 'left';
+  let originY = 'top';
+
+  if (x + rect.width > window.innerWidth) {
+    x = window.innerWidth - rect.width - (isDropdown ? 5 : 0);
+    originX = 'right';
+  }
+  if (y + rect.height > window.innerHeight) {
+    y = window.innerHeight - rect.height;
+    originY = 'bottom';
+  }
+
+  menuElement.style.transformOrigin = `${originY} ${originX}`;
+  menuElement.style.left = `${x}px`;
+  menuElement.style.top = `${y}px`;
+
+  menuElement.animate([
+    { opacity: 0, transform: 'scale(0.95)' },
+    { opacity: 1, transform: 'scale(1)' }
+  ], { duration: 80, easing: 'cubic-bezier(0, 0, 0.2, 1)', fill: 'forwards' });
+}
+
 // ============================================================================
 // 2. Tauri API & Backend Communication
 // ============================================================================
@@ -1674,11 +1704,17 @@ menuSortRoot.style.color = 'var(--text-color)';
 menuSortRoot.style.display = 'flex';
 menuSortRoot.style.justifyContent = 'space-between';
 menuSortRoot.style.alignItems = 'center';
-menuSortRoot.innerHTML = `<span>並べ替え</span><span style="font-size: 0.8em; margin-left: 8px;">▶</span>`;
+menuSortRoot.innerHTML = `<span>並べ替え</span><span style="display: inline-flex; align-items: center; margin-left: 8px; opacity: 0.7;">${UIManager.ICONS.CHEVRON_RIGHT}</span>`;
 
 menuSortRoot.onmouseenter = () => {
   menuSortRoot.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
   menuSortRoot.style.color = '#fff';
+
+  sortSubmenu.style.transformOrigin = 'top left';
+  sortSubmenu.animate([
+    { opacity: 0, transform: 'scale(0.95)' },
+    { opacity: 1, transform: 'scale(1)' }
+  ], { duration: 80, easing: 'cubic-bezier(0, 0, 0.2, 1)', fill: 'forwards' });
 };
 menuSortRoot.onmouseleave = () => {
   menuSortRoot.style.backgroundColor = 'transparent';
@@ -2109,15 +2145,7 @@ window.onTabContextMenu = (e, index) => {
     menuTabCloseRight.style.pointerEvents = 'auto';
   }
 
-  contextMenu.style.display = 'block';
-  const rect = contextMenu.getBoundingClientRect();
-  let x = e.clientX;
-  let y = e.clientY;
-  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
-  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
-
-  contextMenu.style.left = `${x}px`;
-  contextMenu.style.top = `${y}px`;
+  showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
 };
 
 const closeAllMenus = (e) => {
@@ -2204,15 +2232,7 @@ function handleItemContextMenu(e, isGrid) {
     updateSortCheckmarks();
     menuSortRoot.style.display = 'flex';
 
-    contextMenu.style.display = 'block';
-    const rect = contextMenu.getBoundingClientRect();
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
-    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
-    
-    contextMenu.style.left = `${x}px`;
-    contextMenu.style.top = `${y}px`;
+    showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
     return;
   }
   
@@ -2231,15 +2251,7 @@ function handleItemContextMenu(e, isGrid) {
     menuSortRoot.style.display = 'flex';
   }
 
-  contextMenu.style.display = 'block';
-  const rect = contextMenu.getBoundingClientRect();
-  let x = e.clientX;
-  let y = e.clientY;
-  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
-  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
-  
-  contextMenu.style.left = `${x}px`;
-  contextMenu.style.top = `${y}px`;
+  showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
 }
 
 uiManager.elements.thumbnailGrid.addEventListener('click', (e) => handleItemClick(e, true));
@@ -2340,15 +2352,7 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
     menuAddFavorite.style.display = 'block';
   }
 
-  contextMenu.style.display = 'block';
-  const rect = contextMenu.getBoundingClientRect();
-  let x = e.clientX;
-  let y = e.clientY;
-  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
-  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
-
-  contextMenu.style.left = `${x}px`;
-  contextMenu.style.top = `${y}px`;
+  showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
 });
 
 uiManager.elements.dirTree.addEventListener('dragstart', (e) => {
@@ -3233,20 +3237,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       
       updateTabListMenu();
 
-      tabListMenu.style.display = 'block';
       const rect = tabListBtn.getBoundingClientRect();
-      let x = rect.left;
-      let y = rect.bottom;
-      
-      tabListMenu.style.left = `${x}px`;
-      tabListMenu.style.top = `${y}px`;
-      
-      requestAnimationFrame(() => {
-          const menuRect = tabListMenu.getBoundingClientRect();
-          if (menuRect.right > window.innerWidth) {
-              tabListMenu.style.left = `${window.innerWidth - menuRect.width - 5}px`;
-          }
-      });
+      showMenuWithAnimation(tabListMenu, rect.left, rect.bottom, true);
     });
   }
 
@@ -3642,15 +3634,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       menuEditFavorite.style.display = 'block';
       menuDeleteFavorite.style.display = 'block';
 
-      contextMenu.style.display = 'block';
-      const rect = contextMenu.getBoundingClientRect();
-      let x = e.clientX;
-      let y = e.clientY;
-      if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width;
-      if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height;
-
-      contextMenu.style.left = `${x}px`;
-      contextMenu.style.top = `${y}px`;
+      showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
     });
   }
 
