@@ -10,6 +10,9 @@
   --danger-red: #e05263; /* 落ち着いたソフトレッドに変更 */
   --glow-gold: #e6c762; /* 落ち着いたシャンパンゴールドに変更 */
   --resizer-color: #1c282c; /* 背景とボーダーの中間の暗さ */
+  --radius-lg: 8px; /* モーダル、メニューなどの最前面レイヤー */
+  --radius-md: 6px; /* ツールチップなどの中間レイヤー */
+  --radius-sm: 4px; /* 検索窓、ボタンなどの操作・入力レイヤー */
 }
 
 * {
@@ -135,7 +138,7 @@ body.is-resizing .app-content {
   padding: 6px 16px;
   cursor: pointer;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: inherit;
   color: #fff;
@@ -149,7 +152,7 @@ body.is-resizing .app-content {
 .dialog-btn.primary { background-color: var(--accent-color); }
 .dialog-btn.danger { background-color: var(--danger-red); }
 
-.dialog-input { width: 100%; box-sizing: border-box; padding: 6px; background-color: rgba(0, 0, 0, 0.2); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 4px; font-family: inherit; font-size: inherit; outline: none; transition: border-color 0.2s; }
+.dialog-input { width: 100%; box-sizing: border-box; padding: 6px; background-color: rgba(0, 0, 0, 0.2); color: var(--text-color); border: 1px solid var(--border-color); border-radius: var(--radius-sm); margin-bottom: 4px; font-family: inherit; font-size: inherit; outline: none; transition: border-color 0.2s; }
 .dialog-input:focus { border-color: var(--accent-color); }
 .dialog-input.error { border-color: var(--danger-red); }
 
@@ -275,7 +278,7 @@ body.is-resizing #favorites-section {
   justify-content: center;
   align-items: center;
   border: 1px solid var(--modal-border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-color);
   transition: background-color 0.2s, border-color 0.2s, color 0.2s;
@@ -359,7 +362,7 @@ body.is-resizing #file-info-section {
   height: 26px;
   background: rgba(0, 0, 0, 0.25); /* タイトルバーより少し暗く凹ませる */
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 2px;
   transition: border-color 0.2s, background 0.2s;
 }
@@ -552,7 +555,7 @@ input[type="range"]:focus {
   object-fit: contain;
   border: 2px solid transparent;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 2px;
   content-visibility: auto;
   contain-intrinsic-size: var(--thumbnail-size);
   will-change: border-color;
@@ -676,7 +679,7 @@ input[type="range"]:focus {
   background-color: #1a2327;
   color: #fff;
   border: 1px solid #0d1315;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 8px 12px 8px 16px; /* バーの幅(4px)だけ左の余白を増やす */
   font-size: 13px;
   box-shadow: 
@@ -752,7 +755,7 @@ input[type="range"]:focus {
 
 /* --- Diff Modal --- */
 .modal { display: none; position: fixed; z-index: 10005; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.modal-content { background-color: var(--modal-bg); border: 1px solid var(--modal-border); border-radius: 8px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+.modal-content { background-color: var(--modal-bg); border: 1px solid var(--modal-border); border-radius: var(--radius-lg); padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
 
 /* ダイアログやモーダルの閉じるボタン */
 .close-btn {
@@ -878,7 +881,7 @@ input[type="range"]:focus {
   background-color: #1a2327;
   color: var(--text-color);
   border: 1px solid #0d1315;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   font-size: 13px;
   line-height: 1.4;
@@ -900,7 +903,7 @@ input[type="range"]:focus {
   /* 透過やぼかしを一切やめる */
   background-color: #1a2327; /* 背景よりほんの少し明るいリッチなダークグレー */
   border: 1px solid #0d1315; /* 外側は暗く引き締める */
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   
   /* 影で浮遊感を出し、内側の白線(0.05)でエッジを立たせる */
   box-shadow: 
