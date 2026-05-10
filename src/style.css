@@ -153,7 +153,7 @@ body.is-resizing .app-content {
 .dialog-btn.danger { background-color: var(--danger-red); }
 
 .dialog-input { width: 100%; box-sizing: border-box; padding: 6px; background-color: rgba(0, 0, 0, 0.2); color: var(--text-color); border: 1px solid var(--border-color); border-radius: var(--radius-sm); margin-bottom: 4px; font-family: inherit; font-size: inherit; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
-.dialog-input:focus { border-color: var(--accent-color); box-shadow: 0 0 0 2px rgba(37, 126, 140, 0.3); }
+.dialog-input:focus { outline: none; border-color: var(--accent-color); box-shadow: 0 0 0 2px rgba(37, 126, 140, 0.25); }
 .dialog-input.error { border-color: var(--danger-red); }
 
 .dialog-warning { color: var(--danger-red); font-size: 12px; min-height: 14px; margin-bottom: 10px; display: none; }
@@ -161,18 +161,19 @@ body.is-resizing .app-content {
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--modal-border); /* 青緑がかったグレー (#364b50) に変更 */
-  border-radius: 4px;
+  background-color: var(--border-color);
+  border-radius: 6px;
+  border: 3px solid var(--bg-color); /* 背景色でフチ取ることで細く見せる */
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a676e; /* ホバー時もテーマに合わせた明るいティールグレーに変更 */
+  background-color: var(--accent-color);
 }
 
 /* Resizers */
@@ -180,10 +181,12 @@ body.is-resizing .app-content {
   background-color: var(--resizer-color);
   cursor: col-resize;
   z-index: 10;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s ease;
 }
 /* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
-.resizer:hover:not(:has(.resizer-toggle:hover)), .resizer.resizing { 
+.resizer:hover:not(:has(.resizer-toggle:hover)),
+.resizer:active,
+.resizer.resizing { 
   background-color: var(--accent-color); 
 }
 
@@ -193,10 +196,12 @@ body.is-resizing .app-content {
   height: 5px;
   flex: none;
   z-index: 10;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s ease;
 }
 /* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
-.resizer-h:hover:not(:has(.resizer-toggle:hover)), .resizer-h.resizing { 
+.resizer-h:hover:not(:has(.resizer-toggle:hover)),
+.resizer-h:active,
+.resizer-h.resizing { 
   background-color: var(--accent-color); 
 }
 
@@ -255,12 +260,13 @@ body.is-resizing #favorites-section {
   height: 5px;
   flex: none;
   z-index: 10;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s ease;
   position: relative; /* トグルスイッチの配置用 */
 }
 
 /* ホバー時の色変化（トグルスイッチホバー時は除く） */
 #resizer-left-pane:hover:not(:has(.resizer-toggle:hover)),
+#resizer-left-pane:active,
 #resizer-left-pane.resizing {
   background-color: var(--accent-color);
 }
@@ -335,11 +341,12 @@ body.is-resizing #file-info-section {
   height: 5px;
   flex: none;
   z-index: 10;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s ease;
   position: relative;
 }
 
 #resizer-right-pane:hover:not(:has(.resizer-toggle:hover)),
+#resizer-right-pane:active,
 #resizer-right-pane.resizing {
   background-color: var(--accent-color);
 }
@@ -364,12 +371,13 @@ body.is-resizing #file-info-section {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 0 2px;
-  transition: border-color 0.2s, background 0.2s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
 #search-container:focus-within {
   background: #1e1e1e;
   border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(37, 126, 140, 0.25);
 }
 
 #search-clear-btn {

@@ -1666,7 +1666,7 @@ const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager
   }
 });
 
-const menuDeleteFolder = createMenuItem('フォルダ削除', UIManager.ICONS.FOLDER_X, async () => {
+const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS.FOLDER_X, async () => {
   if (!contextMenu.targetFolder) return;
   const oldPath = contextMenu.targetFolder.path;
   const isConfirmed = await uiManager.showConfirm(`本当にフォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しますか？`);
@@ -1691,8 +1691,8 @@ const menuDeleteFolder = createMenuItem('フォルダ削除', UIManager.ICONS.FO
   }
 }, true);
 
-const menuRenameFile = createMenuItem('ファイル名変更', UIManager.ICONS.FILE_PEN, renameSelectedFile);
-const menuDeleteFile = createMenuItem('ファイル削除', UIManager.ICONS.FILE_X, deleteSelectedFiles, true);
+const menuRenameFile = createMenuItem('ファイル名を変更...', UIManager.ICONS.FILE_PEN, renameSelectedFile);
+const menuDeleteFile = createMenuItem('ファイルを削除', UIManager.ICONS.FILE_X, deleteSelectedFiles, true);
 
 // --- コンテキストメニュー「並べ替え」の作成 ---
 const menuSortRoot = document.createElement('div');
@@ -1945,7 +1945,7 @@ const menuTabDuplicate = createMenuItem('タブを複製', UIManager.ICONS.COPY,
   await window.onTabClick(insertAtIndex);
 });
 
-const menuTabCloseOthers = createMenuItem('他のタブをすべて閉じる', UIManager.ICONS.X, async () => {
+const menuTabCloseOthers = createMenuItem('他のタブをすべて閉じる', UIManager.ICONS.X_CIRCLE, async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const targetTab = appState.tabs[contextMenu.targetTabIndex];
     appState.tabs = [targetTab];
@@ -1956,7 +1956,7 @@ const menuTabCloseOthers = createMenuItem('他のタブをすべて閉じる', U
   }
 });
 
-const menuTabCloseRight = createMenuItem('右側のタブをすべて閉じる', UIManager.ICONS.X, async () => {
+const menuTabCloseRight = createMenuItem('右側のタブをすべて閉じる', UIManager.ICONS.ARROW_RIGHT_TO_LINE, async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const targetIndex = contextMenu.targetTabIndex;
     if (targetIndex >= appState.tabs.length - 1) return;
@@ -1988,7 +1988,7 @@ const menuTabOpenExplorer = createMenuItem('エクスプローラで開く', UIM
   }
 });
 
-const menuTabCopyPath = createMenuItem('パスをコピー', UIManager.ICONS.COPY, async () => {
+const menuTabCopyPath = createMenuItem('パスをコピー', UIManager.ICONS.CLIPBOARD, async () => {
   if (contextMenu.targetTabIndex !== undefined) {
     const tab = appState.tabs[contextMenu.targetTabIndex];
     if (tab) {
