@@ -21,7 +21,6 @@ class ViewerState {
     this.isImmersiveArranged = false; // 整列表示時の没入（余白なしカバー）モード
     this.isFullscreen = false;      // フルスクリーン状態かどうか
     this.isBorderVisible = true;    // ウィンドウ枠を表示するかどうか
-    this.previousWindowSize = null; // ウィンドウフィット前のサイズ保存用
     this.isUnsharped = false;       // アンシャープマスクフィルターを適用するかどうか
     this.lastFocusTime = 0;         // ウィンドウが最後にフォーカスを取得した時刻
     this.ignoreNextClick = false;   // フォーカス目的のクリックを無視するためのフラグ

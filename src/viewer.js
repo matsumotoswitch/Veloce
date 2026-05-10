@@ -517,7 +517,6 @@ async function loadImage() {
     if (viewerState.paths && viewerState.paths.length > 0) {
       viewerState.totalImages = viewerState.paths.length;
     }
-    viewerState.previousWindowSize = null; // トグル状態をリセット
 
     let targetImg;
     if (viewerState.preloadCache.has(viewerState.currentIndex)) {
@@ -825,23 +824,52 @@ window.addEventListener('wheel', (e) => {
     e.preventDefault(); // ブラウザ標準のズームを無効化し、親ウィンドウへのイベント伝播を防ぐ
     viewerState.isImmersiveArranged = false; // 手動ズームで解除
 
-    // ホイールの回転方向に応じてスケールを増減（約10%ずつなめらかに変化）
+    // ズーム状態への移行：初めてズームするときは現在の見た目のスケールを計算して引き継ぎ、二重拡大を防ぐ
+    if (!viewerState.isZoomed) {
+      const { width: natW, height: natH } = getNaturalDimensions();
+      viewerState.currentScale = viewerState.isFitToWindow 
+        ? Math.min(window.innerWidth / natW, window.innerHeight / natH)
+        : Math.min(1.0, window.innerWidth / natW, window.innerHeight / natH);
+      setZoomState(true);
+    }
+
+    // ホイールの回転方向に応じてスケールを増減
     if (e.deltaY < 0) {
-      viewerState.currentScale *= 1.1; // 上スクロールで拡大
       viewerState.currentScale *= CONFIG.ZOOM_STEP; // 上スクロールで拡大
     } else {
-      viewerState.currentScale /= 1.1; // 下スクロールで縮小
       viewerState.currentScale /= CONFIG.ZOOM_STEP; // 下スクロールで縮小
     }
 
-    // 倍率の限界値を設定（10% ～ 3000%）
-    viewerState.currentScale = Math.max(0.1, Math.min(viewerState.currentScale, 30.0));
+    // 倍率の限界値を設定
     viewerState.currentScale = Math.max(CONFIG.MIN_ZOOM, Math.min(viewerState.currentScale, CONFIG.MAX_ZOOM));
+
+    // ウィンドウサイズを画像のズームに合わせて即座に追従させる
+    if (!viewerState.isFullscreen && !document.fullscreenElement) {
+      const { width: natW, height: natH } = getNaturalDimensions();
+      let targetWidth = Math.round(natW * viewerState.currentScale);
+      let targetHeight = Math.round(natH * viewerState.currentScale);
+
+      const monitorW = window.screen.availWidth;
+      const monitorH = window.screen.availHeight;
+
+      // モニターサイズを超えないように制限
+      targetWidth = Math.min(targetWidth, monitorW);
+      targetHeight = Math.min(targetHeight, monitorH);
+
+      if (window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
+        if (window._resizeRafId) cancelAnimationFrame(window._resizeRafId);
+        window._resizeRafId = requestAnimationFrame(() => {
+          window.veloceAPI.resizeViewerWindow(targetWidth, targetHeight);
+        });
+      }
+    }
 
     // 一旦スケールを適用し、縮小時にはみ出しを補正して再適用
     if (typeof viewerUI.updateImageRendering === 'function') viewerUI.updateImageRendering();
     if (typeof clampTranslate === 'function') clampTranslate();
     if (typeof viewerUI.updateImageRendering === 'function') viewerUI.updateImageRendering();
+    updateFullscreenStyles(); // マージンの再計算
+    debouncedFocusWindow();   // フォーカスの維持
   } else {
     e.preventDefault(); // 親ウィンドウのスクロールを防止
     if (e.deltaY > 0) {
@@ -931,33 +959,6 @@ window.addEventListener('keydown', async (e) => {
     case 'F11':
       e.preventDefault(); // ブラウザ標準のフルスクリーン動作を防ぐ
       window.veloceAPI.toggleViewerFullscreen();
-      break;
-    case 'w':
-    case 'W':
-      viewerState.isImmersiveArranged = false;
-      if (!viewerState.isFullscreen) {
-        if (viewerState.previousWindowSize) { // 既にフィットしている場合は元のサイズに戻す
-          window.veloceAPI.resizeViewerWindow(viewerState.previousWindowSize.width, viewerState.previousWindowSize.height);
-          viewerState.previousWindowSize = null;
-        } else { // 現在のサイズを保存し、画像サイズに合わせてリサイズする
-          viewerState.previousWindowSize = { width: window.innerWidth, height: window.innerHeight };
-          const { width: natW, height: natH } = getNaturalDimensions();
-          
-          let targetW = natW;
-          let targetH = natH;
-
-          // ズームされていない（縮小表示等されている）場合は、現在の表示サイズを計算して合わせる
-          if (!viewerState.isZoomed) {
-            const scale = viewerState.isFitToWindow 
-              ? Math.min(window.innerWidth / natW, window.innerHeight / natH)
-              : Math.min(1, window.innerWidth / natW, window.innerHeight / natH);
-            targetW = Math.round(natW * scale);
-            targetH = Math.round(natH * scale);
-          }
-
-          window.veloceAPI.resizeViewerWindow(targetW, targetH);
-        }
-      }
       break;
     case 'a':
     case 'A':
