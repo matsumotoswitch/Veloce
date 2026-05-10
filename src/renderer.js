@@ -664,11 +664,11 @@ window.processNextTask = function processNextTask() {
 function clearMetadataUI() {
   const container = document.getElementById('inspector-content');
   if (container) {
-    container.innerHTML = '<div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 50px;">画像を選択すると詳細が表示されます</div>';
+    container.innerHTML = '<div class="empty-state-msg">画像を選択すると詳細が表示されます</div>';
   }
   const infoContainer = document.getElementById('file-info-content');
   if (infoContainer) {
-    infoContainer.innerHTML = '<div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 20px;">画像を選択してください</div>';
+    infoContainer.innerHTML = '<div class="empty-state-msg">画像を選択してください</div>';
   }
 }
 
@@ -1573,7 +1573,7 @@ async function renderMetadata(file) {
           </div>
         `;
       } else {
-        html = '<div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 50px;">メタデータが含まれていないか、読み取れませんでした。</div>';
+      html = '<div class="empty-state-msg">メタデータが含まれていないか、読み取れませんでした。</div>';
       }
     }
 

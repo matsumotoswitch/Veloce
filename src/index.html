@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="border-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; box-sizing: border-box; border: 1px solid var(--accent-color); z-index: 9998; display: none;"></div>
+  <div id="border-overlay" style="display: none;"></div>
   <div data-tauri-drag-region class="titlebar">
     <div id="tab-container">
       <div id="new-tab-btn" class="tab-item new-tab-btn">
@@ -15,8 +15,8 @@
       </div>
     </div>
     <div class="titlebar-controls">
-      <div class="titlebar-button" id="titlebar-tab-list" style="margin-right: 8px;">
-        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      <div class="titlebar-button" id="titlebar-tab-list">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
       </div>
       <div class="titlebar-button" id="titlebar-minimize">
         <svg viewBox="0 0 10 10"><rect x="1" y="5" width="8" height="1" fill="currentColor"/></svg>
@@ -94,7 +94,7 @@
   <div id="right-pane">
     <div id="file-info-section">
       <div id="file-info-content" class="inspector-data">
-        <div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 20px;">
+        <div class="empty-state-msg">
           画像を選択してください
         </div>
       </div>
@@ -102,7 +102,7 @@
     <div class="resizer-h" id="resizer-right-pane"></div>
     <div id="inspector-section">
       <div id="inspector-content" class="inspector-data">
-        <div style="color: var(--text-color); opacity: 0.5; text-align: center; margin-top: 50px;">
+        <div class="empty-state-msg">
           画像を選択すると詳細が表示されます
       </div>
     </div>
@@ -125,26 +125,26 @@
   <div id="toast-container"></div>
 
   <div id="diff-modal" class="modal">
-    <div class="modal-content" style="max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto;">
+    <div class="modal-content">
       <h2>プロンプト差分比較</h2>
       <div id="diff-container">
         </div>
     </div>
   </div>
 
-  <div id="edit-favorite-modal" class="dialog-overlay" style="display: none;">
-    <div class="dialog-box" style="max-width: 400px; width: 90%;">
+  <div id="edit-favorite-modal" class="dialog-overlay">
+    <div class="dialog-box">
       <h2>お気に入りを編集</h2>
-      <div style="margin-bottom: 15px;">
-        <label style="display:block; margin-bottom: 5px; color: var(--text-color); opacity: 0.8;">アイコン</label>
+      <div class="form-group">
+        <label class="form-label">アイコン</label>
         <div id="fav-icon-selector" class="icon-selector"></div>
       </div>
-      <div style="margin-bottom: 15px;">
-        <label for="fav-name-input" style="display:block; margin-bottom: 5px; color: var(--text-color); opacity: 0.8;">名前</label>
+      <div class="form-group">
+        <label for="fav-name-input" class="form-label">名前</label>
         <input type="text" id="fav-name-input" class="dialog-input" placeholder="表示名">
       </div>
-      <div style="margin-bottom: 25px;">
-        <label for="fav-path-input" style="display:block; margin-bottom: 5px; color: var(--text-color); opacity: 0.8;">パス</label>
+      <div class="form-group last">
+        <label for="fav-path-input" class="form-label">パス</label>
         <input type="text" id="fav-path-input" class="dialog-input" placeholder="ディレクトリパス">
       </div>
       <div class="dialog-buttons">
