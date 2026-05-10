@@ -1,4 +1,5 @@
 :root {
+  font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
   --bg-color: #131b1e;
   --panel-bg: #131b1e;
   --border-color: #2b3d41;
@@ -19,8 +20,14 @@
   box-sizing: border-box;
 }
 
+body, input, textarea, button, select, table {
+  font-family: inherit;
+  font-size: 1em;
+}
+
 /* --- Titlebar & Inline Toolbar --- */
 .titlebar {
+  position: relative;
   height: 38px; /* 検索バーが収まるように高さを少し拡張 */
   background: var(--bg-color);
   user-select: none;
@@ -59,6 +66,9 @@
 }
 
 .titlebar-controls {
+  position: absolute;
+  right: 0;
+  top: 0;
   display: flex;
   justify-content: flex-end;
   height: 100%;
@@ -158,6 +168,14 @@ body.is-resizing .app-content {
 
 .dialog-warning { color: var(--danger-red); font-size: 12px; min-height: 14px; margin-bottom: 10px; display: none; }
 .dialog-warning.show { display: block; }
+
+/* オートコンプリート(自動補完)時の背景色・文字色の変化を防ぐ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-color) !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+}
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
@@ -362,6 +380,19 @@ body.is-resizing #file-info-section {
 }
 
 /* --- Search Bar (Inline Style) --- */
+.center-search-wrapper {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.center-search-wrapper #search-container {
+  flex: 1;
+  max-width: none;
+}
+
 #search-container {
   display: flex;
   align-items: center;
@@ -381,6 +412,8 @@ body.is-resizing #file-info-section {
 }
 
 #search-clear-btn {
+  position: static !important;
+  transform: none !important;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -423,6 +456,7 @@ table#file-table {
   border-collapse: collapse; 
   text-align: left; 
   table-layout: fixed;
+  font-size: 0.9em;
 }
 #file-table th:nth-child(1) { width: 35%; }
 #file-table th:nth-child(2) { width: 10%; }
@@ -431,8 +465,9 @@ table#file-table {
 #file-table th:nth-child(5) { width: 10%; }
 #file-table th:nth-child(6) { width: 25%; }
 
-#file-table th, #file-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-color); cursor: pointer; }
-#file-table th { background: var(--panel-bg); position: sticky; top: 0; z-index: 2; }
+#file-table th, #file-table td { padding: 4px 8px; border-right: 1px dotted var(--border-color); border-bottom: 1px solid var(--border-color); cursor: pointer; }
+#file-table th { background: var(--panel-bg); position: sticky; top: 0; z-index: 2; font-weight: normal; }
+#file-table th:last-child, #file-table td:last-child { border-right: none; }
 #file-table tr:hover { background: rgba(37, 126, 140, 0.15); }
 #file-table tr.selected { 
   background: var(--accent-color); 
@@ -1053,14 +1088,40 @@ th[data-sort] svg, th[data-sort] svg path {
 
 /* --- タブのスタイル --- */
 #tab-container {
+  position: absolute;
+  bottom: 0;
+  left: 8px;
+  right: 190px;
+  height: 31px;
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 0 0 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--border-color) !important;
 }
 
+#tab-container::-webkit-scrollbar { display: none; }
+
 #tab-container .tab-item {
+  display: flex;
+  align-items: center;
+  padding: 0 24px 0 10px;
+  position: relative;
+  height: 100%;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0 !important;
   background: transparent !important;
   border: none !important;
-  transition: background-color 0.2s, color 0.2s !important;
+  margin-right: -1px;
+  cursor: pointer;
+  color: var(--text-color);
+  opacity: 0.7;
+  font-size: 13px;
+  max-width: 250px;
+  min-width: 120px;
+  flex-shrink: 0;
+  transition: background-color 0.2s, color 0.2s, opacity 0.15s ease !important;
 }
 
 #tab-container .tab-item:hover {
@@ -1072,9 +1133,79 @@ th[data-sort] svg, th[data-sort] svg path {
   background-color: rgba(37, 126, 140, 0.15) !important;
   color: #fff !important;
   box-shadow: inset 0 -2px 0 var(--accent-color) !important;
+  opacity: 1 !important;
+  z-index: 1;
 }
 
+/* ドラッグ＆ドロップ時のインジケーター（角丸の影響を受けない直線） */
+.tab-item.drag-over-left::after,
+.tab-item.drag-over-right::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--glow-gold);
+  z-index: 10;
+  pointer-events: none;
+}
+.tab-item.drag-over-left::after { left: -2px; }
+.tab-item.drag-over-right::after { right: -2px; }
+
+@keyframes tabFadeIn {
+  from { opacity: 0; transform: translateX(-15px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.tab-item.tab-fade-in {
+  animation: tabFadeIn 0.25s ease-out;
+}
+.tab-item.tab-fade-out {
+  opacity: 0 !important;
+  transform: translateX(-15px) !important;
+  min-width: 0 !important;
+  width: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-right: 0 !important;
+  border-width: 0 !important;
+  transition: opacity 0.15s ease-out, transform 0.15s ease-out, width 0.2s ease-out, padding 0.2s ease-out, margin-right 0.2s ease-out, min-width 0.2s ease-out;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#tab-container .tab-item.new-tab-btn {
+  min-width: 32px !important;
+  padding: 0 !important;
+  justify-content: center;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+#new-tab-btn {
+  position: sticky;
+  right: 0;
+  background-color: var(--bg-color) !important;
+  opacity: 1 !important;
+  z-index: 2;
+  -webkit-app-region: no-drag;
+  margin-left: 1px;
+}
+
+#new-tab-btn::before { content: ''; position: absolute; top: 0; left: -20px; width: 20px; height: 100%; background: linear-gradient(to right, transparent, var(--bg-color)); pointer-events: none; opacity: 0; transition: opacity 0.15s ease; }
+#new-tab-btn.is-overflowing::before { opacity: 1; }
+#new-tab-btn::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 24px; height: 24px; border-radius: 50%; background-color: transparent; transition: background-color 0.15s ease; z-index: 0; }
+#new-tab-btn:hover::after { background-color: var(--accent-color); }
+#new-tab-btn svg { position: relative; z-index: 1; }
+#new-tab-btn:hover { color: #fff; }
+
 .tab-close-btn {
+  position: absolute;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.4;
   transition: all 0.2s;
 }
@@ -1088,4 +1219,13 @@ th[data-sort] svg, th[data-sort] svg path {
   background-color: rgba(224, 82, 99, 0.2) !important;
   color: var(--danger-red) !important;
   border-radius: 4px;
+}
+
+.tab-label {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
 }
