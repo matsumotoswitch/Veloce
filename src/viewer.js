@@ -392,6 +392,11 @@ function updateFullscreenStyles() {
   }
 }
 
+// リサイズ後のフォーカス要求をデバウンスして、連続切り替え時の競合を防ぐ
+const debouncedFocusWindow = debounce(() => {
+  window.focus();
+}, 200);
+
 /**
  * 回転を考慮した画像本来のサイズに合わせてウィンドウをリサイズします。
  */
@@ -406,9 +411,14 @@ function resizeWindowToFitImage() {
   const targetWidth = Math.floor(natW * scale);
   const targetHeight = Math.floor(natH * scale);
 
+  // 現在のウィンドウサイズと同じ場合は無駄なリサイズ要求をスキップする
+  if (Math.abs(window.innerWidth - targetWidth) < 2 && Math.abs(window.innerHeight - targetHeight) < 2) {
+    return;
+  }
+
   if (window.veloceAPI && window.veloceAPI.setWindowSize) {
     window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
-      window.focus(); // リサイズ後にフォーカスが失われてキー操作が効かなくなるのを防ぐ
+      debouncedFocusWindow(); // 連続で呼ばれるとフォーカスが飛ぶ原因になるためデバウンス
       if (window.veloceAPI.toggleWindowDecorations) {
         window.veloceAPI.toggleWindowDecorations(viewerState.isBorderVisible);
       }
@@ -438,10 +448,13 @@ async function getImagePath(index) {
 let currentViewerImg = document.getElementById('viewer-img');
 if (currentViewerImg) currentViewerImg.style.flexShrink = '0';
 
+let isViewerWindowShown = false; // 初回表示フラグ
+let imageLoadSequence = 0;       // 非同期ロード競合防止用
+
 /**
  * DOM Swap方式：新しい画像を背面に用意しておき、表示する瞬間に要素を切り替えることでラグを無くします。
  */
-function swapImageElement(newImg) {
+function swapImageElement(newImg, sequenceId) {
   if (currentViewerImg === newImg) return;
   
   newImg.id = 'viewer-img';
@@ -462,13 +475,19 @@ function swapImageElement(newImg) {
   currentViewerImg = newImg;
 
   const onImageReady = async () => {
+    // 古い画像ロード要求の完了イベントであればスキップする
+    if (sequenceId !== imageLoadSequence) return;
+
     setZoomState(viewerState.isZoomed);
     viewerUI.updateImageRendering();
     resizeWindowToFitImage();
 
     try {
-      // Rust側へウィンドウの表示命令を出す
-      if (window.veloceAPI && window.veloceAPI.showWindow) await window.veloceAPI.showWindow();
+      // Rust側へウィンドウの表示命令を出す（毎回呼ぶとちらつくため初回のみ）
+      if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
+        await window.veloceAPI.showWindow();
+        isViewerWindowShown = true;
+      }
     } catch (e) {}
   };
 
@@ -487,8 +506,13 @@ async function loadImage() {
   viewerState.flipX = 1;
   viewerState.flipY = 1;
 
+  const currentSeq = ++imageLoadSequence;
+
   const path = await getImagePath(viewerState.currentIndex);
   if (path) {
+    // 非同期でパスを取得している間に別のロードが開始されていたら破棄
+    if (currentSeq !== imageLoadSequence) return;
+
     viewerState.currentImagePath = path;
     if (viewerState.paths && viewerState.paths.length > 0) {
       viewerState.totalImages = viewerState.paths.length;
@@ -509,7 +533,7 @@ async function loadImage() {
       targetImg.src = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
     }
 
-    swapImageElement(targetImg);
+    swapImageElement(targetImg, currentSeq);
     preloadAdjacentImages();
 
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
@@ -798,7 +822,7 @@ window.addEventListener('contextmenu', (e) => {
 
 window.addEventListener('wheel', (e) => {
   if (e.ctrlKey) {
-    e.preventDefault(); // ブラウザ標準のズームを無効化
+    e.preventDefault(); // ブラウザ標準のズームを無効化し、親ウィンドウへのイベント伝播を防ぐ
     viewerState.isImmersiveArranged = false; // 手動ズームで解除
 
     // ホイールの回転方向に応じてスケールを増減（約10%ずつなめらかに変化）
@@ -819,6 +843,7 @@ window.addEventListener('wheel', (e) => {
     if (typeof clampTranslate === 'function') clampTranslate();
     if (typeof viewerUI.updateImageRendering === 'function') viewerUI.updateImageRendering();
   } else {
+    e.preventDefault(); // 親ウィンドウのスクロールを防止
     if (e.deltaY > 0) {
       showNext(); // 下スクロールで次へ
     } else if (e.deltaY < 0) {
