@@ -993,16 +993,16 @@ async function showLicenseDialog() {
   overlay.style.alignItems = 'center';
   
   const content = document.createElement('div');
-  content.style.backgroundColor = 'var(--modal-bg)';
-  content.style.padding = '20px';
-  content.style.borderRadius = '8px';
-  content.style.border = '1px solid var(--modal-border)';
+  content.style.backgroundColor = 'var(--panel-bg)';
+  content.style.padding = '24px';
+  content.style.borderRadius = 'var(--radius-lg)';
+  content.style.border = '1px solid #0d1315';
   content.style.width = '85%';
   content.style.maxWidth = '850px';
   content.style.height = '80%';
   content.style.display = 'flex';
   content.style.flexDirection = 'column';
-  content.style.boxShadow = '0 4px 20px rgba(0,0,0,0.8)';
+  content.style.boxShadow = '0 24px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
   content.style.cursor = 'default';
   
   let licenseText = "ライセンス情報を読み込み中";
@@ -1022,7 +1022,7 @@ async function showLicenseDialog() {
   const parsedText = parseLicenseMarkdown(combinedText);
 
   content.innerHTML = `
-    <h2 style="margin-top: 0; color: var(--glow-gold);">ライセンス情報</h2>
+    <h2 style="margin: 0 0 20px 0; color: var(--glow-gold); font-size: 1.2em;">ライセンス情報</h2>
     <div style="background-color: rgba(224, 82, 99, 0.15); border: 1px solid var(--danger-red); border-radius: 4px; padding: 12px; margin-bottom: 15px; color: #f08a96; font-weight: bold; font-size: 14px;">
       ※本ソフトウェア自体の販売や有償提供は禁止されていますが、本ツールを利用して管理・選別した画像の販売（クリエイターによる商用利用）は許可されています。
       本ソフトウェアは無保証・無サポートで提供されており、すべて自己責任でのご利用となります。詳細は以下のライセンス本文をご確認ください。
@@ -1081,16 +1081,16 @@ function toggleHelpOverlay(forceShow) {
   overlay.style.cursor = 'pointer';
   
   const content = document.createElement('div');
-  content.style.backgroundColor = 'rgba(19, 27, 30, 0.85)';
-  content.style.padding = '30px';
-  content.style.borderRadius = '10px';
-  content.style.border = '1px solid var(--modal-border)';
-  content.style.boxShadow = '0 4px 15px rgba(0,0,0,0.5)';
+  content.style.backgroundColor = 'var(--panel-bg)';
+  content.style.padding = '24px';
+  content.style.borderRadius = 'var(--radius-lg)';
+  content.style.border = '1px solid #0d1315';
+  content.style.boxShadow = '0 24px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
   content.style.cursor = 'default';
   
   content.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-      <h2 style="margin: 0; color: var(--glow-gold);">ヘルプ・ショートカット一覧</h2>
+      <h2 style="margin: 0; color: var(--glow-gold); font-size: 1.2em;">ヘルプ・ショートカット一覧</h2>
       <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid var(--modal-border); border-radius: 20px; color: var(--text-color); font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(0, 0, 0, 0.2);"
         onmouseover="this.style.backgroundColor='rgba(37, 126, 140, 0.15)'; this.style.borderColor='var(--accent-color)'; this.style.color='#fff';"
         onmouseout="this.style.backgroundColor='rgba(0, 0, 0, 0.2)'; this.style.borderColor='var(--modal-border)'; this.style.color='var(--text-color)';">
