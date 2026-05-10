@@ -116,10 +116,6 @@
     .tab-item.drag-over-left::after { left: -2px; }
     .tab-item.drag-over-right::after { right: -2px; }
 
-    .tab-item:hover { 
-      background-color: #162a2f; 
-      opacity: 1; 
-    }
     .tab-item.active {
       background-color: var(--accent-color);
       color: #fff;
@@ -207,15 +203,10 @@
       right: 6px;
       width: 18px;
       height: 18px;
-      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      opacity: 0;
-      transition: all 0.1s ease;
     }
-    .tab-item:hover .tab-close-btn { opacity: 1; }
-    .tab-close-btn:hover { background-color: rgba(255,255,255, 0.2); }
     
     .tab-label {
       display: block;

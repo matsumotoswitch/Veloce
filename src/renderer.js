@@ -3057,9 +3057,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     tabListMenu.innerHTML = '';
     appState.tabs.forEach((tab, index) => {
       const option = document.createElement('div');
+        option.className = 'tab-list-item';
         option.style.padding = '8px 16px';
         option.style.cursor = 'pointer';
-        option.style.color = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--text-color)';
+        option.style.color = index === appState.activeTabIndex ? '#ffffff' : 'var(--text-color)';
+        option.style.backgroundColor = index === appState.activeTabIndex ? 'rgba(37, 126, 140, 0.15)' : 'transparent';
+        if (index === appState.activeTabIndex) {
+          option.style.boxShadow = 'inset 3px 0 0 var(--accent-color)';
+        }
         option.style.display = 'flex';
         option.style.alignItems = 'center';
         option.style.gap = '8px';
@@ -3112,33 +3117,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         textContainer.appendChild(nameLabel);
         textContainer.appendChild(pathLabel);
 
-        const checkSpan = document.createElement('span');
-        checkSpan.style.display = 'flex';
-        checkSpan.style.alignItems = 'center';
-        checkSpan.style.flexShrink = '0';
-        checkSpan.style.width = '14px';
-        if (index === appState.activeTabIndex) {
-           checkSpan.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-        }
-
         const closeBtn = document.createElement('span');
+        closeBtn.className = 'tab-close-btn';
         closeBtn.style.display = 'flex';
         closeBtn.style.alignItems = 'center';
         closeBtn.style.justifyContent = 'center';
         closeBtn.style.width = '20px';
         closeBtn.style.height = '20px';
-        closeBtn.style.borderRadius = '50%';
         closeBtn.style.flexShrink = '0';
-        closeBtn.style.opacity = '0';
-        closeBtn.style.transition = 'all 0.1s ease';
         closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="8" height="8"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
-
-        closeBtn.onmouseenter = () => {
-          closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
-        };
-        closeBtn.onmouseleave = () => {
-          closeBtn.style.backgroundColor = 'transparent';
-        };
 
         closeBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
@@ -3148,22 +3135,19 @@ window.addEventListener('DOMContentLoaded', async () => {
           }
         });
 
-        option.appendChild(checkSpan);
         option.appendChild(iconSpan);
         option.appendChild(textContainer);
         option.appendChild(closeBtn);
 
         option.onmouseenter = () => {
-          option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
+          option.style.backgroundColor = 'rgba(37, 126, 140, 0.25)';
           option.style.color = '#fff';
           if (iconColor) iconSpan.style.color = '#fff';
-          closeBtn.style.opacity = '1';
         };
         option.onmouseleave = () => {
-          option.style.backgroundColor = 'transparent';
-          option.style.color = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--text-color)';
+          option.style.backgroundColor = index === appState.activeTabIndex ? 'rgba(37, 126, 140, 0.15)' : 'transparent';
+          option.style.color = index === appState.activeTabIndex ? '#ffffff' : 'var(--text-color)';
           if (iconColor) iconSpan.style.color = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
-          closeBtn.style.opacity = '0';
         };
         
         option.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });

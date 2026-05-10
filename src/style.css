@@ -1039,9 +1039,53 @@ input[type="range"]:focus {
   color: var(--accent-color);
 }
 
+/* ホバー時は他のテキストやアイコンに合わせて白くし、コントラストを維持する */
+.context-menu-item:hover .menu-check {
+  color: #fff;
+}
+
 /* 矢印アイコンが塗りつぶされて三角形になるのを確実に防ぐ */
 .toggle-icon svg, .toggle-icon svg path,
 .resizer-toggle svg, .resizer-toggle svg path,
 th[data-sort] svg, th[data-sort] svg path {
   fill: none !important;
+}
+
+/* --- タブのスタイル --- */
+#tab-container {
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+#tab-container .tab-item {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0 !important;
+  background: transparent !important;
+  border: none !important;
+  transition: background-color 0.2s, color 0.2s !important;
+}
+
+#tab-container .tab-item:hover {
+  background-color: rgba(37, 126, 140, 0.25) !important;
+  opacity: 1 !important;
+}
+
+#tab-container .tab-item.active {
+  background-color: rgba(37, 126, 140, 0.15) !important;
+  color: #fff !important;
+  box-shadow: inset 0 -2px 0 var(--accent-color) !important;
+}
+
+.tab-close-btn {
+  opacity: 0.4;
+  transition: all 0.2s;
+}
+
+.tab-item:hover .tab-close-btn,
+.tab-list-item:hover .tab-close-btn {
+  opacity: 0.8;
+}
+
+.tab-close-btn:hover {
+  background-color: rgba(224, 82, 99, 0.2) !important;
+  color: var(--danger-red) !important;
+  border-radius: 4px;
 }
