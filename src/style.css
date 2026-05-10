@@ -613,19 +613,41 @@ input[type="range"]:focus {
   border-radius: 4px;
   white-space: nowrap;
   color: var(--text-color);
+  position: relative;
+  overflow: hidden; /* インジケーターの左端を角丸に合わせてクリップする */
   transition: color 0.2s, background-color 0.2s;
+}
+
+#dir-tree .tree-item::before,
+#favorites-list .tree-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--accent-color);
+  opacity: 0;
+  transform: translateX(-3px);
+  transition: opacity 0.2s, transform 0.2s;
 }
 
 #dir-tree .tree-item:hover,
 #favorites-list .tree-item:hover {
-  background: rgba(37, 126, 140, 0.15);
+  background-color: rgba(37, 126, 140, 0.25);
   color: #fff;
 }
 
 #dir-tree .tree-item.selected,
 #favorites-list .tree-item.selected {
-  background: var(--accent-color);
-  color: #fff;
+  background-color: rgba(37, 126, 140, 0.15); /* 背景は薄く染める */
+  color: #ffffff; /* 文字は明るく */
+}
+
+#dir-tree .tree-item.selected::before,
+#favorites-list .tree-item.selected::before {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 #dir-tree .tree-icon,
