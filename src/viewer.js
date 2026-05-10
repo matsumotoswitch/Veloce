@@ -484,6 +484,8 @@ async function loadImage() {
   viewerState.currentTranslateX = 0;
   viewerState.currentTranslateY = 0;
   viewerState.currentRotation = 0;
+  viewerState.flipX = 1;
+  viewerState.flipY = 1;
 
   const path = await getImagePath(viewerState.currentIndex);
   if (path) {
@@ -948,6 +950,16 @@ window.addEventListener('keydown', async (e) => {
     case 'u':
     case 'U':
       viewerState.isUnsharped = !viewerState.isUnsharped;
+      viewerUI.updateImageRendering();
+      break;
+    case 'h':
+    case 'H':
+      viewerState.flipX *= -1;
+      viewerUI.updateImageRendering();
+      break;
+    case 'v':
+    case 'V':
+      viewerState.flipY *= -1;
       viewerUI.updateImageRendering();
       break;
   }

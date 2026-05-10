@@ -12,6 +12,8 @@ class ViewerState {
     this.currentScale = 1.0;        // 現在のズーム倍率
     this.currentTranslateX = 0;     // X方向の移動量
     this.currentTranslateY = 0;     // Y方向の移動量
+    this.flipX = 1;                 // 水平方向の反転状態 (1: 通常, -1: 反転)
+    this.flipY = 1;                 // 垂直方向の反転状態 (1: 通常, -1: 反転)
     this.isImageDragging = false;   // 画像のパン（移動）ドラッグ中かどうか
     this.imageDragStartX = 0;       // パン操作の開始X座標
     this.imageDragStartY = 0;       // パン操作の開始Y座標

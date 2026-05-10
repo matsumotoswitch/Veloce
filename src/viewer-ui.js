@@ -30,25 +30,27 @@ class ViewerUI {
     
     if (this.state.isImmersiveArranged) {
       let r = ((this.state.currentRotation % 360) + 360) % 360;
-      let posX = this.state.currentTranslateX;
-      let posY = this.state.currentTranslateY;
+      let tx = this.state.currentTranslateX * this.state.flipX;
+      let ty = this.state.currentTranslateY * this.state.flipY;
+      let posX = tx;
+      let posY = ty;
 
       if (r === 90) {
-        posX = this.state.currentTranslateY;
-        posY = -this.state.currentTranslateX;
+        posX = ty;
+        posY = -tx;
       } else if (r === 180) {
-        posX = -this.state.currentTranslateX;
-        posY = -this.state.currentTranslateY;
+        posX = -tx;
+        posY = -ty;
       } else if (r === 270) {
-        posX = -this.state.currentTranslateY;
-        posY = this.state.currentTranslateX;
+        posX = -ty;
+        posY = tx;
       }
       
       this.elements.viewerImg.style.objectPosition = `calc(50% + ${posX}px) calc(50% + ${posY}px)`;
-      this.elements.viewerImg.style.transform = `translate(0px, 0px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+      this.elements.viewerImg.style.transform = `translate(0px, 0px) scale(${this.state.flipX}, ${this.state.flipY}) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
     } else {
       this.elements.viewerImg.style.objectPosition = '50% 50%';
-      this.elements.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+      this.elements.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) scale(${this.state.flipX}, ${this.state.flipY}) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
     }
   }
 
