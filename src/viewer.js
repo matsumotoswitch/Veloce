@@ -948,14 +948,6 @@ window.addEventListener('keydown', async (e) => {
     case 'Escape':
       if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
       break;
-    case 'Enter':
-      e.preventDefault();
-      viewerState.isZoomed = false; // 100%ズームを解除
-      viewerState.isImmersiveArranged = false;
-      viewerState.isFitToWindow = !viewerState.isFitToWindow; // 強制フィット状態をトグル
-      applyFitState();
-      updateFullscreenStyles();
-      break;
     case 'F11':
       e.preventDefault(); // ブラウザ標準のフルスクリーン動作を防ぐ
       window.veloceAPI.toggleViewerFullscreen();
