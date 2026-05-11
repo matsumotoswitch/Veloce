@@ -83,6 +83,45 @@ function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) 
 // 2. Tauri API & Backend Communication
 // ============================================================================
 
+function updateNavButtons() {
+  const backBtn = document.getElementById('nav-back-btn');
+  const forwardBtn = document.getElementById('nav-forward-btn');
+  const tab = appState.tabs[appState.activeTabIndex];
+  if (!tab || !tab.history) {
+    if (backBtn) backBtn.disabled = true;
+    if (forwardBtn) forwardBtn.disabled = true;
+    return;
+  }
+  if (backBtn) backBtn.disabled = tab.historyIndex <= 0;
+  if (forwardBtn) forwardBtn.disabled = tab.historyIndex >= tab.history.length - 1;
+}
+
+async function navigateHistory(offset) {
+  const tab = appState.tabs[appState.activeTabIndex];
+  if (!tab || !tab.history) return;
+
+  const newIndex = tab.historyIndex + offset;
+  if (newIndex >= 0 && newIndex < tab.history.length) {
+    appState.isNavigatingHistory = true;
+    tab.historyIndex = newIndex;
+    const targetPath = tab.history[newIndex];
+    
+    tab.path = targetPath;
+    tab.name = getTabNameForPath(targetPath);
+    tab.scrollTop = 0;
+    appState.currentDirectory = targetPath;
+    localStorage.setItem('currentDirectory', appState.currentDirectory);
+    uiManager.renderTabs();
+    saveTabsState();
+    
+    await refreshFileList(true);
+    await expandTreeToPath(targetPath);
+    
+    updateNavButtons();
+    appState.isNavigatingHistory = false;
+  }
+}
+
 async function refreshFileList(showToast = false) {
   if (!appState.currentDirectory) return;
 
@@ -102,6 +141,8 @@ async function refreshFileList(showToast = false) {
   uiManager.renderAll();
 
   try {
+    appState.pushHistory(appState.currentDirectory);
+    updateNavButtons();
     // Rust側のバックグラウンドストリーミング処理をキックする
     // ※結果は await せず、onDirectoryChunk リスナー側で随時受け取る
     await window.veloceAPI.loadDirectory(appState.currentDirectory);
@@ -1186,7 +1227,9 @@ function saveTabsState() {
       id: t.id, path: t.path, name: t.name,
       searchQuery: t.searchQuery || '',
       sortConfig: t.sortConfig || { key: 'name', asc: true },
-      scrollTop: t.scrollTop || 0
+      scrollTop: t.scrollTop || 0,
+      history: t.history || [t.path],
+      historyIndex: t.historyIndex !== undefined ? t.historyIndex : 0
     })),
     activeTabIndex: appState.activeTabIndex
   };
@@ -1202,6 +1245,86 @@ function getTabNameForPath(path) {
   const fav = appState.favorites.find(f => f.path === path);
   if (fav) return fav.name;
   return path.split('\\').pop() || path;
+}
+
+/**
+ * 戻る・進むの履歴メニューを表示します。
+ */
+function showHistoryMenu(event, direction, btnElement) {
+  const tab = appState.getActiveTab();
+  if (!tab || !tab.history || tab.history.length === 0) return;
+
+  let menu = document.getElementById('history-menu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = 'history-menu';
+    menu.style.position = 'fixed';
+    menu.style.zIndex = '10001';
+    document.body.appendChild(menu);
+  }
+
+  menu.innerHTML = ''; // 中身をリセット
+
+  const currentIndex = tab.historyIndex;
+  let historyItems = [];
+  
+  // 履歴をリスト化（戻る時は新しい順、進む時は古い順が見やすい）
+  if (direction === -1) {
+    for (let i = currentIndex - 1; i >= 0; i--) {
+      historyItems.push({ index: i, path: tab.history[i] });
+    }
+  } else {
+    for (let i = currentIndex + 1; i < tab.history.length; i++) {
+      historyItems.push({ index: i, path: tab.history[i] });
+    }
+  }
+
+  if (historyItems.length === 0) return;
+
+  historyItems.forEach(item => {
+    const menuItem = document.createElement('div');
+    menuItem.className = 'context-menu-item';
+    
+    // お気に入りに登録されているかチェック
+    const fav = appState.favorites.find(f => f.path === item.path);
+    let displayName = '';
+    let iconHtml = '';
+    let iconColor = '';
+
+    if (fav) {
+      displayName = fav.name;
+      const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
+      iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
+      iconColor = 'var(--glow-gold)';
+    } else {
+      // 通常フォルダの場合
+      displayName = item.path.split(/[/\\]/).filter(Boolean).pop() || item.path;
+      iconHtml = UIManager.ICONS.FOLDER;
+      iconColor = '#4da8da'; // フォルダペインと同じ青色
+    }
+
+    menuItem.innerHTML = `
+      <span class="menu-icon" style="color: ${iconColor}; display: inline-flex; align-items: center;">${iconHtml}</span>
+      <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${displayName}</span>
+    `;
+    menuItem.title = item.path; // ホバーでフルパス表示
+
+    // 履歴クリック時の移動処理
+    menuItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const offset = item.index - tab.historyIndex; // 目的のインデックスまでの差分を計算
+      navigateHistory(offset);
+      menu.style.display = 'none';
+    });
+
+    menu.appendChild(menuItem);
+  });
+
+  // メニューの位置をボタンの下に設定
+  const btnRect = btnElement.getBoundingClientRect();
+  menu.style.left = `${btnRect.left}px`;
+  menu.style.top = `${btnRect.bottom + 4}px`;
+  menu.style.display = 'block';
 }
 
 // --- タブ操作 ---
@@ -1225,6 +1348,9 @@ window.onTabClick = async (index) => {
     uiManager.renderAll(true);
     clearMetadataUI();
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
+    
+    updateNavButtons();
+    
     window.veloceAPI.loadDirectory(tab.path);
 
     await expandTreeToPath(appState.currentDirectory);
@@ -1249,7 +1375,9 @@ window.onNewTabClick = async () => {
     isNew: true,
     searchQuery: '',
     sortConfig: { key: 'name', asc: true },
-    scrollTop: 0
+    scrollTop: 0,
+    history: [newPath],
+    historyIndex: 0
   };
   appState.tabs.push(newTab);
   saveTabsState();
@@ -1893,7 +2021,9 @@ const menuOpenInNewTab = createMenuItem('新しいタブで開く', UIManager.IC
       isNew: true,
       searchQuery: '',
       sortConfig: { key: 'name', asc: true },
-      scrollTop: 0
+      scrollTop: 0,
+      history: [path],
+      historyIndex: 0
     };
     appState.tabs.push(newTab);
     saveTabsState();
@@ -1933,7 +2063,9 @@ const menuTabDuplicate = createMenuItem('タブを複製', UIManager.ICONS.COPY,
     isNew: true,
     searchQuery: sourceTab.searchQuery || '',
     sortConfig: sourceTab.sortConfig ? JSON.parse(JSON.stringify(sourceTab.sortConfig)) : { key: 'name', asc: true },
-    scrollTop: sourceTab.scrollTop || 0
+    scrollTop: sourceTab.scrollTop || 0,
+    history: [...(sourceTab.history || [sourceTab.path])],
+    historyIndex: sourceTab.historyIndex !== undefined ? sourceTab.historyIndex : 0
   };
 
   const insertAtIndex = sourceIndex + 1;
@@ -2125,15 +2257,29 @@ window.onTabContextMenu = (e, index) => {
 };
 
 const closeAllMenus = (e) => {
-  if (e && (e.type === 'mousedown' || e.type === 'click' || e.type === 'contextmenu')) {
-    if (e.target instanceof Element && (e.target.closest('#context-menu') || e.target.closest('#tab-list-menu'))) return;
+  let t = e ? e.target : null;
+  // テキストノードがクリックされた場合は親要素を取得
+  if (t && t.nodeType === Node.TEXT_NODE) t = t.parentNode;
+  
+  if (t && t.closest) {
+    // メニュー自身をクリックした場合は閉じない
+    if (t.closest('#context-menu') || t.closest('#tab-list-menu') || t.closest('#history-menu')) return;
+    // タブリスト展開ボタンは専用のトグル制御があるため無視
+    if (t.closest('#titlebar-tab-list')) return;
   }
-  if (contextMenu.style.display === 'block') contextMenu.style.display = 'none';
-  if (tabListMenu.style.display === 'block') tabListMenu.style.display = 'none';
+
+  // 現在の display 状態を問わず、強制的にすべて非表示にする
+  if (typeof contextMenu !== 'undefined' && contextMenu) contextMenu.style.display = 'none';
+  if (typeof tabListMenu !== 'undefined' && tabListMenu) tabListMenu.style.display = 'none';
+  const historyMenu = document.getElementById('history-menu');
+  if (historyMenu) historyMenu.style.display = 'none';
 };
 
-window.addEventListener('click', closeAllMenus);
-window.addEventListener('mousedown', closeAllMenus);
+// 全てのマウス・タッチ操作の「キャプチャフェーズ（最優先）」で強制実行する
+window.addEventListener('pointerdown', closeAllMenus, true);
+window.addEventListener('mousedown', closeAllMenus, true);
+window.addEventListener('click', closeAllMenus, true);
+window.addEventListener('contextmenu', closeAllMenus, true);
 
 // 各種モーダルの安全な閉じる処理
 window.addEventListener('click', (e) => {
@@ -2767,6 +2913,17 @@ document.querySelectorAll('th').forEach(th => {
 window.addEventListener('keydown', async (e) => {
   const activeTagName = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
 
+  if (e.altKey && e.key === 'ArrowLeft') {
+    e.preventDefault();
+    navigateHistory(-1);
+    return;
+  }
+  if (e.altKey && e.key === 'ArrowRight') {
+    e.preventDefault();
+    navigateHistory(1);
+    return;
+  }
+
   // タブ切り替えショートカット（入力欄フォーカス時でも有効にするため、入力欄チェックの前に配置）
   if (e.ctrlKey && (e.key === 'Tab' || e.key === 'PageDown' || e.key === 'PageUp')) {
     e.preventDefault();
@@ -2820,10 +2977,12 @@ window.addEventListener('keydown', async (e) => {
       toggleHelpOverlay(false);
       return;
     }
-    if (contextMenu.style.display === 'block' || tabListMenu.style.display === 'block') {
+    const historyMenu = document.getElementById('history-menu');
+    if (contextMenu.style.display === 'block' || tabListMenu.style.display === 'block' || (historyMenu && historyMenu.style.display === 'block')) {
       e.preventDefault();
       contextMenu.style.display = 'none';
       tabListMenu.style.display = 'none';
+      if (historyMenu) historyMenu.style.display = 'none';
       return;
     }
   }
@@ -2978,6 +3137,60 @@ document.addEventListener('contextmenu', (e) => {
 
 window.addEventListener('DOMContentLoaded', async () => {
   renderFavorites();
+
+  const setupNavButtonEvents = (btnId, direction) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+
+    let pressTimer;
+    let isLongPressed = false;
+
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!btn.disabled) showHistoryMenu(e, direction, btn);
+    });
+
+    btn.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || btn.disabled) return;
+      isLongPressed = false;
+      pressTimer = setTimeout(() => {
+        isLongPressed = true;
+        showHistoryMenu(e, direction, btn);
+      }, 300);
+    });
+
+    btn.addEventListener('mouseup', (e) => {
+      if (e.button !== 0 || btn.disabled) return;
+      clearTimeout(pressTimer);
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      clearTimeout(pressTimer);
+    });
+
+    btn.addEventListener('click', (e) => {
+      if (btn.disabled) return;
+      if (isLongPressed) {
+        // 長押し完了後のクリックイベントをここで完全に握りつぶし、メニュー非表示を回避する
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        isLongPressed = false; // フラグをリセット
+      } else {
+        // 短いクリックの場合は通常の移動
+        navigateHistory(direction);
+      }
+    });
+  };
+
+  setupNavButtonEvents('nav-back-btn', -1);
+  setupNavButtonEvents('nav-forward-btn', 1);
+
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 3) navigateHistory(-1);
+    if (e.button === 4) navigateHistory(1);
+  });
 
   if (window.veloceAPI.onDirectoryChunk) {
     window.veloceAPI.onDirectoryChunk((payload) => {
@@ -3645,7 +3858,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
       const state = JSON.parse(savedTabsState);
       if (state.tabs && Array.isArray(state.tabs) && state.tabs.length > 0) {
-        appState.tabs = state.tabs;
+        appState.tabs = state.tabs.map(t => ({
+          ...t,
+          history: t.history || [t.path],
+          historyIndex: t.historyIndex !== undefined ? t.historyIndex : 0
+        }));
         appState.activeTabIndex = (state.activeTabIndex >= 0 && state.activeTabIndex < state.tabs.length) ? state.activeTabIndex : 0;
       }
     } catch (e) {
@@ -3661,7 +3878,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       name: getTabNameForPath(savedDirectory),
       searchQuery: '',
       sortConfig: appState.sortConfig ? JSON.parse(JSON.stringify(appState.sortConfig)) : { key: 'name', asc: true },
-      scrollTop: 0
+      scrollTop: 0,
+      history: [savedDirectory],
+      historyIndex: 0
     };
     appState.tabs.push(initialTab);
     appState.activeTabIndex = 0;
@@ -3687,6 +3906,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     uiManager.renderAll(true);
     clearMetadataUI();
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
+    
+    updateNavButtons();
+    
     window.veloceAPI.loadDirectory(currentTab.path);
 
     await expandTreeToPath(appState.currentDirectory);

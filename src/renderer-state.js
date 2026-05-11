@@ -76,6 +76,9 @@ class AppState {
     this.lastThumbnailToastTime = 0;  // 最後にトースト通知を更新した時刻
     this.metadataTargetCount = 0;     // メタデータ取得リクエストの総数
     this.metadataCompleted = 0;       // メタデータ取得完了数
+
+    // 履歴管理
+    this.isNavigatingHistory = false; // 履歴操作による遷移中のフラグ
   }
 
   /**
@@ -148,6 +151,25 @@ class AppState {
         .then(() => window.veloceAPI.syncImagePaths(sortedPaths))
         .catch(err => console.error('Failed to sync image paths:', err));
     }
+  }
+
+  getActiveTab() {
+    return this.tabs && this.tabs[this.activeTabIndex];
+  }
+
+  pushHistory(path) {
+    const tab = this.getActiveTab();
+    if (!tab || this.isNavigatingHistory) return;
+    if (!tab.history) {
+      tab.history = [path];
+      tab.historyIndex = 0;
+      return;
+    }
+    if (tab.history[tab.historyIndex] === path) return;
+    // 現在のインデックスより先の履歴（進む履歴）を破棄
+    tab.history = tab.history.slice(0, tab.historyIndex + 1);
+    tab.history.push(path);
+    tab.historyIndex++;
   }
 }
 

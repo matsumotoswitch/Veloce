@@ -954,14 +954,18 @@ input[type="range"]:focus {
   color: var(--text-color);
   border: 1px solid #0d1315;
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 
+    0 12px 28px rgba(0, 0, 0, 0.6), 
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 1px 0 0 rgba(255, 255, 255, 0.02);
   font-size: 13px;
   line-height: 1.4;
   white-space: pre-wrap;
   opacity: 0;
   visibility: hidden;
   transform: translateY(5px);
-  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0.1s;
 }
 
 .custom-tooltip.show {
@@ -971,7 +975,7 @@ input[type="range"]:focus {
 }
 
 /* --- コンテキストメニュー --- */
-#context-menu, .submenu, #tab-list-menu {
+#context-menu, .submenu, #tab-list-menu, #history-menu {
   /* 透過やぼかしを一切やめる */
   background-color: #1a2327; /* 背景よりほんの少し明るいリッチなダークグレー */
   border: 1px solid #0d1315; /* 外側は暗く引き締める */
@@ -985,7 +989,7 @@ input[type="range"]:focus {
     inset 1px 0 0 rgba(255, 255, 255, 0.02);
 }
 
-#context-menu, #tab-list-menu {
+#context-menu, #tab-list-menu, #history-menu {
   position: fixed;
   z-index: 10001;
   padding: 6px 0;
@@ -1002,6 +1006,13 @@ input[type="range"]:focus {
   min-width: 200px;
   max-width: 400px;
   max-height: 70vh;
+  overflow-y: auto;
+}
+
+#history-menu {
+  min-width: 200px;
+  max-width: 400px;
+  max-height: 50vh;
   overflow-y: auto;
 }
 
@@ -1044,6 +1055,11 @@ input[type="range"]:focus {
 
 .context-menu-item:hover svg {
   opacity: 1;
+}
+
+/* メニューアイテムホバー時に、アイコンの色を強制的に白へ反転させる */
+.context-menu-item:hover .menu-icon {
+  color: #fff !important;
 }
 
 /* 危険な操作（削除など）のホバーエフェクト */
@@ -1281,3 +1297,13 @@ html.viewer-html, .viewer-body {
 }
 .viewer-body ::-webkit-scrollbar { display: none; }
 .viewer-body #viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; -webkit-user-drag: none; }
+
+/* --- Navigation Buttons --- */
+.icon-btn:disabled {
+  opacity: 0.3 !important;
+  cursor: not-allowed;
+}
+.icon-btn:disabled:hover {
+  background-color: transparent !important;
+  color: var(--text-color) !important;
+}
