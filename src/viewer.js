@@ -711,6 +711,9 @@ window.addEventListener('mousedown', (e) => {
   }
 
   if (e.button === 0) { // 左クリック
+    if (e.ctrlKey && e.target && e.target.id === 'viewer-img') {
+      return; // 画像のパン操作（Ctrl + 左ドラッグ）と競合させないためスキップ
+    }
     isDragging = true;
     hasMoved = false;
     if (viewerState.isZoomed) {
