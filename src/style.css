@@ -1301,7 +1301,7 @@ html.viewer-html, .viewer-body {
 /* --- Navigation Buttons --- */
 .icon-btn:disabled {
   opacity: 0.3 !important;
-  cursor: not-allowed;
+  cursor: default;
 }
 .icon-btn:disabled:hover {
   background-color: transparent !important;
