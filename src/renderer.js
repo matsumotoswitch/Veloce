@@ -3187,6 +3187,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupNavButtonEvents('nav-back-btn', -1);
   setupNavButtonEvents('nav-forward-btn', 1);
 
+  const reloadBtn = document.getElementById('nav-reload-btn');
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', async () => {
+      if (reloadBtn.classList.contains('is-spinning')) return;
+      reloadBtn.classList.add('is-spinning');
+      await refreshFileList(true);
+      setTimeout(() => {
+        reloadBtn.classList.remove('is-spinning');
+      }, 500); // アニメーションの時間を加味して遅延解除
+    });
+  }
+
   window.addEventListener('mouseup', (e) => {
     if (e.button === 3) navigateHistory(-1);
     if (e.button === 4) navigateHistory(1);
