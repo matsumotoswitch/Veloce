@@ -3138,12 +3138,23 @@ document.addEventListener('contextmenu', (e) => {
 window.addEventListener('DOMContentLoaded', async () => {
   renderFavorites();
 
-  const setupNavButtonEvents = (btnId, direction) => {
+  const setupNavButtonEvents = (btnId, direction, tooltipText) => {
     const btn = document.getElementById(btnId);
     if (!btn) return;
 
     let pressTimer;
     let isLongPressed = false;
+
+    btn.removeAttribute('title');
+    btn.addEventListener('mouseenter', (e) => {
+      if (!btn.disabled) uiManager.showCustomTooltip(tooltipText, e.clientX, e.clientY);
+    });
+    btn.addEventListener('mousemove', (e) => {
+      if (!btn.disabled) uiManager.showCustomTooltip(tooltipText, e.clientX, e.clientY);
+    });
+    btn.addEventListener('mouseleave', () => {
+      uiManager.hideCustomTooltip();
+    });
 
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -3171,6 +3182,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     btn.addEventListener('click', (e) => {
       if (btn.disabled) return;
+      uiManager.hideCustomTooltip();
       if (isLongPressed) {
         // 長押し完了後のクリックイベントをここで完全に握りつぶし、メニュー非表示を回避する
         e.preventDefault();
@@ -3184,13 +3196,24 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   };
 
-  setupNavButtonEvents('nav-back-btn', -1);
-  setupNavButtonEvents('nav-forward-btn', 1);
+  setupNavButtonEvents('nav-back-btn', -1, '戻る');
+  setupNavButtonEvents('nav-forward-btn', 1, '進む');
 
   const reloadBtn = document.getElementById('nav-reload-btn');
   if (reloadBtn) {
+    reloadBtn.removeAttribute('title');
+    reloadBtn.addEventListener('mouseenter', (e) => {
+      uiManager.showCustomTooltip('再読み込み', e.clientX, e.clientY);
+    });
+    reloadBtn.addEventListener('mousemove', (e) => {
+      uiManager.showCustomTooltip('再読み込み', e.clientX, e.clientY);
+    });
+    reloadBtn.addEventListener('mouseleave', () => {
+      uiManager.hideCustomTooltip();
+    });
     reloadBtn.addEventListener('click', async () => {
       if (reloadBtn.classList.contains('is-spinning')) return;
+      uiManager.hideCustomTooltip();
       reloadBtn.classList.add('is-spinning');
       await refreshFileList(true);
       setTimeout(() => {
