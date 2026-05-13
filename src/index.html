@@ -29,6 +29,19 @@
       </div>
     </div>
   </div>
+  <div id="toolbar" class="toolbar">
+    <button id="nav-back-btn" class="icon-btn" title="戻る (Alt+Left / マウス戻る)" disabled>
+      <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+    </button>
+    <button id="nav-forward-btn" class="icon-btn" title="進む (Alt+Right / マウス進む)" disabled>
+      <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </button>
+    <div class="control-divider"></div>
+    <div id="search-container">
+      <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
+    </div>
+    <button id="search-clear-btn" class="icon-btn"></button>
+  </div>
   <div class="app-content">
   <!-- 左ペイン: ディレクトリツリー等 -->
   <div id="left-pane">
@@ -45,19 +58,6 @@
 
   <!-- 中央ペイン: リストとグリッド -->
   <div id="center-pane">
-    <div class="center-search-wrapper">
-      <button id="nav-back-btn" class="icon-btn" title="戻る (Alt+Left / マウス戻る)" disabled>
-        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
-      </button>
-      <button id="nav-forward-btn" class="icon-btn" title="進む (Alt+Right / マウス進む)" disabled>
-        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-      </button>
-      <div class="control-divider"></div>
-      <div id="search-container">
-        <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
-      </div>
-      <button id="search-clear-btn" class="icon-btn"></button>
-    </div>
 	<div id="center-top">
 	  <table id="file-table">
 		<thead>

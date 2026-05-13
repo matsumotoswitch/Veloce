@@ -28,41 +28,13 @@ body, input, textarea, button, select, table {
 /* --- Titlebar & Inline Toolbar --- */
 .titlebar {
   position: relative;
-  height: 38px; /* 検索バーが収まるように高さを少し拡張 */
+  height: 38px;
   background: var(--bg-color);
   user-select: none;
-  display: grid;
-  grid-template-columns: 1fr minmax(250px, 500px) 1fr; /* 左:中央(検索):右 の割合 */
+  display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border-color);
   -webkit-app-region: drag;
-}
-
-.titlebar-left {
-  display: flex;
-  align-items: center;
-  padding-left: 10px;
-  pointer-events: none;
-}
-
-.titlebar-center {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  padding: 0 10px;
-  -webkit-app-region: no-drag; /* 検索バー操作のためドラッグ除外 */
-}
-
-.titlebar-icon {
-  width: 16px;
-  height: 16px;
-  margin-right: 8px;
-}
-
-.titlebar-title {
-  color: var(--text-color);
-  font-size: 12px;
 }
 
 .titlebar-controls {
@@ -101,7 +73,7 @@ body {
   display: grid;
   grid-template-columns: var(--left-width, 200px) 5px 1fr 5px var(--right-width, 300px);
   grid-template-rows: minmax(0, 1fr);
-  height: calc(100vh - 38px); /* タイトルバー拡張に合わせる */
+  height: calc(100vh - 76px); /* タイトルバー(38px) + ツールバー(38px) */
   color: var(--text-color);
   transition: grid-template-columns 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -379,16 +351,18 @@ body.is-resizing #file-info-section {
   padding: 10px;
 }
 
-/* --- Search Bar (Inline Style) --- */
-.center-search-wrapper {
-  padding: 8px 12px;
+/* --- Toolbar --- */
+.toolbar {
+  height: 38px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   gap: 8px;
+  background-color: var(--bg-color);
 }
 
-.center-search-wrapper #search-container {
+.toolbar #search-container {
   flex: 1;
   max-width: none;
 }
