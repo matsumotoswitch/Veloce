@@ -1035,6 +1035,11 @@ class UIManager {
       return;
     }
 
+    // ドラッグ中にDOMを再構築すると、ドラッグ元の要素が消滅して操作が強制キャンセルされるのを防ぐ
+    if (appState.dragState && appState.dragState.isAppDragging) {
+      return;
+    }
+
     this.lastGridStartIndex = startIndex;
     this.lastGridEndIndex = endIndex;
 

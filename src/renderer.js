@@ -2296,7 +2296,34 @@ window.addEventListener('click', (e) => {
 const dragTooltip = document.createElement('div');
 dragTooltip.id = 'drag-tooltip';
 dragTooltip.className = 'custom-tooltip';
+dragTooltip.style.pointerEvents = 'none'; // マウスイベントを吸収してドロップを妨害しないようにする
 document.body.appendChild(dragTooltip);
+
+document.addEventListener('dragover', (e) => {
+  if (appState.dragState && appState.dragState.isAppDragging) {
+    const paths = appState.dragState.paths || [];
+    const count = paths.length;
+    let text = count > 1 ? `${count} 個のアイテム` : `1 個のアイテム`;
+
+    const itemDiv = e.target.closest('#dir-tree .tree-item');
+    if (itemDiv && itemDiv.dataset.path) {
+      let actionStr = 'コピー';
+      if (paths.length > 0) {
+        const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+        actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+      }
+      const isRoot = itemDiv.dataset.isRoot === 'true';
+      const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
+      
+      text = count > 1 ? `${count}個のファイルを「${folderName}」へ${actionStr}` : `「${folderName}」へ${actionStr}`;
+    }
+
+    dragTooltip.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="color: var(--accent-color); width: 14px; height: 14px;">${UIManager.ICONS.COPY}</span>${text}</span>`;
+    dragTooltip.style.left = (e.clientX + 15) + 'px';
+    dragTooltip.style.top = (e.clientY + 15) + 'px';
+    dragTooltip.classList.add('show');
+  }
+});
 
 document.addEventListener('dragend', async () => {
   dragTooltip.classList.remove('show');
@@ -2331,9 +2358,18 @@ function handleItemDragStart(e, isGrid) {
   e.dataTransfer.setData('application/json', JSON.stringify(paths));
   e.dataTransfer.setData('text/plain', paths[0]);
   e.dataTransfer.effectAllowed = 'copyMove';
+
   e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
+
   appState.dragState.paths = paths;
   appState.dragState.isAppDragging = true;
+
+  const count = paths.length;
+  const text = count > 1 ? `${count} 個のアイテム` : `1 個のアイテム`;
+  dragTooltip.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="color: var(--accent-color); width: 14px; height: 14px;">${UIManager.ICONS.COPY}</span>${text}</span>`;
+  dragTooltip.style.left = (e.clientX + 15) + 'px';
+  dragTooltip.style.top = (e.clientY + 15) + 'px';
+  dragTooltip.classList.add('show');
 }
 
 function handleItemContextMenu(e, isGrid) {
@@ -2514,14 +2550,6 @@ uiManager.elements.dirTree.addEventListener('dragover', (e) => {
     actionStr = getRoot(appState.dragState.paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
   }
   e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
-
-  const isRoot = itemDiv.dataset.isRoot === 'true';
-  const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
-  const countStr = appState.dragState.paths.length > 1 ? `${appState.dragState.paths.length}個のファイルを ` : '';
-  dragTooltip.textContent = `${countStr}「${folderName}」へ${actionStr}`;
-  dragTooltip.style.left = (e.clientX + 15) + 'px';
-  dragTooltip.style.top = (e.clientY + 15) + 'px';
-  dragTooltip.classList.add('show');
 });
 
 uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
@@ -2530,7 +2558,6 @@ uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
   if (!itemDiv) return;
   if (!itemDiv.contains(e.relatedTarget)) {
     itemDiv.style.backgroundColor = '';
-    dragTooltip.classList.remove('show');
   }
 });
 
