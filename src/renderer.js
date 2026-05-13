@@ -2611,7 +2611,11 @@ uiManager.elements.dirTree.addEventListener('drop', (e) => {
               uiManager.showToast('操作をキャンセルしました', 3000, 'file-move');
               return;
             } else if (choice === 'skip') {
-              targetPaths = paths.filter(p => !conflicts.includes(p));
+              // フルパスからファイル名（拡張子含む）だけを取り出して比較する
+              targetPaths = paths.filter(p => {
+                const fileName = p.split('\\').pop().split('/').pop();
+                return !conflicts.includes(fileName);
+              });
               skipCount = conflicts.length;
               if (targetPaths.length === 0) {
                 uiManager.showToast(`${skipCount}件の重複をスキップしました`, 3000, 'file-move');
