@@ -1382,9 +1382,24 @@ fn main() {
                         }
                     }
 
-                    for path_str in known_files.keys() {
+                    for (path_str, &(_size, mtime)) in known_files.iter() {
                         if !current_files.contains_key(path_str) {
                             let _ = app_handle.emit_all("file-removed", path_str.clone());
+
+                            // --- 追加: キャッシュの自動クリーンアップ処理 ---
+                            if let Some(data_dir) = get_veloce_data_dir() {
+                                let cache_file_name = format!("{}_{}", path_str, mtime);
+                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                cache_file_name.hash(&mut hasher);
+                                let hash = hasher.finish();
+
+                                let thumb_path = data_dir.join("Thumbnails").join(format!("{}.jpg", hash));
+                                let meta_path = data_dir.join("Metadata").join(format!("{}.json", hash));
+
+                                let _ = std::fs::remove_file(thumb_path);
+                                let _ = std::fs::remove_file(meta_path);
+                            }
+                            // ------------------------------------------
                         }
                     }
 
