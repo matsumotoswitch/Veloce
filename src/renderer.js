@@ -2309,8 +2309,14 @@ document.addEventListener('dragover', (e) => {
     if (itemDiv && itemDiv.dataset.path) {
       let actionStr = 'コピー';
       if (paths.length > 0) {
-        const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-        actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+        if (e.ctrlKey) {
+          actionStr = 'コピー';
+        } else if (e.shiftKey) {
+          actionStr = '移動';
+        } else {
+          const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+          actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+        }
       }
       const isRoot = itemDiv.dataset.isRoot === 'true';
       const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
@@ -2546,8 +2552,14 @@ uiManager.elements.dirTree.addEventListener('dragover', (e) => {
 
   let actionStr = 'コピー';
   if (appState.dragState.paths.length > 0) {
-    const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-    actionStr = getRoot(appState.dragState.paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+    if (e.ctrlKey) {
+      actionStr = 'コピー';
+    } else if (e.shiftKey) {
+      actionStr = '移動';
+    } else {
+      const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+      actionStr = getRoot(appState.dragState.paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+    }
   }
   e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
 });
@@ -2572,23 +2584,59 @@ uiManager.elements.dirTree.addEventListener('drop', (e) => {
   const paths = getPathsFromDragEvent(e);
   if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
     let actionStr = 'コピー';
+    let intent = 'auto';
     if (paths.length > 0) {
-      const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-      actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+      if (e.ctrlKey) {
+        actionStr = 'コピー';
+        intent = 'copy';
+      } else if (e.shiftKey) {
+        actionStr = '移動';
+        intent = 'move';
+      } else {
+        const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+        actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+      }
     }
 
-    uiManager.showToast(`${paths.length}件のファイルを${actionStr}中`, 0, 'file-move', 'info');
-
     setTimeout(async () => {
+      let targetPaths = paths;
+      let skipCount = 0;
+
+      if (window.veloceAPI.checkConflicts) {
+        try {
+          const conflicts = await window.veloceAPI.checkConflicts(paths, itemDiv.dataset.path);
+          if (conflicts && conflicts.length > 0) {
+            const choice = await uiManager.showConflictDialog(conflicts.length, actionStr);
+            if (choice === 'cancel') {
+              uiManager.showToast('操作をキャンセルしました', 3000, 'file-move');
+              return;
+            } else if (choice === 'skip') {
+              targetPaths = paths.filter(p => !conflicts.includes(p));
+              skipCount = conflicts.length;
+              if (targetPaths.length === 0) {
+                uiManager.showToast(`${skipCount}件の重複をスキップしました`, 3000, 'file-move');
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to check conflicts:', err);
+        }
+      }
+
+      uiManager.showToast(`${targetPaths.length}件のファイルを${actionStr}中`, 0, 'file-move', 'info');
+
       let successCount = 0;
-      for (const p of paths) {
-        const result = await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path);
+      for (const p of targetPaths) {
+        const result = await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path, intent);
         if (result && result.success) {
           successCount++;
         }
       }
       if (successCount > 0) {
-        uiManager.showToast(`${successCount}件のファイルを${actionStr}しました`, 3000, 'file-move');
+        let msg = `${successCount}件のファイルを${actionStr}しました`;
+        if (skipCount > 0) msg += `（${skipCount}件スキップ）`;
+        uiManager.showToast(msg, 3000, 'file-move');
         if (appState.dragState.isAppDragging) {
           appState.dragState.pendingRefresh = true;
         } else {

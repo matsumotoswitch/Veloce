@@ -555,6 +555,83 @@ class UIManager {
   }
 
   /**
+   * 同名ファイルの競合時の処理を選択するダイアログを表示します。
+   * @param {number} conflictCount 
+   * @param {string} actionStr 
+   * @returns {Promise<'overwrite'|'skip'|'cancel'>}
+   */
+  showConflictDialog(conflictCount, actionStr) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'dialog-overlay';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog-box';
+
+      const messageEl = document.createElement('div');
+      messageEl.className = 'dialog-message';
+      messageEl.innerHTML = `宛先に同じ名前のファイルが <strong>${conflictCount}件</strong> 存在します。<br>どのように処理しますか？`;
+
+      const buttonsDiv = document.createElement('div');
+      buttonsDiv.className = 'dialog-buttons';
+      buttonsDiv.style.flexWrap = 'wrap';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'dialog-btn cancel';
+      cancelBtn.textContent = 'キャンセル';
+
+      const skipBtn = document.createElement('button');
+      skipBtn.className = 'dialog-btn primary';
+      skipBtn.textContent = '重複をスキップ';
+
+      const overwriteBtn = document.createElement('button');
+      overwriteBtn.className = 'dialog-btn danger';
+      overwriteBtn.textContent = `上書きして${actionStr}`;
+
+      buttonsDiv.appendChild(cancelBtn);
+      buttonsDiv.appendChild(skipBtn);
+      buttonsDiv.appendChild(overwriteBtn);
+
+      dialog.appendChild(messageEl);
+      dialog.appendChild(buttonsDiv);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+
+      const cleanup = () => {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+      };
+
+      const keydownHandler = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          document.removeEventListener('keydown', keydownHandler);
+          cleanup();
+          resolve('cancel');
+        }
+      };
+
+      document.addEventListener('keydown', keydownHandler);
+
+      overwriteBtn.addEventListener('click', () => { 
+        document.removeEventListener('keydown', keydownHandler);
+        cleanup(); resolve('overwrite'); 
+      });
+      skipBtn.addEventListener('click', () => { 
+        document.removeEventListener('keydown', keydownHandler);
+        cleanup(); resolve('skip'); 
+      });
+      cancelBtn.addEventListener('click', () => { 
+        document.removeEventListener('keydown', keydownHandler);
+        cleanup(); resolve('cancel'); 
+      });
+
+      skipBtn.focus();
+    });
+  }
+
+  /**
    * カスタム確認ダイアログを表示します。
    * @param {string} message 
    * @returns {Promise<boolean>}

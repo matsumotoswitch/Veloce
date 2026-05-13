@@ -580,6 +580,24 @@ fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
 }
 
 #[tauri::command]
+async fn check_conflicts(paths: Vec<String>, dest_dir: String) -> Result<Vec<String>, String> {
+    Ok(tokio::task::spawn_blocking(move || {
+        let mut conflicts = Vec::new();
+        let dest_path = std::path::Path::new(&dest_dir);
+        for path in paths {
+            let src_path = std::path::Path::new(&path);
+            if let Some(file_name) = src_path.file_name() {
+                let target = dest_path.join(file_name);
+                if target.exists() {
+                    conflicts.push(path);
+                }
+            }
+        }
+        conflicts
+    }).await.unwrap_or_default())
+}
+
+#[tauri::command]
 async fn parse_metadata(file_path: String) -> Result<ParseMetadataResult, String> {
     Ok(tokio::task::spawn_blocking(move || {
         let full_meta = get_full_metadata_for_path(&file_path);
@@ -1416,7 +1434,8 @@ fn main() {
             open_cache_folder,
             clear_thumbnail_cache,
             get_thumbnail_cache_info,
-            open_in_explorer
+            open_in_explorer,
+            check_conflicts
         ])
         .run(context)
         .expect("error while running tauri application");

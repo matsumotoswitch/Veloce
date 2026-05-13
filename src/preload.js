@@ -34,7 +34,8 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
  * @property {(folderPath: string) => Promise<{success: boolean, error?: string}>} trashFolder
- * @property {(sourcePath: string, targetDir: string) => Promise<{success: boolean, action: string, reason: string|null}>} moveOrCopyFile
+ * @property {(sourcePath: string, targetDir: string, intent?: 'auto'|'copy'|'move') => Promise<{success: boolean, action: string, reason: string|null}>} moveOrCopyFile
+ * @property {(paths: string[], destDir: string) => Promise<string[]>} checkConflicts
  * @property {(filePath: string) => string} convertFileSrc
  * @property {() => void} toggleDevtools
  * @property {() => void} closeWindow
@@ -248,9 +249,10 @@ window.veloceAPI = {
    * ファイルを指定ディレクトリに移動またはコピーします。
    * @param {string} sourcePath - 元のファイルパス。
    * @param {string} targetDir - ドロップ先のディレクトリパス。
+   * @param {'auto' | 'copy' | 'move'} [intent='auto'] - 強制的に実行するアクション
    * @returns {Promise<object>} 処理結果 { success, action }。
    */
-  moveOrCopyFile: async (sourcePath, targetDir) => {
+  moveOrCopyFile: async (sourcePath, targetDir, intent = 'auto') => {
     const { fs, path } = window.__TAURI__;
     try {
       const fileName = await path.basename(sourcePath);
@@ -261,19 +263,40 @@ window.veloceAPI = {
         return { success: false, action: '', reason: 'same_directory' };
       }
 
-      let action = 'move';
-      try {
-        // まず rename (移動) を試み、ドライブ跨ぎ等でOSから拒否されたら copy にフォールバックする
-        await fs.renameFile(sourcePath, targetPath);
-      } catch (e) {
-        action = 'copy';
+      let action = intent;
+      if (action === 'auto') {
+        const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+        action = getRoot(sourcePath) === getRoot(targetDir) ? 'move' : 'copy';
+      }
+
+      if (action === 'copy') {
         await fs.copyFile(sourcePath, targetPath);
+      } else {
+        try {
+          await fs.renameFile(sourcePath, targetPath);
+        } catch (e) {
+          // 別ドライブ間への移動など、renameFileが失敗した際のフォールバック
+          await fs.copyFile(sourcePath, targetPath);
+          try {
+            await fs.removeFile(sourcePath);
+          } catch (rmErr) {
+            // removeFileも失敗した場合は invoke('trash_file') でゴミ箱送りを試みる
+            await invoke('trash_file', { filePath: sourcePath });
+          }
+        }
       }
       return { success: true, action, reason: null };
     } catch (error) {
       return { success: false, action: '', reason: String(error) };
     }
   },
+  /**
+   * 宛先ディレクトリに同名ファイルが存在するかをチェックします。
+   * @param {string[]} paths - 移動/コピーするファイルのパス配列。
+   * @param {string} destDir - 宛先ディレクトリのパス。
+   * @returns {Promise<string[]>} 重複しているファイルパスの配列。
+   */
+  checkConflicts: (paths, destDir) => invoke('check_conflicts', { paths, destDir }),
   /**
    * ローカルファイルパスをTauriのAssetプロトコルURLに変換します。
    * @param {string} filePath - ローカルファイルのパス
