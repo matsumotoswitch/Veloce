@@ -3650,9 +3650,33 @@ window.addEventListener('DOMContentLoaded', async () => {
     // --- お気に入りのドラッグ＆ドロップ並び替え処理 ---
     favListElement.addEventListener('dragstart', (e) => {
       const itemDiv = e.target.closest('.favorite-item');
-      if (!itemDiv) return;
+      if (!itemDiv) {
+        e.preventDefault();
+        return;
+      }
       draggedFavoriteId = itemDiv.dataset.id;
       e.dataTransfer.effectAllowed = 'move';
+
+      // アイテムのみを掴んでいるように見せるためのカスタムドラッグイメージ
+      const dragGhost = itemDiv.cloneNode(true);
+      dragGhost.style.position = 'absolute';
+      dragGhost.style.top = '-1000px';
+      dragGhost.style.left = '-1000px';
+      dragGhost.style.width = 'max-content'; // コンテンツ幅に合わせる
+      dragGhost.style.padding = '4px 12px';
+      dragGhost.style.backgroundColor = 'var(--panel-bg, #1a2024)';
+      dragGhost.style.border = '1px solid var(--accent-color, #257e8c)';
+      dragGhost.style.color = 'var(--text-color, #ffffff)';
+      dragGhost.style.borderRadius = '4px';
+      dragGhost.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+      document.body.appendChild(dragGhost);
+      
+      e.dataTransfer.setDragImage(dragGhost, 15, 15);
+      
+      setTimeout(() => {
+        if (dragGhost.parentNode) dragGhost.parentNode.removeChild(dragGhost);
+      }, 0);
+
       // ドラッグ中の元アイテムを半透明にする
       setTimeout(() => { itemDiv.style.opacity = '0.5'; }, 0);
     });
