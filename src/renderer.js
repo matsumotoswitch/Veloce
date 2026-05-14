@@ -17,7 +17,7 @@ window.addEventListener('keydown', (e) => {
 // 1. Constants & Global Variables
 // ============================================================================
 import { appState } from './renderer-state.js';
-import { UIManager, uiManager, formatSize, formatDate } from './renderer-ui.js';
+import { UIManager, uiManager, formatSize, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
 import { debounce } from './utils.js';
 
 const CONFIG = {
@@ -515,7 +515,10 @@ function renderFavorites() {
     
     const icon = document.createElement('span');
     icon.className = 'tree-icon';
-    if (fav.icon && fav.icon.startsWith('FAV_')) {
+    if (fav.icon && ICON_SVGS[fav.icon]) {
+      icon.innerHTML = ICON_SVGS[fav.icon];
+      icon.classList.add(`icon-color-${fav.color || 'default'}`);
+    } else if (fav.icon && fav.icon.startsWith('FAV_')) {
       icon.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
       icon.style.color = 'var(--glow-gold)'; // お気に入りのデフォルト色
     } else {
@@ -1293,9 +1296,15 @@ function showHistoryMenu(event, direction, btnElement) {
 
     if (fav) {
       displayName = fav.name;
-      const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
-      iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
-      iconColor = 'var(--glow-gold)';
+      if (fav.icon && ICON_SVGS[fav.icon]) {
+        iconHtml = ICON_SVGS[fav.icon];
+        const c = COLORS.find(c => c.id === (fav.color || 'default'));
+        iconColor = c ? c.hex : 'var(--glow-gold)';
+      } else {
+        const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
+        iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
+        iconColor = 'var(--glow-gold)';
+      }
     } else {
       // 通常フォルダの場合
       displayName = item.path.split(/[/\\]/).filter(Boolean).pop() || item.path;
@@ -1908,7 +1917,7 @@ const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICO
     showNotification(`「${name}」はすでにお気に入りにあります`, 'warning');
     return;
   }
-  appState.favorites.push({ id: Date.now().toString(), name, path, icon: 'FAV_STAR' });
+  appState.favorites.push({ id: Date.now().toString(), name, path, icon: 'star', color: 'default' });
   localStorage.setItem('favorites', JSON.stringify(appState.favorites));
   renderFavorites();
 
@@ -1925,35 +1934,51 @@ const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICO
   showNotification(`「${name}」をお気に入りに追加しました`, 'success');
 });
 
-const FAV_ICONS_LIST = ['FAV_STAR', 'FAV_HEART', 'FAV_BOOKMARK', 'FAV_FLAG', 'FAV_TAG', 'FAV_FOLDER'];
-let selectedFavIcon = 'FAV_STAR';
-
-function renderFavIconSelector(currentIcon) {
-  const container = document.getElementById('fav-icon-selector');
-  if (!container) return;
-  container.innerHTML = '';
-  
-  // 過去の絵文字データなどがある場合は星をデフォルト選択として扱う
-  selectedFavIcon = (currentIcon && currentIcon.startsWith('FAV_')) ? currentIcon : 'FAV_STAR';
-
-  FAV_ICONS_LIST.forEach(key => {
-    const item = document.createElement('div');
-    item.className = `icon-selector-item ${key === selectedFavIcon ? 'selected' : ''}`;
-    item.innerHTML = UIManager.ICONS[key];
-    item.addEventListener('click', () => {
-      selectedFavIcon = key;
-      Array.from(container.children).forEach(child => child.classList.remove('selected'));
-      item.classList.add('selected');
-    });
-    container.appendChild(item);
-  });
-}
-
 const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager.ICONS.EDIT, () => {
   if (!contextMenu.targetFavoriteId) return;
   const fav = appState.favorites.find(f => f.id === contextMenu.targetFavoriteId);
   if (fav) {
-    renderFavIconSelector(fav.icon);
+    const container = document.getElementById('fav-icon-selector');
+    
+    const getFavData = createFavoriteEditorUI(container, fav.icon, fav.color || 'default');
+    
+    const saveBtn = document.getElementById('fav-save-btn');
+    const cancelBtn = document.getElementById('fav-cancel-btn');
+    
+    const newSaveBtn = saveBtn.cloneNode(true);
+    saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+    newSaveBtn.style.display = ''; // 古い非表示設定が残っていれば解除
+    
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+    newCancelBtn.style.display = ''; // 古い非表示設定が残っていれば解除
+
+    newCancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('edit-favorite-modal').style.display = 'none';
+    });
+
+    newSaveBtn.addEventListener('click', () => {
+      const data = getFavData();
+      fav.icon = data.icon;
+      fav.color = data.color;
+      fav.name = document.getElementById('fav-name-input').value;
+      fav.path = document.getElementById('fav-path-input').value;
+      localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+      renderFavorites();
+
+      let tabUpdated = false;
+      appState.tabs.forEach(t => {
+        if (t.path === fav.path) {
+          t.name = fav.name;
+          tabUpdated = true;
+        }
+      });
+      if (tabUpdated) { saveTabsState(); uiManager.renderTabs(); }
+      
+      document.getElementById('edit-favorite-modal').style.display = 'none';
+    });
+    
     document.getElementById('fav-name-input').value = fav.name;
     document.getElementById('fav-path-input').value = fav.path;
     contextMenu.editingFavoriteId = fav.id;
@@ -2142,7 +2167,7 @@ const menuTabAddFavorite = createMenuItem('お気に入りに追加', UIManager.
       if (appState.favorites.find(f => f.path === path)) {
         return;
       }
-      appState.favorites.push({ id: Date.now().toString(), name, path, icon: 'FAV_STAR' });
+      appState.favorites.push({ id: Date.now().toString(), name, path, icon: 'star', color: 'default' });
       localStorage.setItem('favorites', JSON.stringify(appState.favorites));
       renderFavorites();
 
@@ -3399,9 +3424,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         let iconHtml = '';
         let iconColor = '';
         if (fav) {
-          const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
-          iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
-          iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
+          if (fav.icon && ICON_SVGS[fav.icon]) {
+            iconHtml = ICON_SVGS[fav.icon];
+            const c = COLORS.find(c => c.id === (fav.color || 'default'));
+            iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : (c ? c.hex : 'var(--glow-gold)');
+          } else {
+            const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
+            iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
+            iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
+          }
         } else {
           iconHtml = UIManager.ICONS.FOLDER;
           iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : '#4da8da';
@@ -3863,7 +3894,7 @@ window.addEventListener('DOMContentLoaded', async () => {
               }
             }
 
-            const newFav = { id: Date.now().toString(), name: folder.name, path: folder.path, icon: 'FAV_STAR' };
+            const newFav = { id: Date.now().toString(), name: folder.name, path: folder.path, icon: 'star', color: 'default' };
             appState.favorites.splice(insertIndex, 0, newFav);
             localStorage.setItem('favorites', JSON.stringify(appState.favorites));
             renderFavorites();
@@ -3950,30 +3981,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   document.getElementById('fav-cancel-btn')?.addEventListener('click', () => {
-    document.getElementById('edit-favorite-modal').style.display = 'none';
-  });
-
-  document.getElementById('fav-save-btn')?.addEventListener('click', () => {
-    if (contextMenu.editingFavoriteId) {
-      const fav = appState.favorites.find(f => f.id === contextMenu.editingFavoriteId);
-      if (fav) {
-        fav.icon = selectedFavIcon;
-        fav.name = document.getElementById('fav-name-input').value;
-        fav.path = document.getElementById('fav-path-input').value;
-        localStorage.setItem('favorites', JSON.stringify(appState.favorites));
-        renderFavorites();
-
-        // 変更されたお気に入りの名前をタブにも反映
-        let tabUpdated = false;
-        appState.tabs.forEach(t => {
-          if (t.path === fav.path) {
-            t.name = fav.name;
-            tabUpdated = true;
-          }
-        });
-        if (tabUpdated) { saveTabsState(); uiManager.renderTabs(); }
-      }
-    }
     document.getElementById('edit-favorite-modal').style.display = 'none';
   });
 

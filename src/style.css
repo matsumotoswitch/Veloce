@@ -1281,3 +1281,70 @@ html.viewer-html, .viewer-body {
   background-color: transparent !important;
   color: var(--text-color) !important;
 }
+
+/* --- お気に入り: アイコン選択グリッド --- */
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+  color: var(--text-color, #ececec);
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.icon-btn.active {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.2);
+}
+
+/* --- お気に入り: カラー選択パレット --- */
+.color-grid {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.color-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.color-btn:hover {
+  transform: scale(1.1);
+}
+
+.color-btn.active {
+  border-color: #ffffff;
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* --- Veloce 厳選カラークラス --- */
+.icon-color-default { color: #ececec; }
+.icon-color-red     { color: #ef4444; }
+.icon-color-blue    { color: #3b82f6; }
+.icon-color-green   { color: #22c55e; }
+.icon-color-yellow  { color: #eab308; }
+.icon-color-purple  { color: #a855f7; }
+.icon-color-pink    { color: #ec4899; }
+.icon-color-cyan    { color: #06b6d4; }
