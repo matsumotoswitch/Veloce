@@ -1979,10 +1979,13 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
       document.getElementById('edit-favorite-modal').style.display = 'none';
     });
     
-    document.getElementById('fav-name-input').value = fav.name;
+    const nameInput = document.getElementById('fav-name-input');
+    nameInput.value = fav.name;
     document.getElementById('fav-path-input').value = fav.path;
     contextMenu.editingFavoriteId = fav.id;
     document.getElementById('edit-favorite-modal').style.display = 'flex';
+    nameInput.focus();
+    nameInput.select();
   }
 });
 
