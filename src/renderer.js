@@ -2294,6 +2294,8 @@ const closeAllMenus = (e) => {
     if (t.closest('#context-menu') || t.closest('#tab-list-menu') || t.closest('#history-menu')) return;
     // タブリスト展開ボタンは専用のトグル制御があるため無視
     if (t.closest('#titlebar-tab-list')) return;
+    // 履歴ボタンでのクリック時は長押しによるメニュー維持を優先するため除外
+    if (e && e.type === 'click' && (t.closest('#nav-back-btn') || t.closest('#nav-forward-btn'))) return;
   }
 
   // 現在の display 状態を問わず、強制的にすべて非表示にする
