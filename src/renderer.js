@@ -1017,6 +1017,9 @@ function parseLicenseMarkdown(text) {
   html = html.replace(new RegExp(`\\n+(<\\/?(?:${tags})[^>]*>)`, 'gi'), '$1');
   html = html.replace(new RegExp(`(<\\/?(?:${tags})[^>]*>)\\n+`, 'gi'), '$1');
 
+  // URL文字列をリンクに変換（すでに href="..." 等になっているものは除外）
+  html = html.replace(/(?<!href=["'])(https?:\/\/[^\s&<"'>\)]+)/g, '<a href="$1">$1</a>');
+
   html = html.replace(/\n/g, '<br>');
 
   return html;
@@ -1069,6 +1072,20 @@ async function showLicenseDialog() {
     <h2 style="margin: 0 0 20px 0; color: var(--glow-gold); font-size: 1.2em;">ライセンス情報</h2>
     <div id="license-text" style="flex: 1; overflow-y: auto; background-color: rgba(0, 0, 0, 0.2); padding: 0px 20px 20px 20px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color); font-family: sans-serif; white-space: normal; font-size: 14px; line-height: 1.6;">${parsedText}</div>
   `;
+
+  // リンクのクリック処理（アプリ内遷移を防ぎ、OS標準のブラウザで開く）
+  content.querySelectorAll('a').forEach(a => {
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = a.href;
+      if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
+        await window.__TAURI__.shell.open(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    });
+  });
   
   const cleanup = () => {
     overlay.remove();
