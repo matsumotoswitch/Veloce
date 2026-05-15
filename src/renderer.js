@@ -3323,6 +3323,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const reloadBtn = document.getElementById('nav-reload-btn');
   if (reloadBtn) {
+    reloadBtn.innerHTML = UIManager.ICONS.RELOAD;
     reloadBtn.removeAttribute('title');
     reloadBtn.addEventListener('mouseenter', (e) => {
       uiManager.showCustomTooltip('再読み込み', e.clientX, e.clientY);
@@ -3334,13 +3335,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       uiManager.hideCustomTooltip();
     });
     reloadBtn.addEventListener('click', async () => {
-      if (reloadBtn.classList.contains('is-spinning')) return;
       uiManager.hideCustomTooltip();
-      reloadBtn.classList.add('is-spinning');
       await refreshFileList(true);
-      setTimeout(() => {
-        reloadBtn.classList.remove('is-spinning');
-      }, 500); // アニメーションの時間を加味して遅延解除
     });
   }
 
