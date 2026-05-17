@@ -134,6 +134,8 @@ async function refreshFileList(showToast = false) {
   appState.filteredFiles = [];
   appState.selection.clear();
   appState.selectedIndex = -1;
+  appState.thumbnailUrls.clear();
+  appState.pendingThumbnails.clear();
   if (uiManager.elements.searchBar) {
     uiManager.elements.searchBar.value = '';
   }

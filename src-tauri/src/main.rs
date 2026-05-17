@@ -8,7 +8,6 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 use std::io::Read; // flate2のread_to_stringやバイナリ解析用
 use std::sync::Mutex;
-use std::hash::{Hash, Hasher};
 use tauri::Manager;
 
 // --- データ構造の定義 ---
@@ -159,18 +158,11 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
 
                             // キャッシュの存在確認 (Veloceの仕様に合わせる)
                             let cache_file_name = format!("{}_{}", clean_path, mtime);
-                            let cache_path = cache_dir_path.join(format!("{}.jpg", {
-                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                                cache_file_name.hash(&mut hasher);
-                                hasher.finish()
-                            }));
+                            let digest = md5::compute(cache_file_name.as_bytes());
+                            let cache_path = cache_dir_path.join(format!("{:x}.jpg", digest));
                             let has_thumbnail_cache = cache_path.exists();
                             
-                            let meta_cache_path = meta_cache_dir_path.join(format!("{}.json", {
-                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                                cache_file_name.hash(&mut hasher);
-                                hasher.finish()
-                            }));
+                            let meta_cache_path = meta_cache_dir_path.join(format!("{:x}.json", digest));
                             let has_metadata_cache = meta_cache_path.exists();
 
                             all_paths.push(clean_path.clone());
@@ -253,10 +245,8 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
 
     let cache_file_path = if let Some(dir) = &cache_dir {
         let _ = std::fs::create_dir_all(dir);
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{}_{}", file_path, mtime).hash(&mut hasher);
-        let hash = hasher.finish();
-        Some(dir.join(format!("{}.json", hash)))
+        let digest = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
+        Some(dir.join(format!("{:x}.json", digest)))
     } else {
         None
     };
@@ -742,10 +732,8 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
 
         let cache_file_path = if let Some(dir) = &cache_dir {
             let _ = std::fs::create_dir_all(dir);
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            format!("{}_{}", file_path, mtime).hash(&mut hasher);
-            let hash = hasher.finish();
-            Some(dir.join(format!("{}.jpg", hash)))
+            let digest = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
+            Some(dir.join(format!("{:x}.jpg", digest)))
         } else {
             None
         };
@@ -1389,12 +1377,10 @@ fn main() {
                             // --- 追加: キャッシュの自動クリーンアップ処理 ---
                             if let Some(data_dir) = get_veloce_data_dir() {
                                 let cache_file_name = format!("{}_{}", path_str, mtime);
-                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                                cache_file_name.hash(&mut hasher);
-                                let hash = hasher.finish();
+                                let digest = md5::compute(cache_file_name.as_bytes());
 
-                                let thumb_path = data_dir.join("Thumbnails").join(format!("{}.jpg", hash));
-                                let meta_path = data_dir.join("Metadata").join(format!("{}.json", hash));
+                                let thumb_path = data_dir.join("Thumbnails").join(format!("{:x}.jpg", digest));
+                                let meta_path = data_dir.join("Metadata").join(format!("{:x}.json", digest));
 
                                 let _ = std::fs::remove_file(thumb_path);
                                 let _ = std::fs::remove_file(meta_path);
