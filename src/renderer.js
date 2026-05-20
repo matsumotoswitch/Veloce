@@ -3423,18 +3423,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     tabListMenu.innerHTML = '';
     appState.tabs.forEach((tab, index) => {
       const option = document.createElement('div');
-        option.className = 'tab-list-item';
-        option.style.padding = '8px 16px';
-        option.style.cursor = 'pointer';
-        option.style.color = index === appState.activeTabIndex ? '#ffffff' : 'var(--text-color)';
-        option.style.backgroundColor = index === appState.activeTabIndex ? 'rgba(37, 126, 140, 0.15)' : 'transparent';
+        // 右クリックメニューと同じベースクラスを適用し、CSS側にデザインを委ねる
+        option.className = 'context-menu-item tab-list-item';
+        
+        // 現在アクティブなタブのみ、専用のハイライトスタイルを個別に適用する
         if (index === appState.activeTabIndex) {
+          option.style.color = '#ffffff';
+          option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
           option.style.boxShadow = 'inset 3px 0 0 var(--accent-color)';
         }
-        option.style.display = 'flex';
-        option.style.alignItems = 'center';
-        option.style.gap = '8px';
-        option.style.overflow = 'hidden';
 
         const fav = appState.favorites.find(f => f.path === tab.path);
         let iconHtml = '';
@@ -3494,10 +3491,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         closeBtn.style.display = 'flex';
         closeBtn.style.alignItems = 'center';
         closeBtn.style.justifyContent = 'center';
-        closeBtn.style.width = '20px';
-        closeBtn.style.height = '20px';
+        closeBtn.style.width = '16px';
+        closeBtn.style.height = '16px';
         closeBtn.style.flexShrink = '0';
-        closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="8" height="8"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
+        closeBtn.style.borderRadius = '3px';
+        closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="7" height="7"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
         closeBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
@@ -3511,14 +3509,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         option.appendChild(textContainer);
         option.appendChild(closeBtn);
 
+        // ホバー時の背景色・文字色の変化はCSS（context-menu-item:hover）に任せ、アイコンの色変化だけを残す
         option.onmouseenter = () => {
-          option.style.backgroundColor = 'rgba(37, 126, 140, 0.25)';
-          option.style.color = '#fff';
           if (iconColor) iconSpan.style.color = '#fff';
         };
         option.onmouseleave = () => {
-          option.style.backgroundColor = index === appState.activeTabIndex ? 'rgba(37, 126, 140, 0.15)' : 'transparent';
-          option.style.color = index === appState.activeTabIndex ? '#ffffff' : 'var(--text-color)';
           if (iconColor) iconSpan.style.color = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
         };
         
