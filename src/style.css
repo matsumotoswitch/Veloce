@@ -89,7 +89,8 @@ body.is-resizing .app-content {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(4px) !important;
   z-index: 10002;
   display: flex;
   justify-content: center;
@@ -97,13 +98,14 @@ body.is-resizing .app-content {
 }
 
 .dialog-box {
-  background-color: var(--panel-bg);
-  border: 1px solid #0d1315;
-  border-radius: var(--radius-lg);
+  background-color: rgba(30, 40, 45, 0.75) !important;
+  backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: var(--radius-lg, 8px) !important;
   padding: 24px;
   min-width: 300px;
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  color: var(--text-color);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5) !important;
+  color: var(--text-color, #cddbe0);
   font-family: inherit;
 }
 
@@ -1095,10 +1097,13 @@ th[data-sort] svg, th[data-sort] svg path {
   left: 8px;
   right: 190px;
   -webkit-app-region: no-drag;
-  display: flex;
-  align-items: flex-end; /* タブを下に揃える */
-  padding: 8px 8px 0 8px; /* 下部のパディングを0にして、下に接着させる */
-  gap: 4px;
+  background-color: #080808 !important; /* タブバーの底板はアプリ内で最も暗く */
+  padding: 8px 12px 0 12px !important;
+  display: flex !important;
+  gap: 4px !important;
+  border-bottom: 1px solid #2a2a2a !important;
+  height: 40px;
+  align-items: flex-end;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -1108,40 +1113,36 @@ th[data-sort] svg, th[data-sort] svg path {
 #tab-container .tab-item {
   display: flex;
   align-items: center;
-  padding: 0 24px 0 10px !important;
   position: relative;
-  border-radius: 6px 6px 0 0 !important; /* 上部のみ角丸 */
-  background-color: rgba(255, 255, 255, 0.03) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.25) !important;
-  border-bottom: none !important; /* 下の枠線は描かない */
-  margin-bottom: 0 !important;
-  height: 30px !important;
   cursor: pointer;
-  color: #a0a0a0 !important;
   font-size: 13px;
   max-width: 250px;
   min-width: 120px;
   flex-shrink: 0;
-  transition: background-color 0.2s, color 0.2s !important;
+  
+  /* 非アクティブタブ（面と上部エッジの光で表現） */
+  border: none !important;
+  background-color: #242424 !important; /* 明確にタブバーより明るいグレーの箱 */
+  color: #888888 !important;
+  border-radius: 8px 8px 0 0 !important;
+  padding: 6px 24px 6px 16px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  transition: background-color 0.15s ease, color 0.15s ease !important;
+  height: 31px !important;
 }
 
 #tab-container .tab-item:not(.active):hover {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(255, 255, 255, 0.35) !important;
+  background-color: #2a2a2a !important;
   color: #ececec !important;
 }
 
 #tab-container .tab-item.active {
-  background-color: var(--bg-color) !important; /* メイン画面と同じ背景色 */
-  border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-  border-right: 1px solid rgba(255, 255, 255, 0.25) !important;
-  border-top: 2px solid #3b82f6 !important;
+  /* アクティブタブ（メインコンテンツ領域とシームレスに結合） */
+  background-color: var(--bg-color, #131b1e) !important; /* メイン画面の背景色と完全に一致 */
   color: #ffffff !important;
+  box-shadow: inset 0 2px 0 #3b82f6 !important; /* 上部のアクセンライン */
   margin-bottom: -1px !important; /* 1pxだけ被せて線を隠す */
-  padding-bottom: 1px !important; /* はみ出させた分高さを調整 */
-  height: 31px !important;
+  padding-bottom: 7px !important;
   z-index: 2 !important; /* 境界線より手前に表示する */
 }
 
@@ -1337,23 +1338,26 @@ html.viewer-html, .viewer-body {
   margin-bottom: 24px;
 }
 
+/* --- カラー選択ボタン（8色）のアクティブ状態の強調 --- */
 .color-btn {
+  border: 2px solid transparent !important;
+  border-radius: 50%; /* パレットを綺麗な丸型に */
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  border: 2px solid transparent;
   cursor: pointer;
-  transition: transform 0.1s ease;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
 .color-btn:hover {
   transform: scale(1.1);
 }
 
+/* 選択されたカラーボタンは一回り大きくし、外側に白い輪郭、さらに外側にアクセント色のシャドウを当てる */
 .color-btn.active {
-  border-color: #ffffff;
-  outline: 2px solid #3b82f6;
-  outline-offset: 2px;
+  border-color: #ffffff !important;
+  transform: scale(1.15) !important;
+  box-shadow: 0 0 0 2px var(--accent-color, #257e8c) !important;
+  outline: none;
 }
 
 /* --- Veloce 厳選カラークラス --- */
