@@ -1182,29 +1182,48 @@ th[data-sort] svg, th[data-sort] svg path {
   overflow: hidden;
 }
 
-#tab-container .tab-item.new-tab-btn {
-  min-width: 32px !important;
-  padding: 0 !important;
+/* タブ追加ボタン専用の独立したスタイル（通常時は背景完全透明） */
+.titlebar #new-tab-btn {
+  display: flex;
+  align-items: center;
   justify-content: center;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  padding: 0;
+  margin-left: 8px;
+  margin-right: 12px; /* 右側のコントロール群としっかり隙間を空ける */
+  align-self: center;
+  background: transparent !important; /* グレーの背景を完全に排除 */
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 50% !important; /* ホバー時は綺麗な正円（微角丸が良い場合は 6px にしてください） */
+  color: var(--text-color) !important;
+  opacity: 0.6;
+  cursor: pointer;
+  box-shadow: none !important;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-#new-tab-btn {
-  position: sticky;
-  right: 0;
-  background-color: #000000 !important; /* タブバーと同じ真っ黒に合わせる */
-  z-index: 2;
-  -webkit-app-region: no-drag;
-  margin-left: 1px;
+/* ホバー時にフワッと上品なアクリル調の丸背景を浮かび上がらせる */
+.titlebar #new-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  opacity: 1;
 }
 
-#new-tab-btn::before { content: ''; position: absolute; top: 0; left: -20px; width: 20px; height: 100%; background: linear-gradient(to right, transparent, #000000); pointer-events: none; opacity: 0; transition: opacity 0.15s ease; }
-#new-tab-btn.is-overflowing::before { opacity: 1; }
-#new-tab-btn::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 24px; height: 24px; border-radius: 50%; background-color: transparent; transition: background-color 0.15s ease; z-index: 0; }
-#new-tab-btn:hover::after { background-color: var(--accent-color); }
-#new-tab-btn svg { position: relative; z-index: 1; }
-#new-tab-btn:hover { color: #fff; }
+/* クリックした瞬間は押し込まれつつVeloceのテーマカラーで微発光 */
+.titlebar #new-tab-btn:active {
+  background: rgba(37, 126, 140, 0.2) !important; /* Veloceのテーマ色で微発光 */
+  transform: scale(0.92);
+}
+
+/* 内部のプラスアイコン（SVG）のサイズが崩れないように固定 */
+.titlebar #new-tab-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
 
 .tab-close-btn {
   position: absolute;
