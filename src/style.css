@@ -33,7 +33,7 @@ body, input, textarea, button, select, table {
   user-select: none;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid #2a2a2a; /* 下のコンテンツとの境界線は、目立たない暗いグレーに */
+  border-bottom: 1px solid var(--border-color) !important;
   -webkit-app-region: drag;
 }
 
@@ -1097,15 +1097,17 @@ th[data-sort] svg, th[data-sort] svg path {
   left: 8px;
   right: 190px;
   -webkit-app-region: no-drag;
-  background-color: #080808 !important; /* タブバーの底板はアプリ内で最も暗く */
+  background-color: transparent !important; /* タイトルバーの背景を透過させて右上ボタンと統一 */
   padding: 8px 12px 0 12px !important;
   display: flex !important;
   gap: 4px !important;
-  border-bottom: 1px solid #2a2a2a !important;
+  border-bottom: none !important; /* 個別の下線を消去 */
   height: 40px;
+  max-height: 38px; /* 高さを微調整 */
   align-items: flex-end;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: none;
 }
 
 #tab-container::-webkit-scrollbar { display: none; }
@@ -1121,29 +1123,53 @@ th[data-sort] svg, th[data-sort] svg path {
   flex-shrink: 0;
   
   /* 非アクティブタブ（面と上部エッジの光で表現） */
-  border: none !important;
-  background-color: #242424 !important; /* 明確にタブバーより明るいグレーの箱 */
-  color: #888888 !important;
+  background-color: #2b3d41 !important;
+  color: var(--text-color) !important;
+  border: 1px solid transparent !important;
+  border-bottom: 1px solid var(--border-color) !important; /* 通常時は下側にインスペクターとの境界線を持たせる */
   border-radius: 8px 8px 0 0 !important;
+  opacity: 0.8 !important;
+  margin-right: 2px !important; /* タブ間の微細な隙間 */
+  margin-bottom: -1px !important; /* アクティブタブと同じく重ねる */
   padding: 6px 24px 6px 16px !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
-  transition: background-color 0.15s ease, color 0.15s ease !important;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease !important;
   height: 31px !important;
 }
 
 #tab-container .tab-item:not(.active):hover {
   background-color: #2a2a2a !important;
   color: #ececec !important;
+  opacity: 1 !important;
 }
 
 #tab-container .tab-item.active {
   /* アクティブタブ（メインコンテンツ領域とシームレスに結合） */
-  background-color: var(--bg-color, #131b1e) !important; /* メイン画面の背景色と完全に一致 */
+  background-color: var(--panel-bg) !important; /* インスペクターの背景色 #131b1e と完全に同期 */
   color: #ffffff !important;
-  box-shadow: inset 0 2px 0 #3b82f6 !important; /* 上部のアクセンライン */
-  margin-bottom: -1px !important; /* 1pxだけ被せて線を隠す */
+  border-left: 1px solid var(--border-color) !important;
+  border-right: 1px solid var(--border-color) !important;
+  border-top: 1px solid var(--border-color) !important;
+  border-bottom: 1px solid transparent !important; /* 下線を透明にして隙間を埋める準備 */
+  border-top-left-radius: 6px !important;
+  border-top-right-radius: 6px !important;
+  position: relative !important;
+  z-index: 10 !important; /* 最前面に浮かせる */
   padding-bottom: 7px !important;
-  z-index: 2 !important; /* 境界線より手前に表示する */
+  opacity: 1 !important;
+  margin-bottom: 0 !important;
+}
+
+/* アクティブタブの下の1pxの隙間を物理的に塞ぐ特効薬 */
+#tab-container .tab-item.active::after {
+  content: "";
+  position: absolute;
+  bottom: -2px; /* タブの下側に2px分はみ出させる */
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--panel-bg) !important; /* インスペクターと同じ背景色 */
+  z-index: 11;
 }
 
 /* ドラッグ＆ドロップ時のインジケーター（角丸の影響を受けない直線） */
