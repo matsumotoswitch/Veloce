@@ -612,7 +612,8 @@ input[type="range"]:focus {
   padding-left: 0;
 }
 
-#dir-tree .tree-item {
+#dir-tree .tree-item,
+#favorites-list .tree-item {
   display: flex;
   align-items: center;
   padding: 4px;
