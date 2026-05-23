@@ -847,8 +847,8 @@ class UIManager {
       const v2 = text2 ?? '-';
       if (v1 === '-' && v2 === '-') return ''; 
 
-      const tags1 = parse(String(v1));
-      const tags2 = parse(String(v2));
+      const tags1 = isParam ? [String(v1)] : parse(String(v1));
+      const tags2 = isParam ? [String(v2)] : parse(String(v2));
       const set1 = new Set(tags1);
       const set2 = new Set(tags2);
 
