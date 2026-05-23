@@ -1125,14 +1125,14 @@ th[data-sort] svg, th[data-sort] svg path {
   flex-shrink: 0;
   
   /* 非アクティブタブ（面と上部エッジの光で表現） */
-  background-color: #2b3d41 !important;
+  background-color: #000000 !important;
   color: var(--text-color) !important;
   border: 1px solid transparent !important;
-  border-bottom: 1px solid var(--border-color) !important; /* 通常時は下側にインスペクターとの境界線を持たせる */
+  border-bottom: 1px solid var(--border-color) !important; /* #2b3d41: 通常時は下側にインスペクターとの境界線を持たせる */
   border-radius: 8px 8px 0 0 !important;
   opacity: 0.8 !important;
   margin-right: 2px !important; /* タブ間の微細な隙間 */
-  margin-bottom: -1px !important; /* アクティブタブと同じく重ねる */
+  margin-bottom: 0 !important; /* 枠外へのめり込みを無くし、下線を確実に表示させる */
   padding: 6px 24px 6px 16px !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
   transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease !important;
