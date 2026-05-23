@@ -819,11 +819,15 @@ input[type="range"]:focus {
 }
 .modal-content { background-color: var(--panel-bg); border: 1px solid #0d1315; border-radius: var(--radius-lg); padding: 24px; box-shadow: 0 24px 48px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
 
+/* --- 共通: モーダル/ダイアログのタイトル --- */
 .modal-content h2,
 .dialog-box h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  font-size: 1.25em;
   color: var(--glow-gold);
-  font-size: 1.2em;
-  margin: 0 0 20px 0;
+  border-bottom: 1px solid var(--modal-border);
 }
 
 /* ダイアログやモーダルの閉じるボタン */
