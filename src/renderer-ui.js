@@ -133,6 +133,9 @@ class UIManager {
     };
     this.toastContainer = document.getElementById('toast-container');
     this.initCustomTooltip();
+
+    // スクロール時にツールチップを強制的に隠す
+    window.addEventListener('scroll', () => this.hideCustomTooltip(), true);
   }
 
   // タブのスクロール状態をチェックし、グラデーションの表示/非表示を切り替える
@@ -400,7 +403,9 @@ class UIManager {
 
   hideCustomTooltip() {
     this.isTooltipVisible = false;
-    this.tooltipEl.classList.remove('show');
+    if (this.tooltipEl) {
+      this.tooltipEl.classList.remove('show');
+    }
   }
 
   /**

@@ -125,6 +125,9 @@ async function navigateHistory(offset) {
 async function refreshFileList(showToast = false) {
   if (!appState.currentDirectory) return;
 
+  // 画面切り替え時に表示されたままのツールチップを強制消去
+  uiManager.hideCustomTooltip();
+
   if (showToast) {
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
   }
