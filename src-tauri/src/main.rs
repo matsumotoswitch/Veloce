@@ -9,6 +9,8 @@ use std::time::UNIX_EPOCH;
 use std::io::Read; // flate2のread_to_stringやバイナリ解析用
 use std::sync::Mutex;
 use tauri::Manager;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // --- データ構造の定義 ---
 #[derive(Serialize, Clone)]
@@ -671,7 +673,20 @@ async fn open_viewer(
         win_height = (win_height as f64 * scale) as u32;
     }
 
-    let label = format!("viewer_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    // パスから一意のハッシュを生成し、ウィンドウラベルにする
+    let label = if let Some(path) = &target_path {
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        format!("viewer_{}", hasher.finish())
+    } else {
+        format!("viewer_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis())
+    };
+
+    // 既に同じ画像のビューアーが開いている場合は、フォーカスを当てるだけで終了
+    if let Some(window) = app.get_window(&label) {
+        let _ = window.set_focus();
+        return Ok(());
+    }
 
     if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
         viewer_paths.insert(label.clone(), current_paths);
@@ -1047,7 +1062,17 @@ fn get_license_text() -> String {
 fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
     let path = std::path::Path::new(&old_path);
     let parent = path.parent().unwrap_or(std::path::Path::new(""));
-    let new_path = parent.join(new_name);
+
+    // --- 拡張子補完ロジック ---
+    let mut final_name = new_name.clone();
+    if !final_name.contains('.') {
+        if let Some(ext) = path.extension() {
+            final_name = format!("{}.{}", final_name, ext.to_string_lossy());
+        }
+    }
+    // --------------------------
+
+    let new_path = parent.join(&final_name);
 
     if new_path.exists() {
         let old_lower = old_path.to_lowercase();

@@ -383,10 +383,18 @@ class UIManager {
     this.isTooltipVisible = true;
     this.lastMouseX = x;
     this.lastMouseY = y;
-    this.tooltipEl.textContent = text;
+    if (this.tooltipEl.textContent !== text) {
+      this.tooltipEl.textContent = text;
+    }
+
+    // 前回の未実行のアニメーションフレームがあればキャンセル（重複実行による負荷を防止）
+    if (this.tooltipRafId) {
+      cancelAnimationFrame(this.tooltipRafId);
+    }
 
     // DOMにテキストが反映された後にサイズを取得して位置を調整する
-    requestAnimationFrame(() => {
+    this.tooltipRafId = requestAnimationFrame(() => {
+      this.tooltipRafId = null; // 実行時にIDをクリア
       const rect = this.tooltipEl.getBoundingClientRect();
       let posX = x + 15;
       let posY = y + 15;
@@ -403,6 +411,12 @@ class UIManager {
 
   hideCustomTooltip() {
     this.isTooltipVisible = false;
+    
+    if (this.tooltipRafId) {
+      cancelAnimationFrame(this.tooltipRafId);
+      this.tooltipRafId = null;
+    }
+
     if (this.tooltipEl) {
       this.tooltipEl.classList.remove('show');
     }
@@ -471,6 +485,11 @@ class UIManager {
    */
   showPrompt(message, defaultValue = '', selectBaseNameOnly = false) {
     return new Promise((resolve) => {
+      // ファイルリネーム時の拡張子保護用
+      const originalExt = (selectBaseNameOnly && defaultValue.lastIndexOf('.') > 0)
+        ? defaultValue.slice(defaultValue.lastIndexOf('.'))
+        : '';
+
       const overlay = document.createElement('div');
       overlay.className = 'dialog-overlay';
 
@@ -551,12 +570,30 @@ class UIManager {
         inputEl.select();
       }
 
-      okBtn.addEventListener('click', () => {
+      const finishPrompt = () => {
         if (!okBtn.disabled) {
           cleanup();
-          resolve(inputEl.value);
+          let finalValue = inputEl.value;
+
+          // --- 拡張子保護のガードレール ---
+          if (selectBaseNameOnly && originalExt) {
+            if (!finalValue.toLowerCase().endsWith(originalExt.toLowerCase())) {
+              if (finalValue.includes('.')) {
+                // 別の拡張子に変更された場合は、元の拡張子で上書きする
+                finalValue = finalValue.slice(0, finalValue.lastIndexOf('.')) + originalExt;
+              } else {
+                // 拡張子が完全に削除された場合は補完する
+                finalValue += originalExt;
+              }
+            }
+          }
+          // --------------------------------
+
+          resolve(finalValue);
         }
-      });
+      };
+
+      okBtn.addEventListener('click', finishPrompt);
 
       cancelBtn.addEventListener('click', () => {
         cleanup();
@@ -565,10 +602,8 @@ class UIManager {
 
       inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-          if (!okBtn.disabled) {
-            cleanup();
-            resolve(inputEl.value);
-          }
+          e.preventDefault();
+          finishPrompt();
         } else if (e.key === 'Escape') {
           cleanup();
           resolve(null);
@@ -1176,7 +1211,7 @@ class UIManager {
           img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
           if (!appState.pendingThumbnails.has(file.path)) {
             appState.pendingThumbnails.add(file.path);
-            appState.thumbnailRequestQueue.push({ filePath: file.path, requestRenderId: appState.currentRenderId || Date.now(), img });
+            appState.thumbnailRequestQueue.push({ filePath: file.path, requestRenderId: appState.currentRenderId || Date.now() });
           }
       }
       fragment.appendChild(img);

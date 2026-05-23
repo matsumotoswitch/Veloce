@@ -638,7 +638,8 @@ window.processNextTask = function processNextTask() {
 
       // 仮想スクロール対応: 現在DOMに存在しているものを優先して探す
       let targetIndex = appState.thumbnailRequestQueue.findIndex(req => {
-        return document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(req.filePath)}"]`) !== null;
+        const safePath = req.filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        return document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`) !== null;
       });
       if (targetIndex === -1) targetIndex = 0;
 
@@ -679,7 +680,8 @@ window.processNextTask = function processNextTask() {
       const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
       appState.thumbnailUrls.set(targetFile, finalUrl);
 
-      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
+      const safePath = targetFile.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
       if (currentImg) currentImg.src = finalUrl;
 
       const fileObj = appState.files.find(f => f.path === targetFile);
@@ -692,7 +694,8 @@ window.processNextTask = function processNextTask() {
       const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
       appState.thumbnailUrls.set(targetFile, fallbackUrl);
 
-      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${CSS.escape(targetFile)}"]`);
+      const safePath = targetFile.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
       if (currentImg) currentImg.src = fallbackUrl;
 
       const fileObj = appState.files.find(f => f.path === targetFile);
