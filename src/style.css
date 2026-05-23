@@ -1422,3 +1422,12 @@ html.viewer-html, .viewer-body {
 .icon-color-purple  { color: #a855f7; }
 .icon-color-pink    { color: #ec4899; }
 .icon-color-cyan    { color: #06b6d4; }
+
+/* 全画面モーダルの背景からぼかしを排除し、パフォーマンス優先のソリッドな暗色に統一 */
+.modal,
+.dialog-overlay,
+#help-overlay {
+  background-color: rgba(10, 14, 17, 0.94) !important; /* Veloceのテーマに合わせた、ほぼ黒に近い重厚な透過色 */
+  backdrop-filter: none !important; /* 重いぼかし処理を完全にカット */
+  -webkit-backdrop-filter: none !important;
+}

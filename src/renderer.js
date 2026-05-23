@@ -1132,9 +1132,6 @@ function toggleHelpOverlay(forceShow) {
   overlay.style.left = '0';
   overlay.style.width = '100vw';
   overlay.style.height = '100vh';
-  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  overlay.style.backdropFilter = 'blur(10px)';
-  overlay.style.webkitBackdropFilter = 'blur(10px)'; 
   overlay.style.zIndex = '9999';
   overlay.style.display = 'flex';
   overlay.style.justifyContent = 'center';
