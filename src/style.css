@@ -282,36 +282,6 @@ body.is-resizing #favorites-section {
   background-color: var(--accent-color);
 }
 
-/* --- お気に入りアイコン選択UI --- */
-.icon-selector {
-  display: flex;
-  gap: 8px;
-}
-
-.icon-selector-item {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  border: 1px solid var(--modal-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text-color);
-  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
-}
-
-.icon-selector-item:hover {
-  background-color: rgba(37, 126, 140, 0.15);
-  border-color: var(--accent-color);
-}
-
-.icon-selector-item.selected {
-  border-color: var(--accent-color);
-  background-color: rgba(37, 126, 140, 0.2);
-  color: var(--glow-gold);
-}
-
 #center-pane {
   display: flex;
   flex-direction: column;
@@ -1384,7 +1354,7 @@ html.viewer-html, .viewer-body {
   margin-bottom: 16px;
 }
 
-.icon-btn {
+.icon-grid .icon-btn {
   background: transparent;
   border: 2px solid transparent;
   border-radius: 6px;
@@ -1397,11 +1367,11 @@ html.viewer-html, .viewer-body {
   justify-content: center;
 }
 
-.icon-btn:hover {
+.icon-grid .icon-btn:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.icon-btn.active {
+.icon-grid .icon-btn.active {
   border-color: #3b82f6;
   background: rgba(59, 130, 246, 0.2);
 }
