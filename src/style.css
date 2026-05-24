@@ -125,11 +125,26 @@ body.is-resizing .app-content {
 .dialog-message { margin-bottom: 20px; }
 .dialog-message.has-input { margin-bottom: 10px; }
 
+.dialog-path {
+  font-size: 12px;
+  color: var(--text-color);
+  opacity: 0.6;
+  word-break: break-all;
+  margin-bottom: 16px;
+}
+
+.dialog-input-group {
+  display: flex;
+  flex-direction: column;
+}
+
 .dialog-buttons {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
 }
+
+.dialog-buttons--wrap { flex-wrap: wrap; }
 
 .dialog-btn {
   padding: 6px 16px;
@@ -1329,13 +1344,123 @@ th[data-sort] svg, th[data-sort] svg path {
 }
 
 /* --- Viewer Page Styles --- */
-html.viewer-html, .viewer-body {
-  margin: 0; padding: 0; width: 100%; height: 100%;
-  background-color: #111; overflow: hidden;
-  display: flex; justify-content: center; align-items: center;
+html.viewer-html,
+.viewer-body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #131b1e;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-sizing: border-box;
+  border: none;
 }
+
+.viewer-body.viewer-body--align-center { justify-content: center; align-items: center; }
+.viewer-body.viewer-body--align-top { justify-content: center; align-items: flex-start; }
+.viewer-body.viewer-body--align-left { justify-content: flex-start; align-items: center; }
+.viewer-body.viewer-body--align-top-left { justify-content: flex-start; align-items: flex-start; }
+
 .viewer-body ::-webkit-scrollbar { display: none; }
-.viewer-body #viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; -webkit-user-drag: none; }
+
+.viewer-body #viewer-img {
+  flex-shrink: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+}
+
+.viewer-body #viewer-img.is-zoomed {
+  max-width: none;
+  max-height: none;
+}
+
+.viewer-body #viewer-img.mode-immersive {
+  max-width: none;
+  max-height: none;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+}
+
+.viewer-body #viewer-img.mode-immersive.is-swapped {
+  width: 100vh;
+  height: 100vw;
+}
+
+.viewer-body #viewer-img.mode-fit-window {
+  max-width: none;
+  max-height: none;
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+}
+
+.viewer-body #viewer-img.mode-fit-window.is-swapped {
+  width: 100vh;
+  height: 100vw;
+}
+
+.viewer-body #viewer-img.mode-default {
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+  max-width: 100vw;
+  max-height: 100vh;
+  width: 100vw;
+  height: auto;
+}
+
+.viewer-body #viewer-img.mode-default.is-swapped {
+  max-width: 100vh;
+  max-height: 100vw;
+  width: 100vh;
+}
+
+.viewer-body #border-overlay.border-hidden { border: none !important; }
+
+.viewer-body #window-controls {
+  position: fixed;
+  top: 1px;
+  right: 1px;
+  display: flex;
+  z-index: 9999;
+  visibility: visible;
+  transition: opacity 0.2s;
+}
+
+.viewer-body #window-controls.controls-hidden { opacity: 0; }
+.viewer-body #window-controls.fs-hidden { display: none; }
+
+.window-ctrl-btn {
+  width: 46px;
+  height: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: default;
+  transition: background-color 0.1s;
+}
+
+.window-ctrl-btn--min,
+.window-ctrl-btn--max { background-color: rgba(37, 126, 140, 0.4); }
+
+.window-ctrl-btn--min:hover,
+.window-ctrl-btn--max:hover { background-color: #257e8c; }
+
+.window-ctrl-btn--close { background-color: rgba(224, 82, 99, 0.4); }
+.window-ctrl-btn--close:hover { background-color: #e05263; }
+
+.unsharp-svg {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
 
 /* --- Navigation Buttons --- */
 .icon-btn:disabled {

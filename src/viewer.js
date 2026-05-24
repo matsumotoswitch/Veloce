@@ -41,7 +41,7 @@ window.addEventListener('focus', () => {
 function initUnsharpFilter() {
   const svgNS = "http://www.w3.org/2000/svg";
   const svgElement = document.createElementNS(svgNS, "svg");
-  svgElement.style.cssText = "position: absolute; width: 0; height: 0; pointer-events: none;";
+  svgElement.setAttribute("class", "unsharp-svg");
 
   const unsharpFilter = document.createElementNS(svgNS, "filter");
   unsharpFilter.id = "unsharp-filter";
@@ -64,39 +64,6 @@ function initUnsharpFilter() {
   document.body.appendChild(svgElement);
 }
 initUnsharpFilter();
-
-// 画像をビューポート全体にフィットさせるための基本スタイルを適用する。;
-document.documentElement.style.overflow = 'hidden';
-document.body.style.margin = '0';
-document.body.style.padding = '0';
-document.body.style.width = '100%';
-document.body.style.height = '100%';
-document.body.style.backgroundColor = '#131b1e';
-document.body.style.display = 'flex';
-document.body.style.justifyContent = 'center';
-document.body.style.alignItems = 'center';
-document.body.style.boxSizing = 'border-box';
-document.body.style.border = 'none'; // 画像サイズに影響を与えないためborderは外側に描画する
-
-// inset box-shadow だと画像の下に隠れてしまうため、最前面にボーダー用の要素を配置する
-const borderOverlay = document.createElement('div');
-borderOverlay.id = 'border-overlay';
-borderOverlay.style.position = 'fixed';
-borderOverlay.style.top = '0';
-borderOverlay.style.left = '0';
-borderOverlay.style.width = '100vw';
-borderOverlay.style.height = '100vh';
-borderOverlay.style.pointerEvents = 'none'; // マウス操作（ドラッグ等）を透過して邪魔しない
-borderOverlay.style.boxSizing = 'border-box';
-borderOverlay.style.border = viewerState.isBorderVisible ? '1px solid var(--accent-color)' : 'none';
-borderOverlay.style.zIndex = '9998'; // コントロールボタンの下、画像の上に配置
-document.body.appendChild(borderOverlay);
-
-// 初期状態は画面にフィットさせる
-if (viewerUI.elements.viewerImg) {
-  viewerUI.elements.viewerImg.style.maxWidth = '100%';
-  viewerUI.elements.viewerImg.style.maxHeight = '100%';
-}
 
 window.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -200,21 +167,39 @@ window.addEventListener('DOMContentLoaded', () => {
 // 2. Window & View Management
 // ============================================================================
 
+const VIEWER_ALIGN_CLASSES = [
+  'viewer-body--align-center',
+  'viewer-body--align-top',
+  'viewer-body--align-left',
+  'viewer-body--align-top-left'
+];
+
+function setViewerBodyAlignment(alignment) {
+  document.body.classList.remove(...VIEWER_ALIGN_CLASSES);
+  document.body.classList.add(`viewer-body--align-${alignment}`);
+}
+
+function clearViewerImgLayoutClasses(img) {
+  img.classList.remove('is-zoomed', 'is-swapped', 'mode-immersive', 'mode-fit-window', 'mode-default');
+  img.style.width = '';
+  img.style.height = '';
+  img.style.margin = '';
+}
+
 /**
  * 画像のズーム状態（100%表示か、画面フィットか）を設定する。
  * @param {boolean} zoomed - true: 100%表示, false: 画面にフィット
  */
 function setZoomState(zoomed) {
   viewerState.isZoomed = zoomed;
+  const img = viewerUI.elements.viewerImg;
   if (viewerState.isZoomed) {
-    // 100%表示（ズーム）に切り替え
-    viewerUI.elements.viewerImg.style.maxWidth = 'none';
-    viewerUI.elements.viewerImg.style.maxHeight = 'none';
-    viewerUI.elements.viewerImg.style.width = `${viewerUI.elements.viewerImg.naturalWidth}px`;
-    viewerUI.elements.viewerImg.style.height = `${viewerUI.elements.viewerImg.naturalHeight}px`;
+    clearViewerImgLayoutClasses(img);
+    img.classList.add('is-zoomed');
+    img.style.width = `${img.naturalWidth}px`;
+    img.style.height = `${img.naturalHeight}px`;
     viewerUI.setCursor('grab');
   } else {
-    // 画面フィットまたはデフォルト表示に切り替え
     applyFitState();
   }
   updateFullscreenStyles();
@@ -260,46 +245,22 @@ function resetZoomAndFit() {
 function applyFitState() {
   if (viewerState.isZoomed) return;
 
+  const img = viewerUI.elements.viewerImg;
   const isSwapped = isRotationSwapped();
-  if (viewerState.isImmersiveArranged) {
-    viewerUI.elements.viewerImg.style.maxWidth = 'none';
-    viewerUI.elements.viewerImg.style.maxHeight = 'none';
-    viewerUI.elements.viewerImg.style.width = isSwapped ? '100vh' : '100vw';
-    viewerUI.elements.viewerImg.style.height = isSwapped ? '100vw' : '100vh';
-    viewerUI.elements.viewerImg.style.objectFit = 'cover';
-  } else if (viewerState.isFitToWindow) {
-    viewerUI.elements.viewerImg.style.maxWidth = 'none';
-    viewerUI.elements.viewerImg.style.maxHeight = 'none';
-    viewerUI.elements.viewerImg.style.width = isSwapped ? '100vh' : '100vw';
-    viewerUI.elements.viewerImg.style.height = isSwapped ? '100vw' : '100vh';
-    viewerUI.elements.viewerImg.style.objectFit = 'contain';
-  } else {
-    // デフォルト（画面内に収める）
-    viewerUI.elements.viewerImg.style.minWidth = '0';
-    viewerUI.elements.viewerImg.style.minHeight = '0';
-    viewerUI.elements.viewerImg.style.objectFit = 'contain';
 
-    if (isSwapped) {
-      viewerUI.elements.viewerImg.style.maxWidth = '100vh';
-      viewerUI.elements.viewerImg.style.maxHeight = '100vw';
-      viewerUI.elements.viewerImg.style.width = '100vh';
-      viewerUI.elements.viewerImg.style.height = 'auto';
-    } else {
-      viewerUI.elements.viewerImg.style.maxWidth = '100vw';
-      viewerUI.elements.viewerImg.style.maxHeight = '100vh';
-      viewerUI.elements.viewerImg.style.width = '100vw';
-      viewerUI.elements.viewerImg.style.height = 'auto';
-    }
+  clearViewerImgLayoutClasses(img);
+  img.classList.toggle('is-swapped', isSwapped);
+
+  if (viewerState.isImmersiveArranged) {
+    img.classList.add('mode-immersive');
+  } else if (viewerState.isFitToWindow) {
+    img.classList.add('mode-fit-window');
+  } else {
+    img.classList.add('mode-default');
   }
-  
+
   viewerUI.setCursor('default');
-  document.body.style.overflowX = 'hidden';
-  document.body.style.overflowY = 'hidden';
-  document.documentElement.style.overflowX = 'hidden';
-  document.documentElement.style.overflowY = 'hidden';
-  document.body.style.justifyContent = 'center';
-  document.body.style.alignItems = 'center';
-  viewerUI.elements.viewerImg.style.margin = '0';
+  setViewerBodyAlignment('center');
 
   window.scrollTo(0, 0);
   document.body.scrollTop = 0;
@@ -321,9 +282,9 @@ window.addEventListener('resize', debounce(async () => {
     if (isFs && !viewerState.isFullscreen) {
       viewerState.isFullscreen = true;
       const overlay = document.getElementById('border-overlay');
-      if (overlay) overlay.style.border = 'none';
+      if (overlay) overlay.classList.add('border-hidden');
       const controls = document.getElementById('window-controls');
-      if (controls) controls.style.display = 'none';
+      if (controls) controls.classList.add('fs-hidden');
     } else if (!isFs && viewerState.isFullscreen) {
       viewerState.isFullscreen = false;
       viewerUI.applyBorderVisibility();
@@ -337,31 +298,24 @@ window.addEventListener('resize', debounce(async () => {
  * スクロールバーの表示・非表示や、画像の配置を決定する。
  */
 function updateFullscreenStyles() {
+  const img = viewerUI.elements.viewerImg;
   if (!viewerState.isZoomed) {
-    document.body.style.justifyContent = 'center';
-    document.body.style.alignItems = 'center';
-    document.body.style.overflowX = 'hidden';
-    document.body.style.overflowY = 'hidden';
-    viewerUI.elements.viewerImg.style.margin = '0';
+    setViewerBodyAlignment('center');
+    img.style.margin = '0';
     window.scrollTo(0, 0);
     return;
   }
 
-  // ドラッグでスクロール操作を行うため、スクロールバーは常に非表示にします。
-  document.body.style.overflow = 'hidden';
-
-  // 回転による視覚的サイズとレイアウトサイズのズレを margin で補正する
   const isSwapped = isRotationSwapped();
-  
+
   if (isSwapped) {
-    const marginY = (viewerUI.elements.viewerImg.naturalWidth - viewerUI.elements.viewerImg.naturalHeight) / 2;
-    const marginX = (viewerUI.elements.viewerImg.naturalHeight - viewerUI.elements.viewerImg.naturalWidth) / 2;
-    viewerUI.elements.viewerImg.style.margin = `${marginY}px ${marginX}px`;
+    const marginY = (img.naturalWidth - img.naturalHeight) / 2;
+    const marginX = (img.naturalHeight - img.naturalWidth) / 2;
+    img.style.margin = `${marginY}px ${marginX}px`;
   } else {
-    viewerUI.elements.viewerImg.style.margin = '0';
+    img.style.margin = '0';
   }
 
-  // 補正後のサイズ（レイアウト上のサイズ＝視覚的なサイズ）
   const { width: imgWidth, height: imgHeight } = getNaturalDimensions();
 
   const winW = window.innerWidth;
@@ -371,22 +325,13 @@ function updateFullscreenStyles() {
   const overflowY = imgHeight > winH;
 
   if (!overflowX && !overflowY) {
-    // 上下左右に余白が発生する場合
-    document.body.style.justifyContent = 'center';
-    document.body.style.alignItems = 'center';
+    setViewerBodyAlignment('center');
   } else if (!overflowX && overflowY) {
-    // 左右にのみ余白が発生する場合 -> 画像最上部が見えるように左右中央
-    document.body.style.justifyContent = 'center';
-    document.body.style.alignItems = 'flex-start';
+    setViewerBodyAlignment('top');
   } else if (overflowX && !overflowY) {
-    // 上下にのみ余白が発生する場合 -> 画像最左部が見えるように上下中央
-    document.body.style.justifyContent = 'flex-start';
-    document.body.style.alignItems = 'center';
+    setViewerBodyAlignment('left');
   } else {
-    // 余白がない場合（両方はみ出す場合）
-    // Flexboxのcenterだとスクロールで端に行けなくなるためflex-startとし、スクロール位置で中央を表現する
-    document.body.style.justifyContent = 'flex-start';
-    document.body.style.alignItems = 'flex-start';
+    setViewerBodyAlignment('top-left');
     document.body.scrollLeft = (imgWidth - winW) / 2;
     document.body.scrollTop = (imgHeight - winH) / 2;
   }
@@ -446,7 +391,7 @@ async function getImagePath(index) {
 }
 
 let currentViewerImg = document.getElementById('viewer-img');
-if (currentViewerImg) currentViewerImg.style.flexShrink = '0';
+if (currentViewerImg) currentViewerImg.classList.add('mode-default');
 
 let isViewerWindowShown = false; // 初回表示フラグ
 let imageLoadSequence = 0;       // 非同期ロード競合防止用
@@ -458,7 +403,6 @@ function swapImageElement(newImg, sequenceId) {
   if (currentViewerImg === newImg) return;
   
   newImg.id = 'viewer-img';
-  newImg.style.flexShrink = '0'; // Flexboxによる自動縮小を防ぎ、回転時の正しいアスペクト比を維持する
   viewerUI.elements.viewerImg = newImg;
   
   const borderOverlay = document.getElementById('border-overlay');
@@ -637,55 +581,29 @@ let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
 function createWindowControls() {
   const controlsContainer = document.createElement('div');
   controlsContainer.id = 'window-controls';
-  controlsContainer.style.position = 'fixed';
-  controlsContainer.style.top = '1px'; // 青い枠線(1px)の内側に配置
-  controlsContainer.style.right = '1px';
-  controlsContainer.style.display = 'flex';
-  controlsContainer.style.zIndex = '9999'; // 画像より手前になるよう最前面に配置
-  controlsContainer.style.visibility = 'visible'; // 確実に表示されるように設定
-  controlsContainer.style.transition = 'opacity 0.2s';
-  controlsContainer.style.opacity = viewerState.isBorderVisible ? '1' : '0';
+  if (!viewerState.isBorderVisible) controlsContainer.classList.add('controls-hidden');
   // ドラッグ操作や画像の切り替え操作と干渉しないようにする
   ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(evt => {
     controlsContainer.addEventListener(evt, (e) => e.stopPropagation());
   });
 
-  const buttonStyle = `
-    width: 46px;
-    height: 30px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    cursor: default;
-    transition: background-color 0.1s;
-  `;
-
   // 最小化ボタン
   const minBtn = document.createElement('div');
-  minBtn.style.cssText = buttonStyle;
-  minBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
+  minBtn.className = 'window-ctrl-btn window-ctrl-btn--min';
   minBtn.innerHTML = `<svg viewBox="0 0 10 1" width="10" height="1"><rect width="10" height="1" fill="#fff"/></svg>`;
-  minBtn.onmouseenter = () => minBtn.style.backgroundColor = '#257e8c';
-  minBtn.onmouseleave = () => minBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
   minBtn.onclick = () => window.veloceAPI.minimizeViewer();
 
   // 最大化/元に戻すボタン
   const maxBtn = document.createElement('div');
   maxBtn.id = 'window-max-btn';
-  maxBtn.style.cssText = buttonStyle;
-  maxBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
+  maxBtn.className = 'window-ctrl-btn window-ctrl-btn--max';
   maxBtn.innerHTML = ViewerUI.ICONS.MAXIMIZE;
-  maxBtn.onmouseenter = () => maxBtn.style.backgroundColor = '#257e8c';
-  maxBtn.onmouseleave = () => maxBtn.style.backgroundColor = 'rgba(37, 126, 140, 0.4)';
   maxBtn.onclick = () => window.veloceAPI.maximizeViewer();
 
   // 閉じるボタン
   const closeBtn = document.createElement('div');
-  closeBtn.style.cssText = buttonStyle;
-  closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.4)';
+  closeBtn.className = 'window-ctrl-btn window-ctrl-btn--close';
   closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="#fff" stroke-width="1"/></svg>`;
-  closeBtn.onmouseenter = () => closeBtn.style.backgroundColor = '#e05263';
-  closeBtn.onmouseleave = () => closeBtn.style.backgroundColor = 'rgba(224, 82, 99, 0.4)';
   closeBtn.onclick = () => {
     if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };
@@ -697,6 +615,7 @@ function createWindowControls() {
 }
 
 createWindowControls();
+viewerUI.applyBorderVisibility();
 
 // ============================================================================
 // 5. Event Handlers (Mouse & Keyboard)

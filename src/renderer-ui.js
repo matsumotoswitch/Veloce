@@ -510,8 +510,7 @@ class UIManager {
       warningEl.className = 'dialog-warning';
 
       const inputContainer = document.createElement('div');
-      inputContainer.style.display = 'flex';
-      inputContainer.style.flexDirection = 'column';
+      inputContainer.className = 'dialog-input-group';
       inputContainer.appendChild(inputEl);
       inputContainer.appendChild(warningEl);
 
@@ -631,8 +630,7 @@ class UIManager {
       messageEl.innerHTML = `宛先に同じ名前のファイルが <strong>${conflictCount}件</strong> 存在します。<br>どのように処理しますか？`;
 
       const buttonsDiv = document.createElement('div');
-      buttonsDiv.className = 'dialog-buttons';
-      buttonsDiv.style.flexWrap = 'wrap';
+      buttonsDiv.className = 'dialog-buttons dialog-buttons--wrap';
 
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'dialog-btn cancel';
@@ -709,7 +707,7 @@ class UIManager {
       messageEl.innerHTML = `フォルダ「<strong>${folderName}</strong>」は存在しません。${canCloseTab ? '<br>このタブを閉じますか？' : ''}`;
 
       const pathEl = document.createElement('div');
-      pathEl.style.cssText = 'font-size: 12px; color: var(--text-muted, #888); word-break: break-all; margin-bottom: 16px;';
+      pathEl.className = 'dialog-path';
       pathEl.textContent = path;
 
       const buttonsDiv = document.createElement('div');

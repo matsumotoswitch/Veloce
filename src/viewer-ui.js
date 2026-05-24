@@ -60,11 +60,11 @@ class ViewerUI {
   applyBorderVisibility() {
     if (this.state.isFullscreen) return;
     const overlay = document.getElementById('border-overlay');
-    if (overlay) overlay.style.border = this.state.isBorderVisible ? '1px solid var(--accent-color)' : 'none';
+    if (overlay) overlay.classList.toggle('border-hidden', !this.state.isBorderVisible);
     const controls = document.getElementById('window-controls');
     if (controls) {
-      controls.style.display = 'flex';
-      controls.style.opacity = this.state.isBorderVisible ? '1' : '0';
+      controls.classList.toggle('controls-hidden', !this.state.isBorderVisible);
+      controls.classList.remove('fs-hidden');
     }
   }
   
