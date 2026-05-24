@@ -8,6 +8,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
 /**
  * @typedef {Object} VeloceAPI
  * @property {() => Promise<string[]>} getDrives
+ * @property {(path: string) => Promise<boolean>} pathExists
  * @property {(path: string) => Promise<void>} loadDirectory
  * @property {(callback: (payload: {path: string, files: import('./renderer-state.js').ImageFile[], is_complete: boolean}) => void) => void} onDirectoryChunk
  * @property {(dirPath: string) => Promise<Array<{name: string, path: string}>>} getFolders
@@ -60,6 +61,12 @@ window.veloceAPI = {
    * @returns {Promise<Array<string>>} ドライブパスの配列
    */
   getDrives: () => invoke('get_drives'),
+  /**
+   * 指定されたパスのフォルダが存在するかを確認します。
+   * @param {string} path - 確認するディレクトリのパス。
+   * @returns {Promise<boolean>}
+   */
+  pathExists: (path) => invoke('path_exists', { path }),
   /**
    * 指定されたパスのディレクトリのプログレッシブ読み込みを開始します。
    * 結果は onDirectoryChunk イベントで受信します。

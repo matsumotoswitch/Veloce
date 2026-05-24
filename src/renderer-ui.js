@@ -690,6 +690,84 @@ class UIManager {
   }
 
   /**
+   * 存在しないフォルダのタブに切り替えようとした際のダイアログを表示します。
+   * @param {string} path
+   * @param {boolean} canCloseTab
+   * @returns {Promise<'close'|'cancel'|'ok'>}
+   */
+  showMissingFolderDialog(path, canCloseTab) {
+    const folderName = path.split('\\').pop() || path.split('/').pop() || path;
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'dialog-overlay';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog-box';
+
+      const messageEl = document.createElement('div');
+      messageEl.className = 'dialog-message';
+      messageEl.innerHTML = `フォルダ「<strong>${folderName}</strong>」は存在しません。${canCloseTab ? '<br>このタブを閉じますか？' : ''}`;
+
+      const pathEl = document.createElement('div');
+      pathEl.style.cssText = 'font-size: 12px; color: var(--text-muted, #888); word-break: break-all; margin-bottom: 16px;';
+      pathEl.textContent = path;
+
+      const buttonsDiv = document.createElement('div');
+      buttonsDiv.className = 'dialog-buttons';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'dialog-btn cancel';
+      cancelBtn.textContent = canCloseTab ? 'キャンセル' : 'OK';
+
+      buttonsDiv.appendChild(cancelBtn);
+
+      if (canCloseTab) {
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'dialog-btn danger';
+        closeBtn.textContent = 'タブを閉じる';
+        buttonsDiv.appendChild(closeBtn);
+
+        closeBtn.addEventListener('click', () => {
+          document.removeEventListener('keydown', keydownHandler);
+          cleanup();
+          resolve('close');
+        });
+      }
+
+      dialog.appendChild(messageEl);
+      dialog.appendChild(pathEl);
+      dialog.appendChild(buttonsDiv);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+
+      const cleanup = () => {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+      };
+
+      const keydownHandler = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          document.removeEventListener('keydown', keydownHandler);
+          cleanup();
+          resolve(canCloseTab ? 'cancel' : 'ok');
+        }
+      };
+
+      document.addEventListener('keydown', keydownHandler);
+
+      cancelBtn.addEventListener('click', () => {
+        document.removeEventListener('keydown', keydownHandler);
+        cleanup();
+        resolve(canCloseTab ? 'cancel' : 'ok');
+      });
+
+      cancelBtn.focus();
+    });
+  }
+
+  /**
    * カスタム確認ダイアログを表示します。
    * @param {string} message 
    * @returns {Promise<boolean>}
@@ -1058,6 +1136,14 @@ class UIManager {
     }
 
     if (this.elements.fileListBody) this.elements.fileListBody.innerHTML = '';
+    
+    // フォルダ選択時と同様に、タブ切り替え時等も以前のサムネイル表示を確実にクリアする
+    if (this.elements.thumbnailGrid) {
+      const content = this.elements.thumbnailGrid.querySelector('.virtual-content');
+      if (content) content.innerHTML = '';
+      const spacer = this.elements.thumbnailGrid.querySelector('.virtual-spacer');
+      if (spacer) spacer.style.height = '0px';
+    }
 
     const fileListContainer = document.getElementById('center-top');
     if (resetScroll) {
@@ -1138,6 +1224,8 @@ class UIManager {
     if (!appState.filteredFiles || appState.filteredFiles.length === 0) {
       content.innerHTML = '';
       spacer.style.height = '0px';
+      this.lastGridStartIndex = -1;
+      this.lastGridEndIndex = -1;
       return;
     }
 

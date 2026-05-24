@@ -1358,15 +1358,44 @@ function showHistoryMenu(event, direction, btnElement) {
   menu.style.display = 'block';
 }
 
+/**
+ * 指定されたパスのフォルダが存在するかを確認します。
+ * @param {string} path
+ * @returns {Promise<boolean>}
+ */
+async function checkPathExists(path) {
+  if (!path || path === 'PC') return true;
+  if (!window.veloceAPI.pathExists) return true;
+  try {
+    return await window.veloceAPI.pathExists(path);
+  } catch (e) {
+    console.warn('Failed to check path existence:', e);
+    return true;
+  }
+}
+
 // --- タブ操作 ---
 window.onTabClick = async (index) => {
   if (index === appState.activeTabIndex) return;
+
+  const tab = appState.tabs[index];
+  if (!tab) return;
+
+  const exists = await checkPathExists(tab.path);
+  if (!exists) {
+    const canCloseTab = appState.tabs.length > 1;
+    const action = await uiManager.showMissingFolderDialog(tab.path, canCloseTab);
+    if (action === 'close') {
+      await window.onTabClose(index);
+    }
+    return;
+  }
+
   updateCurrentTabState();
   
   appState.activeTabIndex = index;
   uiManager.renderTabs();
   
-  const tab = appState.tabs[index];  
   appState.searchQuery = tab.searchQuery || '';  
   if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;  
   if (tab.sortConfig) { appState.sortConfig = JSON.parse(JSON.stringify(tab.sortConfig)); localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig)); updateSortIndicators(); }

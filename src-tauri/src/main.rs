@@ -125,6 +125,15 @@ fn get_drives() -> Vec<String> {
 }
 
 #[tauri::command]
+fn path_exists(path: String) -> bool {
+    if path == "PC" {
+        return true;
+    }
+    let path_obj = std::path::Path::new(&path);
+    path_obj.exists() && path_obj.is_dir()
+}
+
+#[tauri::command]
 fn load_directory(window: tauri::Window, target_path: String) -> Result<(), String> {
     let path_clone = target_path.clone();
     let app_clone = window.app_handle();
@@ -1441,6 +1450,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_drives,
+            path_exists,
             load_directory,
             get_full_metadata_batch,
             parse_metadata,
