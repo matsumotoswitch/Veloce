@@ -1072,14 +1072,14 @@ fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
     let path = std::path::Path::new(&old_path);
     let parent = path.parent().unwrap_or(std::path::Path::new(""));
 
-    // --- 拡張子補完ロジック ---
+    // フロントエンド側で拡張子が省略された場合、元のファイル拡張子を自動的に補完する保護ロジック。
+    // これにより、ユーザーがファイル名のみを変更した際に誤って拡張子を失うことを防ぎます。
     let mut final_name = new_name.clone();
     if !final_name.contains('.') {
         if let Some(ext) = path.extension() {
             final_name = format!("{}.{}", final_name, ext.to_string_lossy());
         }
     }
-    // --------------------------
 
     let new_path = parent.join(&final_name);
 
@@ -1408,7 +1408,9 @@ fn main() {
                         if !current_files.contains_key(path_str) {
                             let _ = app_handle.emit_all("file-removed", path_str.clone());
 
-                            // --- 追加: キャッシュの自動クリーンアップ処理 ---
+                            // ファイル削除検知時のキャッシュ自動クリーンアップ:
+                            // 対象ファイルに紐づくサムネイル画像およびメタデータJSONのキャッシュファイルを
+                            // MD5ハッシュベースで特定し、ストレージ容量の無駄遣いを防ぐために即時削除します。
                             if let Some(data_dir) = get_veloce_data_dir() {
                                 let cache_file_name = format!("{}_{}", path_str, mtime);
                                 let digest = md5::compute(cache_file_name.as_bytes());
@@ -1419,7 +1421,6 @@ fn main() {
                                 let _ = std::fs::remove_file(thumb_path);
                                 let _ = std::fs::remove_file(meta_path);
                             }
-                            // ------------------------------------------
                         }
                     }
 

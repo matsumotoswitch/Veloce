@@ -1500,7 +1500,12 @@ async function renderMetadata(file) {
       });
     });
 
-    // --- 【追加】ドラッグ選択コピー時のカンマ自動挿入ロジック ---
+    /**
+     * ドラッグ選択コピー時のフォーマット調整:
+     * 複数タグを選択してコピーした際、UI上で視覚的に分離されているタグ要素間に
+     * カンマとスペース（", "）を自動挿入することで、テキストとして貼り付けた際の
+     * プロンプトとしての再利用性を向上させます。
+     */
     const newPromptLooks = [];
     if (container) newPromptLooks.push(...container.querySelectorAll('.prompt-look'));
 
@@ -1525,7 +1530,6 @@ async function renderMetadata(file) {
         e.preventDefault();
       });
     });
-    // --- ここまで ---
   } catch (error) {
     container.innerHTML = `<div style="color:var(--danger-red); padding:10px; font-size:0.9em; border:1px solid var(--danger-red);">描画エラー: ${error.message}</div>`;
   }
@@ -3833,22 +3837,22 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (oldFile.size !== newFile.size || oldFile.mtime !== newFile.mtime) {
           appState.thumbnailUrls.delete(newFile.path);
           
-          // --- 追加: エラー状態やリクエスト待ち状態をリセット ---
+          // 古いサムネイルの生成キューやエラー状態をクリアし、再生成を促す
           appState.pendingThumbnails.delete(newFile.path);
           const qIdx = appState.thumbnailRequestQueue.findIndex(req => req.filePath === newFile.path);
           if (qIdx > -1) appState.thumbnailRequestQueue.splice(qIdx, 1);
 
-          // --- 修正: metaLoaded: false を追加してメタデータを確実に再取得させる ---
+          // ファイルの更新を反映し、メタデータやキャッシュフラグをリセットして再取得を強制する
           appState.files[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0, metaLoaded: false, hasThumbnailCache: false, hasMetadataCache: false };
           
-          // --- 修正: 描画の遅延を待たずに、データ状態とRustのインデックスを即時同期 ---
+          // 描画の遅延を待たずに状態とRustバックエンドのインデックスを即座に同期し、UIの不整合を防ぐ
           appState.applyFiltersAndSort(); 
           scheduleRefresh();
         }
       } else {
         appState.files.push(newFile);
         
-        // --- 修正: 描画の遅延を待たずに、データ状態とRustのインデックスを即時同期 ---
+        // 描画の遅延を待たずに状態とRustバックエンドのインデックスを即座に同期し、UIの不整合を防ぐ
         appState.applyFiltersAndSort();
         scheduleRefresh();
       }
@@ -3861,7 +3865,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (index > -1) {
         appState.files.splice(index, 1);
         
-        // --- 修正: 描画の遅延を待たずに、データ状態とRustのインデックスを即時同期 ---
+        // 描画の遅延を待たずに状態とRustバックエンドのインデックスを即座に同期し、UIの不整合を防ぐ
         appState.applyFiltersAndSort();
         scheduleRefresh();
       }

@@ -573,7 +573,10 @@ class UIManager {
           cleanup();
           let finalValue = inputEl.value;
 
-          // --- 拡張子保護のガードレール ---
+          /**
+           * ファイル名の変更において、誤って拡張子を変更または削除してしまうことを防ぐ保護機構。
+           * selectBaseNameOnly が有効な場合は、変更後の値に元の拡張子を強制的に補完します。
+           */
           if (selectBaseNameOnly && originalExt) {
             if (!finalValue.toLowerCase().endsWith(originalExt.toLowerCase())) {
               if (finalValue.includes('.')) {
@@ -585,7 +588,6 @@ class UIManager {
               }
             }
           }
-          // --------------------------------
 
           resolve(finalValue);
         }
@@ -859,7 +861,12 @@ class UIManager {
       });
     });
 
-    // --- 【追加】Diff画面でのドラッグ選択コピー対応 ---
+    /**
+     * Diff画面のドラッグ選択コピー時のフォーマット調整:
+     * タグ単位で視覚的に分割されているテキストを選択してコピーする際、
+     * クリップボードには自動的にカンマ区切りの文字列として格納します。
+     * これによりプロンプトとしての再利用性を確保します。
+     */
     container.querySelectorAll('.prompt-look').forEach(lookDiv => {
       lookDiv.addEventListener('copy', (e) => {
         const selection = window.getSelection();
@@ -881,7 +888,6 @@ class UIManager {
         e.preventDefault();
       });
     });
-    // --- ここまで ---
 
     modal.style.display = 'flex';
 
