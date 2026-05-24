@@ -1,4 +1,8 @@
 import { appState } from './renderer-state.js';
+import { applyGlowEffect as glowElement } from './utils.js';
+import { validateFilename, INVALID_FILENAME_RE } from './path-utils.js';
+import { showAppDialog } from './dialog-base.js';
+import { extractMetadataFields, parsePromptTags } from './metadata-format.js';
 
 const CHUNK_SIZE = 100;
 
@@ -541,16 +545,11 @@ class UIManager {
       };
 
       const validateInput = () => {
-        const val = inputEl.value;
-        if (/[\\/:*?"<>|]/.test(val)) {
-          warningEl.textContent = '以下の文字は使用できません: \\ / : * ? " < > |';
+        const result = validateFilename(inputEl.value);
+        if (!result.valid) {
+          warningEl.textContent = result.message;
           warningEl.classList.add('show');
-          inputEl.classList.add('error');
-          okBtn.disabled = true;
-        } else if (val.trim() === '') {
-          warningEl.textContent = '名前を入力してください。';
-          warningEl.classList.add('show');
-          inputEl.classList.remove('error');
+          inputEl.classList.toggle('error', INVALID_FILENAME_RE.test(inputEl.value));
           okBtn.disabled = true;
         } else {
           warningEl.classList.remove('show');
@@ -618,72 +617,16 @@ class UIManager {
    * @returns {Promise<'overwrite'|'skip'|'cancel'>}
    */
   showConflictDialog(conflictCount, actionStr) {
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'dialog-overlay';
-
-      const dialog = document.createElement('div');
-      dialog.className = 'dialog-box';
-
-      const messageEl = document.createElement('div');
-      messageEl.className = 'dialog-message';
-      messageEl.innerHTML = `宛先に同じ名前のファイルが <strong>${conflictCount}件</strong> 存在します。<br>どのように処理しますか？`;
-
-      const buttonsDiv = document.createElement('div');
-      buttonsDiv.className = 'dialog-buttons dialog-buttons--wrap';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'dialog-btn cancel';
-      cancelBtn.textContent = 'キャンセル';
-
-      const skipBtn = document.createElement('button');
-      skipBtn.className = 'dialog-btn primary';
-      skipBtn.textContent = '重複をスキップ';
-
-      const overwriteBtn = document.createElement('button');
-      overwriteBtn.className = 'dialog-btn danger';
-      overwriteBtn.textContent = `上書きして${actionStr}`;
-
-      buttonsDiv.appendChild(cancelBtn);
-      buttonsDiv.appendChild(skipBtn);
-      buttonsDiv.appendChild(overwriteBtn);
-
-      dialog.appendChild(messageEl);
-      dialog.appendChild(buttonsDiv);
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-
-      const cleanup = () => {
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
-      };
-
-      const keydownHandler = (e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          document.removeEventListener('keydown', keydownHandler);
-          cleanup();
-          resolve('cancel');
-        }
-      };
-
-      document.addEventListener('keydown', keydownHandler);
-
-      overwriteBtn.addEventListener('click', () => { 
-        document.removeEventListener('keydown', keydownHandler);
-        cleanup(); resolve('overwrite'); 
-      });
-      skipBtn.addEventListener('click', () => { 
-        document.removeEventListener('keydown', keydownHandler);
-        cleanup(); resolve('skip'); 
-      });
-      cancelBtn.addEventListener('click', () => { 
-        document.removeEventListener('keydown', keydownHandler);
-        cleanup(); resolve('cancel'); 
-      });
-
-      skipBtn.focus();
+    return showAppDialog({
+      messageHtml: `宛先に同じ名前のファイルが <strong>${conflictCount}件</strong> 存在します。<br>どのように処理しますか？`,
+      buttons: [
+        { label: 'キャンセル', className: 'dialog-btn cancel', value: 'cancel' },
+        { label: '重複をスキップ', className: 'dialog-btn primary', value: 'skip' },
+        { label: `上書きして${actionStr}`, className: 'dialog-btn danger', value: 'overwrite' }
+      ],
+      buttonsWrap: true,
+      escapeValue: 'cancel',
+      focusIndex: 1
     });
   }
 
@@ -695,73 +638,23 @@ class UIManager {
    */
   showMissingFolderDialog(path, canCloseTab) {
     const folderName = path.split('\\').pop() || path.split('/').pop() || path;
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'dialog-overlay';
+    const pathEl = document.createElement('div');
+    pathEl.className = 'dialog-path';
+    pathEl.textContent = path;
 
-      const dialog = document.createElement('div');
-      dialog.className = 'dialog-box';
+    const buttons = [
+      { label: canCloseTab ? 'キャンセル' : 'OK', className: 'dialog-btn cancel', value: canCloseTab ? 'cancel' : 'ok' }
+    ];
+    if (canCloseTab) {
+      buttons.push({ label: 'タブを閉じる', className: 'dialog-btn danger', value: 'close' });
+    }
 
-      const messageEl = document.createElement('div');
-      messageEl.className = 'dialog-message';
-      messageEl.innerHTML = `フォルダ「<strong>${folderName}</strong>」は存在しません。${canCloseTab ? '<br>このタブを閉じますか？' : ''}`;
-
-      const pathEl = document.createElement('div');
-      pathEl.className = 'dialog-path';
-      pathEl.textContent = path;
-
-      const buttonsDiv = document.createElement('div');
-      buttonsDiv.className = 'dialog-buttons';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'dialog-btn cancel';
-      cancelBtn.textContent = canCloseTab ? 'キャンセル' : 'OK';
-
-      buttonsDiv.appendChild(cancelBtn);
-
-      if (canCloseTab) {
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'dialog-btn danger';
-        closeBtn.textContent = 'タブを閉じる';
-        buttonsDiv.appendChild(closeBtn);
-
-        closeBtn.addEventListener('click', () => {
-          document.removeEventListener('keydown', keydownHandler);
-          cleanup();
-          resolve('close');
-        });
-      }
-
-      dialog.appendChild(messageEl);
-      dialog.appendChild(pathEl);
-      dialog.appendChild(buttonsDiv);
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-
-      const cleanup = () => {
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
-      };
-
-      const keydownHandler = (e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          document.removeEventListener('keydown', keydownHandler);
-          cleanup();
-          resolve(canCloseTab ? 'cancel' : 'ok');
-        }
-      };
-
-      document.addEventListener('keydown', keydownHandler);
-
-      cancelBtn.addEventListener('click', () => {
-        document.removeEventListener('keydown', keydownHandler);
-        cleanup();
-        resolve(canCloseTab ? 'cancel' : 'ok');
-      });
-
-      cancelBtn.focus();
+    return showAppDialog({
+      messageHtml: `フォルダ「<strong>${folderName}</strong>」は存在しません。${canCloseTab ? '<br>このタブを閉じますか？' : ''}`,
+      extraNodes: [pathEl],
+      buttons,
+      escapeValue: canCloseTab ? 'cancel' : 'ok',
+      focusIndex: 0
     });
   }
 
@@ -771,65 +664,14 @@ class UIManager {
    * @returns {Promise<boolean>}
    */
   showConfirm(message) {
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'dialog-overlay';
-
-      const dialog = document.createElement('div');
-      dialog.className = 'dialog-box';
-
-      const messageEl = document.createElement('div');
-      messageEl.className = 'dialog-message';
-      messageEl.textContent = message;
-
-      const buttonsDiv = document.createElement('div');
-      buttonsDiv.className = 'dialog-buttons';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'dialog-btn cancel';
-      cancelBtn.textContent = 'キャンセル';
-
-      const okBtn = document.createElement('button');
-      okBtn.className = 'dialog-btn danger';
-      okBtn.textContent = '削除';
-
-      buttonsDiv.appendChild(cancelBtn);
-      buttonsDiv.appendChild(okBtn);
-
-      dialog.appendChild(messageEl);
-      dialog.appendChild(buttonsDiv);
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-
-      const cleanup = () => {
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
-      };
-
-      const keydownHandler = (e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          document.removeEventListener('keydown', keydownHandler);
-          cleanup();
-          resolve(false);
-        }
-      };
-
-      document.addEventListener('keydown', keydownHandler);
-
-      okBtn.addEventListener('click', () => { 
-        document.removeEventListener('keydown', keydownHandler);
-        cleanup(); 
-        resolve(true); 
-      });
-      cancelBtn.addEventListener('click', () => { 
-        document.removeEventListener('keydown', keydownHandler);
-        cleanup(); 
-        resolve(false); 
-      });
-
-      cancelBtn.focus();
+    return showAppDialog({
+      message,
+      buttons: [
+        { label: 'キャンセル', className: 'dialog-btn cancel', value: false },
+        { label: '削除', className: 'dialog-btn danger', value: true }
+      ],
+      escapeValue: false,
+      focusIndex: 0
     });
   }
 
@@ -838,14 +680,7 @@ class UIManager {
    * @param {HTMLElement} el 対象の要素
    */
   applyGlowEffect(el) {
-    if (!el) return;
-    el.style.transition = 'none';
-    el.classList.add('glow');
-    setTimeout(() => {
-      el.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out, stroke 0.6s ease-out';
-      el.classList.remove('glow');
-      setTimeout(() => { el.style.transition = ''; }, 600);
-    }, 200);
+    glowElement(el);
   }
 
   /**
@@ -903,55 +738,10 @@ class UIManager {
     const container = document.getElementById('diff-container');
     if (!modal || !container) return;
 
-    const parse = (text) => text ? text.split(',').map(t => t.trim()).filter(t => t) : [];
-    
+    const parse = parsePromptTags;
 
-    const extractData = (file, meta) => {
-      const p = meta.params || {};
-      const data = {
-        name: file.name,
-        source: meta.source || file.source || null,
-        prompt: meta.prompt || file.prompt || '',
-        negativePrompt: meta.negativePrompt || file.negativePrompt || '',
-        chars: [],
-        params: {}
-      };
-      if (Array.isArray(p.characterPrompts)) {
-        data.chars = p.characterPrompts.map(cp => ({ prompt: cp.prompt || '', uc: cp.uc || '' }));
-      } else if (Array.isArray(file.charPrompts)) {
-        data.chars = file.charPrompts.map(cp => ({
-          prompt: (cp && typeof cp === 'object' && cp.prompt) ? cp.prompt : String(cp),
-          uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : ''
-        }));
-      }
-
-      const formatNumber = (num) => {
-        if (num === null || num === undefined) return null;
-        const n = Number(num);
-        return !isNaN(n) ? n.toLocaleString() : num;
-      };
-
-      const w = p.width || meta.width;
-      const h = p.height || meta.height;
-      const res = (w && h) ? `${formatNumber(w)}x${formatNumber(h)}` : null;
-
-      let sampler = p.sampler || file.sampler || null;
-      if (sampler !== '-' && p.sm && !sampler.includes('karras')) sampler += " (karras)";
-      data.params = {
-        resolution: res,
-        seed: p.seed ?? file.seed ?? null,
-        steps: formatNumber(p.steps ?? file.steps ?? null),
-        sampler: sampler,
-        scale: p.scale ?? file.scale ?? null,
-        cfg_rescale: p.cfg_rescale ?? file.cfg_rescale ?? null,
-        uncond_scale: p.uncond_scale ?? file.uncond_scale ?? null,
-        rawParameters: p.rawParameters ?? file.rawParameters ?? null
-      };
-      return data;
-    };
-
-    const d1 = extractData(file1, meta1);
-    const d2 = extractData(file2, meta2);
+    const d1 = extractMetadataFields(file1, meta1);
+    const d2 = extractMetadataFields(file2, meta2);
 
     const renderSideBySideSection = (title, text1, text2, isParam = false) => {
       const v1 = text1 ?? '-';

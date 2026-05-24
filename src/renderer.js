@@ -2,23 +2,20 @@
 // Veloce - Main Controller (renderer.js)
 // ============================================================================
 
-// 開発者ツール（F12, Ctrl+Shift+I）の強制ブロック
-window.addEventListener('keydown', (e) => {
-  if (
-    (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) ||
-    e.key === 'F12' || e.code === 'F12'
-  ) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
-}, true);
-
-// ============================================================================
-// 1. Constants & Global Variables
-// ============================================================================
 import { appState } from './renderer-state.js';
 import { UIManager, uiManager, formatSize, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
-import { debounce } from './utils.js';
+import { debounce, blockDevtoolsShortcuts } from './utils.js';
+import { validateFilename } from './path-utils.js';
+import { extractMetadataFields, highlightSearchTerms, buildInspectorSections } from './metadata-format.js';
+import { resolvePathDisplay } from './favorite-icons.js';
+import {
+  initTabHandlers,
+  updateCurrentTabState as syncCurrentTabState,
+  saveTabsState as persistTabsState,
+  getTabNameForPath as resolveTabName
+} from './renderer-tabs.js';
+
+blockDevtoolsShortcuts();
 
 const CONFIG = {
   CHUNK_SIZE: 100,        // 一度にDOMに追加する要素数（レンダリング負荷軽減）
@@ -1223,53 +1220,24 @@ function toggleHelpOverlay(forceShow) {
 }
 
 /**
- * タブコンテナのレイアウトはCSSで制御されるように変更されました。
- */
-function updateTabLayout() {
-}
-
-/**
  * 現在のタブの状態を同期します。
  */
 function updateCurrentTabState() {
-  if (appState.activeTabIndex >= 0 && appState.tabs[appState.activeTabIndex]) {
-    const currentTab = appState.tabs[appState.activeTabIndex];
-    if (typeof appState.searchQuery !== 'undefined') currentTab.searchQuery = appState.searchQuery;
-    if (appState.sortConfig) currentTab.sortConfig = JSON.parse(JSON.stringify(appState.sortConfig));
-    if (uiManager.elements.thumbnailGrid) {
-      currentTab.scrollTop = uiManager.elements.thumbnailGrid.scrollTop || 0;
-    }
-  }
+  syncCurrentTabState(appState, uiManager);
 }
 
 /**
  * タブの状態をローカルストレージに保存します。
  */
 function saveTabsState() {
-  updateCurrentTabState();
-  const state = {
-    tabs: appState.tabs.map(t => ({ 
-      id: t.id, path: t.path, name: t.name,
-      searchQuery: t.searchQuery || '',
-      sortConfig: t.sortConfig || { key: 'name', asc: true },
-      scrollTop: t.scrollTop || 0,
-      history: t.history || [t.path],
-      historyIndex: t.historyIndex !== undefined ? t.historyIndex : 0
-    })),
-    activeTabIndex: appState.activeTabIndex
-  };
-  localStorage.setItem('tabsState', JSON.stringify(state));
+  persistTabsState(appState, uiManager);
 }
 
 /**
- * パスからタブの表示名を取得します。お気に入りに登録されている場合はその名前を優先します。
+ * パスからタブの表示名を取得します。
  */
 function getTabNameForPath(path) {
-  if (!path) return '';
-  if (path === 'PC') return 'PC';
-  const fav = appState.favorites.find(f => f.path === path);
-  if (fav) return fav.name;
-  return path.split('\\').pop() || path;
+  return resolveTabName(path, appState.favorites);
 }
 
 /**
@@ -1312,27 +1280,7 @@ function showHistoryMenu(event, direction, btnElement) {
     
     // お気に入りに登録されているかチェック
     const fav = appState.favorites.find(f => f.path === item.path);
-    let displayName = '';
-    let iconHtml = '';
-    let iconColor = '';
-
-    if (fav) {
-      displayName = fav.name;
-      if (fav.icon && ICON_SVGS[fav.icon]) {
-        iconHtml = ICON_SVGS[fav.icon];
-        const c = COLORS.find(c => c.id === (fav.color || 'default'));
-        iconColor = c ? c.hex : 'var(--glow-gold)';
-      } else {
-        const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
-        iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
-        iconColor = 'var(--glow-gold)';
-      }
-    } else {
-      // 通常フォルダの場合
-      displayName = item.path.split(/[/\\]/).filter(Boolean).pop() || item.path;
-      iconHtml = UIManager.ICONS.FOLDER;
-      iconColor = '#4da8da'; // フォルダペインと同じ青色
-    }
+    const { displayName, iconHtml, iconColor } = resolvePathDisplay(fav, item.path);
 
     menuItem.innerHTML = `
       <span class="menu-icon" style="color: ${iconColor}; display: inline-flex; align-items: center;">${iconHtml}</span>
@@ -1358,178 +1306,6 @@ function showHistoryMenu(event, direction, btnElement) {
   menu.style.display = 'block';
 }
 
-/**
- * 指定されたパスのフォルダが存在するかを確認します。
- * @param {string} path
- * @returns {Promise<boolean>}
- */
-async function checkPathExists(path) {
-  if (!path || path === 'PC') return true;
-  if (!window.veloceAPI.pathExists) return true;
-  try {
-    return await window.veloceAPI.pathExists(path);
-  } catch (e) {
-    console.warn('Failed to check path existence:', e);
-    return true;
-  }
-}
-
-// --- タブ操作 ---
-window.onTabClick = async (index) => {
-  if (index === appState.activeTabIndex) return;
-
-  const tab = appState.tabs[index];
-  if (!tab) return;
-
-  const exists = await checkPathExists(tab.path);
-  if (!exists) {
-    const canCloseTab = appState.tabs.length > 1;
-    const action = await uiManager.showMissingFolderDialog(tab.path, canCloseTab);
-    if (action === 'close') {
-      await window.onTabClose(index);
-    }
-    return;
-  }
-
-  updateCurrentTabState();
-  
-  appState.activeTabIndex = index;
-  uiManager.renderTabs();
-  
-  appState.searchQuery = tab.searchQuery || '';  
-  if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;  
-  if (tab.sortConfig) { appState.sortConfig = JSON.parse(JSON.stringify(tab.sortConfig)); localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig)); updateSortIndicators(); }
-
-  if (window.veloceAPI.loadDirectory) {
-    appState.currentDirectory = tab.path;
-    localStorage.setItem('currentDirectory', appState.currentDirectory);
-
-    appState.files = [];
-    uiManager.renderAll(true);
-    clearMetadataUI();
-    uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
-    
-    updateNavButtons();
-    
-    window.veloceAPI.loadDirectory(tab.path);
-
-    await expandTreeToPath(appState.currentDirectory);
-    saveTabsState();
-  }
-};
-
-window.onNewTabClick = async () => {
-  let newPath = 'PC';
-  try {
-    if (window.__TAURI__ && window.__TAURI__.path && window.__TAURI__.path.pictureDir) {
-      newPath = await window.__TAURI__.path.pictureDir();
-    }
-  } catch (e) {
-    console.warn("Failed to get picture dir:", e);
-  }
-
-  const newTab = {
-    id: Date.now(),
-    path: newPath,
-    name: getTabNameForPath(newPath),
-    isNew: true,
-    searchQuery: '',
-    sortConfig: { key: 'name', asc: true },
-    scrollTop: 0,
-    history: [newPath],
-    historyIndex: 0
-  };
-  appState.tabs.push(newTab);
-  saveTabsState();
-  
-  // 追加した新しいタブを選択して内容を読み込む
-  await window.onTabClick(appState.tabs.length - 1);
-
-  // タブが増えた際に、新しく追加された右端へスクロールする
-  const container = document.getElementById('tab-container');
-  if (container) {
-    container.scrollLeft = container.scrollWidth;
-  }
-};
-
-window.onTabClose = async (index) => {
-  if (appState.tabs.length <= 1) return; // 最後のタブは閉じない
-
-  const tabToRemove = appState.tabs[index];
-  if (!tabToRemove || tabToRemove.isClosing) return;
-  tabToRemove.isClosing = true;
-
-  const container = document.getElementById('tab-container');
-  let delay = 0;
-  let targetTabEl = null;
-
-  if (container) {
-    targetTabEl = container.querySelector(`.tab-item[data-index="${index}"]`);
-    if (targetTabEl) {
-      targetTabEl.style.width = `${targetTabEl.offsetWidth}px`;
-      targetTabEl.style.minWidth = '0px';
-      void targetTabEl.offsetWidth; // リフローを強制して現在幅を確定
-      targetTabEl.classList.add('tab-fade-out');
-      targetTabEl.removeAttribute('data-index'); // 他の処理が誤作動しないようインデックスを外す
-      delay = 200; // アニメーションの完了を待つ
-    }
-  }
-
-  // アニメーションを待たずにデータは即座に削除・同期する
-  appState.tabs.splice(index, 1);
-  saveTabsState();
-
-  let shouldSwitch = false;
-  let nextIndex = appState.activeTabIndex;
-
-  if (appState.activeTabIndex === index) {
-    nextIndex = index - 1;
-    if (nextIndex < 0) nextIndex = 0;
-    shouldSwitch = true;
-    appState.activeTabIndex = -1; // 強制的に切り替えイベントを発生させる
-  } else if (appState.activeTabIndex > index) {
-    appState.activeTabIndex -= 1;
-  }
-
-  if (shouldSwitch) {
-    await window.onTabClick(nextIndex);
-  } else {
-    uiManager.renderTabs();
-  }
-
-  // アニメーション完了後にDOMからクリーンアップ
-  if (delay > 0) {
-    setTimeout(() => {
-      if (targetTabEl && targetTabEl.parentElement) targetTabEl.remove();
-    }, delay);
-  } else {
-    if (targetTabEl && targetTabEl.parentElement) targetTabEl.remove();
-  }
-};
-
-window.onTabMove = (fromIndex, toIndex, insertAfter) => {
-  if (fromIndex === toIndex) return;
-
-  const tabs = appState.tabs;
-  const activeTab = tabs[appState.activeTabIndex]; // アクティブなタブを見失わないように保持
-  
-  const [movedTab] = tabs.splice(fromIndex, 1);
-  
-  let adjustedToIndex = toIndex;
-  if (fromIndex < toIndex) {
-    adjustedToIndex -= 1; // 自身が抜けた分、インデックスを1つ左に詰める
-  }
-  if (insertAfter) {
-    adjustedToIndex += 1;
-  }
-  
-  tabs.splice(adjustedToIndex, 0, movedTab);
-  appState.activeTabIndex = tabs.indexOf(activeTab); // 再計算されたインデックスに戻す
-  
-  uiManager.renderTabs();
-  saveTabsState();
-};
-
 // ============================================================================
 // 4. Event Handlers (User Interactions)
 // ============================================================================
@@ -1538,12 +1314,9 @@ const menuNewFolder = createMenuItem('フォルダを新規作成', UIManager.IC
   if (!contextMenu.targetFolder) return;
   const folderName = await uiManager.showPrompt('新しいフォルダ名を入力してください:');
   if (folderName !== null) {
-    if (folderName.trim() === '') {
-      showNotification('フォルダ名を入力してください。', 'warning');
-      return;
-    }
-    if (/[\\/:*?"<>|]/.test(folderName)) {
-      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+    const validation = validateFilename(folderName);
+    if (!validation.valid) {
+      showNotification(validation.message, 'warning');
       return;
     }
 
@@ -1588,47 +1361,6 @@ async function renderMetadata(file) {
     // データの取得と安全なフォールバック
     const rawMeta = await window.veloceAPI.parseMetadata(file.path);
     const meta = rawMeta || {};
-    const p = meta.params || {};
-
-    // Diff画面と共通のデータ抽出ロジック
-    const extractData = () => {
-      const data = {
-        source: meta.source || file.source || null,
-        prompt: meta.prompt || file.prompt || '',
-        negativePrompt: meta.negativePrompt || file.negativePrompt || '',
-        chars: [],
-        params: {}
-      };
-      if (Array.isArray(p.characterPrompts)) {
-        data.chars = p.characterPrompts.map(cp => ({ prompt: cp.prompt || '', uc: cp.uc || '' }));
-      } else if (Array.isArray(file.charPrompts)) {
-        data.chars = file.charPrompts.map(cp => ({
-          prompt: (cp && typeof cp === 'object' && cp.prompt) ? cp.prompt : String(cp),
-          uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : ''
-        }));
-      }
-      
-      const formatNumber = (num) => {
-        if (num === null || num === undefined) return null;
-        const n = Number(num);
-        return !isNaN(n) ? n.toLocaleString() : num;
-      };
-
-      const w = p.width || meta.width;
-      const h = p.height || meta.height;
-      const res = (w && h) ? `${formatNumber(w)}x${formatNumber(h)}` : null;
-
-      let sampler = p.sampler || file.sampler || null;
-      if (sampler && p.sm && !sampler.includes('karras')) sampler += " (karras)";
-      data.params = {
-        resolution: res, seed: p.seed ?? file.seed ?? null,
-        steps: formatNumber(p.steps ?? file.steps ?? null), sampler: sampler,
-        scale: p.scale ?? file.scale ?? null, cfg_rescale: p.cfg_rescale ?? file.cfg_rescale ?? null,
-        uncond_scale: p.uncond_scale ?? file.uncond_scale ?? null,
-        rawParameters: p.rawParameters ?? file.rawParameters ?? null
-      };
-      return data;
-    };
 
     if (infoContainer) {
       const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
@@ -1637,12 +1369,9 @@ async function renderMetadata(file) {
         const d = gcd(w, h);
         const rw = w / d;
         const rh = h / d;
-        if (rw > 100 || rh > 100) {
-          return `${(w / h).toFixed(2)}:1`;
-        }
+        if (rw > 100 || rh > 100) return `${(w / h).toFixed(2)}:1`;
         return `${rw}:${rh}`;
       };
-
       let cleanExt = file.ext || '';
       if (cleanExt.startsWith('.')) cleanExt = cleanExt.substring(1);
       const fullName = cleanExt && !file.name.toLowerCase().endsWith('.' + cleanExt.toLowerCase()) ? `${file.name}.${cleanExt}` : file.name;
@@ -1650,7 +1379,6 @@ async function renderMetadata(file) {
       const resStr = (file.width && file.height) ? `${Number(file.width).toLocaleString()} x ${Number(file.height).toLocaleString()}` : '-';
       const ratioStr = (file.width && file.height) ? ` (${getAspectRatio(file.width, file.height)})` : '';
       const mtimeStr = file.mtime ? formatDate(file.mtime) : '-';
-      
       let ctimeValue = file.ctime;
       if (!ctimeValue && meta) {
         const metaDate = meta.timestamp || meta.date || meta.CreationTime || meta['Creation Time'];
@@ -1660,9 +1388,7 @@ async function renderMetadata(file) {
         }
       }
       const ctimeStr = ctimeValue ? formatDate(ctimeValue) : '-';
-      
-      const renderTableRow = (title, text) => {
-        return `
+      const renderTableRow = (title, text) => `
           <tr>
             <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
               <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">${title}</h3>
@@ -1670,10 +1396,7 @@ async function renderMetadata(file) {
             <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
               <span>${text}</span>
             </td>
-          </tr>
-        `;
-      };
-
+          </tr>`;
       infoContainer.innerHTML = `
         <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; color: var(--text-color);">
           <tbody>
@@ -1683,37 +1406,33 @@ async function renderMetadata(file) {
             ${renderTableRow('作成日時', ctimeStr)}
             ${renderTableRow('更新日時', mtimeStr)}
           </tbody>
-        </table>
-      `;
+        </table>`;
     }
 
-    const d = extractData();
+    const d = extractMetadataFields(file, meta);
 
-    // --- 【最強版】検索キーワードの確実な取得 ---
     let searchStr = '';
-    if (uiManager.elements.searchBar && uiManager.elements.searchBar.value) {
+    if (uiManager.elements.searchBar?.value) {
       searchStr = uiManager.elements.searchBar.value;
     } else if (typeof appState !== 'undefined' && appState.searchQuery) {
       searchStr = appState.searchQuery;
     }
-    
-    const terms = searchStr.trim() !== '' 
-      ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(t => t) 
+
+    const terms = searchStr.trim() !== ''
+      ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(Boolean)
       : [];
 
-    // ヘルパー: セクション描画
     const renderSection = (title, text, isParam = false) => {
       if (!text || text === '-') return '';
       const tags = isParam ? [String(text)] : String(text).split(',').map(t => t.trim()).filter(t => t);
-      const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
-      
+      const boxClass = isParam ? 'prompt-look param-box' : 'prompt-look';
+
       const tagsHtml = tags.map(t => {
         const isMatch = terms.some(term => t.toLowerCase().includes(term));
-        const matchStyle = isMatch 
-          ? 'border: 1px solid #ffcc00; background-color: rgba(255, 204, 0, 0.25); color: #ffcc00; font-weight: bold; box-shadow: 0 0 8px rgba(255,204,0,0.3);' 
+        const matchStyle = isMatch
+          ? 'border: 1px solid #ffcc00; background-color: rgba(255, 204, 0, 0.25); color: #ffcc00; font-weight: bold; box-shadow: 0 0 8px rgba(255,204,0,0.3);'
           : '';
-          
-        const displayHtml = typeof highlightText === 'function' ? highlightText(t, terms) : t;
+        const displayHtml = highlightSearchTerms(t, terms);
         return `<span class="diff-tag common" style="${matchStyle}">${displayHtml}</span>`;
       }).join('');
 
@@ -1730,22 +1449,9 @@ async function renderMetadata(file) {
     };
 
     let html = '';
-    html += renderSection('モデル / バージョン', d.source, true);
-    html += renderSection('プロンプト', d.prompt);
-    html += renderSection('除外したい要素', d.negativePrompt);
-    d.chars.forEach((c, i) => {
-      html += renderSection(`キャラクター ${i + 1} プロンプト`, c.prompt);
-      html += renderSection(`キャラクター ${i + 1} 除外したい要素`, c.uc);
-    });
-    html += renderSection('画像サイズ', d.params.resolution, true);
-    html += renderSection('シード値', d.params.seed, true);
-    html += renderSection('ステップ', d.params.steps, true);
-    html += renderSection('サンプラー', d.params.sampler, true);
-    html += renderSection('プロンプトガイダンス', d.params.scale, true);
-    html += renderSection('プロンプトガイダンスの再調整', d.params.cfg_rescale, true);
-    html += renderSection('除外したい要素の強さ', d.params.uncond_scale, true);
-    html += renderSection('生成パラメータ (Raw)', d.params.rawParameters);
-
+    for (const section of buildInspectorSections(d)) {
+      html += renderSection(section.title, section.value, section.isParam);
+    }
     // プロンプトが何もない場合（または抽出に失敗した場合）
     if (html === '') {
       const rawMetaStr = JSON.stringify(meta, null, 2);
@@ -3033,7 +2739,6 @@ window.addEventListener('resize', debounce(() => {
   if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
     window.veloceAPI.isViewerMaximized().then(isMax => {
       localStorage.setItem('mainWinMaximized', isMax);
-      updateTabLayout(); // ウィンドウサイズ変更時にタブレイアウトも更新
       if (!isMax) {
         localStorage.setItem('mainWinWidth', Math.max(800, window.outerWidth));
         localStorage.setItem('mainWinHeight', Math.max(600, window.outerHeight));
@@ -3042,7 +2747,6 @@ window.addEventListener('resize', debounce(() => {
       }
     });
   }
-  updateTabLayout();
   uiManager.updateTabScrollState();
 }, 500));
 
@@ -3296,6 +3000,15 @@ document.addEventListener('contextmenu', (e) => {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+  initTabHandlers({
+    appState,
+    uiManager,
+    expandTreeToPath,
+    clearMetadataUI,
+    updateNavButtons,
+    updateSortIndicators
+  });
+
   renderFavorites();
 
   const setupNavButtonEvents = (btnId, direction, tooltipText) => {
@@ -3687,7 +3400,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (savedRightVisible !== null) appState.layout.rightVisible = savedRightVisible === 'true';
 
   uiManager.applyLayout();
-  updateTabLayout();
 
   if (!appState.layout.leftVisible && uiManager.elements.resizerLeft) {
     const btn = uiManager.elements.resizerLeft.querySelector('.resizer-toggle');

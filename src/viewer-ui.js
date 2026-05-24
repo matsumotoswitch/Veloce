@@ -1,4 +1,5 @@
 import { viewerState } from './viewer-state.js';
+import { applyGlowEffect as glowElement } from './utils.js';
 
 /**
  * ビューア画面のUIとDOM操作を管理するクラス
@@ -81,14 +82,7 @@ class ViewerUI {
    * @param {HTMLElement} el 対象の要素
    */
   applyGlowEffect(el) {
-    if (!el) return;
-    el.style.transition = 'none';
-    el.classList.add('glow');
-    setTimeout(() => {
-      el.style.transition = 'color 0.6s ease-out, filter 0.6s ease-out, stroke 0.6s ease-out';
-      el.classList.remove('glow');
-      setTimeout(() => { el.style.transition = ''; }, 600);
-    }, 200);
+    glowElement(el);
   }
 }
 

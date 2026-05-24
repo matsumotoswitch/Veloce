@@ -2,24 +2,11 @@
 // Veloce - Viewer Controller (viewer.js)
 // ============================================================================
 
-// 開発者ツール（F12, Ctrl+Shift+I）の強制ブロック
-window.addEventListener('keydown', (e) => {
-  if (
-    (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) ||
-    e.key === 'F12' || e.code === 'F12'
-  ) {
-    e.preventDefault();
-    e.stopPropagation(); // 他の処理への伝播を完全に遮断
-  }
-}, true);
-
-// ============================================================================
-// 1. Setup & Window Initialization
-// ============================================================================
-
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
-import { debounce } from './utils.js';
+import { debounce, blockDevtoolsShortcuts } from './utils.js';
+
+blockDevtoolsShortcuts();
 
 const CONFIG = {
   ZOOM_STEP: 1.1,         // マウスホイールでのズーム倍率
