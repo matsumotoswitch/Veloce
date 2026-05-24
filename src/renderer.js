@@ -1164,44 +1164,45 @@ function toggleHelpOverlay(forceShow) {
       <div>
         <h3 style="color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
         <table style="border-collapse: collapse; width: 100%;">
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプの表示/非表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Tab / PageDown</td><td style="padding: 6px 15px;">次のタブへ</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Shift + Tab / PageUp</td><td style="padding: 6px 15px;">前のタブへ</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">矢印キー</td><td style="padding: 6px 15px;">画像の選択を移動（Shiftで範囲選択）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F5</td><td style="padding: 6px 15px;">最新の情報に更新</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプ（ショートカット一覧）の表示 / 非表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">矢印キー</td><td style="padding: 6px 15px;">画像の選択を移動（Shift 併用で範囲選択）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + A</td><td style="padding: 6px 15px;">現在のフォルダ内のすべての画像を選択</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl / Shift + クリック</td><td style="padding: 6px 15px;">画像の複数選択</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + A</td><td style="padding: 6px 15px;">すべての画像を選択</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + F</td><td style="padding: 6px 15px;">検索バーに入力フォーカス</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Alt + ← / →</td><td style="padding: 6px 15px;">フォルダ移動履歴を戻る / 進む</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているビューワーを横一列に整列</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">D</td><td style="padding: 6px 15px;">選択した2枚の画像のプロンプト比較 (Diff)</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F2</td><td style="padding: 6px 15px;">選択中のファイル / フォルダの名前変更</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">選択中のファイル / フォルダをゴミ箱に移動</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をコピー</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">ダブルクリック</td><td style="padding: 6px 15px;">サムネイルからビューワーを開く</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ヘルプを閉じる</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">ダブルクリック</td><td style="padding: 6px 15px;">選択したサムネイルから独立ビューアーウィンドウを開く</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">F5</td><td style="padding: 6px 15px;">最新の情報に更新（ディレクトリの再読み込み）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + F</td><td style="padding: 6px 15px;">検索キーワード入力欄（検索バー）にフォーカス</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Alt + ← / Alt + →</td><td style="padding: 6px 15px;">フォルダ移動履歴の「戻る」 / 「進む」</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">F2</td><td style="padding: 6px 15px;">選択中のファイル、または左ツリーで選択中のフォルダの名前を変更</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">選択中のファイル、または左ツリーで選択中のフォルダを安全にゴミ箱へ移動</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をクリップボードに直接コピー（テキスト選択中はテキストコピー）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているすべてのビューアーウィンドウを画面に横一列に整列</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">D</td><td style="padding: 6px 15px;">選択した2枚の画像のプロンプト・パラメータ情報を取得して比較 (Diffモーダル)</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Tab / PageDown</td><td style="padding: 6px 15px;">次のタブへ切り替え</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Shift + Tab / PageUp</td><td style="padding: 6px 15px;">前のタブへ切り替え</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">各種モーダル（Diff/お気に入り編集）、ヘルプ、コンテキストメニューを閉じる</td></tr>
         </table>
       </div>
       <div>
         <h3 style="color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 0;">ビューワー画面</h3>
         <table style="border-collapse: collapse; width: 100%;">
-          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">左 / 右クリック</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">← / →</td><td style="padding: 6px 15px;">前 / 次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + ホイール</td><td style="padding: 6px 15px;">画像のズームイン / アウト（手動倍率）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">左ドラッグ</td><td style="padding: 6px 15px;">ウィンドウの移動（非ズーム時）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + 左ドラッグ</td><td style="padding: 6px 15px;">ズームイン時、画像内を自由に移動（パン）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">↑ / ↓</td><td style="padding: 6px 15px;">90度回転</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">H / V</td><td style="padding: 6px 15px;">画像を左右反転 / 上下反転</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">0</td><td style="padding: 6px 15px;">100%表示（大きい画像は画面サイズまで縮小）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">1</td><td style="padding: 6px 15px;">完全な100%表示（画面外にはみ出しを許可）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">フルスクリーン表示切替</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">すべてのビューワーを横一列に整列</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">B</td><td style="padding: 6px 15px;">ウィンドウ枠・コントロールの表示/非表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">U</td><td style="padding: 6px 15px;">画像のシャープ（アンシャープマスク）切替</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">画像をゴミ箱に移動して次へ</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">画像をクリップボードにコピー</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ビューワーを閉じる</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">← / →</td><td style="padding: 6px 15px;">前の画像 / 次の画像を表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスクリック</td><td style="padding: 6px 15px;">左クリックで前の画像 / 右クリックで次の画像を表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">上スクロールで前の画像 / 下スクロールで次の画像を表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + ホイール</td><td style="padding: 6px 15px;">画像のズームイン / ズームアウト（手動倍率変更）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">左ドラッグ</td><td style="padding: 6px 15px;">ウィンドウの移動（非ズーム時） / スクロール（ズーム時）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + 左ドラッグ</td><td style="padding: 6px 15px;">ズームイン時、画像内を自由に移動（パン操作）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">↑ / ↓</td><td style="padding: 6px 15px;">画像を右に90度回転 / 左に90度回転</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">H</td><td style="padding: 6px 15px;">画像を左右反転（水平反転）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">V</td><td style="padding: 6px 15px;">画像を上下反転（垂直反転）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">0</td><td style="padding: 6px 15px;">100%表示（ただしモニターより大きい画像は画面に収まるようリサイズ）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">1</td><td style="padding: 6px 15px;">完全な100%等倍ウィンドウ表示（画面外へのはみ出しを許可して強制追従）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">ウィンドウのフルスクリーン表示切り替え</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているすべてのビューアーウィンドウを画面に横一列に整列</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">B</td><td style="padding: 6px 15px;">ウィンドウ枠（アクセントボーダー）および右上コントロール群の表示 / 非表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">U</td><td style="padding: 6px 15px;">画像のシャープ表示（アンシャープマスク） / 滑らか表示の切り替え</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">現在の画像をゴミ箱に移動し、自動的に次の画像を読み込んで表示</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">現在表示中の画像をクリップボードにコピー（黄金のフラッシュ余韻エフェクト付き）</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ビューワーウィンドウを閉じる</td></tr>
         </table>
       </div>
     </div>
