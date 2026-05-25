@@ -682,20 +682,31 @@ async fn open_viewer(
         win_height = (win_height as f64 * scale) as u32;
     }
 
-    // パスから一意のハッシュを生成し、ウィンドウラベルにする
-    let label = if let Some(path) = &target_path {
+    let hash_str = if let Some(path) = &target_path {
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
-        format!("viewer_{}", hasher.finish())
+        format!("{}", hasher.finish())
     } else {
-        format!("viewer_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis())
+        "none".to_string()
     };
 
-    // 既に同じ画像のビューアーが開いている場合は、フォーカスを当てるだけで終了
-    if let Some(window) = app.get_window(&label) {
+    // 既に同じ画像（ハッシュ値が一致）のビューアーが開いている場合は、フォーカスを当てるだけで終了
+    let existing_window = app.windows().into_values().find(|w| {
+        let l = w.label();
+        l.starts_with("viewer_") && l.ends_with(&format!("_{}", hash_str))
+    });
+
+    if let Some(window) = existing_window {
         let _ = window.set_focus();
         return Ok(());
     }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let label = format!("viewer_{:016}_{}", now_ms, hash_str);
 
     if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
         viewer_paths.insert(label.clone(), current_paths);
