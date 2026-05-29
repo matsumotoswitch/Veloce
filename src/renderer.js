@@ -835,6 +835,14 @@ function getPathsFromDragEvent(e) {
   }
   
   const paths = [];
+  const folderDataStr = e.dataTransfer.getData('application/json-folder');
+  if (folderDataStr) {
+    try {
+      const folderData = JSON.parse(folderDataStr);
+      if (folderData && folderData.path) return [folderData.path];
+    } catch(err) {}
+  }
+
   const jsonData = e.dataTransfer.getData('application/json');
   if (jsonData) {
     try { 
@@ -2113,7 +2121,7 @@ document.addEventListener('dragover', (e) => {
       const isRoot = itemDiv.dataset.isRoot === 'true';
       const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
       
-      text = count > 1 ? `${count}個のファイルを「${folderName}」へ${actionStr}` : `「${folderName}」へ${actionStr}`;
+      text = count > 1 ? `${count}個のアイテムを「${folderName}」へ${actionStr}` : `「${folderName}」へ${actionStr}`;
     }
 
     dragTooltip.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="color: var(--accent-color); width: 14px; height: 14px;">${UIManager.ICONS.COPY}</span>${text}</span>`;
@@ -2325,11 +2333,14 @@ uiManager.elements.dirTree.addEventListener('dragstart', (e) => {
     isRoot: false
   };
   e.dataTransfer.setData('application/json-folder', JSON.stringify(folderData));
-  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.effectAllowed = 'copyMove';
+
+  appState.dragState.paths = [itemDiv.dataset.path];
+  appState.dragState.isAppDragging = true;
 });
 
 uiManager.elements.dirTree.addEventListener('dragenter', (e) => {
-  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return; // お気に入り関連のドラッグ中は無視
+  if (draggedFavoriteId) return; // お気に入り関連のドラッグ中は無視
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   e.preventDefault();
@@ -2337,7 +2348,7 @@ uiManager.elements.dirTree.addEventListener('dragenter', (e) => {
 });
 
 uiManager.elements.dirTree.addEventListener('dragover', (e) => {
-  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return;
+  if (draggedFavoriteId) return;
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   e.preventDefault();
@@ -2357,7 +2368,7 @@ uiManager.elements.dirTree.addEventListener('dragover', (e) => {
 });
 
 uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
-  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return;
+  if (draggedFavoriteId) return;
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   if (!itemDiv.contains(e.relatedTarget)) {
@@ -2366,7 +2377,7 @@ uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
 });
 
 uiManager.elements.dirTree.addEventListener('drop', (e) => {
-  if (draggedFavoriteId || Array.from(e.dataTransfer.types).includes('application/json-folder')) return;
+  if (draggedFavoriteId) return;
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
   e.preventDefault();
