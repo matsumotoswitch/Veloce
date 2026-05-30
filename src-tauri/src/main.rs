@@ -302,6 +302,13 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
         }
     }
 
+    // EXIF等でプロンプトが見つからなかった場合、Stealthメタデータを試行
+    if raw_comment.trim().is_empty() && raw_description.trim().is_empty() {
+        if let Some(stealth) = extract_stealth_pnginfo(file_path) {
+            raw_comment = stealth;
+        }
+    }
+
     let mut prompt = raw_description.clone();
     let mut negative_prompt = String::new();
     let mut params = serde_json::Value::Object(serde_json::Map::new());
@@ -536,6 +543,66 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
         }
     }
     results
+}
+
+fn extract_stealth_pnginfo(path: &str) -> Option<String> {
+    use image::GenericImageView;
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+
+    let img = image::open(path).ok()?;
+    
+    // アルファチャンネルの最下位ビットを抽出（Column-Major Order: x -> y）
+    let mut bits = Vec::new();
+    for x in 0..img.width() {
+        for y in 0..img.height() {
+            let pixel = img.get_pixel(x, y);
+            bits.push(pixel.0[3] & 1);
+        }
+    }
+
+    // 8ビットずつ結合してバイト配列に変換（MSB first）
+    let mut bytes = Vec::with_capacity(bits.len() / 8);
+    for chunk in bits.chunks_exact(8) {
+        let mut b = 0u8;
+        for (i, bit) in chunk.iter().enumerate() {
+            b |= bit << (7 - i);
+        }
+        bytes.push(b);
+    }
+
+    if bytes.len() < 30 {
+        return None;
+    }
+
+    let header = String::from_utf8_lossy(&bytes[0..15]);
+    if header == "stealth_pngcomp" {
+        // stealth_pngcomp の場合、15〜19バイト目にビッグエンディアンで長さが入る
+        let len_bytes: [u8; 4] = bytes[15..19].try_into().ok()?;
+        let length = u32::from_be_bytes(len_bytes) as usize;
+        
+        if 19 + length <= bytes.len() {
+            let payload = &bytes[19..19 + length];
+            let mut decoder = GzDecoder::new(payload);
+            let mut decompressed = String::new();
+            if decoder.read_to_string(&mut decompressed).is_ok() {
+                return Some(decompressed);
+            }
+        }
+    } else if header == "stealth_pnginfo" {
+        // 非圧縮のstealth_pnginfo（念のためのフォールバック）
+        let len_bytes: [u8; 4] = bytes[15..19].try_into().ok()?;
+        let length = u32::from_be_bytes(len_bytes) as usize;
+        
+        if 19 + length <= bytes.len() {
+            let payload = &bytes[19..19 + length];
+            if let Ok(text) = String::from_utf8(payload.to_vec()) {
+                return Some(text);
+            }
+        }
+    }
+
+    None
 }
 
 fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
@@ -1153,7 +1220,16 @@ fn open_cache_folder() -> Result<(), String> {
 #[tauri::command]
 fn clear_thumbnail_cache() -> Result<(), String> {
     if let Some(mut path) = get_veloce_data_dir() {
+        // Clear Thumbnails
         path.push("Thumbnails");
+        if path.exists() {
+            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        }
+        
+        // Clear Metadata
+        path.pop();
+        path.push("Metadata");
         if path.exists() {
             std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
