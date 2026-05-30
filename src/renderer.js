@@ -1427,7 +1427,7 @@ async function renderMetadata(file) {
       ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(Boolean)
       : [];
 
-    const renderSection = (title, text, isParam = false) => {
+    const renderSection = (title, text, isParam = false, subLabel = null) => {
       if (!text || text === '-') return '';
       const tags = isParam ? [String(text)] : String(text).split(',').map(t => t.trim()).filter(t => t);
       const boxClass = isParam ? 'prompt-look param-box' : 'prompt-look';
@@ -1441,6 +1441,23 @@ async function renderMetadata(file) {
         return `<span class="diff-tag common" style="${matchStyle}">${displayHtml}</span>`;
       }).join('');
 
+      let subLabelHtml = '';
+      if (subLabel) {
+        let color = 'var(--text-color)';
+        let opacity = '0.7';
+        let fontWeight = 'normal';
+        if (subLabel.includes('Inpainting')) {
+          color = '#4a9eff';
+          opacity = '1';
+          fontWeight = 'normal';
+        } else if (subLabel.includes('Vibe Transfer') || subLabel.includes('Image to Image')) {
+          color = '#d27aff';
+          opacity = '1';
+          fontWeight = 'normal';
+        }
+        subLabelHtml = `<div style="font-size: 0.8em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight}; margin-top: 6px; text-align: left; padding-left: 2px;">${subLabel}</div>`;
+      }
+
       return `
         <div class="inspector-section" style="margin-bottom: 15px;">
           <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
@@ -1449,13 +1466,14 @@ async function renderMetadata(file) {
           <div class="${boxClass}">
             ${tagsHtml}
           </div>
+          ${subLabelHtml}
         </div>
       `;
     };
 
     let html = '';
     for (const section of buildInspectorSections(d)) {
-      html += renderSection(section.title, section.value, section.isParam);
+      html += renderSection(section.title, section.value, section.isParam, section.subLabel);
     }
     // プロンプトが何もない場合（または抽出に失敗した場合）
     if (html === '') {

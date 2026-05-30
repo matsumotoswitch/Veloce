@@ -9,6 +9,17 @@ export function formatMetadataNumber(num) {
   return !isNaN(n) ? n.toLocaleString() : num;
 }
 
+export function formatRequestType(reqType) {
+  if (!reqType) return null;
+  const types = {
+    'PromptGenerateRequest': 'Text to Image',
+    'NativeInfillingRequest': 'Inpainting',
+    'ImageToImageRequest': 'Image to Image / Vibe Transfer',
+    'VibeTransferRequest': 'Vibe Transfer'
+  };
+  return types[reqType] || reqType;
+}
+
 /**
  * 画像ファイルとメタデータからインスペクター/Diff共通の構造を抽出します。
  * @param {object} file
@@ -17,9 +28,18 @@ export function formatMetadataNumber(num) {
  */
 export function extractMetadataFields(file, meta = {}) {
   const p = meta.params || {};
+  let requestType = p.request_type || null;
+
+  if (Array.isArray(p.reference_information_extracted_multiple) && p.reference_information_extracted_multiple.length > 0) {
+    requestType = 'VibeTransferRequest';
+  } else if (Array.isArray(p.reference_image_multiple) && p.reference_image_multiple.length > 0) {
+    requestType = 'VibeTransferRequest';
+  }
+
   const data = {
     name: file.name,
     source: meta.source || file.source || null,
+    requestType: requestType,
     prompt: meta.prompt || file.prompt || '',
     negativePrompt: meta.negativePrompt || file.negativePrompt || '',
     chars: [],
@@ -93,10 +113,13 @@ export function highlightSearchTerms(text, terms) {
  */
 export function buildInspectorSections(data) {
   const sections = [
-    { title: 'モデル / バージョン', value: data.source, isParam: true },
-    { title: 'プロンプト', value: data.prompt },
-    { title: '除外したい要素', value: data.negativePrompt },
+    { title: 'モデル / バージョン', value: data.source, isParam: true, subLabel: data.requestType ? formatRequestType(data.requestType) : null }
   ];
+
+  sections.push(
+    { title: 'プロンプト', value: data.prompt },
+    { title: '除外したい要素', value: data.negativePrompt }
+  );
 
   data.chars.forEach((c, i) => {
     sections.push({ title: `キャラクター ${i + 1} プロンプト`, value: c.prompt });

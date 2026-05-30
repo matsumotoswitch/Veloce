@@ -2,7 +2,7 @@ import { appState } from './renderer-state.js';
 import { applyGlowEffect as glowElement } from './utils.js';
 import { validateFilename, INVALID_FILENAME_RE } from './path-utils.js';
 import { showAppDialog } from './dialog-base.js';
-import { extractMetadataFields, parsePromptTags } from './metadata-format.js';
+import { extractMetadataFields, parsePromptTags, formatRequestType } from './metadata-format.js';
 
 const CHUNK_SIZE = 100;
 
@@ -745,7 +745,7 @@ class UIManager {
     const d1 = extractMetadataFields(file1, meta1);
     const d2 = extractMetadataFields(file2, meta2);
 
-    const renderSideBySideSection = (title, text1, text2, isParam = false) => {
+    const renderSideBySideSection = (title, text1, text2, isParam = false, subLabel1 = null, subLabel2 = null) => {
       const v1 = text1 ?? '-';
       const v2 = text2 ?? '-';
       if (v1 === '-' && v2 === '-') return ''; 
@@ -772,6 +772,26 @@ class UIManager {
 
       const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
 
+      const getSubLabelHtml = (sub) => {
+        if (!sub) return '';
+        let color = 'var(--text-color)';
+        let opacity = '0.7';
+        let fontWeight = 'normal';
+        if (sub.includes('Inpainting')) {
+          color = '#4a9eff';
+          opacity = '1';
+          fontWeight = 'normal';
+        } else if (sub.includes('Vibe Transfer') || sub.includes('Image to Image')) {
+          color = '#d27aff';
+          opacity = '1';
+          fontWeight = 'normal';
+        }
+        return `<div style="font-size: 0.8em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight}; margin-top: 6px; text-align: left; padding-left: 2px;">${sub}</div>`;
+      };
+
+      let sub1Html = getSubLabelHtml(subLabel1);
+      let sub2Html = getSubLabelHtml(subLabel2);
+
       return `
         <div class="diff-columns">
           <div class="diff-column">
@@ -780,6 +800,7 @@ class UIManager {
                 <span>${title}</span>${UIManager.createCopyButtonHTML(v1)}
               </h3>
               <div class="${boxClass}">${renderTags(tags1, set2, 'left')}</div>
+              ${sub1Html}
             </div>
           </div>
           <div class="diff-column">
@@ -788,6 +809,7 @@ class UIManager {
                 <span>${title}</span>${UIManager.createCopyButtonHTML(v2)}
               </h3>
               <div class="${boxClass}">${renderTags(tags2, set1, 'right')}</div>
+              ${sub2Html}
             </div>
           </div>
         </div>
@@ -795,7 +817,15 @@ class UIManager {
     };
 
     let contentHtml = '';
-    contentHtml += renderSideBySideSection('モデル / バージョン', d1.source, d2.source, true);
+    contentHtml += renderSideBySideSection(
+      'モデル / バージョン', 
+      d1.source, 
+      d2.source, 
+      true,
+      d1.requestType ? formatRequestType(d1.requestType) : null,
+      d2.requestType ? formatRequestType(d2.requestType) : null
+    );
+    
     contentHtml += renderSideBySideSection('プロンプト', d1.prompt, d2.prompt);
     contentHtml += renderSideBySideSection('除外したい要素', d1.negativePrompt, d2.negativePrompt);
 
