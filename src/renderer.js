@@ -1148,11 +1148,7 @@ function toggleHelpOverlay(forceShow) {
   overlay.style.cursor = 'pointer';
   
   const content = document.createElement('div');
-  content.style.backgroundColor = 'var(--panel-bg)';
-  content.style.padding = '24px';
-  content.style.borderRadius = 'var(--radius-lg)';
-  content.style.border = '1px solid #0d1315';
-  content.style.boxShadow = '0 24px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
+  content.className = 'modal-content';
   content.style.cursor = 'default';
   
   content.innerHTML = `
