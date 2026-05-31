@@ -30,7 +30,10 @@ appState.tabs = [];
 appState.activeTabIndex = -1;
 
 const logicalCores = navigator.hardwareConcurrency || 8;
-const MAX_CONCURRENT_THUMBNAILS = logicalCores * 2;
+// サムネイル生成の同時実行数を制限します。
+// 多すぎるとWindows Shell (IShellItemImageFactory) がディスクI/Oやスレッド競合を起こし、
+// 全てが完了するまで「先頭の数枚が極端に遅くなる」現象が発生するためです。
+const MAX_CONCURRENT_THUMBNAILS = Math.min(logicalCores, 4); 
 
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';

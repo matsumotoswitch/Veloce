@@ -703,9 +703,9 @@ class UIManager {
     for (let i = 0; i < currentSelectedThumbs.length; i++) currentSelectedThumbs[i].classList.remove('selected');
 
     // 新たに選択された要素のみにクラスを付与する
-    const rows = this.elements.fileListBody.children;
     for (const i of this.state.selection) {
-      if (rows[i]) rows[i].classList.add('selected');
+      const row = this.elements.fileListBody.querySelector(`tr[data-index="${i}"]`);
+      if (row) row.classList.add('selected');
       
       // 仮想スクロール対応: DOMの順番ではなく、data-index属性を使って対象の画像を探す
       const thumb = this.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${i}"]`);
@@ -985,37 +985,8 @@ class UIManager {
       if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
     }
 
-    for (let i = 0; i < this.state.filteredFiles.length; i += CHUNK_SIZE) {
-      if (renderId !== this.state.currentRenderId) return;
-
-      const chunk = this.state.filteredFiles.slice(i, i + CHUNK_SIZE);
-      const tableFragment = document.createDocumentFragment();
-
-      chunk.forEach((file, chunkIndex) => {
-        const index = i + chunkIndex;
-        const isSelected = this.state.selection.has(index);
-
-        // --- テーブル行の作成 ---
-        const tr = document.createElement('tr');
-        if (isSelected) tr.classList.add('selected');
-        tr.dataset.index = index;
-        tr.innerHTML = `
-          <td>${file.name}</td>
-          <td>${file.ext}</td>
-          <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
-          <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
-          <td style="text-align: right;">${formatSize(file.size)}</td>
-          <td>${formatDate(file.mtime)}</td>
-        `;
-        
-        tr.draggable = true;
-        tableFragment.appendChild(tr);
-      });
-
-      if (this.elements.fileListBody) this.elements.fileListBody.appendChild(tableFragment);
-
-      // メインスレッドのブロック回避
-      await new Promise(resolve => setTimeout(resolve, 0));
+    if (typeof this.updateVirtualList === 'function') {
+      this.updateVirtualList(true);
     }
 
     if (typeof this.updateVirtualGrid === 'function') {
@@ -1029,6 +1000,92 @@ class UIManager {
         setTimeout(window.processNextTask, 50);
       }
     }
+  }
+
+  updateVirtualList(force = false) {
+    if (!this.elements.fileListBody) return;
+    const container = document.getElementById('center-top');
+    const tbody = this.elements.fileListBody;
+
+    if (!this._listScrollAttached && container) {
+      container.addEventListener('scroll', () => this.updateVirtualList(), { passive: true });
+      window.addEventListener('resize', () => {
+        if (this._listResizeTimeout) clearTimeout(this._listResizeTimeout);
+        this._listResizeTimeout = setTimeout(() => this.updateVirtualList(true), 100);
+      });
+      this._listScrollAttached = true;
+    }
+
+    if (!appState.filteredFiles || appState.filteredFiles.length === 0) {
+      tbody.innerHTML = '';
+      this.lastListStartIndex = -1;
+      this.lastListEndIndex = -1;
+      return;
+    }
+
+    // <tr>の概算高さ（CSSのpaddingやborderを含む）
+    const rowHeight = 28; 
+    const totalRows = appState.filteredFiles.length;
+    
+    const scrollTop = container.scrollTop;
+    const containerHeight = container.clientHeight || window.innerHeight;
+
+    const startRow = Math.floor(Math.max(0, scrollTop) / rowHeight);
+    const safeStartRow = Math.max(0, startRow - 5);
+    const endRow = Math.min(totalRows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 5);
+
+    if (!force && this.lastListStartIndex === safeStartRow && this.lastListEndIndex === endRow) {
+      return;
+    }
+
+    if (appState.dragState && appState.dragState.isAppDragging) {
+      return;
+    }
+
+    this.lastListStartIndex = safeStartRow;
+    this.lastListEndIndex = endRow;
+
+    const topSpacerHeight = safeStartRow * rowHeight;
+    const bottomSpacerHeight = (totalRows - 1 - endRow) * rowHeight;
+
+    const fragment = document.createDocumentFragment();
+
+    if (topSpacerHeight > 0) {
+      const tr = document.createElement('tr');
+      tr.style.height = `${topSpacerHeight}px`;
+      tr.innerHTML = `<td colspan="6" style="padding: 0; border: none;"></td>`;
+      fragment.appendChild(tr);
+    }
+
+    for (let i = safeStartRow; i <= endRow; i++) {
+      const file = appState.filteredFiles[i];
+      if (!file) continue;
+      const isSelected = appState.selection.has(i);
+      const tr = document.createElement('tr');
+      if (isSelected) tr.classList.add('selected');
+      tr.dataset.index = i;
+      tr.style.height = `${rowHeight}px`;
+      tr.innerHTML = `
+        <td>${file.name}</td>
+        <td>${file.ext}</td>
+        <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
+        <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
+        <td style="text-align: right;">${formatSize(file.size)}</td>
+        <td>${formatDate(file.mtime)}</td>
+      `;
+      tr.draggable = true;
+      fragment.appendChild(tr);
+    }
+
+    if (bottomSpacerHeight > 0) {
+      const tr = document.createElement('tr');
+      tr.style.height = `${bottomSpacerHeight}px`;
+      tr.innerHTML = `<td colspan="6" style="padding: 0; border: none;"></td>`;
+      fragment.appendChild(tr);
+    }
+
+    tbody.innerHTML = '';
+    tbody.appendChild(fragment);
   }
 
   updateVirtualGrid(force = false) {
