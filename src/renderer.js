@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Veloce - Main Controller (renderer.js)
 // ============================================================================
 
@@ -1469,18 +1469,21 @@ async function renderMetadata(file) {
           opacity = '1';
           fontWeight = 'normal';
         }
-        subLabelHtml = `<div style="font-size: 0.8em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight}; margin-top: 6px; text-align: left; padding-left: 2px;">${subLabel}</div>`;
+        subLabelHtml = `<span style="font-size: 0.85em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight};">${subLabel}</span>`;
       }
 
       return `
         <div class="inspector-section" style="margin-bottom: 15px;">
           <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
-            <span>${title}</span>${UIManager.createCopyButtonHTML(text)}
+            <span style="display: flex; align-items: center; gap: 8px;">
+              <span>${title}</span>
+              ${subLabelHtml}
+            </span>
+            ${UIManager.createCopyButtonHTML(text)}
           </h3>
           <div class="${boxClass}">
             ${tagsHtml}
           </div>
-          ${subLabelHtml}
         </div>
       `;
     };
