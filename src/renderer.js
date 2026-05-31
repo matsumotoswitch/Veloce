@@ -1450,8 +1450,12 @@ async function renderMetadata(file) {
           color = '#4a9eff';
           opacity = '1';
           fontWeight = 'normal';
-        } else if (subLabel.includes('Vibe Transfer') || subLabel.includes('Image to Image')) {
+        } else if (subLabel.includes('Vibe Transfer')) {
           color = '#d27aff';
+          opacity = '1';
+          fontWeight = 'normal';
+        } else if (subLabel.includes('Image to Image') || subLabel.includes('Img2Img')) {
+          color = '#4ade80';
           opacity = '1';
           fontWeight = 'normal';
         }

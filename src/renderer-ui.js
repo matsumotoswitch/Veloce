@@ -781,8 +781,12 @@ class UIManager {
           color = '#4a9eff';
           opacity = '1';
           fontWeight = 'normal';
-        } else if (sub.includes('Vibe Transfer') || sub.includes('Image to Image')) {
+        } else if (sub.includes('Vibe Transfer')) {
           color = '#d27aff';
+          opacity = '1';
+          fontWeight = 'normal';
+        } else if (sub.includes('Image to Image') || sub.includes('Img2Img')) {
+          color = '#4ade80';
           opacity = '1';
           fontWeight = 'normal';
         }

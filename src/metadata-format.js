@@ -14,7 +14,8 @@ export function formatRequestType(reqType) {
   const types = {
     'PromptGenerateRequest': 'Text to Image',
     'NativeInfillingRequest': 'Inpainting',
-    'ImageToImageRequest': 'Image to Image / Vibe Transfer',
+    'ImageToImageRequest': 'Image to Image',
+    'Img2ImgRequest': 'Image to Image',
     'VibeTransferRequest': 'Vibe Transfer'
   };
   return types[reqType] || reqType;
