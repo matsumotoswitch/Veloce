@@ -1474,7 +1474,7 @@ async function renderMetadata(file) {
 
       return `
         <div class="inspector-section" style="margin-bottom: 15px;">
-          <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
+          <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s; user-select: none;">
             <span style="display: flex; align-items: center; gap: 8px;">
               <span>${title}</span>
               ${subLabelHtml}
