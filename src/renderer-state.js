@@ -22,10 +22,10 @@
  */
 class AppState {
   constructor() {
-    /** @type {ImageFile[]} 読み込まれたすべての画像ファイルリスト */
-    this.files = [];
-    /** @type {ImageFile[]} 検索・ソート適用後のファイルリスト */
-    this.filteredFiles = [];
+    /** @type {number} Rust側のフィルタリング済みファイルの総件数 */
+    this.totalCount = 0;
+    /** @type {string[]} Rust側のフィルタリング済みファイルのパス一覧 */
+    this.currentPaths = [];
     /** @type {{key: string, asc: boolean}} 現在のソート設定 */
     this.sortConfig = { key: 'name', asc: true };
     /** @type {string} 検索クエリ文字列 */
@@ -82,75 +82,22 @@ class AppState {
   }
 
   /**
-   * 現在のファイルリストに対して、検索クエリによるフィルタリングと、
-   * 設定されたソート条件による並び替えを適用し、結果を filteredFiles に格納します。
-   * また、選択状態の維持も行います。
+   * Rust側のSource of Truthにソート・検索条件を送信し、フィルタリング後の件数を取得します。
+   * @returns {Promise<number>} フィルタリング後の件数
    */
-  applyFiltersAndSort() {
-    // ソート後も選択状態を維持するためにパスを記録
-    const selectedPath = this.selectedIndex > -1 && this.filteredFiles[this.selectedIndex] ? this.filteredFiles[this.selectedIndex].path : null;
-    const selectedPaths = new Set(Array.from(this.selection).map(i => this.filteredFiles[i] ? this.filteredFiles[i].path : null).filter(Boolean));
-
-    let files = this.files;
-
-    if (this.searchQuery.trim() !== '') {
-      const terms = this.searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t);
-      
-      files = files.filter(f => {
-        const charPromptsText = f.charPrompts ? JSON.stringify(f.charPrompts) : '';
-        const textToSearch = [f.name, f.prompt, f.negativePrompt, f.source, charPromptsText].filter(Boolean).join(' ').toLowerCase();
-        return terms.every(term => textToSearch.includes(term));
-      });
-    }
-
-    files.sort((a, b) => {
-      let valA = a[this.sortConfig.key];
-      let valB = b[this.sortConfig.key];
-
-      // 未定義プロパティ（メタデータ読み込み前など）のフォールバック
-      if (valA === undefined) valA = 0;
-      if (valB === undefined) valB = 0;
-
-      let cmp = 0;
-      if (typeof valA === 'string' && typeof valB === 'string') {
-        // OS標準のエクスプローラに近い「自然順（1, 2, 10...）」で比較する
-        cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-      } else {
-        if (valA < valB) cmp = -1;
-        else if (valA > valB) cmp = 1;
+  async setViewParams() {
+    if (window.veloceAPI && window.veloceAPI.setViewParams) {
+      try {
+        const [totalCount, paths] = await window.veloceAPI.setViewParams(
+          this.sortConfig.key, this.sortConfig.asc, this.searchQuery
+        );
+        this.totalCount = totalCount;
+        this.currentPaths = paths;
+      } catch (err) {
+        console.error('Failed to set view params:', err);
       }
-
-      if (cmp !== 0) return this.sortConfig.asc ? cmp : -cmp;
-
-      // 値が同じ場合（同じサイズや同じ日時など）は、ファイル名（自然順）で安定ソートする
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-    });
-
-    this.filteredFiles = files;
-
-    this.selection.clear();
-    this.selectedIndex = -1;
-    this.filteredFiles.forEach((f, i) => {
-      if (selectedPaths.has(f.path)) this.selection.add(i);
-      if (f.path === selectedPath) this.selectedIndex = i;
-    });
-    
-    // ソート完了後、即座にRust側と同期をとる
-    this.syncPathsToBackend();
-  }
-
-  /**
-   * 現在の filteredFiles のパス配列をRustのバックエンドと同期します。
-   * 競合を防ぐため Promise チェーンで順序を保証します。
-   */
-  syncPathsToBackend() {
-    if (window.veloceAPI && window.veloceAPI.syncImagePaths) {
-      const sortedPaths = this.filteredFiles.map(f => f.path);
-      if (!this.syncPromise) this.syncPromise = Promise.resolve();
-      this.syncPromise = this.syncPromise
-        .then(() => window.veloceAPI.syncImagePaths(sortedPaths))
-        .catch(err => console.error('Failed to sync image paths:', err));
     }
+    return this.totalCount;
   }
 
   getActiveTab() {

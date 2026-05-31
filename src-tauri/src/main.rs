@@ -13,7 +13,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 // --- データ構造の定義 ---
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")] // フロントエンドのJSがキャメルケースを期待しているため変換
 pub struct ImageFile {
     name: String,
@@ -24,6 +24,19 @@ pub struct ImageFile {
     ctime: u64,
     has_thumbnail_cache: bool,
     has_metadata_cache: bool,
+    // メタデータフィールド（Rust側でSource of Truthとして保持）
+    #[serde(default)]
+    width: u32,
+    #[serde(default)]
+    height: u32,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    negative_prompt: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    meta_loaded: bool,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -32,6 +45,22 @@ pub struct DirectoryChunkPayload {
     path: String,
     files: Vec<ImageFile>,
     is_complete: bool,
+}
+
+/// ディレクトリ読み込み完了時にJS側へ送信するペイロード
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryLoadedPayload {
+    path: String,
+    total_count: usize,
+}
+
+/// JS側から受け取るソート・検索条件
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SortConfig {
+    key: String,
+    asc: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -82,6 +111,11 @@ pub struct AppState {
     image_paths: Mutex<Vec<String>>,
     current_dir: Mutex<String>,
     viewer_paths: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    // Source of Truth: 全ファイルとフィルタリング済みファイルをRust側で保持
+    all_files: Mutex<Vec<ImageFile>>,
+    filtered_files: Mutex<Vec<ImageFile>>,
+    sort_config: Mutex<SortConfig>,
+    search_query: Mutex<String>,
 }
 
 // --- ユーティリティ ---
@@ -134,9 +168,15 @@ fn path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
-fn load_directory(window: tauri::Window, target_path: String) -> Result<(), String> {
+fn load_directory(window: tauri::Window, target_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let path_clone = target_path.clone();
     let app_clone = window.app_handle();
+    
+    // ディレクトリ変更時にRust側の状態をリセット
+    if let Ok(mut lock) = state.all_files.lock() { lock.clear(); }
+    if let Ok(mut lock) = state.filtered_files.lock() { lock.clear(); }
+    if let Ok(mut lock) = state.image_paths.lock() { lock.clear(); }
+    if let Ok(mut dir_lock) = state.current_dir.lock() { *dir_lock = path_clone.clone(); }
     
     tauri::async_runtime::spawn(async move {
         // Veloceのキャッシュディレクトリ構造に合わせる
@@ -147,8 +187,8 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
             .map(|p| p.join("Metadata"))
             .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
 
-        let mut files = Vec::new();
-        let mut all_paths = Vec::new(); // ビューアー用にパスを保持する
+        let mut files: Vec<ImageFile> = Vec::new();
+        let mut all_paths = Vec::new();
         let walker = walkdir::WalkDir::new(&path_clone).max_depth(1).into_iter().filter_map(|e| e.ok());
 
         for entry in walker {
@@ -159,7 +199,6 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
                     if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
                         if let Ok(metadata) = std::fs::metadata(p) {
                             let size = metadata.len();
-                            // 既存UIのフォーマットとキャッシュ生成用にミリ秒単位で取得
                             let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                             let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                             
@@ -167,7 +206,6 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
                             let full_path = p.to_string_lossy().into_owned();
                             let clean_path = full_path.replace("\\\\?\\", "");
 
-                            // キャッシュの存在確認 (Veloceの仕様に合わせる)
                             let cache_file_name = format!("{}_{}", clean_path, mtime);
                             let digest = md5::compute(cache_file_name.as_bytes());
                             let cache_path = cache_dir_path.join(format!("{:x}.jpg", digest));
@@ -187,37 +225,45 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
                                 ctime,
                                 has_thumbnail_cache,
                                 has_metadata_cache,
+                                width: 0,
+                                height: 0,
+                                prompt: String::new(),
+                                negative_prompt: String::new(),
+                                source: String::new(),
+                                meta_loaded: false,
                             });
-
-                            // 200件ごとにフロントエンドへ送信
-                            if files.len() >= 200 {
-                                let payload = DirectoryChunkPayload {
-                                    path: path_clone.clone(),
-                                    files: files.clone(),
-                                    is_complete: false,
-                                };
-                                let _ = window.emit("directory-chunk", payload);
-                                files.clear();
-                            }
                         }
                     }
                 }
             }
         }
 
-        // 残りのファイルと完了フラグを送信
-        let payload = DirectoryChunkPayload {
-            path: path_clone.clone(),
-            files,
-            is_complete: true,
-        };
-        let _ = window.emit("directory-chunk", payload);
-
-        // Rust側のStateにパス一覧を保存（画像ビューア等で必要）
+        // Rust側のAppStateに全ファイルを格納（Source of Truth）
         if let Some(state) = app_clone.try_state::<AppState>() {
-            if let Ok(mut lock) = state.image_paths.lock() {
-                *lock = all_paths;
+            // デフォルトソート（名前順昇順）を適用
+            files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+            let total_count = files.len();
+            let sorted_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+
+            if let Ok(mut lock) = state.all_files.lock() {
+                *lock = files.clone();
             }
+            if let Ok(mut lock) = state.filtered_files.lock() {
+                *lock = files;
+            }
+            if let Ok(mut lock) = state.image_paths.lock() {
+                *lock = sorted_paths;
+            }
+
+            // JS側には総件数のみを通知（ファイルデータ自体はIPCで送らない）
+            let _ = window.emit("directory-loaded", DirectoryLoadedPayload {
+                path: path_clone.clone(),
+                total_count,
+            });
+        }
+
+        if let Some(state) = app_clone.try_state::<AppState>() {
             if let Ok(mut dir_lock) = state.current_dir.lock() {
                 *dir_lock = path_clone;
             }
@@ -225,6 +271,146 @@ fn load_directory(window: tauri::Window, target_path: String) -> Result<(), Stri
     });
 
     Ok(())
+}
+/// Rust側でソート・フィルタリングを実行するヘルパー関数
+fn apply_filters_and_sort(state: &AppState) -> (usize, Vec<String>) {
+    let all_files = state.all_files.lock().unwrap();
+    let sort_config = state.sort_config.lock().unwrap();
+    let search_query = state.search_query.lock().unwrap();
+
+    let mut filtered: Vec<ImageFile> = if search_query.trim().is_empty() {
+        all_files.clone()
+    } else {
+        let terms: Vec<String> = search_query.to_lowercase().split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+        all_files.iter().filter(|f| {
+            let text = format!("{} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source).to_lowercase();
+            terms.iter().all(|term| text.contains(term))
+        }).cloned().collect()
+    };
+
+    // ソート
+    let key = sort_config.key.as_str();
+    let asc = sort_config.asc;
+    filtered.sort_by(|a, b| {
+        let cmp = match key {
+            "name" => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            "ext" => a.ext.cmp(&b.ext),
+            "size" => a.size.cmp(&b.size),
+            "mtime" => a.mtime.cmp(&b.mtime),
+            "ctime" => a.ctime.cmp(&b.ctime),
+            "width" => a.width.cmp(&b.width),
+            "height" => a.height.cmp(&b.height),
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        };
+        let cmp = if asc { cmp } else { cmp.reverse() };
+        if cmp == std::cmp::Ordering::Equal {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        } else {
+            cmp
+        }
+    });
+
+    let total = filtered.len();
+    let paths: Vec<String> = filtered.iter().map(|f| f.path.clone()).collect();
+    
+    drop(all_files);
+    drop(sort_config);
+    drop(search_query);
+
+    if let Ok(mut lock) = state.filtered_files.lock() {
+        *lock = filtered;
+    }
+    if let Ok(mut lock) = state.image_paths.lock() {
+        *lock = paths.clone();
+    }
+
+    (total, paths)
+}
+
+/// JS側からソート条件・検索クエリを受け取り、Rust側でフィルタリングとソートを実行する
+#[tauri::command]
+fn set_view_params(
+    state: tauri::State<'_, AppState>,
+    sort_key: String,
+    asc: bool,
+    search_query: String,
+) -> (usize, Vec<String>) {
+    if let Ok(mut lock) = state.sort_config.lock() {
+        *lock = SortConfig { key: sort_key, asc };
+    }
+    if let Ok(mut lock) = state.search_query.lock() {
+        *lock = search_query;
+    }
+    apply_filters_and_sort(&state)
+}
+
+/// 仮想スクロール用: 指定範囲のImageFileをスライスして返す
+#[tauri::command]
+fn get_items(state: tauri::State<'_, AppState>, offset: usize, limit: usize) -> Vec<ImageFile> {
+    let lock = state.filtered_files.lock().unwrap();
+    let end = std::cmp::min(offset + limit, lock.len());
+    if offset >= lock.len() {
+        return Vec::new();
+    }
+    lock[offset..end].to_vec()
+}
+
+/// selectImage用: 単一のImageFileを取得
+#[tauri::command]
+fn get_file_by_index(state: tauri::State<'_, AppState>, index: usize) -> Option<ImageFile> {
+    let lock = state.filtered_files.lock().unwrap();
+    lock.get(index).cloned()
+}
+
+/// メタデータ読み込み結果をRust側のSource of Truthに反映する
+#[tauri::command]
+fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<FullMetadata>) {
+    if let Ok(mut all_files) = state.all_files.lock() {
+        for meta in &updates {
+            if let Some(file) = all_files.iter_mut().find(|f| f.path == meta.path) {
+                file.width = meta.width;
+                file.height = meta.height;
+                file.prompt = meta.prompt.clone();
+                file.negative_prompt = meta.negative_prompt.clone();
+                file.source = meta.source.clone();
+                file.meta_loaded = true;
+            }
+        }
+    }
+    if let Ok(mut filtered) = state.filtered_files.lock() {
+        for meta in &updates {
+            if let Some(file) = filtered.iter_mut().find(|f| f.path == meta.path) {
+                file.width = meta.width;
+                file.height = meta.height;
+                file.prompt = meta.prompt.clone();
+                file.negative_prompt = meta.negative_prompt.clone();
+                file.source = meta.source.clone();
+                file.meta_loaded = true;
+            }
+        }
+    }
+}
+
+/// ファイルウォッチャーから通知されたファイル変更をRust側のSource of Truthに反映する
+#[tauri::command]
+fn notify_file_changed(state: tauri::State<'_, AppState>, file: ImageFile) -> usize {
+    if let Ok(mut all_files) = state.all_files.lock() {
+        if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
+            *existing = file.clone();
+        } else {
+            all_files.push(file);
+        }
+    }
+    apply_filters_and_sort(&state).0
+}
+
+/// ファイルウォッチャーから通知されたファイル削除をRust側のSource of Truthに反映する
+#[tauri::command]
+fn notify_file_removed(state: tauri::State<'_, AppState>, path: String) -> usize {
+    if let Ok(mut all_files) = state.all_files.lock() {
+        all_files.retain(|f| f.path != path);
+    }
+    apply_filters_and_sort(&state).0
 }
 
 #[tauri::command]
@@ -1439,6 +1625,10 @@ fn main() {
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            all_files: Mutex::new(Vec::new()),
+            filtered_files: Mutex::new(Vec::new()),
+            sort_config: Mutex::new(SortConfig { key: "name".to_string(), asc: true }),
+            search_query: Mutex::new(String::new()),
         })
         .setup(move |app| {
             let data_dir = get_veloce_data_dir().unwrap_or_default();
@@ -1561,13 +1751,13 @@ fn main() {
                                                 if old_size != size || old_mtime != mtime {
                                                     let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                                                     let file_name = entry.file_name().to_string_lossy().into_owned();
-                                                    let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false };
+                                                    let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false };
                                                     let _ = app_handle.emit_all("file-changed", img_file);
                                                 }
                                             } else {
                                                 let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                                                 let file_name = entry.file_name().to_string_lossy().into_owned();
-                                                let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false };
+                                                let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false };
                                                 let _ = app_handle.emit_all("file-changed", img_file);
                                             }
                                         }
@@ -1656,6 +1846,12 @@ fn main() {
             get_drives,
             path_exists,
             load_directory,
+            set_view_params,
+            get_items,
+            get_file_by_index,
+            update_metadata_in_state,
+            notify_file_changed,
+            notify_file_removed,
             get_full_metadata_batch,
             parse_metadata,
             get_viewer_image,

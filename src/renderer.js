@@ -133,8 +133,7 @@ async function refreshFileList(showToast = false) {
   }
 
   // UIとデータの初期化
-  appState.files = [];
-  appState.filteredFiles = [];
+  appState.totalCount = 0;
   appState.selection.clear();
   appState.selectedIndex = -1;
   appState.thumbnailUrls.clear();
@@ -254,10 +253,16 @@ function updateMetadataToast() {
 async function loadAllMetadataInBackground() {
   if (!window.veloceAPI.getFullMetadataBatch) return;
   // まだメタデータが読み込まれていないファイルのみを対象にする
-  const targets = appState.files.filter(f => !f.metaLoaded);
+  const FETCH_BATCH = 200;
+  const allFiles = [];
+  for (let offset = 0; offset < appState.totalCount; offset += FETCH_BATCH) {
+    const items = await window.veloceAPI.getItems(offset, FETCH_BATCH);
+    allFiles.push(...items);
+  }
+  const targets = allFiles.filter(f => !f.metaLoaded);
   
   // プログレス表示用の分母と分子は、「キャッシュがなく、実際に抽出が必要なファイル数」をベースにする
-  const noCacheFiles = appState.files.filter(f => !f.hasMetadataCache);
+  const noCacheFiles = allFiles.filter(f => !f.hasMetadataCache);
   const noCacheTargets = targets.filter(f => !f.hasMetadataCache);
   appState.metadataTargetCount = noCacheFiles.length;
   appState.metadataCompleted = noCacheFiles.length - noCacheTargets.length;
@@ -282,36 +287,12 @@ async function loadAllMetadataInBackground() {
       const results = await window.veloceAPI.getFullMetadataBatch(paths);
       if (appState.currentMetaBatchId !== batchId) return;
 
-      const pathToIndex = new Map();
-      appState.files.forEach((f, idx) => pathToIndex.set(f.path, idx));
-      
-      results.forEach(meta => {
-        const fileIndex = pathToIndex.get(meta.path);
-        if (fileIndex !== undefined && fileIndex > -1) {
-          const file = appState.files[fileIndex];
-          if (!file.metaLoaded) {
-            file.width = meta.width;
-            file.height = meta.height;
-            file.prompt = meta.prompt || '';
-            file.negativePrompt = meta.negativePrompt || '';
-            file.source = meta.source || '';
-            if (meta.params && Array.isArray(meta.params.characterPrompts)) {
-              file.charPrompts = meta.params.characterPrompts;
-            }
-            file.metaLoaded = true;
-            if (!file.hasMetadataCache) {
-              appState.metadataCompleted++;
-            }
-
-            const tableIndex = appState.filteredFiles.findIndex(f => f.path === meta.path);
-            if (tableIndex !== -1 && uiManager.elements.fileListBody.children[tableIndex]) {
-              const row = uiManager.elements.fileListBody.children[tableIndex];
-              row.children[2].textContent = meta.width ? meta.width.toLocaleString() : '-';
-              row.children[3].textContent = meta.height ? meta.height.toLocaleString() : '-';
-            }
-          }
-        }
+      await window.veloceAPI.updateMetadataInState(results);
+      const newCompletions = results.filter(m => {
+        const t = batch.find(f => f.path === m.path);
+        return t && !t.hasMetadataCache;
       });
+      appState.metadataCompleted += newCompletions.length;
       
       updateMetadataToast();
       
@@ -405,8 +386,9 @@ async function deleteSelectedFolder() {
 }
 
 async function renameSelectedFile() {
-  if (appState.selectedIndex > -1 && appState.filteredFiles[appState.selectedIndex]) {
-    const file = appState.filteredFiles[appState.selectedIndex];
+  if (appState.selectedIndex > -1) {
+    const file = await window.veloceAPI.getFileByIndex(appState.selectedIndex);
+    if (!file) return;
     const oldPath = file.path;
     const newName = await uiManager.showPrompt('新しいファイル名を入力してください:', file.name, true);
     if (newName !== null && newName !== file.name) {
@@ -424,12 +406,8 @@ async function renameSelectedFile() {
         uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
         
         const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
-        const currentIdx = appState.files.findIndex(f => f.path === oldPath);
-        if (currentIdx > -1) {
-          appState.files[currentIdx].path = result.path;
-          appState.files[currentIdx].name = newName;
-          appState.files[currentIdx].ext = newExt;
-        }
+        // Rust側に変更を通知
+        await window.veloceAPI.notifyFileChanged(file);
         file.path = result.path;
         file.name = newName;
         file.ext = newExt;
@@ -448,7 +426,8 @@ async function deleteSelectedFiles() {
   if (appState.selection.size > 0) {
     const pathsToDelete = [];
     for (const i of appState.selection) {
-      if (appState.filteredFiles[i]) pathsToDelete.push(appState.filteredFiles[i].path);
+      const f = await window.veloceAPI.getFileByIndex(i);
+      if (f) pathsToDelete.push(f.path);
     }
 
     appState.selection.clear();
@@ -463,7 +442,10 @@ async function deleteSelectedFiles() {
     for (const path of pathsToDelete) {
       try {
         const success = await window.veloceAPI.trashFile(path);
-        if (success) trashedCount++;
+        if (success) {
+          trashedCount++;
+          await window.veloceAPI.notifyFileRemoved(path);
+        }
       } catch (err) {
         console.error('Failed to trash file:', err);
       }
@@ -472,12 +454,7 @@ async function deleteSelectedFiles() {
     if (trashedCount > 0) {
       uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
       
-      // アプリ内で削除したアイテムを即座にリストから除外して画面を更新する
-      pathsToDelete.forEach(path => {
-        const index = appState.files.findIndex(f => f.path === path);
-        if (index > -1) appState.files.splice(index, 1);
-      });
-      appState.applyFiltersAndSort();
+      
       scheduleRefresh();
     } else {
       uiManager.showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
@@ -656,17 +633,38 @@ window.processNextTask = function processNextTask() {
     // 【バックグラウンド処理】優先キューが空の場合
     else {
       appState.isPreloadRunning = true;
-      while (appState.preloadCursor < appState.filteredFiles.length) {
-        const p = appState.filteredFiles[appState.preloadCursor].path;
+      // キューが空で、まだプリロードする対象がある場合は非同期で補充を開始する
+      if ((!appState.preloadQueue || appState.preloadQueue.length === 0) && appState.preloadCursor < appState.totalCount) {
+        if (!appState.isFetchingPreload) {
+          appState.isFetchingPreload = true;
+          appState.preloadQueue = appState.preloadQueue || [];
+          
+          window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
+            appState.preloadCursor += items.length;
+            appState.preloadQueue.push(...items.map(f => f.path));
+            appState.isFetchingPreload = false;
+            // 補充完了後に再度タスクディスパッチを呼び出す
+            setTimeout(window.processNextTask, 0);
+          });
+        }
+        break; // 補充待ちのため一旦ループを抜ける
+      }
+
+      // プリロードキューから対象を取得
+      if (appState.preloadQueue && appState.preloadQueue.length > 0) {
+        while (appState.preloadQueue.length > 0) {
+          const p = appState.preloadQueue.shift();
         if (!appState.thumbnailUrls.has(p) && !appState.pendingThumbnails.has(p)) {
           targetFile = p;
           break;
         }
-        appState.preloadCursor++;
+        }
       }
 
       if (!targetFile) {
-        appState.isPreloadRunning = false;
+        if (appState.preloadCursor >= appState.totalCount) {
+          appState.isPreloadRunning = false;
+        }
         break; // 完全に処理する画像がなくなったので補充ループを抜ける
       }
     }
@@ -684,12 +682,8 @@ window.processNextTask = function processNextTask() {
       const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
       if (currentImg) currentImg.src = finalUrl;
 
-      const fileObj = appState.files.find(f => f.path === targetFile);
-      if (fileObj && !fileObj.hasThumbnailCache) {
-        fileObj.hasThumbnailCache = true;
-        appState.thumbnailCompleted++;
-        updateThumbnailToast();
-      }
+      appState.thumbnailCompleted++;
+      updateThumbnailToast();
     }).catch(() => {
       const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
       appState.thumbnailUrls.set(targetFile, fallbackUrl);
@@ -698,12 +692,8 @@ window.processNextTask = function processNextTask() {
       const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
       if (currentImg) currentImg.src = fallbackUrl;
 
-      const fileObj = appState.files.find(f => f.path === targetFile);
-      if (fileObj && !fileObj.hasThumbnailCache) {
-        fileObj.hasThumbnailCache = true;
-        appState.thumbnailCompleted++;
-        updateThumbnailToast();
-      }
+      appState.thumbnailCompleted++;
+      updateThumbnailToast();
     }).finally(() => {
       // 成功・失敗に関わらず、タスクが1つ終わったら枠を空けて次を1つだけキックする
       appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
@@ -724,9 +714,9 @@ function clearMetadataUI() {
   }
 }
 
-const scheduleRefresh = debounce(() => {
+const scheduleRefresh = debounce(async () => {
   appState.preloadCursor = 0;
-  appState.applyFiltersAndSort();
+  await appState.setViewParams();
   uiManager.renderAll();
   loadAllMetadataInBackground();
   uiManager.updateSelectionUI();
@@ -920,7 +910,7 @@ async function selectImage(index, event = null) {
     return;
   }
 
-  const file = appState.filteredFiles[index];
+  const file = await window.veloceAPI.getFileByIndex(index);
   
   uiManager.updateSelectionUI();
 
@@ -943,44 +933,34 @@ async function selectImage(index, event = null) {
     }
   }
 
-  const rows = uiManager.elements.fileListBody.children;
-  if (rows[index]) {
+  const targetRow = uiManager.elements.fileListBody?.querySelector(`tr[data-index="${index}"]`);
+  if (targetRow) {
     const thead = document.querySelector('#file-table thead');
     if (thead) {
-      rows[index].style.scrollMarginTop = `${thead.getBoundingClientRect().height}px`;
+      targetRow.style.scrollMarginTop = `${thead.getBoundingClientRect().height}px`;
     }
-    
-    rows[index].scrollIntoView({ block: 'nearest' });
+    targetRow.scrollIntoView({ block: 'nearest' });
   }
 
   const requestId = ++appState.currentMetaRequestId;
 
   // インスペクターの更新
-  renderMetadata(file);
+  if (file) renderMetadata(file);
 }
 
-function openViewer(index) {
-  const file = appState.filteredFiles[index];
+async function openViewer(index) {
+  const file = await window.veloceAPI.getFileByIndex(index);
 
   // IPC通信の遅延を回避するため、初期表示用のデータを LocalStorage に保存して直接渡す
   if (file) {
     localStorage.setItem('viewerInitialData', JSON.stringify({
       path: file.path,
-      total: appState.filteredFiles.length
+      total: appState.totalCount
     }));
 
-    // IPC通信を排除するため、リストのパス配列を丸ごとビューアに渡す
-    try {
-      const paths = appState.filteredFiles.map(f => f.path);
-      localStorage.setItem('viewerPaths', JSON.stringify(paths));
-    } catch (e) {
-      // LocalStorageの容量制限(5MB)を超えた場合は周辺の数千件のみ渡すフォールバック
-      const start = Math.max(0, index - 2000);
-      const end = Math.min(appState.filteredFiles.length, index + 2000);
-      const paths = appState.filteredFiles.slice(start, end).map(f => f.path);
-      localStorage.setItem('viewerPaths', JSON.stringify(paths));
-      localStorage.setItem('viewerStartIndex', start.toString());
-    }
+    // パス配列はRust側にあるため転送不要
+    localStorage.removeItem('viewerPaths');
+    localStorage.removeItem('viewerStartIndex');
   }
 
   window.veloceAPI.openViewer({ 
@@ -2194,7 +2174,7 @@ function handleItemDragStart(e, isGrid) {
   const index = parseInt(item.dataset.index, 10);
   
   if (!appState.selection.has(index)) selectImage(index);
-  const paths = Array.from(appState.selection).map(idx => appState.filteredFiles[idx].path);
+  const paths = Array.from(appState.selection).map(idx => appState.currentPaths[idx]).filter(Boolean);
   e.dataTransfer.setData('application/json', JSON.stringify(paths));
   e.dataTransfer.setData('text/plain', paths[0]);
   e.dataTransfer.effectAllowed = 'copyMove';
@@ -2914,8 +2894,8 @@ window.addEventListener('keydown', async (e) => {
     e.preventDefault();
     if (appState.selection.size === 2) {
       const indices = Array.from(appState.selection);
-      const file1 = appState.filteredFiles[indices[0]];
-      const file2 = appState.filteredFiles[indices[1]];
+      const file1 = await window.veloceAPI.getFileByIndex(indices[0]);
+      const file2 = await window.veloceAPI.getFileByIndex(indices[1]);
       
       // 完全なメタデータを取得してからDiffモーダルを開く
       uiManager.showToast('比較データを読み込み中', 0, 'diff-loading', 'info');
@@ -2995,20 +2975,20 @@ window.addEventListener('keydown', async (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     e.preventDefault();
-    if (appState.filteredFiles.length === 0) return;
+    if (appState.totalCount === 0) return;
 
     appState.selection.clear();
-    for (let i = 0; i < appState.filteredFiles.length; i++) {
+    for (let i = 0; i < appState.totalCount; i++) {
       appState.selection.add(i);
     }
-    appState.selectedIndex = appState.filteredFiles.length - 1; 
+    appState.selectedIndex = appState.totalCount - 1; 
 
     uiManager.updateSelectionUI();
     return;
   }
 
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    if (appState.filteredFiles.length === 0) return;
+    if (appState.totalCount === 0) return;
     
     e.preventDefault();
 
@@ -3025,9 +3005,9 @@ window.addEventListener('keydown', async (e) => {
       const columns = Math.max(1, Math.floor((availableWidth + gap) / (itemSize + gap)));
 
       if (e.key === 'ArrowLeft') newIndex = Math.max(0, appState.selectedIndex - 1);
-      else if (e.key === 'ArrowRight') newIndex = Math.min(appState.filteredFiles.length - 1, appState.selectedIndex + 1);
+      else if (e.key === 'ArrowRight') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + 1);
       else if (e.key === 'ArrowUp') newIndex = Math.max(0, appState.selectedIndex - columns);
-      else if (e.key === 'ArrowDown') newIndex = Math.min(appState.filteredFiles.length - 1, appState.selectedIndex + columns);
+      else if (e.key === 'ArrowDown') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + columns);
     }
 
     if (newIndex !== appState.selectedIndex) {
@@ -3146,26 +3126,18 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (e.button === 4) navigateHistory(1);
   });
 
-  if (window.veloceAPI.onDirectoryChunk) {
-    window.veloceAPI.onDirectoryChunk((payload) => {
-      // 別のタブ等による非同期のズレを防ぐ
+  if (window.veloceAPI.onDirectoryLoaded) {
+    window.veloceAPI.onDirectoryLoaded(async (payload) => {
       if (payload.path !== appState.currentDirectory) return;
-
-      if (payload.files && payload.files.length > 0) {
-        appState.files.push(...payload.files);
-        scheduleRefresh(); // UIの更新を要求
-      }
-
-      if (payload.isComplete) {
-        setTimeout(() => {
-          const t = document.getElementById('toast-dir-load-progress');
-          if (t) {
-            t.classList.remove('show');
-            setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-          }
-        }, 100); // 描画の安定を待ってから確実に削除
-        loadAllMetadataInBackground();
-      }
+      appState.totalCount = payload.totalCount;
+      await scheduleRefresh();
+      setTimeout(() => {
+        const t = document.getElementById('toast-dir-load-progress');
+        if (t) {
+          t.classList.remove('show');
+          setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+        }
+      }, 100);
     });
   }
 
@@ -3861,7 +3833,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (window.veloceAPI.loadDirectory) {
     appState.currentDirectory = currentTab.path;
     localStorage.setItem('currentDirectory', appState.currentDirectory);
-    appState.files = [];
+    appState.totalCount = 0;
     uiManager.renderAll(true);
     clearMetadataUI();
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
@@ -3875,45 +3847,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (window.veloceAPI.onFileChanged) {
-    window.veloceAPI.onFileChanged((newFile) => {
-      const index = appState.files.findIndex(f => f.path === newFile.path);
-      if (index > -1) {
-        const oldFile = appState.files[index];
-        if (oldFile.size !== newFile.size || oldFile.mtime !== newFile.mtime) {
-          appState.thumbnailUrls.delete(newFile.path);
-          
-          // 古いサムネイルの生成キューやエラー状態をクリアし、再生成を促す
-          appState.pendingThumbnails.delete(newFile.path);
-          const qIdx = appState.thumbnailRequestQueue.findIndex(req => req.filePath === newFile.path);
-          if (qIdx > -1) appState.thumbnailRequestQueue.splice(qIdx, 1);
+    window.veloceAPI.onFileChanged(async (newFile) => {
+      appState.thumbnailUrls.delete(newFile.path);
+      
+      appState.pendingThumbnails.delete(newFile.path);
+      const qIdx = appState.thumbnailRequestQueue.findIndex(req => req.filePath === newFile.path);
+      if (qIdx > -1) appState.thumbnailRequestQueue.splice(qIdx, 1);
 
-          // ファイルの更新を反映し、メタデータやキャッシュフラグをリセットして再取得を強制する
-          appState.files[index] = { ...oldFile, size: newFile.size, mtime: newFile.mtime, width: 0, height: 0, metaLoaded: false, hasThumbnailCache: false, hasMetadataCache: false };
-          
-          // 描画の遅延を待たずに状態とRustバックエンドのインデックスを即座に同期し、UIの不整合を防ぐ
-          appState.applyFiltersAndSort(); 
-          scheduleRefresh();
-        }
-      } else {
-        appState.files.push(newFile);
-        
-        // 描画の遅延を待たずに状態とRustバックエンドのインデックスを即座に同期し、UIの不整合を防ぐ
-        appState.applyFiltersAndSort();
-        scheduleRefresh();
-      }
+      await window.veloceAPI.notifyFileChanged(newFile);
+      scheduleRefresh();
     });
   }
 
   if (window.veloceAPI.onFileRemoved) {
-    window.veloceAPI.onFileRemoved((path) => {
-      const index = appState.files.findIndex(f => f.path === path);
-      if (index > -1) {
-        appState.files.splice(index, 1);
-        
-        // 描画の遅延を待たずに状態とRustバックエンドのインデックスを即座に同期し、UIの不整合を防ぐ
-        appState.applyFiltersAndSort();
-        scheduleRefresh();
-      }
+    window.veloceAPI.onFileRemoved(async (path) => {
+      await window.veloceAPI.notifyFileRemoved(path);
+      scheduleRefresh();
     });
   }
 

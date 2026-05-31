@@ -960,8 +960,8 @@ class UIManager {
     }
 
     // 本当に新規作成が必要なサムネイルの枚数を計算
-    const cachedCount = this.state.filteredFiles.filter(f => this.state.thumbnailUrls.has(f.path) || f.hasThumbnailCache).length;
-    this.state.thumbnailTotalRequested = this.state.filteredFiles.length - cachedCount;
+    // 本当に新規作成が必要なサムネイルの枚数を概算
+    this.state.thumbnailTotalRequested = this.state.totalCount || 0;
     this.state.thumbnailCompleted = 0;
     
     // 初期進捗の反映
@@ -1002,7 +1002,7 @@ class UIManager {
     }
   }
 
-  updateVirtualList(force = false) {
+  async updateVirtualList(force = false) {
     if (!this.elements.fileListBody) return;
     const container = document.getElementById('center-top');
     const tbody = this.elements.fileListBody;
@@ -1016,7 +1016,7 @@ class UIManager {
       this._listScrollAttached = true;
     }
 
-    if (!appState.filteredFiles || appState.filteredFiles.length === 0) {
+    if (appState.totalCount === 0) {
       tbody.innerHTML = '';
       this.lastListStartIndex = -1;
       this.lastListEndIndex = -1;
@@ -1025,7 +1025,7 @@ class UIManager {
 
     // <tr>の概算高さ（CSSのpaddingやborderを含む）
     const rowHeight = 28; 
-    const totalRows = appState.filteredFiles.length;
+    const totalRows = appState.totalCount;
     
     const scrollTop = container.scrollTop;
     const containerHeight = container.clientHeight || window.innerHeight;
@@ -1057,8 +1057,10 @@ class UIManager {
       fragment.appendChild(tr);
     }
 
+    const items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
+
     for (let i = safeStartRow; i <= endRow; i++) {
-      const file = appState.filteredFiles[i];
+      const file = items[i - safeStartRow];
       if (!file) continue;
       const isSelected = appState.selection.has(i);
       const tr = document.createElement('tr');
@@ -1088,7 +1090,7 @@ class UIManager {
     tbody.appendChild(fragment);
   }
 
-  updateVirtualGrid(force = false) {
+  async updateVirtualGrid(force = false) {
     if (!this.elements.thumbnailGrid) return;
     const container = this.elements.thumbnailGrid;
 
@@ -1112,7 +1114,7 @@ class UIManager {
       });
     }
 
-    if (!appState.filteredFiles || appState.filteredFiles.length === 0) {
+    if (appState.totalCount === 0) {
       content.innerHTML = '';
       spacer.style.height = '0px';
       this.lastGridStartIndex = -1;
@@ -1127,7 +1129,7 @@ class UIManager {
 
     // カラム数と行数の計算
     const cols = Math.max(1, Math.floor((width + gap) / (itemSize + gap)));
-    const rows = Math.ceil(appState.filteredFiles.length / cols);
+    const rows = Math.ceil(appState.totalCount / cols);
     const rowHeight = itemSize + gap;
     const totalHeight = rows * rowHeight + (padding * 2);
 
@@ -1142,7 +1144,7 @@ class UIManager {
     const endRow = Math.min(rows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 2);
 
     const startIndex = safeStartRow * cols;
-    const endIndex = Math.min(appState.filteredFiles.length - 1, ((endRow + 1) * cols) - 1);
+    const endIndex = Math.min(appState.totalCount - 1, ((endRow + 1) * cols) - 1);
 
     // スクロール位置が変わっていなければスキップ
     if (!force && this.lastGridStartIndex === startIndex && this.lastGridEndIndex === endIndex) {
@@ -1161,12 +1163,14 @@ class UIManager {
     const offsetY = (safeStartRow * rowHeight) + padding;
     content.style.transform = `translateY(${offsetY}px)`;
 
+    const items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
+
     // DOMの再構築
     content.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
     for (let i = startIndex; i <= endIndex; i++) {
-      const file = appState.filteredFiles[i];
+      const file = items[i - startIndex];
       if (!file) continue;
 
       const isSelected = appState.selection.has(i);

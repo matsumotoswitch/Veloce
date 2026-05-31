@@ -98,8 +98,8 @@ export function initTabHandlers(ctx) {
     if (window.veloceAPI.loadDirectory) {
       appState.currentDirectory = tab.path;
       localStorage.setItem('currentDirectory', appState.currentDirectory);
-
-      appState.files = [];
+      appState.totalCount = 0;
+      appState.selection.clear();
       uiManager.renderAll(true);
       clearMetadataUI();
       uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');

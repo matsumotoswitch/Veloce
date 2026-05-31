@@ -10,7 +10,13 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<string[]>} getDrives
  * @property {(path: string) => Promise<boolean>} pathExists
  * @property {(path: string) => Promise<void>} loadDirectory
- * @property {(callback: (payload: {path: string, files: import('./renderer-state.js').ImageFile[], is_complete: boolean}) => void) => void} onDirectoryChunk
+ * @property {(callback: (payload: {path: string, totalCount: number}) => void) => void} onDirectoryLoaded
+ * @property {(sortKey: string, asc: boolean, searchQuery: string) => Promise<[number, string[]]>} setViewParams
+ * @property {(offset: number, limit: number) => Promise<Array<import('./renderer-state.js').ImageFile>>} getItems
+ * @property {(index: number) => Promise<import('./renderer-state.js').ImageFile|null>} getFileByIndex
+ * @property {(updates: any[]) => Promise<void>} updateMetadataInState
+ * @property {(file: import('./renderer-state.js').ImageFile) => Promise<number>} notifyFileChanged
+ * @property {(path: string) => Promise<number>} notifyFileRemoved
  * @property {(dirPath: string) => Promise<Array<{name: string, path: string}>>} getFolders
  * @property {(filePaths: string[]) => Promise<any[]>} getFullMetadataBatch
  * @property {(filePath: string) => Promise<string>} getThumbnail
@@ -75,9 +81,33 @@ window.veloceAPI = {
    */
   loadDirectory: (path) => invoke('load_directory', { targetPath: path }),
   /**
-   * ディレクトリ読み込みのチャンクデータを受信したときの通知を受け取ります。
+   * ディレクトリ読み込み完了時に件数のみを受信する新イベント
    */
-  onDirectoryChunk: (callback) => listen('directory-chunk', (event) => callback(event.payload)),
+  onDirectoryLoaded: (callback) => listen('directory-loaded', (event) => callback(event.payload)),
+  /**
+   * Rust側でソート・検索を実行し、フィルタリング後の件数とパス一覧を返す
+   */
+  setViewParams: (sortKey, asc, searchQuery) => invoke('set_view_params', { sortKey, asc, searchQuery }),
+  /**
+   * 仮想スクロール用: 指定範囲のImageFileをRustから取得する
+   */
+  getItems: (offset, limit) => invoke('get_items', { offset, limit }),
+  /**
+   * selectImage用: 指定インデックスの単一ImageFileを取得
+   */
+  getFileByIndex: (index) => invoke('get_file_by_index', { index }),
+  /**
+   * メタデータの読み込み結果をRust側のSource of Truthに反映する
+   */
+  updateMetadataInState: (updates) => invoke('update_metadata_in_state', { updates }),
+  /**
+   * ファイルウォッチャーから通知されたファイル変更をRust側に通知する
+   */
+  notifyFileChanged: (file) => invoke('notify_file_changed', { file }),
+  /**
+   * ファイルウォッチャーから通知されたファイル削除をRust側に通知する
+   */
+  notifyFileRemoved: (path) => invoke('notify_file_removed', { path }),
   /**
    * 指定されたパス内のサブフォルダのリストを取得します。
    * @param {string} path - 調査するディレクトリのパス。
