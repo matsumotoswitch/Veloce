@@ -46,8 +46,8 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(paths: string[]) => Promise<void>} syncImagePaths
  * @property {() => Promise<string>} getLicenseText
  * @property {() => Promise<void>} openCacheFolder
- * @property {() => Promise<void>} clearThumbnailCache
- * @property {() => Promise<{path: string, fileCount: number, totalSizeBytes: number}>} getThumbnailCacheInfo
+ * @property {() => Promise<void>} clearCache
+ * @property {() => Promise<{path: string, fileCount: number, totalSizeBytes: number}>} getCacheInfo
  * @property {(path: string) => Promise<void>} openInExplorer
  */
 /**
@@ -349,13 +349,13 @@ window.veloceAPI = {
    */
   openCacheFolder: () => invoke('open_cache_folder'),
   /**
-   * サムネイルキャッシュをすべて削除します。
+   * サムネイル・メタデータキャッシュをすべて削除します。
    */
-  clearThumbnailCache: () => invoke('clear_thumbnail_cache'),
+  clearCache: () => invoke('clear_cache'),
   /**
-   * サムネイルキャッシュの情報を取得します。
+   * キャッシュの情報を取得します。
    */
-  getThumbnailCacheInfo: () => invoke('get_thumbnail_cache_info'),
+  getCacheInfo: () => invoke('get_cache_info'),
   /**
    * 指定したパスをエクスプローラで開きます。
    */

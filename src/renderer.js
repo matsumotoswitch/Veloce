@@ -3513,8 +3513,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     let openCacheText = 'キャッシュフォルダを開きます';
     uiManager.elements.openCacheBtn.addEventListener('mouseenter', async (e) => {
       uiManager.showCustomTooltip(openCacheText, e.clientX, e.clientY);
-      if (window.veloceAPI.getThumbnailCacheInfo) {
-        const info = await window.veloceAPI.getThumbnailCacheInfo();
+      if (window.veloceAPI.getCacheInfo) {
+        const info = await window.veloceAPI.getCacheInfo();
         openCacheText = `キャッシュフォルダを開きます\nパス: ${info.path}`;
         if (uiManager.isTooltipVisible) {
           uiManager.showCustomTooltip(openCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
@@ -3540,10 +3540,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     let clearCacheText = 'キャッシュを削除します';
     uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async (e) => {
       uiManager.showCustomTooltip(clearCacheText, e.clientX, e.clientY);
-      if (window.veloceAPI.getThumbnailCacheInfo) {
-        const info = await window.veloceAPI.getThumbnailCacheInfo();
+      if (window.veloceAPI.getCacheInfo) {
+        const info = await window.veloceAPI.getCacheInfo();
         const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
-        clearCacheText = `キャッシュを削除します\n保存数: ${info.fileCount.toLocaleString()}枚\n合計サイズ: ${sizeMB} MB`;
+        clearCacheText = `キャッシュを削除します\n保存数: ${info.fileCount.toLocaleString()}ファイル\n合計サイズ: ${sizeMB} MB`;
         if (uiManager.isTooltipVisible) {
           uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
         }
@@ -3562,13 +3562,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (isConfirmed) {
         uiManager.showToast('キャッシュを削除しています', 0, 'cache-clear', 'info');
         try {
-          await window.veloceAPI.clearThumbnailCache();
+          await window.veloceAPI.clearCache();
           appState.thumbnailUrls.clear(); 
           resetThumbnailPreloader(); 
           await refreshFileList(); 
-          uiManager.showToast('サムネイルキャッシュを削除しました。', 3000, 'cache-clear', 'success');
+          uiManager.showToast('すべてのキャッシュを削除しました。', 3000, 'cache-clear', 'success');
         } catch (err) {
-          console.error("Failed to clear thumbnail cache:", err);
+          console.error("Failed to clear cache:", err);
           uiManager.showToast('キャッシュの削除に失敗しました。', 3000, 'cache-clear', 'error');
         }
       }

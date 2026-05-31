@@ -1087,10 +1087,58 @@ fn sync_image_paths(app: tauri::AppHandle, state: tauri::State<'_, AppState>, pa
 
 // --- ファイル・システム操作コマンド ---
 
+fn collect_cache_paths_to_remove(target_path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut cache_paths = Vec::new();
+    if let Some(mut cache_dir) = get_veloce_data_dir() {
+        if target_path.is_file() {
+            collect_single_file_cache(target_path, &mut cache_dir, &mut cache_paths);
+        } else if target_path.is_dir() {
+            for entry in walkdir::WalkDir::new(target_path).into_iter().filter_map(|e| e.ok()) {
+                if entry.path().is_file() {
+                    collect_single_file_cache(entry.path(), &mut cache_dir, &mut cache_paths);
+                }
+            }
+        }
+    }
+    cache_paths
+}
+
+fn collect_single_file_cache(path: &std::path::Path, cache_dir: &mut std::path::PathBuf, cache_paths: &mut Vec<std::path::PathBuf>) {
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mtime = metadata.modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let clean_path = path.to_string_lossy().to_string().replace("\\\\?\\", "");
+        let cache_file_name = format!("{}_{}", clean_path, mtime);
+        let digest = md5::compute(cache_file_name.as_bytes());
+
+        cache_dir.push("Thumbnails");
+        cache_paths.push(cache_dir.join(format!("{:x}.jpg", digest)));
+        cache_dir.pop();
+        
+        cache_dir.push("Metadata");
+        cache_paths.push(cache_dir.join(format!("{:x}.json", digest)));
+        cache_dir.pop();
+    }
+}
+
+fn remove_collected_caches(cache_paths: Vec<std::path::PathBuf>) {
+    for path in cache_paths {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 #[tauri::command]
 async fn trash_file(file_path: String) -> Result<bool, String> {
     Ok(tokio::task::spawn_blocking(move || {
+        let path = std::path::Path::new(&file_path);
+        let cache_paths = collect_cache_paths_to_remove(path);
+
         if trash::delete(&file_path).is_ok() {
+            remove_collected_caches(cache_paths);
             true
         } else {
             false
@@ -1101,8 +1149,14 @@ async fn trash_file(file_path: String) -> Result<bool, String> {
 #[tauri::command]
 async fn trash_folder(folder_path: String) -> Result<FolderOperationResult, String> {
     Ok(tokio::task::spawn_blocking(move || {
+        let path = std::path::Path::new(&folder_path);
+        let cache_paths = collect_cache_paths_to_remove(path);
+
         match trash::delete(&folder_path) {
-            Ok(_) => FolderOperationResult { success: true, path: None, error: None },
+            Ok(_) => {
+                remove_collected_caches(cache_paths);
+                FolderOperationResult { success: true, path: None, error: None }
+            },
             Err(e) => FolderOperationResult { success: false, path: None, error: Some(e.to_string()) },
         }
     }).await.unwrap_or_else(|e| FolderOperationResult { success: false, path: None, error: Some(e.to_string()) }))
@@ -1150,8 +1204,6 @@ fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
     let path = std::path::Path::new(&old_path);
     let parent = path.parent().unwrap_or(std::path::Path::new(""));
 
-    // フロントエンド側で拡張子が省略された場合、元のファイル拡張子を自動的に補完する保護ロジック。
-    // これにより、ユーザーがファイル名のみを変更した際に誤って拡張子を失うことを防ぎます。
     let mut final_name = new_name.clone();
     if !final_name.contains('.') {
         if let Some(ext) = path.extension() {
@@ -1169,8 +1221,13 @@ fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
         }
     }
 
+    let cache_paths = collect_cache_paths_to_remove(path);
+
     match std::fs::rename(&old_path, &new_path) {
-        Ok(_) => Ok(new_path.to_string_lossy().to_string()),
+        Ok(_) => {
+            remove_collected_caches(cache_paths);
+            Ok(new_path.to_string_lossy().to_string())
+        },
         Err(e) => Err(e.to_string()),
     }
 }
@@ -1189,8 +1246,13 @@ fn rename_folder(old_path: String, new_name: String) -> Result<String, String> {
         }
     }
 
+    let cache_paths = collect_cache_paths_to_remove(path);
+
     match std::fs::rename(&old_path, &new_path) {
-        Ok(_) => Ok(new_path.to_string_lossy().to_string()),
+        Ok(_) => {
+            remove_collected_caches(cache_paths);
+            Ok(new_path.to_string_lossy().to_string())
+        },
         Err(e) => Err(e.to_string()),
     }
 }
@@ -1218,7 +1280,7 @@ fn open_cache_folder() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn clear_thumbnail_cache() -> Result<(), String> {
+fn clear_cache() -> Result<(), String> {
     if let Some(mut path) = get_veloce_data_dir() {
         // Clear Thumbnails
         path.push("Thumbnails");
@@ -1261,14 +1323,14 @@ fn open_in_explorer(path: String) -> Result<(), String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ThumbnailCacheInfo {
+pub struct CacheInfo {
     path: String,
     file_count: usize,
     total_size_bytes: u64,
 }
 
 #[tauri::command]
-fn get_thumbnail_cache_info() -> ThumbnailCacheInfo {
+fn get_cache_info() -> CacheInfo {
     let mut path_str = String::new();
     let mut file_count = 0;
     let mut total_size_bytes = 0;
@@ -1304,7 +1366,7 @@ fn get_thumbnail_cache_info() -> ThumbnailCacheInfo {
         }
     }
 
-    ThumbnailCacheInfo {
+    CacheInfo {
         path: path_str,
         file_count,
         total_size_bytes,
@@ -1556,8 +1618,8 @@ fn main() {
             rename_file,
             rename_folder,
             open_cache_folder,
-            clear_thumbnail_cache,
-            get_thumbnail_cache_info,
+            clear_cache,
+            get_cache_info,
             open_in_explorer,
             check_conflicts
         ])
