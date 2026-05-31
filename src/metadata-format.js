@@ -37,6 +37,10 @@ export function extractMetadataFields(file, meta = {}) {
     requestType = 'VibeTransferRequest';
   }
 
+  // --- ComfyUI 解析 ---
+  if (Array.isArray(p.nodes) && Array.isArray(p.links)) {
+    return parseComfyUI(file, meta, p);
+  }
   const data = {
     name: file.name,
     source: meta.source || file.source || null,
@@ -135,8 +139,153 @@ export function buildInspectorSections(data) {
     { title: 'プロンプトガイダンス', value: data.params.scale, isParam: true },
     { title: 'プロンプトガイダンスの再調整', value: data.params.cfg_rescale, isParam: true },
     { title: '除外したい要素の強さ', value: data.params.uncond_scale, isParam: true },
-    { title: '生成パラメータ (Raw)', value: data.params.rawParameters }
+    { title: '生成パラメータ (Raw)', value: data.params.rawParameters, isRaw: true }
   );
 
   return sections;
+}
+
+/**
+ * ComfyUIのメタデータを解析して標準のデータ構造にマッピングします。
+ */
+function parseComfyUI(file, meta, p) {
+  const nodes = p.nodes || [];
+  const links = p.links || [];
+
+  const linkMap = {};
+  for (const l of links) {
+    if (!l) continue;
+    linkMap[l[0]] = l;
+  }
+
+  const nodeMap = {};
+  for (const n of nodes) {
+    nodeMap[n.id] = n;
+  }
+
+  const samplers = nodes.filter(n => n.type === 'KSampler' || n.type === 'KSamplerAdvanced');
+  const sampler = samplers[0];
+
+  let positivePrompt = '';
+  let negativePrompt = '';
+  let width = null;
+  let height = null;
+  let seed = null;
+  let steps = null;
+  let samplerName = null;
+  let cfg = null;
+  let modelName = null;
+
+  function traceLink(node, inputName) {
+    if (!node || !node.inputs) return null;
+    const input = node.inputs.find(i => i.name === inputName);
+    if (!input || !input.link) return null;
+    const link = linkMap[input.link];
+    if (!link) return null;
+    return nodeMap[link[1]];
+  }
+
+  function extractTextFromNode(node) {
+    if (!node) return '';
+    if (node.type === 'CLIPTextEncode') {
+      return (node.widgets_values && node.widgets_values[0]) ? String(node.widgets_values[0]) : '';
+    }
+    if (node.type === 'IllustriousPromptBuilder') {
+      if (node.widgets_values && node.widgets_values[0]) {
+        try {
+          const data = JSON.parse(node.widgets_values[0]);
+          if (data && Array.isArray(data.rows)) {
+            const groups = {};
+            for (const row of data.rows) {
+              if (row.enabled && row.prompt) {
+                const cat = row.category || 'Other';
+                if (!groups[cat]) groups[cat] = [];
+                groups[cat].push(row.prompt.trim());
+              }
+            }
+            let formatted = '';
+            for (const cat in groups) {
+              formatted += `[${cat}]\n${groups[cat].join('\n')}\n\n`;
+            }
+            if (formatted) return formatted.trim();
+          }
+        } catch (e) {
+          // ignore parsing error, fallback to flat string
+        }
+      }
+      return (node.widgets_values && node.widgets_values[1]) ? String(node.widgets_values[1]) : '';
+    }
+    return '';
+  }
+
+  if (sampler) {
+    if (sampler.widgets_values && sampler.widgets_values.length >= 6) {
+      const w = sampler.widgets_values;
+      if (typeof w[0] === 'number') seed = w[0];
+      for (let i = 1; i < w.length; i++) {
+        if (typeof w[i] === 'number' && Number.isInteger(w[i]) && w[i] > 1) {
+          steps = w[i];
+          if (typeof w[i+1] === 'number') cfg = w[i+1];
+          if (typeof w[i+2] === 'string') samplerName = w[i+2];
+          if (typeof w[i+3] === 'string') samplerName += ' ' + w[i+3];
+          break;
+        }
+      }
+    }
+
+    const posNode = traceLink(sampler, 'positive');
+    positivePrompt = extractTextFromNode(posNode);
+    
+    const negNode = traceLink(sampler, 'negative');
+    negativePrompt = extractTextFromNode(negNode);
+
+    let latentNode = traceLink(sampler, 'latent_image');
+    if (latentNode && latentNode.type === 'EmptyLatentImage') {
+      if (latentNode.widgets_values && latentNode.widgets_values.length >= 2) {
+        width = latentNode.widgets_values[0];
+        height = latentNode.widgets_values[1];
+      }
+    }
+  }
+
+  if (!width || !height) {
+    const latent = nodes.find(n => n.type === 'EmptyLatentImage');
+    if (latent && latent.widgets_values) {
+      width = latent.widgets_values[0];
+      height = latent.widgets_values[1];
+    }
+  }
+  
+  if (!positivePrompt && !negativePrompt) {
+    const clips = nodes.filter(n => n.type === 'CLIPTextEncode');
+    if (clips.length > 0) {
+      positivePrompt = clips[0].widgets_values ? clips[0].widgets_values[0] : '';
+      if (clips.length > 1) {
+        negativePrompt = clips[1].widgets_values ? clips[1].widgets_values[0] : '';
+      }
+    }
+  }
+
+  const w = width || meta.width;
+  const h = height || meta.height;
+  const res = (w && h) ? `x` : null;
+
+  return {
+    name: file.name,
+    source: "ComfyUI",
+    requestType: null,
+    prompt: positivePrompt || '',
+    negativePrompt: negativePrompt || '',
+    chars: [],
+    params: {
+      resolution: res,
+      seed: seed,
+      steps: steps ? formatMetadataNumber(steps) : null,
+      sampler: samplerName,
+      cfg_rescale: cfg,
+      scale: cfg,
+      uncond_scale: null,
+      rawParameters: JSON.stringify(p, null, 2)
+    }
+  };
 }

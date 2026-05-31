@@ -286,6 +286,21 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
         raw_comment = chunks.get("Comment").cloned().unwrap_or_default();
         raw_parameters = chunks.get("parameters").or(chunks.get("Parameters")).cloned().unwrap_or_default();
         source = chunks.get("Source").or(chunks.get("Software")).cloned().unwrap_or_default();
+
+        // ComfyUI metadata fallback
+        if let Some(workflow) = chunks.get("workflow") {
+            if raw_comment.is_empty() {
+                raw_comment = workflow.clone();
+            } else if raw_parameters.is_empty() {
+                raw_parameters = workflow.clone();
+            }
+        } else if let Some(prompt_json) = chunks.get("prompt") {
+            if raw_comment.is_empty() {
+                raw_comment = prompt_json.clone();
+            } else if raw_parameters.is_empty() {
+                raw_parameters = prompt_json.clone();
+            }
+        }
     } else {
         let exif_data = if lower_path.ends_with(".webp") { parse_webp_exif(file_path) } else { parse_jpeg_exif(file_path) };
 
@@ -314,10 +329,50 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
     let mut params = serde_json::Value::Object(serde_json::Map::new());
     let comment_string = raw_comment.trim();
 
-    if let Some(start) = comment_string.find('{') {
-        if let Some(end) = comment_string.rfind('}') {
-            let json_text = &comment_string[start..=end];
-            if let Ok(mut comment_obj) = serde_json::from_str::<serde_json::Value>(json_text) {
+    let desc_string = raw_description.trim();
+    let target_strings = [comment_string, desc_string];
+    let mut extracted_json_text = None;
+
+    for s in target_strings.iter() {
+        if let Some(start) = s.find('{') {
+            if let Some(end) = s.rfind('}') {
+                let full_span = &s[start..=end];
+                if serde_json::from_str::<serde_json::Value>(full_span).is_ok() {
+                    extracted_json_text = Some(full_span.to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    if extracted_json_text.is_none() {
+        for s in target_strings.iter() {
+            if let Some(start) = s.find('{') {
+                let mut brace_count = 0;
+                let mut valid_end = None;
+                for (i, c) in s[start..].char_indices() {
+                    if c == '{' { brace_count += 1; }
+                    else if c == '}' {
+                        brace_count -= 1;
+                        if brace_count == 0 {
+                            valid_end = Some(start + i);
+                            break;
+                        }
+                    }
+                }
+                if let Some(end) = valid_end {
+                    let candidate = &s[start..=end];
+                    if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
+                        extracted_json_text = Some(candidate.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(json_text) = extracted_json_text {
+        if let Ok(mut comment_obj) = serde_json::from_str::<serde_json::Value>(&json_text) {
                 let mut json_source = None;
 
                 // WebP等の二重エンコードJSON対応
@@ -387,7 +442,6 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
                 params = comment_obj;
             }
         }
-    }
 
     // フォールバック処理 (A1111形式など)
     if params.as_object().map_or(true, |m| m.is_empty()) {

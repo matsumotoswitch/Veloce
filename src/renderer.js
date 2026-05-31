@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Veloce - Main Controller (renderer.js)
 // ============================================================================
 
@@ -1427,8 +1427,18 @@ async function renderMetadata(file) {
       ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(Boolean)
       : [];
 
-    const renderSection = (title, text, isParam = false, subLabel = null) => {
+    const renderSection = (title, text, isParam = false, subLabel = null, isRaw = false) => {
       if (!text || text === '-') return '';
+      if (isRaw) {
+        return `
+          <div class="inspector-section" style="margin-bottom: 15px;">
+            <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
+              <span>${title}</span>${UIManager.createCopyButtonHTML(text)}
+            </h3>
+            <div class="prompt-look" style="white-space: pre-wrap; font-family: Consolas, monospace; font-size: 0.85em; word-break: break-all; max-height: 400px; overflow-y: auto;">${String(text).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          </div>
+        `;
+      }
       const tags = isParam ? [String(text)] : String(text).split(',').map(t => t.trim()).filter(t => t);
       const boxClass = isParam ? 'prompt-look param-box' : 'prompt-look';
 
@@ -1477,7 +1487,7 @@ async function renderMetadata(file) {
 
     let html = '';
     for (const section of buildInspectorSections(d)) {
-      html += renderSection(section.title, section.value, section.isParam, section.subLabel);
+      html += renderSection(section.title, section.value, section.isParam, section.subLabel, section.isRaw);
     }
     // プロンプトが何もない場合（または抽出に失敗した場合）
     if (html === '') {
