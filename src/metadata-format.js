@@ -41,6 +41,16 @@ export function extractMetadataFields(file, meta = {}) {
   if (Array.isArray(p.nodes) && Array.isArray(p.links)) {
     return parseComfyUI(file, meta, p);
   }
+  // --- A1111 / Forge 解析 ---
+  let a1111Candidate = p.rawParameters || p.Description || p.prompt || file.prompt || meta.prompt;
+  if (typeof a1111Candidate === 'string') {
+    // EXIFのUTF-16LE文字列がUTF-8としてパースされた際に混入するNULL文字（\0）を除去し、先頭の識別子（UNICODEなど）を消す
+    a1111Candidate = a1111Candidate.replace(/\0/g, '').replace(/^(?:[^<A-Za-z0-9]*UNICODE[^<A-Za-z0-9]*)?/i, '').trim();
+    if (a1111Candidate.includes('Steps:') && a1111Candidate.includes('Sampler:')) {
+      const a1111P = { ...p, rawParameters: a1111Candidate };
+      return parseA1111(file, meta, a1111P);
+    }
+  }
   const data = {
     name: file.name,
     source: meta.source || file.source || null,
@@ -286,6 +296,77 @@ function parseComfyUI(file, meta, p) {
       scale: cfg,
       uncond_scale: null,
       rawParameters: JSON.stringify(p, null, 2)
+    }
+  };
+}
+
+/**
+ * A1111 / Forge のメタデータを解析して標準のデータ構造にマッピングします。
+ */
+function parseA1111(file, meta, p) {
+  const raw = p.rawParameters || '';
+  
+  let positivePrompt = '';
+  let negativePrompt = '';
+  const parsedParams = {};
+
+  // "Steps:" が現れる最後の行を探す
+  const lines = raw.split('\n');
+  let paramLineIndex = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].includes('Steps:')) {
+      paramLineIndex = i;
+      break;
+    }
+  }
+
+  if (paramLineIndex !== -1) {
+    const paramLine = lines[paramLineIndex];
+    // パラメータ行をパース (Key: Value形式)
+    // 括弧付きの値やカンマが含まれる値もあるため、単純なsplit(',')ではダメな場合があるが、
+    // 基本的な抽出は正規表現で行う
+    const kvRegex = /([a-zA-Z0-9\s]+):\s*([^,]+(?:,\s*"[^"]+")[^,]*|[^,]+)/g;
+    let match;
+    while ((match = kvRegex.exec(paramLine)) !== null) {
+      const key = match[1].trim();
+      const val = match[2].trim();
+      parsedParams[key] = val;
+    }
+
+    // ネガティブプロンプトとポジティブプロンプトの抽出
+    let textBeforeParams = lines.slice(0, paramLineIndex).join('\n').trim();
+    
+    // "Negative prompt: " で分割
+    const negIndex = textBeforeParams.indexOf('Negative prompt:');
+    if (negIndex !== -1) {
+      positivePrompt = textBeforeParams.substring(0, negIndex).trim();
+      negativePrompt = textBeforeParams.substring(negIndex + 'Negative prompt:'.length).trim();
+    } else {
+      positivePrompt = textBeforeParams;
+    }
+  }
+
+  let source = "A1111 / Forge";
+  if (parsedParams['Model']) {
+    source += ` (${parsedParams['Model']})`;
+  }
+
+  return {
+    name: file.name,
+    source: source,
+    requestType: null,
+    prompt: positivePrompt || '',
+    negativePrompt: negativePrompt || '',
+    chars: [],
+    params: {
+      resolution: parsedParams['Size'] || null,
+      seed: parsedParams['Seed'] || null,
+      steps: parsedParams['Steps'] ? formatMetadataNumber(parsedParams['Steps']) : null,
+      sampler: parsedParams['Sampler'] || null,
+      cfg_rescale: null,
+      scale: parsedParams['CFG scale'] || null,
+      uncond_scale: null,
+      rawParameters: raw
     }
   };
 }
