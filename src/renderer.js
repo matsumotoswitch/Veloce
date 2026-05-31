@@ -1452,7 +1452,7 @@ async function renderMetadata(file) {
       }).join('');
 
       let subLabelHtml = '';
-      if (subLabel) {
+      if (subLabel && subLabel !== 'Text to Image') {
         let color = 'var(--text-color)';
         let opacity = '0.7';
         let fontWeight = 'normal';

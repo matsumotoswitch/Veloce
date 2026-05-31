@@ -773,7 +773,7 @@ class UIManager {
       const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
 
       const getSubLabelHtml = (sub) => {
-        if (!sub) return '';
+        if (!sub || sub === 'Text to Image') return '';
         let color = 'var(--text-color)';
         let opacity = '0.7';
         let fontWeight = 'normal';
@@ -790,7 +790,7 @@ class UIManager {
           opacity = '1';
           fontWeight = 'normal';
         }
-        return `<div style="font-size: 0.8em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight}; margin-top: 6px; text-align: left; padding-left: 2px;">${sub}</div>`;
+        return `<span style="font-size: 0.85em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight};">${sub}</span>`;
       };
 
       let sub1Html = getSubLabelHtml(subLabel1);
@@ -800,20 +800,26 @@ class UIManager {
         <div class="diff-columns">
           <div class="diff-column">
             <div class="diff-section">
-              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>${title}</span>${UIManager.createCopyButtonHTML(v1)}
+              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center; user-select: none;">
+                <span style="display: flex; align-items: center; gap: 8px;">
+                  <span>${title}</span>
+                  ${sub1Html}
+                </span>
+                ${UIManager.createCopyButtonHTML(v1)}
               </h3>
               <div class="${boxClass}">${renderTags(tags1, set2, 'left')}</div>
-              ${sub1Html}
             </div>
           </div>
           <div class="diff-column">
             <div class="diff-section">
-              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>${title}</span>${UIManager.createCopyButtonHTML(v2)}
+              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center; user-select: none;">
+                <span style="display: flex; align-items: center; gap: 8px;">
+                  <span>${title}</span>
+                  ${sub2Html}
+                </span>
+                ${UIManager.createCopyButtonHTML(v2)}
               </h3>
               <div class="${boxClass}">${renderTags(tags2, set1, 'right')}</div>
-              ${sub2Html}
             </div>
           </div>
         </div>
