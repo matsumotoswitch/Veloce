@@ -1008,11 +1008,15 @@ class UIManager {
     const tbody = this.elements.fileListBody;
 
     if (!this._listScrollAttached && container) {
-      container.addEventListener('scroll', () => this.updateVirtualList(), { passive: true });
-      window.addEventListener('resize', () => {
-        if (this._listResizeTimeout) clearTimeout(this._listResizeTimeout);
-        this._listResizeTimeout = setTimeout(() => this.updateVirtualList(true), 100);
+      container.addEventListener('scroll', () => {
+        if (this._listScrollRaf) cancelAnimationFrame(this._listScrollRaf);
+        this._listScrollRaf = requestAnimationFrame(() => this.updateVirtualList());
+      }, { passive: true });
+      this._listResizeObserver = new ResizeObserver(() => {
+        if (this._listResizeRaf) cancelAnimationFrame(this._listResizeRaf);
+        this._listResizeRaf = requestAnimationFrame(() => this.updateVirtualList(true));
       });
+      this._listResizeObserver.observe(container);
       this._listScrollAttached = true;
     }
 
@@ -1107,11 +1111,15 @@ class UIManager {
       spacer = container.querySelector('.virtual-spacer');
 
       container.style.position = 'relative';
-      container.addEventListener('scroll', () => this.updateVirtualGrid(), { passive: true });
-      window.addEventListener('resize', () => {
-        if (this._resizeTimeout) clearTimeout(this._resizeTimeout);
-        this._resizeTimeout = setTimeout(() => this.updateVirtualGrid(true), 100);
+      container.addEventListener('scroll', () => {
+        if (this._gridScrollRaf) cancelAnimationFrame(this._gridScrollRaf);
+        this._gridScrollRaf = requestAnimationFrame(() => this.updateVirtualGrid());
+      }, { passive: true });
+      this._gridResizeObserver = new ResizeObserver(() => {
+        if (this._gridResizeRaf) cancelAnimationFrame(this._gridResizeRaf);
+        this._gridResizeRaf = requestAnimationFrame(() => this.updateVirtualGrid(true));
       });
+      this._gridResizeObserver.observe(container);
     }
 
     if (appState.totalCount === 0) {
