@@ -308,6 +308,13 @@ async function loadAllMetadataInBackground() {
       scheduleRefresh();
     } else if (appState.searchQuery.trim() !== '') {
       scheduleRefresh();
+    } else {
+      if (typeof uiManager.updateVirtualList === 'function') {
+        uiManager.updateVirtualList(true);
+      }
+      if (appState.selection.size > 0) {
+        uiManager.renderMetadata(Array.from(appState.selection)[0]);
+      }
     }
   }
 }
@@ -1401,6 +1408,7 @@ function getInspectorSection() {
   h3.appendChild(copyWrapper);
 
   const box = document.createElement('div');
+  box.tabIndex = -1;
   
   section.appendChild(h3);
   section.appendChild(box);
