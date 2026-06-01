@@ -704,13 +704,30 @@ window.processNextTask = function processNextTask() {
 };
 
 function clearMetadataUI() {
-  const container = document.getElementById('inspector-content');
-  if (container) {
-    container.innerHTML = '<div class="empty-state-msg">画像を選択すると詳細が表示されます</div>';
+  const staticTable = document.getElementById('static-file-info-table');
+  const emptyInfoMsg = document.getElementById('file-info-empty');
+  if (staticTable && emptyInfoMsg) {
+    staticTable.style.display = 'none';
+    emptyInfoMsg.style.display = 'block';
+  } else {
+    const infoContainer = document.getElementById('file-info-content');
+    if (infoContainer) {
+      infoContainer.innerHTML = '<div class="empty-state-msg">画像を選択してください</div>';
+    }
   }
-  const infoContainer = document.getElementById('file-info-content');
-  if (infoContainer) {
-    infoContainer.innerHTML = '<div class="empty-state-msg">画像を選択してください</div>';
+
+  const emptyInspectorMsg = document.getElementById('inspector-empty');
+  if (emptyInspectorMsg) {
+    emptyInspectorMsg.style.display = 'block';
+  } else {
+    const container = document.getElementById('inspector-content');
+    if (container) {
+      container.innerHTML = '<div class="empty-state-msg">画像を選択すると詳細が表示されます</div>';
+    }
+  }
+
+  if (typeof resetInspectorPools === 'function') {
+    resetInspectorPools();
   }
 }
 
@@ -1340,17 +1357,104 @@ const menuNewFolder = createMenuItem('フォルダを新規作成', UIManager.IC
  * 指定されたファイルのメタデータをインスペクターに描画します。
  * Diff画面と同一のデザイン、項目順、コピー機能を提供します。
  */
+// --- DOM Pool for Inspector ---
+const inspectorSectionPool = [];
+const inspectorTagPool = [];
+let inspectorSectionIndex = 0;
+let inspectorTagIndex = 0;
+let _inspectorDelegationInit = false;
+
+function getInspectorSection() {
+  if (inspectorSectionIndex < inspectorSectionPool.length) {
+    const el = inspectorSectionPool[inspectorSectionIndex++];
+    el.root.style.display = 'block';
+    return el;
+  }
+  const section = document.createElement('div');
+  section.className = 'inspector-section';
+  section.style.marginBottom = '15px';
+
+  const h3 = document.createElement('h3');
+  h3.style.fontSize = '0.9em';
+  h3.style.marginBottom = '4px';
+  h3.style.display = 'flex';
+  h3.style.justifyContent = 'space-between';
+  h3.style.alignItems = 'center';
+  h3.style.color = 'var(--text-color)';
+  h3.style.transition = 'color 0.2s';
+  h3.style.userSelect = 'none';
+
+  const titleWrapper = document.createElement('span');
+  titleWrapper.style.display = 'flex';
+  titleWrapper.style.alignItems = 'center';
+  titleWrapper.style.gap = '8px';
+
+  const titleSpan = document.createElement('span');
+  const subLabelSpan = document.createElement('span');
+  
+  titleWrapper.appendChild(titleSpan);
+  titleWrapper.appendChild(subLabelSpan);
+
+  const copyWrapper = document.createElement('div');
+
+  h3.appendChild(titleWrapper);
+  h3.appendChild(copyWrapper);
+
+  const box = document.createElement('div');
+  
+  section.appendChild(h3);
+  section.appendChild(box);
+
+  const elObj = {
+    root: section,
+    title: titleSpan,
+    subLabel: subLabelSpan,
+    copyWrapper: copyWrapper,
+    box: box
+  };
+  
+  inspectorSectionPool.push(elObj);
+  inspectorSectionIndex++;
+  return elObj;
+}
+
+function getInspectorTag() {
+  if (inspectorTagIndex < inspectorTagPool.length) {
+    const el = inspectorTagPool[inspectorTagIndex++];
+    el.style.display = 'inline';
+    return el;
+  }
+  const span = document.createElement('span');
+  span.className = 'diff-tag common';
+  inspectorTagPool.push(span);
+  inspectorTagIndex++;
+  return span;
+}
+
+function resetInspectorPools() {
+  for (let i = 0; i < inspectorSectionIndex; i++) {
+    inspectorSectionPool[i].root.style.display = 'none';
+    inspectorSectionPool[i].box.replaceChildren();
+  }
+  inspectorSectionIndex = 0;
+  inspectorTagIndex = 0;
+}
+
 async function renderMetadata(file) {
   const container = document.getElementById('inspector-content');
-  const infoContainer = document.getElementById('file-info-content');
+  const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (!file || !container) return;
 
   try {
-    // データの取得と安全なフォールバック
     const rawMeta = await window.veloceAPI.parseMetadata(file.path);
     const meta = rawMeta || {};
 
-    if (infoContainer) {
+    const staticTable = document.getElementById('static-file-info-table');
+    const emptyInfoMsg = document.getElementById('file-info-empty');
+    if (staticTable && emptyInfoMsg) {
+      emptyInfoMsg.style.display = 'none';
+      staticTable.style.display = 'table';
+      
       const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
       const getAspectRatio = (w, h) => {
         if (!w || !h) return '';
@@ -1376,25 +1480,12 @@ async function renderMetadata(file) {
         }
       }
       const ctimeStr = ctimeValue ? formatDate(ctimeValue) : '-';
-      const renderTableRow = (title, text) => `
-          <tr>
-            <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
-              <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">${title}</h3>
-            </td>
-            <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
-              <span>${text}</span>
-            </td>
-          </tr>`;
-      infoContainer.innerHTML = `
-        <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; color: var(--text-color);">
-          <tbody>
-            ${renderTableRow('ファイル名', fullName)}
-            ${renderTableRow('ファイルサイズ', sizeStr)}
-            ${renderTableRow('解像度・比率', `${resStr}${ratioStr}`)}
-            ${renderTableRow('作成日時', ctimeStr)}
-            ${renderTableRow('更新日時', mtimeStr)}
-          </tbody>
-        </table>`;
+
+      document.getElementById('static-file-name').textContent = fullName;
+      document.getElementById('static-file-size').textContent = sizeStr;
+      document.getElementById('static-file-res').textContent = `${resStr}${ratioStr}`;
+      document.getElementById('static-file-ctime').textContent = ctimeStr;
+      document.getElementById('static-file-mtime').textContent = mtimeStr;
     }
 
     const d = extractMetadataFields(file, meta);
@@ -1405,157 +1496,156 @@ async function renderMetadata(file) {
     } else if (typeof appState !== 'undefined' && appState.searchQuery) {
       searchStr = appState.searchQuery;
     }
-
     const terms = searchStr.trim() !== ''
       ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(Boolean)
       : [];
 
-    const renderSection = (title, text, isParam = false, subLabel = null, isRaw = false) => {
-      if (!text || text === '-') return '';
-      if (isRaw) {
-        return `
-          <div class="inspector-section" style="margin-bottom: 15px;">
-            <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s;">
-              <span>${title}</span>${UIManager.createCopyButtonHTML(text)}
-            </h3>
-            <div class="prompt-look" style="white-space: pre-wrap; font-family: Consolas, monospace; font-size: 0.85em; word-break: break-all; max-height: 400px; overflow-y: auto;">${String(text).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-          </div>
-        `;
+    resetInspectorPools();
+    if (emptyInspectorMsg) emptyInspectorMsg.style.display = 'none';
+
+    let hasContent = false;
+    for (const section of buildInspectorSections(d)) {
+      if (!section.value || section.value === '-') continue;
+      hasContent = true;
+
+      const secEl = getInspectorSection();
+      secEl.title.textContent = section.title;
+      secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
+
+      if (section.isRaw) {
+        secEl.box.className = 'prompt-look';
+        secEl.box.style.whiteSpace = 'pre-wrap';
+        secEl.box.style.fontFamily = 'Consolas, monospace';
+        secEl.box.style.fontSize = '0.85em';
+        secEl.box.style.wordBreak = 'break-all';
+        secEl.box.style.maxHeight = '400px';
+        secEl.box.style.overflowY = 'auto';
+        secEl.box.textContent = String(section.value);
+      } else {
+        secEl.box.className = section.isParam ? 'prompt-look param-box' : 'prompt-look';
+        secEl.box.style.cssText = '';
+
+        const tags = section.isParam ? [String(section.value)] : String(section.value).split(',').map(t => t.trim()).filter(t => t);
+        for (const t of tags) {
+          const tagEl = getInspectorTag();
+          if (terms.length > 0) {
+            const isMatch = terms.some(term => t.toLowerCase().includes(term));
+            if (isMatch) {
+              tagEl.style.border = '1px solid #ffcc00';
+              tagEl.style.backgroundColor = 'rgba(255, 204, 0, 0.25)';
+              tagEl.style.color = '#ffcc00';
+              tagEl.style.fontWeight = 'bold';
+              tagEl.style.boxShadow = '0 0 8px rgba(255,204,0,0.3)';
+            } else {
+              tagEl.style.cssText = '';
+            }
+            tagEl.innerHTML = highlightSearchTerms(t, terms);
+          } else {
+            tagEl.style.cssText = '';
+            tagEl.textContent = t;
+          }
+          secEl.box.appendChild(tagEl);
+        }
       }
-      const tags = isParam ? [String(text)] : String(text).split(',').map(t => t.trim()).filter(t => t);
-      const boxClass = isParam ? 'prompt-look param-box' : 'prompt-look';
 
-      const tagsHtml = tags.map(t => {
-        const isMatch = terms.some(term => t.toLowerCase().includes(term));
-        const matchStyle = isMatch
-          ? 'border: 1px solid #ffcc00; background-color: rgba(255, 204, 0, 0.25); color: #ffcc00; font-weight: bold; box-shadow: 0 0 8px rgba(255,204,0,0.3);'
-          : '';
-        const displayHtml = highlightSearchTerms(t, terms);
-        return `<span class="diff-tag common" style="${matchStyle}">${displayHtml}</span>`;
-      }).join('');
-
-      let subLabelHtml = '';
-      if (subLabel && subLabel !== 'Text to Image') {
+      if (section.subLabel && section.subLabel !== 'Text to Image') {
         let color = 'var(--text-color)';
         let opacity = '0.7';
         let fontWeight = 'normal';
-        if (subLabel.includes('Inpainting')) {
+        if (section.subLabel.includes('Inpainting')) {
           color = '#4a9eff';
           opacity = '1';
-          fontWeight = 'normal';
-        } else if (subLabel.includes('Vibe Transfer')) {
+        } else if (section.subLabel.includes('Vibe Transfer')) {
           color = '#d27aff';
           opacity = '1';
-          fontWeight = 'normal';
-        } else if (subLabel.includes('Image to Image') || subLabel.includes('Img2Img')) {
+        } else if (section.subLabel.includes('Image to Image') || section.subLabel.includes('Img2Img')) {
           color = '#4ade80';
           opacity = '1';
-          fontWeight = 'normal';
         }
-        subLabelHtml = `<span style="font-size: 0.85em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight};">${subLabel}</span>`;
+        secEl.subLabel.style.fontSize = '0.85em';
+        secEl.subLabel.style.color = color;
+        secEl.subLabel.style.opacity = opacity;
+        secEl.subLabel.style.fontWeight = fontWeight;
+        secEl.subLabel.textContent = section.subLabel;
+      } else {
+        secEl.subLabel.textContent = '';
       }
 
-      return `
-        <div class="inspector-section" style="margin-bottom: 15px;">
-          <h3 style="font-size: 0.9em; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; color: var(--text-color); transition: color 0.2s; user-select: none;">
-            <span style="display: flex; align-items: center; gap: 8px;">
-              <span>${title}</span>
-              ${subLabelHtml}
-            </span>
-            ${UIManager.createCopyButtonHTML(text)}
-          </h3>
-          <div class="${boxClass}">
-            ${tagsHtml}
-          </div>
-        </div>
-      `;
-    };
-
-    let html = '';
-    for (const section of buildInspectorSections(d)) {
-      html += renderSection(section.title, section.value, section.isParam, section.subLabel, section.isRaw);
+      if (secEl.root.parentNode !== container) {
+        container.appendChild(secEl.root);
+      }
     }
-    // プロンプトが何もない場合（または抽出に失敗した場合）
-    if (html === '') {
+
+    if (!hasContent) {
       const rawMetaStr = JSON.stringify(meta, null, 2);
       if (rawMetaStr !== '{}' && rawMetaStr !== 'null') {
-        const escapedMeta = rawMetaStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        html = `
-          <div style="padding: 10px; color: var(--text-color);">
-            <h3 style="font-size: 1em; margin-bottom: 10px;">未対応のメタデータ形式</h3>
-            <p style="font-size: 0.85em; margin-bottom: 10px; line-height: 1.4;">データは読み込めていますが、NovelAIなどの特殊な格納形式になっています。以下の生データを確認してください：</p>
-            <div class="prompt-look" style="white-space: pre-wrap; font-family: Consolas, monospace; font-size: 0.85em; word-break: break-all; max-height: 400px; overflow-y: auto;">${escapedMeta}</div>
-          </div>
-        `;
+        const secEl = getInspectorSection();
+        secEl.title.textContent = '未対応のメタデータ形式';
+        secEl.copyWrapper.innerHTML = '';
+        secEl.subLabel.textContent = '';
+        secEl.box.className = 'prompt-look';
+        secEl.box.style.whiteSpace = 'pre-wrap';
+        secEl.box.style.fontFamily = 'Consolas, monospace';
+        secEl.box.style.fontSize = '0.85em';
+        secEl.box.style.wordBreak = 'break-all';
+        secEl.box.style.maxHeight = '400px';
+        secEl.box.style.overflowY = 'auto';
+        secEl.box.textContent = rawMetaStr;
+        if (secEl.root.parentNode !== container) container.appendChild(secEl.root);
       } else {
-      html = '<div class="empty-state-msg">メタデータが含まれていないか、読み取れませんでした。</div>';
+        if (emptyInspectorMsg) {
+          emptyInspectorMsg.textContent = 'メタデータが含まれていないか、読み取れませんでした。';
+          emptyInspectorMsg.style.display = 'block';
+        }
       }
     }
 
-    container.innerHTML = html;
-
-    // コピーイベントの登録 (インスペクターのみ)
-    const newCopyBtns = [];
-    if (container) newCopyBtns.push(...container.querySelectorAll('.diff-copy-btn'));
-
-    newCopyBtns.forEach(btn => {
-      btn.removeAttribute('title');
-      btn.addEventListener('mouseenter', (e) => {
-        uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
-      });
-      btn.addEventListener('mousemove', (e) => {
-        uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
-      });
-      btn.addEventListener('mouseleave', () => {
-        uiManager.hideCustomTooltip();
-      });
-      btn.addEventListener('click', async (e) => {
-        const target = e.currentTarget;
-        const text = target.getAttribute('data-copy-text');
-        if (text) {
-          await navigator.clipboard.writeText(text);
-          if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました", 3000, null, 'success');
-          else showNotification("クリップボードにコピーしました", 'success'); // 古い関数へのフォールバック
-          uiManager.applyGlowEffect(target);
-          uiManager.hideCustomTooltip();
+    if (!_inspectorDelegationInit) {
+      _inspectorDelegationInit = true;
+      container.addEventListener('click', async (e) => {
+        const copyBtn = e.target.closest('.diff-copy-btn');
+        if (copyBtn) {
+          const text = copyBtn.getAttribute('data-copy-text');
+          if (text) {
+            await navigator.clipboard.writeText(text);
+            if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました", 3000, null, 'success');
+            else showNotification("クリップボードにコピーしました", 'success');
+            uiManager.applyGlowEffect(copyBtn);
+            uiManager.hideCustomTooltip();
+          }
         }
       });
-    });
+      container.addEventListener('mousemove', (e) => {
+        const copyBtn = e.target.closest('.diff-copy-btn');
+        if (copyBtn) uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
+      });
+      container.addEventListener('mouseleave', () => {
+        uiManager.hideCustomTooltip();
+      }, true);
 
-    /**
-     * ドラッグ選択コピー時のフォーマット調整:
-     * 複数タグを選択してコピーした際、UI上で視覚的に分離されているタグ要素間に
-     * カンマとスペース（", "）を自動挿入することで、テキストとして貼り付けた際の
-     * プロンプトとしての再利用性を向上させます。
-     */
-    const newPromptLooks = [];
-    if (container) newPromptLooks.push(...container.querySelectorAll('.prompt-look'));
-
-    newPromptLooks.forEach(lookDiv => {
-      lookDiv.addEventListener('copy', (e) => {
+      container.addEventListener('copy', (e) => {
         const selection = window.getSelection();
         if (selection.isCollapsed) return;
+        const promptLook = e.target.closest('.prompt-look');
+        if (!promptLook) return;
 
         const clone = selection.getRangeAt(0).cloneContents();
         const tempDiv = document.createElement('div');
         tempDiv.appendChild(clone);
-
         const tags = tempDiv.querySelectorAll('.diff-tag');
-        tags.forEach(tag => {
-          tag.textContent = tag.textContent + ", ";
-        });
-
-        let copiedText = tempDiv.textContent;
-        copiedText = copiedText.replace(/,\s*$/, '').trim();
-
+        tags.forEach(tag => { tag.textContent = tag.textContent + ", "; });
+        let copiedText = tempDiv.textContent.replace(/,\s*$/, '').trim();
         e.clipboardData.setData('text/plain', copiedText);
         e.preventDefault();
       });
-    });
+    }
   } catch (error) {
-    container.innerHTML = `<div style="color:var(--danger-red); padding:10px; font-size:0.9em; border:1px solid var(--danger-red);">描画エラー: ${error.message}</div>`;
+    if (container) {
+      container.innerHTML = `<div style="color:var(--danger-red); padding:10px; font-size:0.9em; border:1px solid var(--danger-red);">描画エラー: ${error.message}</div>`;
+    }
   }
 }
+
 
 const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager.ICONS.FOLDER_PEN, async () => {
   if (!contextMenu.targetFolder) return;
