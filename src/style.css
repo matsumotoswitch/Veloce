@@ -1945,13 +1945,11 @@ html.viewer-html,
   /* 重いぼかし処理を完全にカット */
   -webkit-backdrop-filter: none !important;
 }
-/* Pane Focus Indicator */
-#left-pane, #center-pane, #right-pane {
-  transition: outline 0.2s ease, box-shadow 0.2s ease;
-}
-#left-pane.pane-focused, #center-pane.pane-focused, #right-pane.pane-focused {
-  outline: 1px solid var(--accent-color);
-  outline-offset: -1px;
-  box-shadow: inset 0 0 10px rgba(37, 126, 140, 0.15); /* very subtle glow */
+
+/* Global Focus Indicator for Keyboard Navigation */
+:focus-visible {
+  outline: 2px solid var(--glow-gold) !important;
+  outline-offset: 2px !important;
+  border-radius: 2px;
 }
 

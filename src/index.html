@@ -52,7 +52,7 @@
       <ul id="favorites-list" class="tree-root"></ul>
     </div>
     <div class="resizer-h" id="resizer-left-pane"></div>
-    <div id="directories-section">
+    <div id="directories-section" tabindex="-1">
       <div id="dir-tree"></div>
     </div>
   </div>
@@ -61,7 +61,7 @@
 
   <!-- 中央ペイン: リストとグリッド -->
   <div id="center-pane">
-	<div id="center-top">
+	<div id="center-top" tabindex="-1">
 	  <table id="file-table">
 		<thead>
 		  <tr>
@@ -95,14 +95,14 @@
 	    </svg>
 	  </button>
 	</div>
-	<div id="center-bottom" class="thumbnail-grid"></div>
+	<div id="center-bottom" class="thumbnail-grid" tabindex="-1"></div>
   </div>
 
   <div class="resizer" id="resizer-right"></div>
 
   <!-- 右ペイン: インスペクター -->
   <div id="right-pane">
-    <div id="file-info-section">
+    <div id="file-info-section" tabindex="-1">
       <div id="file-info-content" class="inspector-data">
         <table id="static-file-info-table" style="width: 100%; border-collapse: collapse; font-size: 0.9em; color: var(--text-color); display: none;">
           <tbody>
@@ -152,7 +152,7 @@
       </div>
     </div>
     <div class="resizer-h" id="resizer-right-pane"></div>
-    <div id="inspector-section">
+    <div id="inspector-section" tabindex="-1">
       <div id="inspector-content" class="inspector-data">
         <div id="inspector-empty" class="empty-state-msg">画像を選択して詳細を表示します</div>
       </div>

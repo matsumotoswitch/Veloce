@@ -3978,15 +3978,3 @@ window.addEventListener('DOMContentLoaded', async () => {
     }).catch(() => {});
   }
 });
-
-// --- Pane Focus Indicator Logic ---
-function updatePaneFocus(e) {
-  const pane = e.target.closest('#left-pane, #center-pane, #right-pane');
-  document.querySelectorAll('.pane-focused').forEach(el => el.classList.remove('pane-focused'));
-  if (pane) {
-    pane.classList.add('pane-focused');
-  }
-}
-document.addEventListener('focusin', updatePaneFocus);
-document.addEventListener('mousedown', updatePaneFocus);
-
