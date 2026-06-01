@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -1270,6 +1270,7 @@ fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
                 
                 let _ = window.set_always_on_top(false);
                 let _ = window.set_always_on_top(true);
+                let _ = window.set_focus();
             }
         }
     }
@@ -1834,6 +1835,7 @@ fn main() {
                 if label == "main" {
                     std::process::exit(0);
                 } else if label.starts_with("viewer_") {
+                    let _ = event.window().set_always_on_top(false);
                     // ビューアウィンドウが閉じられた際にキャッシュを破棄
                     let state = event.window().state::<AppState>();
                     if let Ok(mut viewer_paths) = state.viewer_paths.lock() {

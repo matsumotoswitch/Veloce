@@ -864,9 +864,7 @@ window.addEventListener('keydown', async (e) => {
     case 'a':
     case 'A':
       if (window.veloceAPI.arrangeViewers) {
-        window.veloceAPI.arrangeViewers().then(() => {
-          if (window.veloceAPI.focusWindow) window.veloceAPI.focusWindow();
-        });
+        window.veloceAPI.arrangeViewers();
       }
       break;
     case 'b':

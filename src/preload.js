@@ -347,7 +347,12 @@ window.veloceAPI = {
   /**
    * ウィンドウを安全に閉じます。
    */
-  closeWindow: () => appWindow.close(),
+  closeWindow: async () => {
+    try {
+      await appWindow.setAlwaysOnTop(false);
+    } catch (e) {}
+    appWindow.close();
+  },
   /**
    * 開いているすべてのビューアーウィンドウを横一列に並べます。
    */
