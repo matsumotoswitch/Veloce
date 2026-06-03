@@ -1,4 +1,4 @@
-﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -262,6 +262,71 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                 total_count,
             });
         }
+
+        let app_for_bg = app_clone.clone();
+        let path_for_bg = path_clone.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let paths_to_process = {
+                if let Some(state) = app_for_bg.try_state::<AppState>() {
+                    if let Ok(lock) = state.all_files.lock() {
+                        lock.iter().map(|f| f.path.clone()).collect::<Vec<String>>()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                }
+            };
+
+            for path in paths_to_process {
+                if let Some(state) = app_for_bg.try_state::<AppState>() {
+                    if let Ok(dir_lock) = state.current_dir.lock() {
+                        if *dir_lock != path_for_bg {
+                            break;
+                        }
+                    }
+
+                    let needs_parsing = if let Ok(lock) = state.all_files.lock() {
+                        lock.iter().find(|f| f.path == path).map(|f| !f.meta_loaded).unwrap_or(false)
+                    } else {
+                        false
+                    };
+
+                    if needs_parsing {
+                        let path_clone_for_blocking = path.clone();
+                        let full_meta = match tokio::task::spawn_blocking(move || {
+                            get_full_metadata_for_path(&path_clone_for_blocking)
+                        }).await {
+                            Ok(meta) => meta,
+                            Err(_) => continue,
+                        };
+
+                        if let Ok(mut all_files) = state.all_files.lock() {
+                            if let Some(f) = all_files.iter_mut().find(|f| f.path == path) {
+                                f.width = full_meta.width;
+                                f.height = full_meta.height;
+                                f.prompt = full_meta.prompt.clone();
+                                f.negative_prompt = full_meta.negative_prompt.clone();
+                                f.source = full_meta.source.clone();
+                                f.meta_loaded = true;
+                            }
+                        }
+                        if let Ok(mut filtered) = state.filtered_files.lock() {
+                            if let Some(f) = filtered.iter_mut().find(|f| f.path == path) {
+                                f.width = full_meta.width;
+                                f.height = full_meta.height;
+                                f.prompt = full_meta.prompt.clone();
+                                f.negative_prompt = full_meta.negative_prompt.clone();
+                                f.source = full_meta.source.clone();
+                                f.meta_loaded = true;
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
         if let Some(state) = app_clone.try_state::<AppState>() {
             if let Ok(mut dir_lock) = state.current_dir.lock() {
