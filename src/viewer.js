@@ -256,7 +256,7 @@ function applyFitState() {
   document.documentElement.scrollLeft = 0;
 }
 
-window.addEventListener('resize', debounce(async () => {
+const resizeObserver = new ResizeObserver(debounce(async () => {
     // リサイズ中にIPC通信（await invoke）を行うとOSのメッセージループが詰まり
     // 例外0xc000041dでクラッシュするため、ブラウザのAPIを用いて判定する
     const isMax = window.innerWidth >= window.screen.availWidth - 10 && window.innerHeight >= window.screen.availHeight - 10;
@@ -278,7 +278,8 @@ window.addEventListener('resize', debounce(async () => {
     }
     
     updateFullscreenStyles();
-}, CONFIG.RESIZE_THROTTLE)); // ドラッグ中の高頻度なイベントを間引く
+}, CONFIG.RESIZE_THROTTLE));
+resizeObserver.observe(document.body);
 
 /**
  * フルスクリーン（100%表示）時のスタイルを更新する。
@@ -387,7 +388,13 @@ let imageLoadSequence = 0;       // 非同期ロード競合防止用
  * DOM Swap方式：新しい画像を背面に用意しておき、表示する瞬間に要素を切り替えることでラグを無くします。
  */
 function swapImageElement(newImg, sequenceId) {
-  if (currentViewerImg === newImg) return;
+  if (currentViewerImg === newImg) {
+    if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
+      window.veloceAPI.showWindow();
+      isViewerWindowShown = true;
+    }
+    return;
+  }
   
   newImg.id = 'viewer-img';
   viewerUI.elements.viewerImg = newImg;
@@ -457,11 +464,24 @@ async function loadImage() {
       }
     }
 
+    const targetSrc = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
+    if (!targetImg && currentViewerImg && currentViewerImg.src === targetSrc) {
+      targetImg = currentViewerImg;
+    }
+
     if (!targetImg) {
       targetImg = document.createElement('img');
-      targetImg.decoding = 'sync';
-      targetImg.src = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
+      targetImg.decoding = 'async';
+      targetImg.src = targetSrc;
     }
+
+    try {
+      await targetImg.decode();
+    } catch (err) {
+      console.warn("Background decode failed:", err);
+    }
+
+    if (currentSeq !== imageLoadSequence) return;
 
     swapImageElement(targetImg, currentSeq);
     preloadAdjacentImages();
@@ -540,14 +560,16 @@ function clampTranslate() {
   const baseRight = rect.right - viewerState.currentTranslateX;
   const baseBottom = rect.bottom - viewerState.currentTranslateY;
 
+  // X軸の制約：縮小時は画面内に収まる範囲で自由に移動、拡大時ははみ出さない範囲で移動
   if (rect.width <= winW) {
-    viewerState.currentTranslateX = 0;
+    viewerState.currentTranslateX = Math.max(-baseLeft, Math.min(viewerState.currentTranslateX, winW - baseRight));
   } else {
     viewerState.currentTranslateX = Math.max(winW - baseRight, Math.min(viewerState.currentTranslateX, -baseLeft));
   }
 
+  // Y軸の制約：縮小時は画面内に収まる範囲で自由に移動、拡大時ははみ出さない範囲で移動
   if (rect.height <= winH) {
-    viewerState.currentTranslateY = 0;
+    viewerState.currentTranslateY = Math.max(-baseTop, Math.min(viewerState.currentTranslateY, winH - baseBottom));
   } else {
     viewerState.currentTranslateY = Math.max(winH - baseBottom, Math.min(viewerState.currentTranslateY, -baseTop));
   }
@@ -561,7 +583,6 @@ function clampTranslate() {
 let isDragging = false;
 let hasMoved = false; // ドラッグ中に実際にマウスが移動したか
 let startX = 0, startY = 0; // ドラッグ開始時の座標
-let scrollLeftStart = 0, scrollTopStart = 0; // ドラッグ開始時のスクロール位置
 let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
 
 // OS標準のタイトルバーのホバーバグを回避するため、HTMLで自前のコントロールを右上に描画する
@@ -617,25 +638,24 @@ window.addEventListener('mousedown', (e) => {
   }
 
   if (e.button === 0) { // 左クリック
-    if (e.ctrlKey && e.target && e.target.id === 'viewer-img') {
-      return; // 画像のパン操作（Ctrl + 左ドラッグ）と競合させないためスキップ
-    }
-    isDragging = true;
-    hasMoved = false;
-    if (viewerState.isZoomed) {
-      startX = e.pageX;
-      startY = e.pageY;
-      scrollLeftStart = document.body.scrollLeft;
-      scrollTopStart = document.body.scrollTop;
+    // 画像上でのCtrl+左ドラッグはパン操作とする
+    if (e.ctrlKey && e.target && (e.target.id === 'viewer-img' || e.target.closest('#viewer-img') || e.target.id === 'border-overlay')) {
+      e.preventDefault(); // デフォルトのドラッグを防止
+      viewerState.isImageDragging = true;
+      viewerState.imageDragStartX = e.clientX;
+      viewerState.imageDragStartY = e.clientY;
       viewerUI.setCursor('grabbing');
+      hasMoved = false;
     } else {
-      // OSのネイティブリサイズと競合しないよう、縁は移動の対象外
+      // それ以外の左ドラッグはウィンドウ移動
       const EDGE = CONFIG.EDGE_THRESHOLD;
       if (e.clientX < EDGE || e.clientX > window.innerWidth - EDGE ||
           e.clientY < EDGE || e.clientY > window.innerHeight - EDGE) {
         isDragging = false;
         return;
       }
+      isDragging = true;
+      hasMoved = false;
       startX = e.screenX;
       startY = e.screenY;
       windowX = e.clientX;
@@ -646,23 +666,34 @@ window.addEventListener('mousedown', (e) => {
 
 let dragRafId = null;
 window.addEventListener('mousemove', (e) => {
-  if (isDragging) {
+  if (viewerState.isImageDragging) {
     if (!hasMoved) {
-      const movedX = viewerState.isZoomed ? e.pageX : e.screenX;
-      const movedY = viewerState.isZoomed ? e.pageY : e.screenY;
-      if (Math.abs(movedX - startX) > 5 || Math.abs(movedY - startY) > 5) {
+      if (Math.abs(e.clientX - viewerState.imageDragStartX) > 5 || Math.abs(e.clientY - viewerState.imageDragStartY) > 5) {
+        hasMoved = true;
+      }
+    }
+    
+    if (hasMoved) {
+      viewerState.currentTranslateX += e.clientX - viewerState.imageDragStartX;
+      viewerState.currentTranslateY += e.clientY - viewerState.imageDragStartY;
+      viewerState.imageDragStartX = e.clientX;
+      viewerState.imageDragStartY = e.clientY;
+
+      // 一旦DOMに仮反映してから境界をチェックし、最終結果を適用する
+      viewerUI.updateImageRendering();
+      clampTranslate();
+      viewerUI.updateImageRendering();
+    }
+  } else if (isDragging) {
+    if (!hasMoved) {
+      if (Math.abs(e.screenX - startX) > 5 || Math.abs(e.screenY - startY) > 5) {
         hasMoved = true;
       }
     }
     if (hasMoved) {
       if (dragRafId) cancelAnimationFrame(dragRafId);
       dragRafId = requestAnimationFrame(() => {
-        if (viewerState.isZoomed) {
-          document.body.scrollLeft = scrollLeftStart - (e.pageX - startX);
-          document.body.scrollTop = scrollTopStart - (e.pageY - startY);
-        } else {
-          window.veloceAPI.moveViewerWindow(e.screenX - windowX, e.screenY - windowY);
-        }
+        window.veloceAPI.moveViewerWindow(e.screenX - windowX, e.screenY - windowY);
       });
     }
   }
@@ -670,12 +701,18 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('mouseup', (e) => {
   if (e.button === 0) { // 左クリックのリリース
-    if (viewerState.isZoomed) {
-      viewerUI.setCursor('grab');
-    }
-    isDragging = false;
-    if (!hasMoved && !viewerState.ignoreNextClick && !viewerState.isImageDragging) {
-      showPrev();
+    if (viewerState.isImageDragging) {
+      viewerState.isImageDragging = false;
+      viewerUI.setCursor(e.ctrlKey ? 'grab' : 'default');
+      // ドラッグせずに離した場合はクリックとして扱う（次の画像へ）※Ctrl押下時はスキップ
+      if (!hasMoved && !viewerState.ignoreNextClick && !e.ctrlKey) {
+        showPrev();
+      }
+    } else if (isDragging) {
+      isDragging = false;
+      if (!hasMoved && !viewerState.ignoreNextClick) {
+        showPrev();
+      }
     }
   }
 });
@@ -685,40 +722,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Control') viewerUI.setCursor('grab');
 });
 window.addEventListener('keyup', (e) => {
-  if (e.key === 'Control' && !viewerState.isImageDragging) viewerUI.setCursor('default');
-});
-// ドラッグ開始（Ctrlを押している時のみ）
-window.addEventListener('mousedown', (e) => {
-  if (e.target && e.target.id === 'viewer-img' && e.ctrlKey && e.button === 0) {
-    e.preventDefault(); // Macの右クリック化やOSの標準ドラッグを防止
-    e.stopPropagation(); // 既存のウィンドウドラッグ処理との競合を防止
-    viewerState.isImageDragging = true;
-    viewerState.imageDragStartX = e.clientX;
-    viewerState.imageDragStartY = e.clientY;
-    viewerUI.setCursor('grabbing'); // 掴んでいるカーソル
-  }
-});
-
-// ドラッグ中（移動量の計算と適用）
-window.addEventListener('mousemove', (e) => {
-  if (viewerState.isImageDragging) {
-    viewerState.currentTranslateX += e.clientX - viewerState.imageDragStartX;
-    viewerState.currentTranslateY += e.clientY - viewerState.imageDragStartY;
-    viewerState.imageDragStartX = e.clientX;
-    viewerState.imageDragStartY = e.clientY;
-
-    // 一旦DOMに仮反映してから境界をチェックし、最終結果を適用する
-    viewerUI.updateImageRendering();
-    if (typeof clampTranslate === 'function') clampTranslate();
-    viewerUI.updateImageRendering();
-  }
-});
-
-// ドラッグ終了
-window.addEventListener('mouseup', (e) => {
-  if (viewerState.isImageDragging) {
-    viewerState.isImageDragging = false;
-    viewerUI.setCursor(e.ctrlKey ? 'grab' : 'default');
+  if (e.key === 'Control' && !viewerState.isImageDragging) {
+    viewerUI.setCursor('default');
   }
 });
 
