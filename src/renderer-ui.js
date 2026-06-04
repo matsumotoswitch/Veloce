@@ -959,16 +959,6 @@ class UIManager {
         this.state.thumbnailObserver.disconnect();
     }
 
-    // 本当に新規作成が必要なサムネイルの枚数を計算
-    // 本当に新規作成が必要なサムネイルの枚数を概算
-    this.state.thumbnailTotalRequested = this.state.totalCount || 0;
-    this.state.thumbnailCompleted = 0;
-    
-    // 初期進捗の反映
-    if (this.state.thumbnailTotalRequested > 0 && this.state.thumbnailCompleted < this.state.thumbnailTotalRequested) {
-      if (typeof updateThumbnailToast === 'function') updateThumbnailToast();
-    }
-
     if (this.elements.fileListBody) this.elements.fileListBody.innerHTML = '';
     
     // フォルダ選択時と同様に、タブ切り替え時等も以前のサムネイル表示を確実にクリアする
@@ -1198,6 +1188,7 @@ class UIManager {
 
       if (appState.thumbnailUrls.has(file.path)) {
           img.src = appState.thumbnailUrls.get(file.path);
+          if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
       } else {
           img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
           if (!appState.pendingThumbnails.has(file.path)) {

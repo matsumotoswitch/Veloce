@@ -31,10 +31,8 @@ appState.activeTabIndex = -1;
 
 const logicalCores = navigator.hardwareConcurrency || 8;
 // サムネイル生成の同時実行数を制限します。
-// 多すぎるとWindows Shell (IShellItemImageFactory) がディスクI/Oやスレッド競合を起こし、
-// 全てが完了するまで「先頭の数枚が極端に遅くなる」現象が発生するためです。
-const MAX_CONCURRENT_THUMBNAILS = Math.min(logicalCores, 4); 
-
+// Rust側で直接リサイズ処理を行うため、I/Oやシェル依存のボトルネックが解消され、並列数を引き上げても高速に処理されます。
+const MAX_CONCURRENT_THUMBNAILS = 8;
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -577,14 +575,22 @@ function resetThumbnailPreloader() {
   appState.preloadCursor = 0;
 }
 
-function updateThumbnailToast() {
+window.markThumbnailCompleted = function markThumbnailCompleted(filePath) {
+  if (filePath && !appState.thumbnailCounted.has(filePath)) {
+    appState.thumbnailCounted.add(filePath);
+    appState.thumbnailCompleted++;
+    window.updateThumbnailToast();
+  }
+};
+
+window.updateThumbnailToast = function updateThumbnailToast() {
   if (appState.thumbnailTotalRequested === 0) return;
 
   const now = Date.now();
   const THROTTLE_DELAY = 50; // 50msに1回まで更新を許可
 
   // 最後の更新から十分な時間が経過したか、または最後の1件の時のみUIを更新
-  if (now - appState.lastThumbnailToastTime > THROTTLE_DELAY || appState.thumbnailCompleted === appState.thumbnailTotalRequested) {
+  if (now - appState.lastThumbnailToastTime > THROTTLE_DELAY || appState.thumbnailCompleted >= appState.thumbnailTotalRequested) {
     appState.lastThumbnailToastTime = now;
 
     if (appState.thumbnailCompleted < appState.thumbnailTotalRequested) {
@@ -606,7 +612,7 @@ function updateThumbnailToast() {
   }
 }
 
-function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
+function fetchThumbnailWithTimeout(filePath, timeoutMs = 3000) {
   return Promise.race([
     window.veloceAPI.getThumbnail(filePath),
     new Promise((_, reject) => setTimeout(() => reject(new Error('Thumbnail timeout')), timeoutMs))
@@ -664,7 +670,9 @@ window.processNextTask = function processNextTask() {
       if (appState.preloadQueue && appState.preloadQueue.length > 0) {
         while (appState.preloadQueue.length > 0) {
           const p = appState.preloadQueue.shift();
-        if (!appState.thumbnailUrls.has(p) && !appState.pendingThumbnails.has(p)) {
+        if (appState.thumbnailUrls.has(p)) {
+          if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
+        } else if (!appState.pendingThumbnails.has(p)) {
           targetFile = p;
           break;
         }
@@ -692,8 +700,7 @@ window.processNextTask = function processNextTask() {
       const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
       if (currentImg) currentImg.src = finalUrl;
 
-      appState.thumbnailCompleted++;
-      updateThumbnailToast();
+
     }).catch(() => {
       const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
       appState.thumbnailUrls.set(targetFile, fallbackUrl);
@@ -702,9 +709,9 @@ window.processNextTask = function processNextTask() {
       const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
       if (currentImg) currentImg.src = fallbackUrl;
 
-      appState.thumbnailCompleted++;
-      updateThumbnailToast();
+
     }).finally(() => {
+      window.markThumbnailCompleted(targetFile);
       // 成功・失敗に関わらず、タスクが1つ終わったら枠を空けて次を1つだけキックする
       appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
       appState.pendingThumbnails.delete(targetFile);
@@ -3232,6 +3239,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onDirectoryLoaded(async (payload) => {
       if (payload.path !== appState.currentDirectory) return;
       appState.totalCount = payload.totalCount;
+      appState.thumbnailTotalRequested = appState.totalCount;
+      appState.thumbnailCompleted = 0;
+      appState.thumbnailCounted.clear();
       await scheduleRefresh();
       setTimeout(() => {
         const t = document.getElementById('toast-dir-load-progress');

@@ -73,6 +73,7 @@ class AppState {
     this.thumbnailTotalRequested = 0; // サムネイル生成リクエストの総数
     this.thumbnailCompleted = 0;      // サムネイル生成完了数
     this.thumbnailToastTimeout = null; // トースト通知を消すためのタイマー
+    this.thumbnailCounted = new Set(); // 完了済みとしてカウントしたファイルのセット
     this.lastThumbnailToastTime = 0;  // 最後にトースト通知を更新した時刻
     this.metadataTargetCount = 0;     // メタデータ取得リクエストの総数
     this.metadataCompleted = 0;       // メタデータ取得完了数
