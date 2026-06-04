@@ -272,7 +272,7 @@ async function loadAllMetadataInBackground() {
   }
 
   const batchId = ++appState.currentMetaBatchId;
-  const BATCH_SIZE = 50;
+  const BATCH_SIZE = 5;
 
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
     // フォルダ切り替えなどでリセットされた場合は中断
@@ -640,6 +640,7 @@ window.processNextTask = function processNextTask() {
       
       // 古いレンダリングIDのリクエストは破棄して次を探す
       if (appState.currentRenderId !== req.requestRenderId) {
+        appState.pendingThumbnails.delete(req.filePath);
         continue; 
       }
       
@@ -656,10 +657,19 @@ window.processNextTask = function processNextTask() {
           appState.preloadQueue = appState.preloadQueue || [];
           
           window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
-            appState.preloadCursor += items.length;
-            appState.preloadQueue.push(...items.map(f => f.path));
+            if (items.length === 0) {
+              appState.preloadCursor += 50; // 空の場合はカーソルを進めて無限ループを防止
+            } else {
+              appState.preloadCursor += items.length;
+              appState.preloadQueue.push(...items.map(f => f.path));
+            }
             appState.isFetchingPreload = false;
             // 補充完了後に再度タスクディスパッチを呼び出す
+            setTimeout(window.processNextTask, 0);
+          }).catch(err => {
+            console.warn("Preload getItems failed:", err);
+            appState.isFetchingPreload = false;
+            appState.preloadCursor += 50;
             setTimeout(window.processNextTask, 0);
           });
         }

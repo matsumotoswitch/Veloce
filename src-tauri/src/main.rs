@@ -411,20 +411,20 @@ fn set_view_params(
 
 /// 仮想スクロール用: 指定範囲のImageFileをスライスして返す
 #[tauri::command]
-fn get_items(state: tauri::State<'_, AppState>, offset: usize, limit: usize) -> Vec<ImageFile> {
+async fn get_items(state: tauri::State<'_, AppState>, offset: usize, limit: usize) -> Result<Vec<ImageFile>, String> {
     let lock = state.filtered_files.lock().unwrap();
     let end = std::cmp::min(offset + limit, lock.len());
     if offset >= lock.len() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    lock[offset..end].to_vec()
+    Ok(lock[offset..end].to_vec())
 }
 
 /// selectImage用: 単一のImageFileを取得
 #[tauri::command]
-fn get_file_by_index(state: tauri::State<'_, AppState>, index: usize) -> Option<ImageFile> {
+async fn get_file_by_index(state: tauri::State<'_, AppState>, index: usize) -> Result<Option<ImageFile>, String> {
     let lock = state.filtered_files.lock().unwrap();
-    lock.get(index).cloned()
+    Ok(lock.get(index).cloned())
 }
 
 /// メタデータ読み込み結果をRust側のSource of Truthに反映する
@@ -1152,55 +1152,117 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
             }
         }
 
-        // --- フォールバック: 既存の image::open 処理 ---
-        let img = image::open(&file_path).map_err(|e| e.to_string())?;
-        
-        let (src_width_val, src_height_val, src_raw, pixel_type) = match img {
-            image::DynamicImage::ImageRgb8(rgb) => {
-                let (w, h) = rgb.dimensions();
-                (w, h, rgb.into_raw(), fast_image_resize::PixelType::U8x3)
-            },
-            image::DynamicImage::ImageRgba8(rgba) => {
-                let (w, h) = rgba.dimensions();
-                (w, h, rgba.into_raw(), fast_image_resize::PixelType::U8x4)
-            },
-            _ => {
-                let rgba = img.into_rgba8();
-                let (w, h) = rgba.dimensions();
-                (w, h, rgba.into_raw(), fast_image_resize::PixelType::U8x4)
-            }
-        };
+        // Windows環境ではOS標準のAPIを使用してサムネイルを高速に取得する
+        #[cfg(windows)]
+        {
+            use windows::core::HSTRING;
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+            use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT};
+            use windows::Win32::Graphics::Gdi::{
+                DeleteObject, GetObjectW, GetDIBits, CreateCompatibleDC, DeleteDC,
+                BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB, RGBQUAD
+            };
+            use windows::Win32::Foundation::SIZE;
 
-        let src_width = std::num::NonZeroU32::new(src_width_val).unwrap_or(std::num::NonZeroU32::new(1).unwrap());
-        let src_height = std::num::NonZeroU32::new(src_height_val).unwrap_or(std::num::NonZeroU32::new(1).unwrap());
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                
+                let result: Option<Vec<u8>> = (|| -> windows::core::Result<Vec<u8>> {
+                    let path_hstring = HSTRING::from(&file_path);
+                    let item: IShellItemImageFactory = SHCreateItemFromParsingName(&path_hstring, None)?;
+                    
+                    let size = SIZE { cx: 512, cy: 512 };
+                    let hbitmap = item.GetImage(size, SIIGBF_RESIZETOFIT)?;
 
-        let src_image = fast_image_resize::Image::from_vec_u8(src_width, src_height, src_raw, pixel_type).map_err(|e| e.to_string())?;
+                    let mut bitmap = BITMAP::default();
+                    if GetObjectW(
+                        hbitmap,
+                        std::mem::size_of::<BITMAP>() as i32,
+                        Some(&mut bitmap as *mut _ as *mut std::ffi::c_void),
+                    ) == 0 {
+                        let _ = DeleteObject(hbitmap);
+                        return Err(windows::core::Error::from_win32());
+                    }
 
-        let max_dim: f32 = 512.0;
-        let ratio = (max_dim / src_width.get() as f32).min(max_dim / src_height.get() as f32).min(1.0_f32);
-        let dst_width = std::num::NonZeroU32::new((src_width.get() as f32 * ratio).max(1.0) as u32).unwrap();
-        let dst_height = std::num::NonZeroU32::new((src_height.get() as f32 * ratio).max(1.0) as u32).unwrap();
+                    let width = bitmap.bmWidth;
+                    let height = bitmap.bmHeight;
+                    let mut info = BITMAPINFO {
+                        bmiHeader: BITMAPINFOHEADER {
+                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                            biWidth: width,
+                            biHeight: -height, // top-down
+                            biPlanes: 1,
+                            biBitCount: 32,
+                            biCompression: BI_RGB.0 as u32,
+                            biSizeImage: 0,
+                            biXPelsPerMeter: 0,
+                            biYPelsPerMeter: 0,
+                            biClrUsed: 0,
+                            biClrImportant: 0,
+                        },
+                        bmiColors: [RGBQUAD::default(); 1],
+                    };
 
-        let mut dst_image = fast_image_resize::Image::new(dst_width, dst_height, pixel_type);
-        let mut resizer = fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Nearest);
-        resizer.resize(&src_image.view(), &mut dst_image.view_mut()).map_err(|e| e.to_string())?;
+                    let hdc = CreateCompatibleDC(None);
+                    let mut pixels = vec![0u8; (width * height * 4) as usize];
+                    let res = GetDIBits(
+                        hdc,
+                        hbitmap,
+                        0,
+                        height as u32,
+                        Some(pixels.as_mut_ptr() as *mut _),
+                        &mut info,
+                        DIB_RGB_COLORS,
+                    );
 
-        let thumb = match pixel_type {
-            fast_image_resize::PixelType::U8x3 => image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(dst_width.get(), dst_height.get(), dst_image.into_vec()).unwrap()),
-            _ => image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(dst_width.get(), dst_height.get(), dst_image.into_vec()).unwrap()),
-        };
+                    let _ = DeleteDC(hdc);
+                    let _ = DeleteObject(hbitmap);
 
-        let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
-        thumb.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
-        let bytes = buf.into_inner();
+                    if res == 0 {
+                        return Err(windows::core::Error::from_win32());
+                    }
 
-        if let Some(cache_path) = &cache_file_path {
-            if std::fs::write(cache_path, &bytes).is_ok() {
-                return Ok(cache_path.to_string_lossy().to_string());
+                    // BGRA -> RGBA のバイトスワップ
+                    for chunk in pixels.chunks_exact_mut(4) {
+                        chunk.swap(0, 2);
+                    }
+
+                    if let Some(img) = image::RgbaImage::from_raw(width as u32, height as u32, pixels) {
+                        let dyn_img = image::DynamicImage::ImageRgba8(img);
+                        let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
+                        if dyn_img.write_to(&mut buf, image::ImageFormat::Jpeg).is_ok() {
+                            return Ok(buf.into_inner());
+                        }
+                    }
+
+                    Err(windows::core::Error::from_win32())
+                })().ok();
+
+                CoUninitialize();
+
+                // WindowsAPIでの取得が成功した場合はそのまま返す
+                if let Some(bytes) = result {
+                    if let Some(cache_path) = &cache_file_path {
+                        let _ = std::fs::write(cache_path, &bytes);
+                        return Ok(cache_path.to_string_lossy().to_string());
+                    }
+                }
             }
         }
 
-        Ok(file_path)
+        // --- フォールバック: 既存の image::open 処理 ---
+        // WindowsAPIが失敗した場合に image::open にフォールバックすると、一部の特殊な画像で
+        // 深刻なOOMやプロセスハングアップ（86枚目付近などでの停止）を引き起こすため、
+        // フォールバックを行わずに即座にエラーを返します。
+        #[cfg(windows)]
+        {
+            Err("Thumbnail generation failed (Windows API unavailable or failed)".to_string())
+        }
+        #[cfg(not(windows))]
+        {
+            // Windows以外（想定外）の場合はとりあえずエラーを返す
+            Err("Thumbnail generation not supported on this OS".to_string())
+        }
     }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
