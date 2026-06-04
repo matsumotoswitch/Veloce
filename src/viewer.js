@@ -437,12 +437,6 @@ function swapImageElement(newImg, sequenceId) {
 }
 
 async function loadImage() {
-  viewerState.currentScale = 1.0;
-  viewerState.currentTranslateX = 0;
-  viewerState.currentTranslateY = 0;
-  viewerState.currentRotation = 0;
-  viewerState.flipX = 1;
-  viewerState.flipY = 1;
 
   const currentSeq = ++imageLoadSequence;
 
