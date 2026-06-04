@@ -313,7 +313,10 @@ async function loadAllMetadataInBackground() {
         uiManager.updateVirtualList(true);
       }
       if (appState.selection.size > 0) {
-        uiManager.renderMetadata(Array.from(appState.selection)[0]);
+        const idx = Array.from(appState.selection)[0];
+        window.veloceAPI.getFileByIndex(idx).then(file => {
+          if (file) renderMetadata(file);
+        });
       }
     }
   }
@@ -1759,7 +1762,6 @@ const handleSortChange = (key, asc) => {
   if (asc !== undefined) appState.sortConfig.asc = asc;
   localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
   updateSortIndicators();
-  appState.applyFiltersAndSort();
   scheduleRefresh();
   contextMenu.style.display = 'none';
 };
@@ -2897,8 +2899,7 @@ document.querySelectorAll('th').forEach(th => {
 	}
 	localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
 	updateSortIndicators();
-	appState.applyFiltersAndSort();
-	uiManager.renderAll(true);
+	scheduleRefresh();
   });
 });
 
@@ -3045,16 +3046,21 @@ window.addEventListener('keydown', async (e) => {
       return;
     }
 
-    if (appState.selectedIndex > -1 && appState.filteredFiles[appState.selectedIndex]) {
-      window.veloceAPI.copyImageToClipboard(appState.filteredFiles[appState.selectedIndex].path);
-      showNotification('画像をクリップボードにコピーしました', 'success');
+    if (appState.selectedIndex > -1) {
+      const idx = appState.selectedIndex;
+      window.veloceAPI.getFileByIndex(idx).then(file => {
+        if (file) {
+          window.veloceAPI.copyImageToClipboard(file.path);
+          showNotification('画像をクリップボードにコピーしました', 'success');
 
-      const applyFlash = (el) => {
-        uiManager.applyGlowEffect(el);
-      };
+          const applyFlash = (el) => {
+            uiManager.applyGlowEffect(el);
+          };
 
-      applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${appState.selectedIndex}"]`));
-      applyFlash(uiManager.elements.fileListBody.querySelector(`tr[data-index="${appState.selectedIndex}"]`));
+          applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${idx}"]`));
+          applyFlash(uiManager.elements.fileListBody.querySelector(`tr[data-index="${idx}"]`));
+        }
+      });
     }
   }
 
