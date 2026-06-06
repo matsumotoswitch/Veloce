@@ -16,7 +16,8 @@ export function formatRequestType(reqType) {
     'NativeInfillingRequest': 'Inpainting',
     'ImageToImageRequest': 'Image to Image',
     'Img2ImgRequest': 'Image to Image',
-    'VibeTransferRequest': 'Vibe Transfer'
+    'VibeTransferRequest': 'Vibe Transfer',
+    'VibeTransfer+ImageToImage': 'Vibe Transfer + Image to Image'
   };
   return types[reqType] || reqType;
 }
@@ -31,10 +32,17 @@ export function extractMetadataFields(file, meta = {}) {
   const p = meta.params || {};
   let requestType = p.request_type || null;
 
-  if (Array.isArray(p.reference_information_extracted_multiple) && p.reference_information_extracted_multiple.length > 0) {
-    requestType = 'VibeTransferRequest';
-  } else if (Array.isArray(p.reference_image_multiple) && p.reference_image_multiple.length > 0) {
-    requestType = 'VibeTransferRequest';
+  const isVibeTransfer = 
+    (Array.isArray(p.reference_information_extracted_multiple) && p.reference_information_extracted_multiple.length > 0) ||
+    (Array.isArray(p.reference_image_multiple) && p.reference_image_multiple.length > 0) ||
+    (Array.isArray(p.reference_strength_multiple) && p.reference_strength_multiple.length > 0);
+
+  if (isVibeTransfer) {
+    if (requestType === 'Img2ImgRequest' || requestType === 'ImageToImageRequest') {
+      requestType = 'VibeTransfer+ImageToImage';
+    } else {
+      requestType = 'VibeTransferRequest';
+    }
   }
 
   // --- ComfyUI 解析 ---
