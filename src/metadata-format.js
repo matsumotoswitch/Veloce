@@ -17,8 +17,15 @@ export function formatRequestType(reqType) {
     'ImageToImageRequest': 'Image to Image',
     'Img2ImgRequest': 'Image to Image',
     'VibeTransferRequest': 'Vibe Transfer',
-    'VibeTransfer+ImageToImage': 'Vibe Transfer + Image to Image'
+    'VibeTransfer': 'Vibe Transfer',
+    'CharacterReference': 'Character Reference',
+    'ImageToImage': 'Image to Image'
   };
+
+  if (reqType.includes('+')) {
+    return reqType.split('+').map(t => types[t] || t).join(' + ');
+  }
+
   return types[reqType] || reqType;
 }
 
@@ -37,12 +44,21 @@ export function extractMetadataFields(file, meta = {}) {
     (Array.isArray(p.reference_image_multiple) && p.reference_image_multiple.length > 0) ||
     (Array.isArray(p.reference_strength_multiple) && p.reference_strength_multiple.length > 0);
 
-  if (isVibeTransfer) {
+  const isCharacterReference = 
+    (Array.isArray(p.director_reference_strengths) && p.director_reference_strengths.length > 0) ||
+    (Array.isArray(p.director_reference_information_extracted) && p.director_reference_information_extracted.length > 0) ||
+    (Array.isArray(p.director_reference_images) && p.director_reference_images.length > 0) ||
+    (Array.isArray(p.director_reference_descriptions) && p.director_reference_descriptions.length > 0);
+
+  let enhancements = [];
+  if (isVibeTransfer) enhancements.push('VibeTransfer');
+  if (isCharacterReference) enhancements.push('CharacterReference');
+
+  if (enhancements.length > 0) {
     if (requestType === 'Img2ImgRequest' || requestType === 'ImageToImageRequest') {
-      requestType = 'VibeTransfer+ImageToImage';
-    } else {
-      requestType = 'VibeTransferRequest';
+      enhancements.push('ImageToImage');
     }
+    requestType = enhancements.join('+');
   }
 
   // --- ComfyUI 解析 ---

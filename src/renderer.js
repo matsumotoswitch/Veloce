@@ -1577,26 +1577,36 @@ async function renderMetadata(file) {
       }
 
       if (section.subLabel && section.subLabel !== 'Text to Image') {
-        let color = 'var(--text-color)';
-        let opacity = '0.7';
-        let fontWeight = 'normal';
-        if (section.subLabel.includes('Inpainting')) {
-          color = '#4a9eff';
-          opacity = '1';
-        } else if (section.subLabel.includes('Vibe Transfer')) {
-          color = '#d27aff';
-          opacity = '1';
-        } else if (section.subLabel.includes('Image to Image') || section.subLabel.includes('Img2Img')) {
-          color = '#4ade80';
-          opacity = '1';
-        }
-        secEl.subLabel.style.fontSize = '0.85em';
-        secEl.subLabel.style.color = color;
-        secEl.subLabel.style.opacity = opacity;
-        secEl.subLabel.style.fontWeight = fontWeight;
-        secEl.subLabel.textContent = section.subLabel;
+        const labels = section.subLabel.split(' + ');
+        secEl.subLabel.innerHTML = '';
+        secEl.subLabel.style.display = 'flex';
+        secEl.subLabel.style.gap = '4px';
+        secEl.subLabel.style.alignItems = 'center';
+        secEl.subLabel.style.flexWrap = 'wrap';
+
+        labels.forEach(lbl => {
+          let color = 'var(--text-color)';
+          let opacity = '1';
+          if (lbl.includes('Inpainting')) {
+            color = '#4a9eff';
+          } else if (lbl.includes('Vibe Transfer')) {
+            color = '#d27aff';
+          } else if (lbl.includes('Character Reference')) {
+            color = '#ff9a4a';
+          } else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) {
+            color = '#4ade80';
+          }
+          const span = document.createElement('span');
+          span.style.fontSize = '0.85em';
+          span.style.color = color;
+          span.style.opacity = opacity;
+          span.style.fontWeight = 'normal';
+          span.textContent = `[${lbl}]`;
+          secEl.subLabel.appendChild(span);
+        });
       } else {
-        secEl.subLabel.textContent = '';
+        secEl.subLabel.innerHTML = '';
+        secEl.subLabel.style.display = '';
       }
 
       if (secEl.root.parentNode !== container) {

@@ -774,23 +774,22 @@ class UIManager {
 
       const getSubLabelHtml = (sub) => {
         if (!sub || sub === 'Text to Image') return '';
-        let color = 'var(--text-color)';
-        let opacity = '0.7';
-        let fontWeight = 'normal';
-        if (sub.includes('Inpainting')) {
-          color = '#4a9eff';
-          opacity = '1';
-          fontWeight = 'normal';
-        } else if (sub.includes('Vibe Transfer')) {
-          color = '#d27aff';
-          opacity = '1';
-          fontWeight = 'normal';
-        } else if (sub.includes('Image to Image') || sub.includes('Img2Img')) {
-          color = '#4ade80';
-          opacity = '1';
-          fontWeight = 'normal';
-        }
-        return `<span style="font-size: 0.85em; color: ${color}; opacity: ${opacity}; font-weight: ${fontWeight};">${sub}</span>`;
+        const labels = sub.split(' + ');
+        const spans = labels.map(lbl => {
+          let color = 'var(--text-color)';
+          let opacity = '1';
+          if (lbl.includes('Inpainting')) {
+            color = '#4a9eff';
+          } else if (lbl.includes('Vibe Transfer')) {
+            color = '#d27aff';
+          } else if (lbl.includes('Character Reference')) {
+            color = '#ff9a4a';
+          } else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) {
+            color = '#4ade80';
+          }
+          return `<span style="font-size: 0.85em; color: ${color}; opacity: ${opacity}; font-weight: normal;">[${lbl}]</span>`;
+        });
+        return `<span style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">${spans.join('')}</span>`;
       };
 
       let sub1Html = getSubLabelHtml(subLabel1);

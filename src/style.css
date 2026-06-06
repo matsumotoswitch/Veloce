@@ -1948,8 +1948,6 @@ html.viewer-html,
 
 /* Global Focus Indicator for Keyboard Navigation */
 :focus-visible {
-  outline: 2px solid var(--glow-gold) !important;
-  outline-offset: 2px !important;
-  border-radius: 2px;
+  outline: none !important;
 }
 
