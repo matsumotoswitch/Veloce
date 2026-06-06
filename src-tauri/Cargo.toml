@@ -17,6 +17,7 @@ tauri = { version = "1", features = [
     "fs-copy-file",
     "fs-create-dir",
     "fs-read-dir",
+    "fs-remove-file",
     "fs-rename-file",
     "path-all",
     "protocol-asset",

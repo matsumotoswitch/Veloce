@@ -414,11 +414,13 @@ async function renameSelectedFile() {
         uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
         
         const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
-        // Rust側に変更を通知
-        await window.veloceAPI.notifyFileChanged(file);
+        
         file.path = result.path;
         file.name = newName;
         file.ext = newExt;
+
+        // Rust側に変更を通知
+        await window.veloceAPI.notifyFileChanged(file);
 
         appState.thumbnailUrls.delete(oldPath);
         resetThumbnailPreloader();
@@ -986,8 +988,6 @@ async function selectImage(index, event = null) {
     targetRow.scrollIntoView({ block: 'nearest' });
   }
 
-  const requestId = ++appState.currentMetaRequestId;
-
   // インスペクターの更新
   if (file) renderMetadata(file);
 }
@@ -1208,8 +1208,8 @@ function toggleHelpOverlay(forceShow) {
           <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をクリップボードに直接コピー（テキスト選択中はテキストコピー）</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているすべてのビューアーウィンドウを画面に横一列に整列</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">D</td><td style="padding: 6px 15px;">選択した2枚の画像のプロンプト・パラメータ情報を取得して比較 (Diffモーダル)</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Tab / PageDown</td><td style="padding: 6px 15px;">次のタブへ切り替え</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Shift + Tab / PageUp</td><td style="padding: 6px 15px;">前のタブへ切り替え</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Tab / Ctrl + PageDown</td><td style="padding: 6px 15px;">次のタブへ切り替え</td></tr>
+          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Shift + Tab / Ctrl + PageUp</td><td style="padding: 6px 15px;">前のタブへ切り替え</td></tr>
           <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">各種モーダル（Diff/お気に入り編集）、ヘルプ、コンテキストメニューを閉じる</td></tr>
         </table>
       </div>
@@ -2555,11 +2555,8 @@ uiManager.elements.dirTree.addEventListener('drop', (e) => {
               uiManager.showToast('操作をキャンセルしました', 3000, 'file-move');
               return;
             } else if (choice === 'skip') {
-              // フルパスからファイル名（拡張子含む）だけを取り出して比較する
-              targetPaths = paths.filter(p => {
-                const fileName = p.split('\\').pop().split('/').pop();
-                return !conflicts.includes(fileName);
-              });
+              // Rust側から返される重複リストはフルパスなので、そのまま比較する
+              targetPaths = paths.filter(p => !conflicts.includes(p));
               skipCount = conflicts.length;
               if (targetPaths.length === 0) {
                 uiManager.showToast(`${skipCount}件の重複をスキップしました`, 3000, 'file-move');
@@ -3007,14 +3004,14 @@ window.addEventListener('keydown', async (e) => {
     }
   }
 
-  if (e.key === 'a' || e.key === 'A') {
+  if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey) {
     e.preventDefault();
     if (window.veloceAPI.arrangeViewers) {
       window.veloceAPI.arrangeViewers();
     }
   }
 
-  if (e.key === 'd' || e.key === 'D') {
+  if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey) {
     e.preventDefault();
     if (appState.selection.size === 2) {
       const indices = Array.from(appState.selection);
