@@ -739,19 +739,17 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
             let mut chunk_type = [0; 4];
             if f.read_exact(&mut chunk_type).is_err() { break; }
 
-            let mut data = vec![0; len];
-            if f.read_exact(&mut data).is_err() { break; }
-
-            let mut crc = [0; 4];
-            if f.read_exact(&mut crc).is_err() { break; }
-
             if &chunk_type == b"tEXt" {
+                let mut data = vec![0; len];
+                if f.read_exact(&mut data).is_err() { break; }
                 if let Some(null_idx) = data.iter().position(|&b| b == 0) {
                     let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
                     let text = String::from_utf8_lossy(&data[null_idx + 1..]).to_string();
                     chunks.insert(keyword, text);
                 }
             } else if &chunk_type == b"iTXt" {
+                let mut data = vec![0; len];
+                if f.read_exact(&mut data).is_err() { break; }
                 if let Some(null_idx) = data.iter().position(|&b| b == 0) {
                     let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
                     let mut offset = null_idx + 1;
@@ -778,7 +776,15 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
                 }
             } else if &chunk_type == b"IEND" {
                 break;
+            } else {
+                // Skip the data for non-text chunks to avoid massive memory allocation and I/O
+                use std::io::{Seek, SeekFrom};
+                if f.seek(SeekFrom::Current(len as i64)).is_err() { break; }
             }
+            
+            // Read 4 bytes for CRC to advance the file pointer to the next chunk
+            let mut crc = [0; 4];
+            if f.read_exact(&mut crc).is_err() { break; }
         }
     }
     chunks
