@@ -351,8 +351,7 @@ function resizeWindowToFitImage() {
 
   if (window.veloceAPI && window.veloceAPI.setWindowSize) {
     window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
-      debouncedFocusWindow(); // 連続で呼ばれるとフォーカスが飛ぶ原因になるためデバウンス
-
+      debouncedFocusWindow(); // 連続呼び出しによるフォーカス外れを防ぐためデバウンス処理を行う
     });
   }
 }

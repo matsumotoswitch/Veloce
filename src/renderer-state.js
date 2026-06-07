@@ -59,8 +59,7 @@ class AppState {
     };
 
     // システム状態・サムネイル管理
-    this.currentMetaBatchId = 0;     // メタデータ一括読み込みのバッチID（非同期キャンセル用）
-    this.currentMetaRequestId = 0;   // メタデータ個別読み込みのリクエストID
+    this.currentMetaBatchId = 0;     // 一括読み込み管理用ID
     this.currentRenderId = 0;        // リスト描画のリクエストID
     this.thumbnailUrls = new Map();  // サムネイル画像のURLキャッシュ（パス -> URL）
     this.pendingThumbnails = new Set(); // サムネイル取得待ちのファイルパス集合

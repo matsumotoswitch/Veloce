@@ -145,8 +145,8 @@ async function refreshFileList(showToast = false) {
   try {
     appState.pushHistory(appState.currentDirectory);
     updateNavButtons();
-    // Rust側のバックグラウンドストリーミング処理をキックする
-    // ※結果は await せず、onDirectoryChunk リスナー側で随時受け取る
+    // Rust側のバックグラウンド処理をキックする
+    // ※結果は await せず、onDirectoryLoaded リスナー側で随時受け取る
     await window.veloceAPI.loadDirectory(appState.currentDirectory);
   } catch (error) {
     console.error('Failed to start loading directory:', error);
@@ -2555,7 +2555,7 @@ uiManager.elements.dirTree.addEventListener('drop', (e) => {
               uiManager.showToast('操作をキャンセルしました', 3000, 'file-move');
               return;
             } else if (choice === 'skip') {
-              // Rust側から返される重複リストはフルパスなので、そのまま比較する
+              // 重複ファイルを除外して処理を継続する
               targetPaths = paths.filter(p => !conflicts.includes(p));
               skipCount = conflicts.length;
               if (targetPaths.length === 0) {
