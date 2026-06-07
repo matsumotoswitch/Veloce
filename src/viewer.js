@@ -352,9 +352,7 @@ function resizeWindowToFitImage() {
   if (window.veloceAPI && window.veloceAPI.setWindowSize) {
     window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
       debouncedFocusWindow(); // 連続で呼ばれるとフォーカスが飛ぶ原因になるためデバウンス
-      if (window.veloceAPI.toggleWindowDecorations) {
-        window.veloceAPI.toggleWindowDecorations(viewerState.isBorderVisible);
-      }
+
     });
   }
 }

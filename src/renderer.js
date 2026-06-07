@@ -2126,12 +2126,12 @@ contextMenu.appendChild(menuEditFavorite);
 // 5. 削除系 (危険な操作は下にまとめる)
 contextMenu.appendChild(menuDeleteFolder);
 contextMenu.appendChild(menuDeleteFile);
+contextMenu.appendChild(menuDeleteFavorite);
 
 // 並べ替え (ファイル操作メニュー時に表示)
 contextMenu.appendChild(menuSeparatorSort);
 contextMenu.appendChild(menuSortRoot);
 
-contextMenu.appendChild(menuDeleteFavorite);
 contextMenu.appendChild(menuSeparator4);
 
 // 6. お気に入り管理

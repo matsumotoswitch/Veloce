@@ -94,6 +94,9 @@ class AppState {
         );
         this.totalCount = totalCount;
         this.currentPaths = paths;
+        if (window.veloceAPI.syncImagePaths) {
+          await window.veloceAPI.syncImagePaths(paths);
+        }
       } catch (err) {
         console.error('Failed to set view params:', err);
       }

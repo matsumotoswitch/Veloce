@@ -19,6 +19,7 @@
         "copyFile": true,
         "createDir": true,
         "readDir": true,
+        "removeFile": true,
         "renameFile": true,
         "scope": ["**"]
       },
