@@ -295,7 +295,7 @@ async function loadAllMetadataInBackground() {
       updateMetadataToast();
       
       // メインスレッドをブロックしないよう少し休止
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 50));
     } catch (error) {
       console.error('Failed to load metadata batch:', error);
     }
@@ -614,7 +614,7 @@ window.updateThumbnailToast = function updateThumbnailToast() {
   }
 }
 
-function fetchThumbnailWithTimeout(filePath, timeoutMs = 3000) {
+function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
   return Promise.race([
     window.veloceAPI.getThumbnail(filePath),
     new Promise((_, reject) => setTimeout(() => reject(new Error('Thumbnail timeout')), timeoutMs))

@@ -1160,7 +1160,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         #[cfg(windows)]
         {
             use windows::core::HSTRING;
-            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
             use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT};
             use windows::Win32::Graphics::Gdi::{
                 DeleteObject, GetObjectW, GetDIBits, CreateCompatibleDC, DeleteDC,
@@ -1169,7 +1169,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
             use windows::Win32::Foundation::SIZE;
 
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
                 
                 let result: Option<Vec<u8>> = (|| -> windows::core::Result<Vec<u8>> {
                     let path_hstring = HSTRING::from(&file_path);
