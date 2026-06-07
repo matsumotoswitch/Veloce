@@ -1858,18 +1858,21 @@ fn main() {
             Ok(())
         })
         .on_window_event(|event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event.event() {
-                let label = event.window().label().to_string();
-                if label == "main" {
-                    std::process::exit(0);
-                } else if label.starts_with("viewer_") {
-                    let _ = event.window().set_always_on_top(false);
-                    // ビューアウィンドウが閉じられた際にキャッシュを破棄
-                    let state = event.window().state::<AppState>();
-                    if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-                        viewer_paths.remove(&label);
-                    };
+            match event.event() {
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                    let label = event.window().label().to_string();
+                    if label == "main" {
+                        std::process::exit(0);
+                    } else if label.starts_with("viewer_") {
+                        let _ = event.window().set_always_on_top(false);
+                        // ビューアウィンドウが閉じられた際にキャッシュを破棄
+                        let state = event.window().state::<AppState>();
+                        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+                            viewer_paths.remove(&label);
+                        };
+                    }
                 }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
