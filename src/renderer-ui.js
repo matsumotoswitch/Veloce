@@ -1156,9 +1156,9 @@ class UIManager {
     this.lastGridStartIndex = startIndex;
     this.lastGridEndIndex = endIndex;
 
-    // コンテンツ領域をスクロール位置に合わせて移動
+    // コンテンツ領域をスクロール位置に合わせて移動 (Win8.1等のちらつき防止のため translate3d でハードウェアアクセラレーションを強制)
     const offsetY = (safeStartRow * rowHeight) + padding;
-    content.style.transform = `translateY(${offsetY}px)`;
+    content.style.transform = `translate3d(0, ${offsetY}px, 0)`;
 
     const items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
 

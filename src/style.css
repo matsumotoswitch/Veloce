@@ -729,9 +729,8 @@ input[type="range"]:focus {
   border: 2px solid transparent;
   cursor: pointer;
   border-radius: 2px;
-  content-visibility: auto;
-  contain-intrinsic-size: var(--thumbnail-size);
   will-change: border-color;
+  transform: translateZ(0);
 }
 
 .thumbnail-item:hover {
