@@ -116,6 +116,7 @@ pub struct AppState {
     filtered_files: Mutex<Vec<ImageFile>>,
     sort_config: Mutex<SortConfig>,
     search_query: Mutex<String>,
+    thumbnail_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 // --- ユーティリティ ---
@@ -1129,6 +1130,9 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         p
     });
 
+    let semaphore = state.thumbnail_semaphore.clone();
+    let _permit = semaphore.acquire_owned().await.map_err(|_| "Semaphore closed".to_string())?;
+
     tokio::task::spawn_blocking(move || {
         let mtime = std::fs::metadata(&file_path)
             .and_then(|m| m.modified())
@@ -1658,6 +1662,7 @@ fn main() {
             filtered_files: Mutex::new(Vec::new()),
             sort_config: Mutex::new(SortConfig { key: "name".to_string(), asc: true }),
             search_query: Mutex::new(String::new()),
+            thumbnail_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
         })
         .setup(move |app| {
             let data_dir = get_veloce_data_dir().unwrap_or_default();
