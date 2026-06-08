@@ -432,6 +432,55 @@ async function renameSelectedFile() {
   }
 }
 
+  async function rebuildSelectedCache() {
+    try {
+      if (appState.selection.size === 0) return;
+      
+      const pathsToRebuild = [];
+      for (const index of appState.selection) {
+        const file = await window.veloceAPI.getFileByIndex(index);
+        if (file) {
+          pathsToRebuild.push(file.path);
+          if (appState.thumbnailUrls.has(file.path)) {
+            URL.revokeObjectURL(appState.thumbnailUrls.get(file.path));
+            appState.thumbnailUrls.delete(file.path);
+          }
+        }
+      }
+
+      if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
+        await window.veloceAPI.clearMetadataCache(pathsToRebuild);
+        uiManager.showToast("キャッシュをクリアしました。再生成を開始します...", 3000, 'info');
+
+        if (appState.thumbnailTotalRequested === 0) {
+          appState.thumbnailCompleted = 0;
+        }
+        appState.thumbnailTotalRequested += pathsToRebuild.length;
+        
+        pathsToRebuild.forEach(p => {
+          appState.thumbnailCounted.delete(p);
+        });
+
+        // Add to the front of the preload queue for immediate background generation
+        appState.preloadQueue.unshift(...pathsToRebuild);
+        
+        window.updateThumbnailToast();
+        setTimeout(window.processNextTask, 0);
+      } else {
+        uiManager.showToast("エラー: APIが見つかりません", 5000, 'error');
+      }
+      
+      if (typeof uiManager.updateVirtualGrid === 'function') {
+        uiManager.updateVirtualGrid(true);
+      }
+      if (typeof uiManager.updateVirtualList === 'function') {
+        uiManager.updateVirtualList(true);
+      }
+    } catch (err) {
+      uiManager.showToast("エラーが発生しました: " + err.toString(), 5000, 'error');
+    }
+  }
+
 async function deleteSelectedFiles() {
   if (appState.selection.size > 0) {
     const pathsToDelete = [];
@@ -570,6 +619,7 @@ const menuSeparator1 = createMenuSeparator();
 const menuSeparator2 = createMenuSeparator();
 const menuSeparator3 = createMenuSeparator();
 const menuSeparator4 = createMenuSeparator();
+const menuSeparatorCache = createMenuSeparator();
 
 function resetThumbnailPreloader() {
   appState.thumbnailRequestQueue = [];
@@ -1739,6 +1789,7 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
 }, true);
 
 const menuRenameFile = createMenuItem('ファイル名を変更...', UIManager.ICONS.FILE_PEN, renameSelectedFile);
+const menuRebuildCache = createMenuItem('キャッシュとサムネイルを再構築', UIManager.ICONS.REFRESH, rebuildSelectedCache);
 const menuDeleteFile = createMenuItem('ファイルを削除', UIManager.ICONS.FILE_X, deleteSelectedFiles, true);
 
 // --- コンテキストメニュー「並べ替え」の作成 ---
@@ -2123,10 +2174,14 @@ contextMenu.appendChild(menuRenameFolder);
 contextMenu.appendChild(menuRenameFile);
 contextMenu.appendChild(menuEditFavorite);
 
-// 5. 削除系 (危険な操作は下にまとめる)
+// 5. 削除系
 contextMenu.appendChild(menuDeleteFolder);
 contextMenu.appendChild(menuDeleteFile);
 contextMenu.appendChild(menuDeleteFavorite);
+
+// 6. キャッシュ操作系
+contextMenu.appendChild(menuSeparatorCache);
+contextMenu.appendChild(menuRebuildCache);
 
 // 並べ替え (ファイル操作メニュー時に表示)
 contextMenu.appendChild(menuSeparatorSort);
@@ -2349,6 +2404,8 @@ function handleItemContextMenu(e, isGrid) {
 
   menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none'; 
   menuDeleteFile.style.display = 'block';
+  menuSeparatorCache.style.display = 'block';
+  menuRebuildCache.style.display = 'block';
 
   if (isGrid) {
     menuSeparatorSort.style.display = 'block';

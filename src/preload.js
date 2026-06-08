@@ -394,5 +394,9 @@ window.veloceAPI = {
   /**
    * 指定したパスをエクスプローラで開きます。
    */
-  openInExplorer: (path) => invoke('open_in_explorer', { path })
+  openInExplorer: (path) => invoke('open_in_explorer', { path }),
+  /**
+   * メタデータキャッシュをクリア
+   */
+  clearMetadataCache: (filePaths) => invoke('clear_metadata_cache', { filePaths })
 };

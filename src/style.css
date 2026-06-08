@@ -347,6 +347,7 @@ input:-webkit-autofill:focus {
   flex: 0 0 var(--left-top-height, 150px);
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   transition: flex-basis 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -410,6 +411,7 @@ body.is-resizing #favorites-section {
   flex: 0 0 var(--right-top-height, 200px);
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   transition: flex-basis 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   padding: 0;
 }
@@ -445,6 +447,7 @@ body.is-resizing #file-info-section {
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   min-height: 0;
   padding: 10px;
 }
@@ -772,6 +775,7 @@ input[type="range"]:focus {
 /* Tree View */
 #dir-tree {
   overflow: auto;
+  scrollbar-gutter: stable;
   flex: 1;
   font-size: 14px;
   min-height: 0;

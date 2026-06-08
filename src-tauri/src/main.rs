@@ -1167,7 +1167,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         {
             use windows::core::HSTRING;
             use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
-            use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT};
+            use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT, SIIGBF_THUMBNAILONLY};
             use windows::Win32::Graphics::Gdi::{
                 DeleteObject, GetObjectW, GetDIBits, CreateCompatibleDC, DeleteDC,
                 BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB, RGBQUAD
@@ -1182,7 +1182,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
                     let item: IShellItemImageFactory = SHCreateItemFromParsingName(&path_hstring, None)?;
                     
                     let size = SIZE { cx: 512, cy: 512 };
-                    let hbitmap = item.GetImage(size, SIIGBF_RESIZETOFIT)?;
+                    let hbitmap = item.GetImage(size, SIIGBF_RESIZETOFIT | SIIGBF_THUMBNAILONLY)?;
 
                     let mut bitmap = BITMAP::default();
                     if GetObjectW(
@@ -1261,18 +1261,27 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         }
 
         // --- フォールバック: 既存の image::open 処理 ---
-        // WindowsAPIが失敗した場合に image::open にフォールバックすると、一部の特殊な画像で
-        // 深刻なOOMやプロセスハングアップ（86枚目付近などでの停止）を引き起こすため、
-        // フォールバックを行わずに即座にエラーを返します。
-        #[cfg(windows)]
-        {
-            Err("Thumbnail generation failed (Windows API unavailable or failed)".to_string())
+        // Mutex を使用して、フォールバックの画像デコードを同時に1つだけに制限することで、
+        // 巨大な画像を複数スレッドでデコードしようとしてOOMになるのを防ぎます。
+        static FALLBACK_DECODE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = match FALLBACK_DECODE_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        
+        let img = image::open(&file_path).map_err(|e| format!("image::open failed: {}", e))?;
+        let thumbnail = img.thumbnail(512, 512);
+        
+        let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
+        thumbnail.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+        
+        let bytes = buf.into_inner();
+        if let Some(cache_path) = &cache_file_path {
+            let _ = std::fs::write(cache_path, &bytes);
+            return Ok(cache_path.to_string_lossy().to_string());
         }
-        #[cfg(not(windows))]
-        {
-            // Windows以外（想定外）の場合はとりあえずエラーを返す
-            Err("Thumbnail generation not supported on this OS".to_string())
-        }
+        
+        Err("Could not save thumbnail cache".to_string())
     }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
@@ -1408,6 +1417,47 @@ fn remove_collected_caches(cache_paths: Vec<std::path::PathBuf>) {
     for path in cache_paths {
         let _ = std::fs::remove_file(path);
     }
+}
+
+#[tauri::command]
+fn clear_metadata_cache(file_paths: Vec<String>) -> Result<Vec<String>, String> {
+    let mut messages = Vec::new();
+    if let Some(base_dir) = get_veloce_data_dir() {
+        let meta_dir = base_dir.join("Metadata");
+        let thumb_dir = base_dir.join("Thumbnails");
+        
+        for file_path in file_paths {
+            let mtime = std::fs::metadata(&file_path)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH)
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            
+            let clean_path = file_path.replace("\\\\?\\", "");
+            
+            // Raw path digest
+            let digest_raw = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
+            let json_raw = meta_dir.join(format!("{:x}.json", digest_raw));
+            let jpg_raw = thumb_dir.join(format!("{:x}.jpg", digest_raw));
+            
+            // Clean path digest
+            let digest_clean = md5::compute(format!("{}_{}", clean_path, mtime).as_bytes());
+            let json_clean = meta_dir.join(format!("{:x}.json", digest_clean));
+            let jpg_clean = thumb_dir.join(format!("{:x}.jpg", digest_clean));
+
+            for cache_file in [json_raw, jpg_raw, json_clean, jpg_clean] {
+                if cache_file.exists() {
+                    if let Err(e) = std::fs::remove_file(&cache_file) {
+                        messages.push(format!("Failed: {}: {}", cache_file.display(), e));
+                    } else {
+                        messages.push(format!("Deleted: {}", cache_file.display()));
+                    }
+                }
+            }
+        }
+    }
+    Ok(messages)
 }
 
 #[tauri::command]
@@ -1915,7 +1965,8 @@ fn main() {
             clear_cache,
             get_cache_info,
             open_in_explorer,
-            check_conflicts
+            check_conflicts,
+            clear_metadata_cache
         ])
         .run(context)
         .expect("error while running tauri application");
