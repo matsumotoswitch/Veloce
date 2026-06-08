@@ -546,12 +546,19 @@ class UIManager {
       };
 
       const validateInput = () => {
-        const result = validateFilename(inputEl.value);
+        const value = inputEl.value;
+        const result = validateFilename(value);
         if (!result.valid) {
-          warningEl.textContent = result.message;
-          warningEl.classList.add('show');
-          inputEl.classList.toggle('error', INVALID_FILENAME_RE.test(inputEl.value));
-          okBtn.disabled = true;
+          if (!value || value.trim() === '') {
+            warningEl.classList.remove('show');
+            inputEl.classList.remove('error');
+            okBtn.disabled = true;
+          } else {
+            warningEl.textContent = result.message;
+            warningEl.classList.add('show');
+            inputEl.classList.toggle('error', INVALID_FILENAME_RE.test(value));
+            okBtn.disabled = true;
+          }
         } else {
           warningEl.classList.remove('show');
           inputEl.classList.remove('error');
@@ -1248,8 +1255,8 @@ export const COLORS = [
 ];
 
 export function createFavoriteEditorUI(containerElement, initialIcon = 'star', initialColor = 'default') {
-  let selectedIconId = initialIcon;
-  let selectedColorId = initialColor;
+  let selectedIconId = (initialIcon || 'star').toLowerCase();
+  let selectedColorId = initialColor || 'default';
 
   containerElement.innerHTML = `
     <div class="favorite-icon-editor">
