@@ -103,7 +103,7 @@ async function navigateHistory(offset) {
     appState.isNavigatingHistory = true;
     tab.historyIndex = newIndex;
     const targetPath = tab.history[newIndex];
-    
+
     tab.path = targetPath;
     tab.name = getTabNameForPath(targetPath);
     tab.scrollTop = 0;
@@ -111,10 +111,10 @@ async function navigateHistory(offset) {
     localStorage.setItem('currentDirectory', appState.currentDirectory);
     uiManager.renderTabs();
     saveTabsState();
-    
+
     await refreshFileList(true);
     await expandTreeToPath(targetPath);
-    
+
     updateNavButtons();
     appState.isNavigatingHistory = false;
   }
@@ -200,34 +200,34 @@ async function expandTreeToPath(targetPath, disableScroll = false, rootElement =
   const separator = '\\';
   const parts = targetPath.split(separator).filter(p => p !== '');
   let pathsToExpand = [];
-  
+
   let current = parts[0] + separator;
   pathsToExpand.push(current);
-  for(let i = 1; i < parts.length; i++) {
-      current += parts[i];
-      pathsToExpand.push(current);
-      current += separator;
+  for (let i = 1; i < parts.length; i++) {
+    current += parts[i];
+    pathsToExpand.push(current);
+    current += separator;
   }
 
   for (let i = 0; i < pathsToExpand.length; i++) {
-      const p = pathsToExpand[i];
-      const escapedPath = CSS.escape(p);
-      const itemDiv = searchRoot.querySelector(`.tree-item[data-path="${escapedPath}"]`);
-      
-      if (itemDiv) {
-          if (i === pathsToExpand.length - 1) {
-              const activeItem = searchRoot.querySelector('.tree-item.selected');
-              if (activeItem) activeItem.classList.remove('selected');
-              itemDiv.classList.add('selected');
-              if (!disableScroll) {
-                  itemDiv.scrollIntoView({ block: 'center', behavior: 'smooth' });
-              }
-          } else {
-              if (itemDiv.expandNode) await itemDiv.expandNode();
-          }
+    const p = pathsToExpand[i];
+    const escapedPath = CSS.escape(p);
+    const itemDiv = searchRoot.querySelector(`.tree-item[data-path="${escapedPath}"]`);
+
+    if (itemDiv) {
+      if (i === pathsToExpand.length - 1) {
+        const activeItem = searchRoot.querySelector('.tree-item.selected');
+        if (activeItem) activeItem.classList.remove('selected');
+        itemDiv.classList.add('selected');
+        if (!disableScroll) {
+          itemDiv.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
       } else {
-          break;
+        if (itemDiv.expandNode) await itemDiv.expandNode();
       }
+    } else {
+      break;
+    }
   }
 }
 
@@ -258,7 +258,7 @@ async function loadAllMetadataInBackground() {
     allFiles.push(...items);
   }
   const targets = allFiles.filter(f => !f.metaLoaded);
-  
+
   // プログレス表示用の分母と分子は、「キャッシュがなく、実際に抽出が必要なファイル数」をベースにする
   const noCacheFiles = allFiles.filter(f => !f.hasMetadataCache);
   const noCacheTargets = targets.filter(f => !f.hasMetadataCache);
@@ -291,9 +291,9 @@ async function loadAllMetadataInBackground() {
         return t && !t.hasMetadataCache;
       });
       appState.metadataCompleted += newCompletions.length;
-      
+
       updateMetadataToast();
-      
+
       // メインスレッドをブロックしないよう少し休止
       await new Promise(resolve => setTimeout(resolve, 50));
     } catch (error) {
@@ -401,20 +401,20 @@ async function renameSelectedFile() {
     const newName = await uiManager.showPrompt('新しいファイル名を入力してください:', file.name, true);
     if (newName !== null && newName !== file.name) {
       if (newName.trim() === '') {
-      uiManager.showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
+        uiManager.showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
         return;
       }
       if (/[\\/:*?"<>|]/.test(newName)) {
-      uiManager.showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
+        uiManager.showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
         return;
       }
 
       const result = await window.veloceAPI.renameFile(oldPath, newName);
       if (result && result.success) {
         uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
-        
+
         const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
-        
+
         file.path = result.path;
         file.name = newName;
         file.ext = newExt;
@@ -432,11 +432,22 @@ async function renameSelectedFile() {
   }
 }
 
-  async function rebuildSelectedCache() {
-    try {
-      if (appState.selection.size === 0) return;
-      
-      const pathsToRebuild = [];
+async function rebuildSelectedCache() {
+  try {
+    if (appState.selection.size === 0) return;
+
+    const pathsToRebuild = [];
+    if (window.veloceAPI.getFilesByIndices) {
+      const indices = Array.from(appState.selection);
+      const files = await window.veloceAPI.getFilesByIndices(indices);
+      for (const file of files) {
+        pathsToRebuild.push(file.path);
+        if (appState.thumbnailUrls.has(file.path)) {
+          URL.revokeObjectURL(appState.thumbnailUrls.get(file.path));
+          appState.thumbnailUrls.delete(file.path);
+        }
+      }
+    } else {
       for (const index of appState.selection) {
         const file = await window.veloceAPI.getFileByIndex(index);
         if (file) {
@@ -447,46 +458,55 @@ async function renameSelectedFile() {
           }
         }
       }
-
-      if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
-        await window.veloceAPI.clearMetadataCache(pathsToRebuild);
-        uiManager.showToast("キャッシュをクリアしました。再生成を開始します...", 3000, 'info');
-
-        if (appState.thumbnailTotalRequested === 0) {
-          appState.thumbnailCompleted = 0;
-        }
-        appState.thumbnailTotalRequested += pathsToRebuild.length;
-        
-        pathsToRebuild.forEach(p => {
-          appState.thumbnailCounted.delete(p);
-        });
-
-        // Add to the front of the preload queue for immediate background generation
-        appState.preloadQueue.unshift(...pathsToRebuild);
-        
-        window.updateThumbnailToast();
-        setTimeout(window.processNextTask, 0);
-      } else {
-        uiManager.showToast("エラー: APIが見つかりません", 5000, 'error');
-      }
-      
-      if (typeof uiManager.updateVirtualGrid === 'function') {
-        uiManager.updateVirtualGrid(true);
-      }
-      if (typeof uiManager.updateVirtualList === 'function') {
-        uiManager.updateVirtualList(true);
-      }
-    } catch (err) {
-      uiManager.showToast("エラーが発生しました: " + err.toString(), 5000, 'error');
     }
+
+    if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
+      await window.veloceAPI.clearMetadataCache(pathsToRebuild);
+      
+      if (appState.thumbnailTotalRequested === 0) {
+        appState.thumbnailCompleted = 0;
+      }
+      appState.thumbnailTotalRequested += pathsToRebuild.length;
+      
+      pathsToRebuild.forEach(p => {
+        appState.thumbnailCounted.delete(p);
+        appState.pendingThumbnails.delete(p);
+      });
+
+      appState.preloadQueue = appState.preloadQueue || [];
+      appState.preloadQueue.unshift(...pathsToRebuild);
+      
+      if (typeof window.updateThumbnailToast === 'function') window.updateThumbnailToast();
+      if (typeof window.processNextTask === 'function') setTimeout(window.processNextTask, 0);
+    } else {
+      uiManager.showToast("エラー: APIが見つかりません", 5000, 'error');
+    }
+
+    if (typeof uiManager.updateVirtualGrid === 'function') {
+      uiManager.updateVirtualGrid(true);
+    }
+    if (typeof uiManager.updateVirtualList === 'function') {
+      uiManager.updateVirtualList(true);
+    }
+  } catch (err) {
+    uiManager.showToast("エラーが発生しました: " + err.toString(), 5000, 'error');
   }
+}
 
 async function deleteSelectedFiles() {
   if (appState.selection.size > 0) {
     const pathsToDelete = [];
-    for (const i of appState.selection) {
-      const f = await window.veloceAPI.getFileByIndex(i);
-      if (f) pathsToDelete.push(f.path);
+    if (window.veloceAPI.getFilesByIndices) {
+      const indices = Array.from(appState.selection);
+      const files = await window.veloceAPI.getFilesByIndices(indices);
+      for (const f of files) {
+        pathsToDelete.push(f.path);
+      }
+    } else {
+      for (const i of appState.selection) {
+        const f = await window.veloceAPI.getFileByIndex(i);
+        if (f) pathsToDelete.push(f.path);
+      }
     }
 
     appState.selection.clear();
@@ -497,7 +517,7 @@ async function deleteSelectedFiles() {
     let trashedCount = 0;
     const total = pathsToDelete.length;
     uiManager.showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
-    
+
     for (const path of pathsToDelete) {
       try {
         const success = await window.veloceAPI.trashFile(path);
@@ -512,8 +532,8 @@ async function deleteSelectedFiles() {
 
     if (trashedCount > 0) {
       uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
-      
-      
+
+
       scheduleRefresh();
     } else {
       uiManager.showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
@@ -539,12 +559,12 @@ function renderFavorites() {
     container.appendChild(li);
     return;
   }
-  
+
   appState.favorites.forEach(fav => {
     const li = document.createElement('li');
     li.className = 'tree-node';
     li.style.fontSize = '0.9em';
-    
+
     const itemDiv = document.createElement('div');
     itemDiv.className = 'tree-item favorite-item';
     itemDiv.dataset.path = fav.path;
@@ -553,7 +573,7 @@ function renderFavorites() {
     itemDiv.style.display = 'flex';
     itemDiv.style.alignItems = 'center';
     itemDiv.draggable = true; // ドラッグ可能にする
-    
+
     const icon = document.createElement('span');
     icon.className = 'tree-icon';
     if (fav.icon && ICON_SVGS[fav.icon]) {
@@ -566,7 +586,7 @@ function renderFavorites() {
       icon.textContent = fav.icon || '⭐';
     }
     icon.style.marginRight = '4px';
-    icon.style.marginLeft = '2px'; 
+    icon.style.marginLeft = '2px';
     icon.style.display = 'inline-flex';
     icon.style.alignItems = 'center';
 
@@ -594,12 +614,12 @@ function createMenuItem(label, iconSvg, onClick, isDanger = false) {
   const item = document.createElement('div');
   item.className = 'context-menu-item';
   if (isDanger) item.classList.add('danger');
-  
+
   item.innerHTML = `
     ${iconSvg || '<div style="width:16px;height:16px;"></div>'}
     <span>${label}</span>
   `;
-  
+
   item.addEventListener('click', (e) => {
     e.stopPropagation();
     contextMenu.style.display = 'none';
@@ -689,16 +709,16 @@ window.processNextTask = function processNextTask() {
       if (targetIndex === -1) targetIndex = 0;
 
       const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
-      
+
       // 古いレンダリングIDのリクエストは破棄して次を探す
       if (appState.currentRenderId !== req.requestRenderId) {
         appState.pendingThumbnails.delete(req.filePath);
-        continue; 
+        continue;
       }
-      
+
       targetFile = req.filePath;
       requestRenderId = req.requestRenderId;
-    } 
+    }
     // 【バックグラウンド処理】優先キューが空の場合
     else {
       appState.isPreloadRunning = true;
@@ -707,7 +727,7 @@ window.processNextTask = function processNextTask() {
         if (!appState.isFetchingPreload) {
           appState.isFetchingPreload = true;
           appState.preloadQueue = appState.preloadQueue || [];
-          
+
           window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
             if (items.length === 0) {
               appState.preloadCursor += 50; // 空の場合はカーソルを進めて無限ループを防止
@@ -732,12 +752,12 @@ window.processNextTask = function processNextTask() {
       if (appState.preloadQueue && appState.preloadQueue.length > 0) {
         while (appState.preloadQueue.length > 0) {
           const p = appState.preloadQueue.shift();
-        if (appState.thumbnailUrls.has(p)) {
-          if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
-        } else if (!appState.pendingThumbnails.has(p)) {
-          targetFile = p;
-          break;
-        }
+          if (appState.thumbnailUrls.has(p)) {
+            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
+          } else if (!appState.pendingThumbnails.has(p)) {
+            targetFile = p;
+            break;
+          }
         }
       }
 
@@ -871,7 +891,7 @@ function createTreeNode(folder, isRoot = false) {
   const expandNode = async () => {
     if (!isLoaded) {
       const subFolders = await window.veloceAPI.getFolders(folder.path);
-      
+
       // もし開いたフォルダ自身にサブフォルダがない場合は、自身の展開アイコンを隠して終了する
       if (subFolders.length === 0) {
         toggleIcon.style.visibility = 'hidden';
@@ -922,24 +942,24 @@ function getPathsFromDragEvent(e) {
   if (appState.dragState.paths && appState.dragState.paths.length > 0) {
     return [...appState.dragState.paths];
   }
-  
+
   const paths = [];
   const folderDataStr = e.dataTransfer.getData('application/json-folder');
   if (folderDataStr) {
     try {
       const folderData = JSON.parse(folderDataStr);
       if (folderData && folderData.path) return [folderData.path];
-    } catch(err) {}
+    } catch (err) { }
   }
 
   const jsonData = e.dataTransfer.getData('application/json');
   if (jsonData) {
-    try { 
-      const parsed = JSON.parse(jsonData); 
+    try {
+      const parsed = JSON.parse(jsonData);
       if (Array.isArray(parsed)) return parsed;
-    } catch(err) {}
-  } 
-  
+    } catch (err) { }
+  }
+
   const sourcePath = e.dataTransfer.getData('text/plain');
   if (sourcePath) {
     let cleanPath = decodeURIComponent(sourcePath).trim();
@@ -1007,7 +1027,7 @@ async function selectImage(index, event = null) {
   }
 
   const file = await window.veloceAPI.getFileByIndex(index);
-  
+
   uiManager.updateSelectionUI();
 
   // 選択した画像が画面内に表示されるように自動スクロール (仮想スクロール対応)
@@ -1018,7 +1038,7 @@ async function selectImage(index, event = null) {
     const padding = 8;
     const width = container.clientWidth - (padding * 2);
     const cols = Math.max(1, Math.floor((width + gap) / (itemSize + gap)));
-    
+
     const row = Math.floor(index / cols);
     const targetY = row * (itemSize + gap);
 
@@ -1057,7 +1077,7 @@ async function openViewer(index) {
     localStorage.removeItem('viewerStartIndex');
   }
 
-  window.veloceAPI.openViewer({ 
+  window.veloceAPI.openViewer({
     currentIndex: index,
     width: file ? file.width : 0,
     height: file ? file.height : 0,
@@ -1068,7 +1088,7 @@ async function openViewer(index) {
 
 function parseLicenseMarkdown(text) {
   if (!text) return '';
-  
+
   let html = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -1092,7 +1112,7 @@ function parseLicenseMarkdown(text) {
     processedLines.push(`<blockquote class="md-blockquote">${bqBuffer.join('<br>')}</blockquote>`);
   }
   html = processedLines.join('\n');
-  
+
   html = html.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
   html = html.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
   html = html.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
@@ -1124,11 +1144,11 @@ async function showLicenseDialog() {
   overlay.style.width = '100vw';
   overlay.style.height = '100vh';
   overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-  overlay.style.zIndex = '10000'; 
+  overlay.style.zIndex = '10000';
   overlay.style.display = 'flex';
   overlay.style.justifyContent = 'center';
   overlay.style.alignItems = 'center';
-  
+
   const content = document.createElement('div');
   content.style.backgroundColor = 'var(--panel-bg)';
   content.style.padding = '24px';
@@ -1141,7 +1161,7 @@ async function showLicenseDialog() {
   content.style.flexDirection = 'column';
   content.style.boxShadow = '0 24px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
   content.style.cursor = 'default';
-  
+
   let licenseText = "ライセンス情報を読み込み中";
   try {
     if (window.__TAURI__ && window.__TAURI__.invoke) {
@@ -1176,7 +1196,7 @@ async function showLicenseDialog() {
       }
     });
   });
-  
+
   const cleanup = () => {
     overlay.remove();
     document.removeEventListener('keydown', keydownHandler, true);
@@ -1195,19 +1215,19 @@ async function showLicenseDialog() {
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) cleanup();
   });
-  
+
   overlay.appendChild(content);
   document.body.appendChild(overlay);
 }
 
 function toggleHelpOverlay(forceShow) {
   let overlay = document.getElementById('help-overlay');
-  
+
   if (overlay) {
     overlay.remove();
     return;
   }
-  
+
   if (forceShow === false) return;
 
   overlay = document.createElement('div');
@@ -1223,11 +1243,11 @@ function toggleHelpOverlay(forceShow) {
   overlay.style.alignItems = 'center';
   overlay.style.color = '#fff';
   overlay.style.cursor = 'pointer';
-  
+
   const content = document.createElement('div');
   content.className = 'modal-content';
   content.style.cursor = 'default';
-  
+
   content.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
       <h2 style="margin: 0; color: var(--glow-gold); font-size: 1.2em;">ヘルプ・ショートカット一覧</h2>
@@ -1288,7 +1308,7 @@ function toggleHelpOverlay(forceShow) {
       </div>
     </div>
   `;
-  
+
   overlay.addEventListener('click', (e) => {
     if (e.target.id === 'license-link') {
       showLicenseDialog();
@@ -1296,7 +1316,7 @@ function toggleHelpOverlay(forceShow) {
     }
     toggleHelpOverlay(false);
   });
-  
+
   overlay.appendChild(content);
   document.body.appendChild(overlay);
 }
@@ -1342,7 +1362,7 @@ function showHistoryMenu(event, direction, btnElement) {
 
   const currentIndex = tab.historyIndex;
   let historyItems = [];
-  
+
   // 履歴をリスト化（戻る時は新しい順、進む時は古い順が見やすい）
   if (direction === -1) {
     for (let i = currentIndex - 1; i >= 0; i--) {
@@ -1359,7 +1379,7 @@ function showHistoryMenu(event, direction, btnElement) {
   historyItems.forEach(item => {
     const menuItem = document.createElement('div');
     menuItem.className = 'context-menu-item';
-    
+
     // お気に入りに登録されているかチェック
     const fav = appState.favorites.find(f => f.path === item.path);
     const { displayName, iconHtml, iconColor } = resolvePathDisplay(fav, item.path);
@@ -1468,7 +1488,7 @@ function getInspectorSection() {
 
   const titleSpan = document.createElement('span');
   const subLabelSpan = document.createElement('span');
-  
+
   titleWrapper.appendChild(titleSpan);
   titleWrapper.appendChild(subLabelSpan);
 
@@ -1479,7 +1499,7 @@ function getInspectorSection() {
 
   const box = document.createElement('div');
   box.tabIndex = -1;
-  
+
   section.appendChild(h3);
   section.appendChild(box);
 
@@ -1490,7 +1510,7 @@ function getInspectorSection() {
     copyWrapper: copyWrapper,
     box: box
   };
-  
+
   inspectorSectionPool.push(elObj);
   inspectorSectionIndex++;
   return elObj;
@@ -1532,7 +1552,7 @@ async function renderMetadata(file) {
     if (staticTable && emptyInfoMsg) {
       emptyInfoMsg.style.display = 'none';
       staticTable.style.display = 'table';
-      
+
       const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
       const getAspectRatio = (w, h) => {
         if (!w || !h) return '';
@@ -1850,7 +1870,7 @@ const createSubOption = (label, onClick, dataKey, dataVal) => {
   if (dataKey === 'sortKey') opt.dataset.sortKey = dataVal;
   if (dataKey === 'sortOrder') opt.dataset.sortOrder = dataVal;
   opt.innerHTML = `<span class="menu-check" style="width:16px;height:16px;display:inline-flex;justify-content:center;align-items:center;"></span><span>${label}</span>`;
-  
+
   opt.addEventListener('click', (e) => {
     e.stopPropagation();
     onClick();
@@ -1901,16 +1921,16 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
   const fav = appState.favorites.find(f => f.id === contextMenu.targetFavoriteId);
   if (fav) {
     const container = document.getElementById('fav-icon-selector');
-    
+
     const getFavData = createFavoriteEditorUI(container, fav.icon, fav.color || 'default');
-    
+
     const saveBtn = document.getElementById('fav-save-btn');
     const cancelBtn = document.getElementById('fav-cancel-btn');
-    
+
     const newSaveBtn = saveBtn.cloneNode(true);
     saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
     newSaveBtn.style.display = ''; // 古い非表示設定が残っていれば解除
-    
+
     const newCancelBtn = cancelBtn.cloneNode(true);
     cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
     newCancelBtn.style.display = ''; // 古い非表示設定が残っていれば解除
@@ -1937,10 +1957,10 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
         }
       });
       if (tabUpdated) { saveTabsState(); uiManager.renderTabs(); }
-      
+
       document.getElementById('edit-favorite-modal').style.display = 'none';
     });
-    
+
     const nameInput = document.getElementById('fav-name-input');
     nameInput.value = fav.name;
     document.getElementById('fav-path-input').value = fav.path;
@@ -1961,7 +1981,7 @@ const menuDeleteFavorite = createMenuItem('お気に入りを削除', UIManager.
       appState.favorites.splice(favIndex, 1);
       localStorage.setItem('favorites', JSON.stringify(appState.favorites));
       renderFavorites();
-      
+
       // 現在開いているタブの中から該当パスを探してデフォルトのフォルダ名に戻す
       let tabUpdated = false;
       appState.tabs.forEach(t => {
@@ -2017,7 +2037,7 @@ const menuOpenInNewTab = createMenuItem('新しいタブで開く', UIManager.IC
     };
     appState.tabs.push(newTab);
     saveTabsState();
-    
+
     await window.onTabClick(appState.tabs.length - 1);
 
     const container = document.getElementById('tab-container');
@@ -2254,7 +2274,7 @@ const closeAllMenus = (e) => {
   let t = e ? e.target : null;
   // テキストノードがクリックされた場合は親要素を取得
   if (t && t.nodeType === Node.TEXT_NODE) t = t.parentNode;
-  
+
   if (t && t.closest) {
     // メニュー自身をクリックした場合は閉じない
     if (t.closest('#context-menu') || t.closest('#tab-list-menu') || t.closest('#history-menu')) return;
@@ -2281,7 +2301,7 @@ window.addEventListener('contextmenu', closeAllMenus, true);
 window.addEventListener('click', (e) => {
   const diffModal = document.getElementById('diff-modal');
   if (diffModal && e.target === diffModal) {
-      diffModal.style.display = 'none';
+    diffModal.style.display = 'none';
   }
   const favModal = document.getElementById('edit-favorite-modal');
   if (favModal && e.target === favModal) {
@@ -2316,7 +2336,7 @@ document.addEventListener('dragover', (e) => {
       }
       const isRoot = itemDiv.dataset.isRoot === 'true';
       const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
-      
+
       text = count > 1 ? `${count}個のアイテムを「${folderName}」へ${actionStr}` : `「${folderName}」へ${actionStr}`;
     }
 
@@ -2354,7 +2374,7 @@ function handleItemDragStart(e, isGrid) {
   const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
   if (!item || !item.dataset.index) return;
   const index = parseInt(item.dataset.index, 10);
-  
+
   if (!appState.selection.has(index)) selectImage(index);
   const paths = Array.from(appState.selection).map(idx => appState.currentPaths[idx]).filter(Boolean);
   e.dataTransfer.setData('application/json', JSON.stringify(paths));
@@ -2379,30 +2399,30 @@ function handleItemContextMenu(e, isGrid) {
   e.stopPropagation();
 
   const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  
+
   if (!item || !item.dataset.index) {
     if (!isGrid) return;
-    
+
     appState.selection.clear();
     appState.selectedIndex = -1;
     uiManager.updateSelectionUI();
 
     Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
-    
+
     updateSortCheckmarks();
     menuSortRoot.style.display = 'flex';
 
     showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
     return;
   }
-  
+
   const index = parseInt(item.dataset.index, 10);
 
   if (!appState.selection.has(index)) selectImage(index);
 
   Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-  menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none'; 
+  menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none';
   menuDeleteFile.style.display = 'block';
   menuSeparatorCache.style.display = 'block';
   menuRebuildCache.style.display = 'block';
@@ -2465,7 +2485,7 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
       localStorage.setItem('currentDirectory', path);
       uiManager.renderTabs();
       saveTabsState();
-      
+
       // 古い applyNewFileList ではなく、refreshFileList を呼んで非同期ロードを開始する
       refreshFileList(true);
       await expandTreeToPath(path);
@@ -2524,7 +2544,7 @@ uiManager.elements.dirTree.addEventListener('dragstart', (e) => {
     e.preventDefault();
     return;
   }
-  
+
   const folderData = {
     path: itemDiv.dataset.path,
     name: itemDiv.dataset.name,
@@ -2672,16 +2692,16 @@ function createResizerToggle(resizer, type) {
     background-color: var(--border-color); border: 1px solid var(--modal-border); border-radius: 2px; cursor: pointer; color: var(--text-color);
     z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
   `;
-  
+
   const isVertical = type === 'center' || type === 'leftTop' || type === 'rightTop';
   btn.style.width = isVertical ? '30px' : '14px';
   btn.style.height = isVertical ? '14px' : '30px';
-  
+
   let openIcon, closeIcon;
   if (type === 'left') { openIcon = UIManager.ICONS.CHEVRON_LEFT; closeIcon = UIManager.ICONS.CHEVRON_RIGHT; }
   else if (type === 'right') { openIcon = UIManager.ICONS.CHEVRON_RIGHT; closeIcon = UIManager.ICONS.CHEVRON_LEFT; }
   else { openIcon = UIManager.ICONS.CHEVRON_UP; closeIcon = UIManager.ICONS.CHEVRON_DOWN; }
-  
+
   if (type === 'left') btn.innerHTML = appState.layout.leftVisible ? openIcon : closeIcon;
   else if (type === 'right') btn.innerHTML = appState.layout.rightVisible ? openIcon : closeIcon;
   else if (type === 'leftTop') btn.innerHTML = appState.layout.leftTopVisible ? openIcon : closeIcon;
@@ -2751,7 +2771,7 @@ function createResizerToggle(resizer, type) {
   });
 
   btn.addEventListener('mousedown', (e) => e.stopPropagation());
-  
+
   resizer.appendChild(btn);
 }
 
@@ -2813,7 +2833,7 @@ window.addEventListener('mousemove', (e) => {
       const centerPane = document.getElementById('center-pane');
       const rect = centerPane.getBoundingClientRect();
       let newHeight = e.clientY - rect.top;
-      
+
       if (newHeight < 50) {
         const root = document.documentElement;
         if (root.style.getPropertyValue('--top-height') !== '0px') {
@@ -2827,7 +2847,7 @@ window.addEventListener('mousemove', (e) => {
         newHeight = Math.max(50, Math.min(newHeight, rect.height - 50));
         const root = document.documentElement;
         root.style.setProperty('--top-height', `${newHeight}px`);
-        
+
         const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
         if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
           btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
@@ -2837,7 +2857,7 @@ window.addEventListener('mousemove', (e) => {
       const leftPane = document.getElementById('left-pane');
       const rect = leftPane.getBoundingClientRect();
       let newHeight = e.clientY - rect.top;
-      
+
       if (newHeight < 30) {
         const root = document.documentElement;
         if (root.style.getPropertyValue('--left-top-height') !== '0px') {
@@ -2852,7 +2872,7 @@ window.addEventListener('mousemove', (e) => {
         const root = document.documentElement;
         root.style.setProperty('--left-top-height', `${newHeight}px`);
         appState.layout.leftTopHeight = newHeight;
-        
+
         const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
         if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
           btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
@@ -2862,7 +2882,7 @@ window.addEventListener('mousemove', (e) => {
       const rightPane = document.getElementById('right-pane');
       const rect = rightPane.getBoundingClientRect();
       let newHeight = e.clientY - rect.top;
-      
+
       if (newHeight < 30) {
         const root = document.documentElement;
         if (root.style.getPropertyValue('--right-top-height') !== '0px') {
@@ -2877,7 +2897,7 @@ window.addEventListener('mousemove', (e) => {
         const root = document.documentElement;
         root.style.setProperty('--right-top-height', `${newHeight}px`);
         appState.layout.rightTopHeight = newHeight;
-        
+
         const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
         if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
           btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
@@ -2971,16 +2991,16 @@ window.addEventListener('beforeunload', () => {
 
 document.querySelectorAll('th').forEach(th => {
   th.addEventListener('click', () => {
-	const key = th.dataset.sort;
-	if (appState.sortConfig.key === key) {
-	  appState.sortConfig.asc = !appState.sortConfig.asc;
-	} else {
-	  appState.sortConfig.key = key;
-	  appState.sortConfig.asc = true;
-	}
-	localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
-	updateSortIndicators();
-	scheduleRefresh();
+    const key = th.dataset.sort;
+    if (appState.sortConfig.key === key) {
+      appState.sortConfig.asc = !appState.sortConfig.asc;
+    } else {
+      appState.sortConfig.key = key;
+      appState.sortConfig.asc = true;
+    }
+    localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+    updateSortIndicators();
+    scheduleRefresh();
   });
 });
 
@@ -3008,7 +3028,7 @@ window.addEventListener('keydown', async (e) => {
       } else if ((e.key === 'Tab' && e.shiftKey) || e.key === 'PageUp') {
         nextIndex = (appState.activeTabIndex - 1 + appState.tabs.length) % appState.tabs.length;
       }
-      
+
       if (nextIndex !== appState.activeTabIndex) {
         await window.onTabClick(nextIndex);
         const container = document.getElementById('tab-container');
@@ -3032,7 +3052,7 @@ window.addEventListener('keydown', async (e) => {
     toggleHelpOverlay();
     return;
   }
-  
+
   if (e.key === 'Escape') {
     const diffModal = document.getElementById('diff-modal');
     if (diffModal && diffModal.style.display === 'flex') {
@@ -3074,7 +3094,7 @@ window.addEventListener('keydown', async (e) => {
       const indices = Array.from(appState.selection);
       const file1 = await window.veloceAPI.getFileByIndex(indices[0]);
       const file2 = await window.veloceAPI.getFileByIndex(indices[1]);
-      
+
       // 完全なメタデータを取得してからDiffモーダルを開く
       uiManager.showToast('比較データを読み込み中', 0, 'diff-loading', 'info');
       Promise.all([
@@ -3164,7 +3184,7 @@ window.addEventListener('keydown', async (e) => {
     for (let i = 0; i < appState.totalCount; i++) {
       appState.selection.add(i);
     }
-    appState.selectedIndex = appState.totalCount - 1; 
+    appState.selectedIndex = appState.totalCount - 1;
 
     uiManager.updateSelectionUI();
     return;
@@ -3172,11 +3192,11 @@ window.addEventListener('keydown', async (e) => {
 
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
     if (appState.totalCount === 0) return;
-    
+
     e.preventDefault();
 
     let newIndex = appState.selectedIndex;
-    
+
     if (newIndex === -1) {
       newIndex = 0;
     } else {
@@ -3195,7 +3215,7 @@ window.addEventListener('keydown', async (e) => {
 
     if (newIndex !== appState.selectedIndex) {
       if (e.shiftKey) {
-        selectImage(newIndex, { shiftKey: true }); 
+        selectImage(newIndex, { shiftKey: true });
       } else {
         selectImage(newIndex);
       }
@@ -3385,125 +3405,125 @@ window.addEventListener('DOMContentLoaded', async () => {
     tabListMenu.innerHTML = '';
     appState.tabs.forEach((tab, index) => {
       const option = document.createElement('div');
-        // 右クリックメニューと同じベースクラスを適用し、CSS側にデザインを委ねる
-        option.className = 'context-menu-item tab-list-item';
-        
-        // 現在アクティブなタブのみ、専用のハイライトスタイルを個別に適用する
-        if (index === appState.activeTabIndex) {
-          option.style.color = '#ffffff';
-          option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
-          option.style.boxShadow = 'inset 3px 0 0 var(--accent-color)';
-        }
+      // 右クリックメニューと同じベースクラスを適用し、CSS側にデザインを委ねる
+      option.className = 'context-menu-item tab-list-item';
 
-        const fav = appState.favorites.find(f => f.path === tab.path);
-        let iconHtml = '';
-        let iconColor = '';
-        if (fav) {
-          if (fav.icon && ICON_SVGS[fav.icon]) {
-            iconHtml = ICON_SVGS[fav.icon];
-            const c = COLORS.find(c => c.id === (fav.color || 'default'));
-            iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : (c ? c.hex : 'var(--glow-gold)');
-          } else {
-            const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
-            iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
-            iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
-          }
+      // 現在アクティブなタブのみ、専用のハイライトスタイルを個別に適用する
+      if (index === appState.activeTabIndex) {
+        option.style.color = '#ffffff';
+        option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
+        option.style.boxShadow = 'inset 3px 0 0 var(--accent-color)';
+      }
+
+      const fav = appState.favorites.find(f => f.path === tab.path);
+      let iconHtml = '';
+      let iconColor = '';
+      if (fav) {
+        if (fav.icon && ICON_SVGS[fav.icon]) {
+          iconHtml = ICON_SVGS[fav.icon];
+          const c = COLORS.find(c => c.id === (fav.color || 'default'));
+          iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : (c ? c.hex : 'var(--glow-gold)');
         } else {
-          iconHtml = UIManager.ICONS.FOLDER;
-          iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : '#4da8da';
+          const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
+          iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
+          iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
         }
-        
-        const iconSpan = document.createElement('span');
-        iconSpan.style.display = 'flex';
-        iconSpan.style.alignItems = 'center';
-        iconSpan.style.flexShrink = '0';
-        iconSpan.style.width = '16px';
-        iconSpan.innerHTML = iconHtml;
-        if (iconColor) iconSpan.style.color = iconColor;
-        
-        const textContainer = document.createElement('div');
-        textContainer.style.display = 'flex';
-        textContainer.style.flexDirection = 'column';
-        textContainer.style.overflow = 'hidden';
-        textContainer.style.flex = '1';
+      } else {
+        iconHtml = UIManager.ICONS.FOLDER;
+        iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : '#4da8da';
+      }
 
-        const nameLabel = document.createElement('span');
-        nameLabel.textContent = tab.name;
-        nameLabel.style.fontWeight = index === appState.activeTabIndex ? 'bold' : 'normal';
-        nameLabel.style.whiteSpace = 'nowrap';
-        nameLabel.style.overflow = 'hidden';
-        nameLabel.style.textOverflow = 'ellipsis';
-        nameLabel.style.fontSize = '13px';
+      const iconSpan = document.createElement('span');
+      iconSpan.style.display = 'flex';
+      iconSpan.style.alignItems = 'center';
+      iconSpan.style.flexShrink = '0';
+      iconSpan.style.width = '16px';
+      iconSpan.innerHTML = iconHtml;
+      if (iconColor) iconSpan.style.color = iconColor;
 
-        const pathLabel = document.createElement('span');
-        pathLabel.textContent = tab.path;
-        pathLabel.title = tab.path;
-        pathLabel.style.whiteSpace = 'nowrap';
-        pathLabel.style.overflow = 'hidden';
-        pathLabel.style.textOverflow = 'ellipsis';
-        pathLabel.style.fontSize = '11px';
-        pathLabel.style.opacity = '0.6';
-        pathLabel.style.marginTop = '2px';
+      const textContainer = document.createElement('div');
+      textContainer.style.display = 'flex';
+      textContainer.style.flexDirection = 'column';
+      textContainer.style.overflow = 'hidden';
+      textContainer.style.flex = '1';
 
-        textContainer.appendChild(nameLabel);
-        textContainer.appendChild(pathLabel);
+      const nameLabel = document.createElement('span');
+      nameLabel.textContent = tab.name;
+      nameLabel.style.fontWeight = index === appState.activeTabIndex ? 'bold' : 'normal';
+      nameLabel.style.whiteSpace = 'nowrap';
+      nameLabel.style.overflow = 'hidden';
+      nameLabel.style.textOverflow = 'ellipsis';
+      nameLabel.style.fontSize = '13px';
 
-        const closeBtn = document.createElement('span');
-        closeBtn.className = 'tab-close-btn';
-        closeBtn.style.display = 'flex';
-        closeBtn.style.alignItems = 'center';
-        closeBtn.style.justifyContent = 'center';
-        closeBtn.style.width = '16px';
-        closeBtn.style.height = '16px';
-        closeBtn.style.flexShrink = '0';
-        closeBtn.style.borderRadius = '3px';
-        closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="7" height="7"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
+      const pathLabel = document.createElement('span');
+      pathLabel.textContent = tab.path;
+      pathLabel.title = tab.path;
+      pathLabel.style.whiteSpace = 'nowrap';
+      pathLabel.style.overflow = 'hidden';
+      pathLabel.style.textOverflow = 'ellipsis';
+      pathLabel.style.fontSize = '11px';
+      pathLabel.style.opacity = '0.6';
+      pathLabel.style.marginTop = '2px';
 
-        closeBtn.addEventListener('click', async (e) => {
+      textContainer.appendChild(nameLabel);
+      textContainer.appendChild(pathLabel);
+
+      const closeBtn = document.createElement('span');
+      closeBtn.className = 'tab-close-btn';
+      closeBtn.style.display = 'flex';
+      closeBtn.style.alignItems = 'center';
+      closeBtn.style.justifyContent = 'center';
+      closeBtn.style.width = '16px';
+      closeBtn.style.height = '16px';
+      closeBtn.style.flexShrink = '0';
+      closeBtn.style.borderRadius = '3px';
+      closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="7" height="7"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
+
+      closeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (window.onTabClose) {
+          await window.onTabClose(index);
+          if (tabListMenu.style.display === 'block') updateTabListMenu();
+        }
+      });
+
+      option.appendChild(iconSpan);
+      option.appendChild(textContainer);
+      option.appendChild(closeBtn);
+
+      // ホバー時の背景色・文字色の変化はCSS（context-menu-item:hover）に任せ、アイコンの色変化だけを残す
+      option.onmouseenter = () => {
+        if (iconColor) iconSpan.style.color = '#fff';
+      };
+      option.onmouseleave = () => {
+        if (iconColor) iconSpan.style.color = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
+      };
+
+      option.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+      option.addEventListener('auxclick', async (e) => {
+        if (e.button === 1) { // 中クリック
           e.stopPropagation();
           if (window.onTabClose) {
             await window.onTabClose(index);
             if (tabListMenu.style.display === 'block') updateTabListMenu();
           }
-        });
+        }
+      });
 
-        option.appendChild(iconSpan);
-        option.appendChild(textContainer);
-        option.appendChild(closeBtn);
+      option.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        tabListMenu.style.display = 'none';
+        await window.onTabClick(index);
 
-        // ホバー時の背景色・文字色の変化はCSS（context-menu-item:hover）に任せ、アイコンの色変化だけを残す
-        option.onmouseenter = () => {
-          if (iconColor) iconSpan.style.color = '#fff';
-        };
-        option.onmouseleave = () => {
-          if (iconColor) iconSpan.style.color = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
-        };
-        
-        option.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
-        option.addEventListener('auxclick', async (e) => {
-          if (e.button === 1) { // 中クリック
-            e.stopPropagation();
-            if (window.onTabClose) {
-              await window.onTabClose(index);
-              if (tabListMenu.style.display === 'block') updateTabListMenu();
-            }
+        const container = document.getElementById('tab-container');
+        if (container) {
+          const tabEls = container.querySelectorAll('.tab-item:not(.new-tab-btn)');
+          if (tabEls[index]) {
+            tabEls[index].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
           }
-        });
-
-        option.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          tabListMenu.style.display = 'none';
-          await window.onTabClick(index);
-          
-          const container = document.getElementById('tab-container');
-          if (container) {
-            const tabEls = container.querySelectorAll('.tab-item:not(.new-tab-btn)');
-            if (tabEls[index]) {
-                tabEls[index].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-            }
-          }
-        });
-        tabListMenu.appendChild(option);
+        }
+      });
+      tabListMenu.appendChild(option);
     });
   };
 
@@ -3525,7 +3545,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         tabListMenu.style.display = 'none';
         return;
       }
-      
+
       updateTabListMenu();
 
       const rect = tabListBtn.getBoundingClientRect();
@@ -3574,7 +3594,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             // タイトルバー付近がモニター内にあるか判定
             return x >= mx - 100 && x < mx + mw - 100 && y >= my - 50 && y < my + mh - 50;
           });
-          
+
           if (!isVisible && monitors.length > 0) {
             const primary = monitors[0];
             const scale = primary.scaleFactor || 1;
@@ -3597,7 +3617,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const savedLeftWidth = localStorage.getItem('leftWidth');
   if (savedLeftWidth) appState.layout.leftWidth = parseInt(savedLeftWidth, 10);
-  
+
   const savedRightWidth = localStorage.getItem('rightWidth');
   if (savedRightWidth) appState.layout.rightWidth = parseInt(savedRightWidth, 10);
 
@@ -3647,7 +3667,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {
     uiManager.elements.thumbnailSizeSlider.value = savedThumbScale;
   } else {
-    uiManager.elements.thumbnailSizeSlider.value = 120; 
+    uiManager.elements.thumbnailSizeSlider.value = 120;
   }
   updateThumbnailSize();
 
@@ -3737,9 +3757,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         uiManager.showToast('キャッシュを削除しています', 0, 'cache-clear', 'info');
         try {
           await window.veloceAPI.clearCache();
-          appState.thumbnailUrls.clear(); 
-          resetThumbnailPreloader(); 
-          await refreshFileList(); 
+          appState.thumbnailUrls.clear();
+          resetThumbnailPreloader();
+          await refreshFileList();
           uiManager.showToast('すべてのキャッシュを削除しました。', 3000, 'cache-clear', 'success');
         } catch (err) {
           console.error("Failed to clear cache:", err);
@@ -3775,9 +3795,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       dragGhost.style.borderRadius = '4px';
       dragGhost.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
       document.body.appendChild(dragGhost);
-      
+
       e.dataTransfer.setDragImage(dragGhost, 15, 15);
-      
+
       setTimeout(() => {
         if (dragGhost.parentNode) dragGhost.parentNode.removeChild(dragGhost);
       }, 0);
@@ -3871,7 +3891,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             localStorage.setItem('favorites', JSON.stringify(appState.favorites));
             renderFavorites();
             showNotification(`「${folder.name}」をお気に入りに追加しました`, 'success');
-          } catch (err) {}
+          } catch (err) { }
         }
         return;
       }
@@ -3896,7 +3916,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             newIndex = appState.favorites.length;
           }
         }
-        
+
         // 並び替えた状態を保存して再描画
         appState.favorites.splice(newIndex, 0, movedItem);
         localStorage.setItem('favorites', JSON.stringify(appState.favorites));
@@ -3907,7 +3927,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     favListElement.addEventListener('click', async (e) => {
       const itemDiv = e.target.closest('.tree-item');
       if (!itemDiv) return;
-      
+
       const path = itemDiv.dataset.path;
       appState.selection.clear();
       appState.selectedIndex = -1;
@@ -3918,7 +3938,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (activeTab) {
           activeTab.path = path;
           activeTab.name = getTabNameForPath(path);
-          activeTab.scrollTop = 0; 
+          activeTab.scrollTop = 0;
           appState.currentDirectory = path;
           localStorage.setItem('currentDirectory', appState.currentDirectory);
           uiManager.renderTabs();
@@ -3938,7 +3958,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       contextMenu.targetFavoriteId = itemDiv.dataset.id;
       contextMenu.targetFavoritePath = itemDiv.dataset.path;
-      contextMenu.targetFolder = null; 
+      contextMenu.targetFolder = null;
 
       Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
@@ -4002,11 +4022,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     appState.tabs.push(initialTab);
     appState.activeTabIndex = 0;
   }
-  
+
   uiManager.renderTabs();
 
   const currentTab = appState.tabs[appState.activeTabIndex];
-  
+
   appState.searchQuery = currentTab.searchQuery || '';
   if (uiManager.elements.searchBar) {
     uiManager.elements.searchBar.value = appState.searchQuery;
@@ -4023,9 +4043,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     uiManager.renderAll(true);
     clearMetadataUI();
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
-    
+
     updateNavButtons();
-    
+
     window.veloceAPI.loadDirectory(currentTab.path);
 
     await expandTreeToPath(appState.currentDirectory);
@@ -4035,7 +4055,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (window.veloceAPI.onFileChanged) {
     window.veloceAPI.onFileChanged(async (newFile) => {
       appState.thumbnailUrls.delete(newFile.path);
-      
+
       appState.pendingThumbnails.delete(newFile.path);
       const qIdx = appState.thumbnailRequestQueue.findIndex(req => req.filePath === newFile.path);
       if (qIdx > -1) appState.thumbnailRequestQueue.splice(qIdx, 1);
@@ -4055,7 +4075,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (window.veloceAPI.onDirectoryChanged) {
     const handleDirChange = debounce(async () => {
       await refreshTree();
-      
+
       if (appState.currentDirectory) {
         refreshFileList(false);
         await expandTreeToPath(appState.currentDirectory);
@@ -4073,6 +4093,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (borderOverlay) borderOverlay.style.display = isMax ? 'none' : 'block';
       const maxBtn = document.getElementById('titlebar-maximize');
       if (maxBtn) maxBtn.innerHTML = isMax ? UIManager.ICONS.WINDOW_RESTORE : UIManager.ICONS.WINDOW_MAXIMIZE;
-    }).catch(() => {});
+    }).catch(() => { });
   }
 });

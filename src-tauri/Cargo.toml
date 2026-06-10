@@ -50,6 +50,10 @@ features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_F
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
 
+# 開発モード(npm run tauri dev)でも画像処理クレートを最適化してコンパイルし、サムネイル生成速度を爆速にする設定
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 strip = true
 panic = "abort"

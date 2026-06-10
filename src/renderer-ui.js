@@ -435,6 +435,10 @@ class UIManager {
    * @param {string} [type='info'] - トーストの種類 ('info', 'success', 'warning', 'error')
    */
   showToast(message, duration = 3000, id = null, type = 'info') {
+    if (duration !== 0) {
+      duration = (type === 'error') ? 5000 : 1000;
+    }
+
     if (!this.toastContainer) {
       let container = document.getElementById('toast-container');
       if (!container) {

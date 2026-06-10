@@ -96,6 +96,7 @@ window.veloceAPI = {
    * selectImage用: 指定インデックスの単一ImageFileを取得
    */
   getFileByIndex: (index) => invoke('get_file_by_index', { index }),
+  getFilesByIndices: (indices) => invoke('get_files_by_indices', { indices }),
   /**
    * メタデータの読み込み結果をRust側のSource of Truthに反映する
    */

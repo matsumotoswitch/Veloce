@@ -1261,13 +1261,8 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         }
 
         // --- フォールバック: 既存の image::open 処理 ---
-        // Mutex を使用して、フォールバックの画像デコードを同時に1つだけに制限することで、
-        // 巨大な画像を複数スレッドでデコードしようとしてOOMになるのを防ぎます。
-        static FALLBACK_DECODE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = match FALLBACK_DECODE_LOCK.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        // 以前はOOMを防ぐためにロックしていましたが、現在全体の同時実行数がsemaphore(16)とJS側(8)で制限されているため、
+        // ロックを外して並列処理させ、生成速度を向上させます。
         
         let img = image::open(&file_path).map_err(|e| format!("image::open failed: {}", e))?;
         let thumbnail = img.thumbnail(512, 512);
@@ -1420,44 +1415,58 @@ fn remove_collected_caches(cache_paths: Vec<std::path::PathBuf>) {
 }
 
 #[tauri::command]
-fn clear_metadata_cache(file_paths: Vec<String>) -> Result<Vec<String>, String> {
-    let mut messages = Vec::new();
-    if let Some(base_dir) = get_veloce_data_dir() {
-        let meta_dir = base_dir.join("Metadata");
-        let thumb_dir = base_dir.join("Thumbnails");
-        
-        for file_path in file_paths {
-            let mtime = std::fs::metadata(&file_path)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH)
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            
-            let clean_path = file_path.replace("\\\\?\\", "");
-            
-            // Raw path digest
-            let digest_raw = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
-            let json_raw = meta_dir.join(format!("{:x}.json", digest_raw));
-            let jpg_raw = thumb_dir.join(format!("{:x}.jpg", digest_raw));
-            
-            // Clean path digest
-            let digest_clean = md5::compute(format!("{}_{}", clean_path, mtime).as_bytes());
-            let json_clean = meta_dir.join(format!("{:x}.json", digest_clean));
-            let jpg_clean = thumb_dir.join(format!("{:x}.jpg", digest_clean));
+async fn get_files_by_indices(state: tauri::State<'_, AppState>, indices: Vec<usize>) -> Result<Vec<ImageFile>, String> {
+    let lock = state.filtered_files.lock().unwrap();
+    let mut files = Vec::with_capacity(indices.len());
+    for idx in indices {
+        if let Some(f) = lock.get(idx) {
+            files.push(f.clone());
+        }
+    }
+    Ok(files)
+}
 
-            for cache_file in [json_raw, jpg_raw, json_clean, jpg_clean] {
-                if cache_file.exists() {
-                    if let Err(e) = std::fs::remove_file(&cache_file) {
-                        messages.push(format!("Failed: {}: {}", cache_file.display(), e));
-                    } else {
-                        messages.push(format!("Deleted: {}", cache_file.display()));
+#[tauri::command]
+async fn clear_metadata_cache(file_paths: Vec<String>) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut messages = Vec::new();
+        if let Some(base_dir) = get_veloce_data_dir() {
+            let meta_dir = base_dir.join("Metadata");
+            let thumb_dir = base_dir.join("Thumbnails");
+            
+            for file_path in file_paths {
+                let mtime = std::fs::metadata(&file_path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH)
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                
+                let clean_path = file_path.replace("\\\\?\\", "");
+                
+                // Raw path digest
+                let digest_raw = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
+                let json_raw = meta_dir.join(format!("{:x}.json", digest_raw));
+                let jpg_raw = thumb_dir.join(format!("{:x}.jpg", digest_raw));
+                
+                // Clean path digest
+                let digest_clean = md5::compute(format!("{}_{}", clean_path, mtime).as_bytes());
+                let json_clean = meta_dir.join(format!("{:x}.json", digest_clean));
+                let jpg_clean = thumb_dir.join(format!("{:x}.jpg", digest_clean));
+
+                for cache_file in [json_raw, jpg_raw, json_clean, jpg_clean] {
+                    if cache_file.exists() {
+                        if let Err(e) = std::fs::remove_file(&cache_file) {
+                            messages.push(format!("Failed: {}: {}", cache_file.display(), e));
+                        } else {
+                            messages.push(format!("Deleted: {}", cache_file.display()));
+                        }
                     }
                 }
             }
         }
-    }
-    Ok(messages)
+        Ok(messages)
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1966,7 +1975,8 @@ fn main() {
             get_cache_info,
             open_in_explorer,
             check_conflicts,
-            clear_metadata_cache
+            clear_metadata_cache,
+            get_files_by_indices
         ])
         .run(context)
         .expect("error while running tauri application");
