@@ -1538,61 +1538,65 @@ fn get_license_text() -> String {
 }
 
 #[tauri::command]
-fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
-    let path = std::path::Path::new(&old_path);
-    let parent = path.parent().unwrap_or(std::path::Path::new(""));
+async fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = std::path::Path::new(&old_path);
+        let parent = path.parent().unwrap_or(std::path::Path::new(""));
 
-    let mut final_name = new_name.clone();
-    if !final_name.contains('.') {
-        if let Some(ext) = path.extension() {
-            final_name = format!("{}.{}", final_name, ext.to_string_lossy());
+        let mut final_name = new_name.clone();
+        if !final_name.contains('.') {
+            if let Some(ext) = path.extension() {
+                final_name = format!("{}.{}", final_name, ext.to_string_lossy());
+            }
         }
-    }
 
-    let new_path = parent.join(&final_name);
+        let new_path = parent.join(&final_name);
 
-    if new_path.exists() {
-        let old_lower = old_path.to_lowercase();
-        let new_lower = new_path.to_string_lossy().to_lowercase();
-        if old_lower != new_lower {
-            return Err("同じ名前のファイルが既に存在します。".to_string());
+        if new_path.exists() {
+            let old_lower = old_path.to_lowercase();
+            let new_lower = new_path.to_string_lossy().to_lowercase();
+            if old_lower != new_lower {
+                return Err("同じ名前のファイルが既に存在します。".to_string());
+            }
         }
-    }
 
-    let cache_paths = collect_cache_paths_to_remove(path);
+        let cache_paths = collect_cache_paths_to_remove(path);
 
-    match std::fs::rename(&old_path, &new_path) {
-        Ok(_) => {
-            remove_collected_caches(cache_paths);
-            Ok(new_path.to_string_lossy().to_string())
-        },
-        Err(e) => Err(e.to_string()),
-    }
+        match std::fs::rename(&old_path, &new_path) {
+            Ok(_) => {
+                remove_collected_caches(cache_paths);
+                Ok(new_path.to_string_lossy().to_string())
+            },
+            Err(e) => Err(e.to_string()),
+        }
+    }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
-fn rename_folder(old_path: String, new_name: String) -> Result<String, String> {
-    let path = std::path::Path::new(&old_path);
-    let parent = path.parent().unwrap_or(std::path::Path::new(""));
-    let new_path = parent.join(new_name);
+async fn rename_folder(old_path: String, new_name: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = std::path::Path::new(&old_path);
+        let parent = path.parent().unwrap_or(std::path::Path::new(""));
+        let new_path = parent.join(new_name);
 
-    if new_path.exists() {
-        let old_lower = old_path.to_lowercase();
-        let new_lower = new_path.to_string_lossy().to_lowercase();
-        if old_lower != new_lower {
-            return Err("同じ名前のフォルダが既に存在します。".to_string());
+        if new_path.exists() {
+            let old_lower = old_path.to_lowercase();
+            let new_lower = new_path.to_string_lossy().to_lowercase();
+            if old_lower != new_lower {
+                return Err("同じ名前のフォルダが既に存在します。".to_string());
+            }
         }
-    }
 
-    let cache_paths = collect_cache_paths_to_remove(path);
+        let cache_paths = collect_cache_paths_to_remove(path);
 
-    match std::fs::rename(&old_path, &new_path) {
-        Ok(_) => {
-            remove_collected_caches(cache_paths);
-            Ok(new_path.to_string_lossy().to_string())
-        },
-        Err(e) => Err(e.to_string()),
-    }
+        match std::fs::rename(&old_path, &new_path) {
+            Ok(_) => {
+                remove_collected_caches(cache_paths);
+                Ok(new_path.to_string_lossy().to_string())
+            },
+            Err(e) => Err(e.to_string()),
+        }
+    }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -1618,26 +1622,28 @@ fn open_cache_folder() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn clear_cache() -> Result<(), String> {
-    if let Some(mut path) = get_veloce_data_dir() {
-        // Clear Thumbnails
-        path.push("Thumbnails");
-        if path.exists() {
-            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
-            std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+async fn clear_cache() -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if let Some(mut path) = get_veloce_data_dir() {
+            // Clear Thumbnails
+            path.push("Thumbnails");
+            if path.exists() {
+                std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+            }
+            
+            // Clear Metadata
+            path.pop();
+            path.push("Metadata");
+            if path.exists() {
+                std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        } else {
+            Err("Could not resolve local data directory".to_string())
         }
-        
-        // Clear Metadata
-        path.pop();
-        path.push("Metadata");
-        if path.exists() {
-            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
-            std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    } else {
-        Err("Could not resolve local data directory".to_string())
-    }
+    }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -1668,47 +1674,53 @@ pub struct CacheInfo {
 }
 
 #[tauri::command]
-fn get_cache_info() -> CacheInfo {
-    let mut path_str = String::new();
-    let mut file_count = 0;
-    let mut total_size_bytes = 0;
+async fn get_cache_info() -> CacheInfo {
+    tokio::task::spawn_blocking(move || {
+        let mut path_str = String::new();
+        let mut file_count = 0;
+        let mut total_size_bytes = 0;
 
-    if let Some(mut path) = get_veloce_data_dir() {
-        path_str = path.to_string_lossy().to_string(); // 親ディレクトリ(Veloce)のパスを保持
+        if let Some(mut path) = get_veloce_data_dir() {
+            path_str = path.to_string_lossy().to_string(); // 親ディレクトリ(Veloce)のパスを保持
 
-        path.push("Thumbnails");
-        
-        if let Ok(entries) = std::fs::read_dir(&path) {
-            for entry in entries.filter_map(Result::ok) {
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.is_file() {
-                        file_count += 1;
-                        total_size_bytes += metadata.len();
+            path.push("Thumbnails");
+            
+            if let Ok(entries) = std::fs::read_dir(&path) {
+                for entry in entries.filter_map(Result::ok) {
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_file() {
+                            file_count += 1;
+                            total_size_bytes += metadata.len();
+                        }
+                    }
+                }
+            }
+
+            // メタデータキャッシュの情報も合算する
+            path.pop();
+            path.push("Metadata");
+            if let Ok(entries) = std::fs::read_dir(&path) {
+                for entry in entries.filter_map(Result::ok) {
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_file() {
+                            file_count += 1;
+                            total_size_bytes += metadata.len();
+                        }
                     }
                 }
             }
         }
 
-        // メタデータキャッシュの情報も合算する
-        path.pop();
-        path.push("Metadata");
-        if let Ok(entries) = std::fs::read_dir(&path) {
-            for entry in entries.filter_map(Result::ok) {
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.is_file() {
-                        file_count += 1;
-                        total_size_bytes += metadata.len();
-                    }
-                }
-            }
+        CacheInfo {
+            path: path_str,
+            file_count,
+            total_size_bytes,
         }
-    }
-
-    CacheInfo {
-        path: path_str,
-        file_count,
-        total_size_bytes,
-    }
+    }).await.unwrap_or(CacheInfo {
+        path: String::new(),
+        file_count: 0,
+        total_size_bytes: 0,
+    })
 }
 
 fn main() {
