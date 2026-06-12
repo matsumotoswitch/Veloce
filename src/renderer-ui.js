@@ -1202,9 +1202,8 @@ class UIManager {
           if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
       } else {
           img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-          if (!appState.pendingThumbnails.has(file.path)) {
-            appState.pendingThumbnails.add(file.path);
-            appState.thumbnailRequestQueue.push({ filePath: file.path, requestRenderId: appState.currentRenderId || Date.now() });
+          if (window.thumbnailManager) {
+            window.thumbnailManager.enqueuePriority(file.path, appState.currentRenderId || Date.now());
           }
       }
       fragment.appendChild(img);

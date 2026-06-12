@@ -1148,7 +1148,9 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
             .as_millis();
 
         let cache_file_path = if let Some(dir) = &cache_dir {
-            let _ = std::fs::create_dir_all(dir);
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                eprintln!("create_dir_all failed: {}", e);
+            }
             let digest = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
             Some(dir.join(format!("{:x}.jpg", digest)))
         } else {
@@ -1253,8 +1255,11 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
                 // WindowsAPIでの取得が成功した場合はそのまま返す
                 if let Some(bytes) = result {
                     if let Some(cache_path) = &cache_file_path {
-                        let _ = std::fs::write(cache_path, &bytes);
-                        return Ok(cache_path.to_string_lossy().to_string());
+                        if let Err(e) = std::fs::write(cache_path, &bytes) {
+                            eprintln!("Thumbnail write failed: {}", e);
+                        } else {
+                            return Ok(cache_path.to_string_lossy().to_string());
+                        }
                     }
                 }
             }
@@ -1272,8 +1277,11 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         
         let bytes = buf.into_inner();
         if let Some(cache_path) = &cache_file_path {
-            let _ = std::fs::write(cache_path, &bytes);
-            return Ok(cache_path.to_string_lossy().to_string());
+            if let Err(e) = std::fs::write(cache_path, &bytes) {
+                eprintln!("Thumbnail write failed (fallback): {}", e);
+            } else {
+                return Ok(cache_path.to_string_lossy().to_string());
+            }
         }
         
         Err("Could not save thumbnail cache".to_string())
@@ -1628,16 +1636,22 @@ async fn clear_cache() -> Result<(), String> {
             // Clear Thumbnails
             path.push("Thumbnails");
             if path.exists() {
-                std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
-                std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+                if let Ok(entries) = std::fs::read_dir(&path) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
+                }
             }
             
             // Clear Metadata
             path.pop();
             path.push("Metadata");
             if path.exists() {
-                std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
-                std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+                if let Ok(entries) = std::fs::read_dir(&path) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
+                }
             }
             Ok(())
         } else {

@@ -62,9 +62,6 @@ class AppState {
     this.currentMetaBatchId = 0;     // 一括読み込み管理用ID
     this.currentRenderId = 0;        // リスト描画のリクエストID
     this.thumbnailUrls = new Map();  // サムネイル画像のURLキャッシュ（パス -> URL）
-    this.pendingThumbnails = new Set(); // サムネイル取得待ちのファイルパス集合
-    this.activeThumbnailTasks = 0;   // 現在実行中のサムネイル取得タスク数
-    this.thumbnailRequestQueue = []; // サムネイル取得リクエストのキュー
     this.preloadCursor = 0;          // バックグラウンドプリロードの現在のインデックス
     this.isPreloadRunning = false;   // プリロード処理が実行中かどうか
 

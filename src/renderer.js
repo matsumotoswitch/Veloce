@@ -135,7 +135,7 @@ async function refreshFileList(showToast = false) {
   appState.selection.clear();
   appState.selectedIndex = -1;
   appState.thumbnailUrls.clear();
-  appState.pendingThumbnails.clear();
+  if (window.thumbnailManager) window.thumbnailManager.clear();
   if (uiManager.elements.searchBar) {
     uiManager.elements.searchBar.value = '';
   }
@@ -470,14 +470,12 @@ async function rebuildSelectedCache() {
       
       pathsToRebuild.forEach(p => {
         appState.thumbnailCounted.delete(p);
-        appState.pendingThumbnails.delete(p);
       });
 
-      appState.preloadQueue = appState.preloadQueue || [];
-      appState.preloadQueue.unshift(...pathsToRebuild);
+      if (window.thumbnailManager) window.thumbnailManager.unshiftPreload(pathsToRebuild);
       
       if (typeof window.updateThumbnailToast === 'function') window.updateThumbnailToast();
-      if (typeof window.processNextTask === 'function') setTimeout(window.processNextTask, 0);
+      if (typeof window.processNextTask === 'function') window.processNextTask();
     } else {
       uiManager.showToast("エラー: APIが見つかりません", 5000, 'error');
     }
@@ -642,8 +640,7 @@ const menuSeparator4 = createMenuSeparator();
 const menuSeparatorCache = createMenuSeparator();
 
 function resetThumbnailPreloader() {
-  appState.thumbnailRequestQueue = [];
-  appState.pendingThumbnails.clear();
+  if (window.thumbnailManager) window.thumbnailManager.resetPreload();
   appState.preloadCursor = 0;
 }
 
@@ -691,116 +688,151 @@ function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
   ]);
 }
 
-window.processNextTask = function processNextTask() {
-  // 実行中のタスクが上限に達するまで、同期的にタスクを補充する
-  while (appState.activeThumbnailTasks < MAX_CONCURRENT_THUMBNAILS) {
-    let targetFile = null;
-    let requestRenderId = null;
+class ThumbnailQueueManager {
+  constructor(concurrency) {
+    this.concurrency = concurrency;
+    this.activeTasks = new Set();
+    this.priorityQueue = [];
+    this.preloadQueue = [];
+    this.isProcessing = false;
+  }
 
-    // 【優先処理】画面内に見えている画像
-    if (appState.thumbnailRequestQueue.length > 0) {
-      appState.isPreloadRunning = false;
-
-      // 仮想スクロール対応: 現在DOMに存在しているものを優先して探す
-      let targetIndex = appState.thumbnailRequestQueue.findIndex(req => {
-        const safePath = req.filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`) !== null;
-      });
-      if (targetIndex === -1) targetIndex = 0;
-
-      const req = appState.thumbnailRequestQueue.splice(targetIndex, 1)[0];
-
-      // 古いレンダリングIDのリクエストは破棄して次を探す
-      if (appState.currentRenderId !== req.requestRenderId) {
-        appState.pendingThumbnails.delete(req.filePath);
-        continue;
-      }
-
-      targetFile = req.filePath;
-      requestRenderId = req.requestRenderId;
+  enqueuePriority(filePath, renderId) {
+    if (!this.activeTasks.has(filePath) && !appState.thumbnailUrls.has(filePath)) {
+      const idx = this.priorityQueue.findIndex(req => req.filePath === filePath);
+      if (idx > -1) this.priorityQueue.splice(idx, 1);
+      this.priorityQueue.push({ filePath, renderId });
+      this.processNext();
     }
-    // 【バックグラウンド処理】優先キューが空の場合
-    else {
-      appState.isPreloadRunning = true;
-      // キューが空で、まだプリロードする対象がある場合は非同期で補充を開始する
-      if ((!appState.preloadQueue || appState.preloadQueue.length === 0) && appState.preloadCursor < appState.totalCount) {
-        if (!appState.isFetchingPreload) {
-          appState.isFetchingPreload = true;
-          appState.preloadQueue = appState.preloadQueue || [];
+  }
 
-          window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
-            if (items.length === 0) {
-              appState.preloadCursor += 50; // 空の場合はカーソルを進めて無限ループを防止
-            } else {
-              appState.preloadCursor += items.length;
-              appState.preloadQueue.push(...items.map(f => f.path));
-            }
-            appState.isFetchingPreload = false;
-            // 補充完了後に再度タスクディスパッチを呼び出す
-            setTimeout(window.processNextTask, 0);
-          }).catch(err => {
-            console.warn("Preload getItems failed:", err);
-            appState.isFetchingPreload = false;
-            appState.preloadCursor += 50;
-            setTimeout(window.processNextTask, 0);
+  resetPreload() {
+    this.preloadQueue = [];
+  }
+
+  clear() {
+    this.priorityQueue = [];
+    this.preloadQueue = [];
+    this.activeTasks.clear();
+  }
+
+  unshiftPreload(paths) {
+    const toAdd = paths.filter(p => !this.activeTasks.has(p) && !appState.thumbnailUrls.has(p));
+    this.preloadQueue.unshift(...toAdd);
+    this.processNext();
+  }
+
+  remove(filePath) {
+    this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
+    this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
+  }
+
+  async processNext() {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
+    try {
+      while (this.activeTasks.size < this.concurrency) {
+        let targetFile = null;
+
+        // 1. Priority Queue
+        if (this.priorityQueue.length > 0) {
+          appState.isPreloadRunning = false;
+          let targetIndex = this.priorityQueue.findIndex(req => {
+            const safePath = req.filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            return document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`) !== null;
           });
+          if (targetIndex === -1) targetIndex = 0;
+          
+          const req = this.priorityQueue.splice(targetIndex, 1)[0];
+          
+          if (appState.currentRenderId !== req.renderId) continue;
+          if (appState.thumbnailUrls.has(req.filePath)) {
+            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(req.filePath);
+            continue;
+          }
+          targetFile = req.filePath;
         }
-        break; // 補充待ちのため一旦ループを抜ける
-      }
-
-      // プリロードキューから対象を取得
-      if (appState.preloadQueue && appState.preloadQueue.length > 0) {
-        while (appState.preloadQueue.length > 0) {
-          const p = appState.preloadQueue.shift();
-          if (appState.thumbnailUrls.has(p)) {
-            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
-          } else if (!appState.pendingThumbnails.has(p)) {
-            targetFile = p;
-            break;
+        // 2. Preload Fetching
+        else if (this.preloadQueue.length === 0 && appState.preloadCursor < appState.totalCount) {
+          appState.isPreloadRunning = true;
+          if (!appState.isFetchingPreload) {
+            appState.isFetchingPreload = true;
+            window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
+              if (items && items.length > 0) {
+                appState.preloadCursor += items.length;
+                this.preloadQueue.push(...items.map(f => f.path));
+              } else {
+                appState.preloadCursor += 50;
+              }
+            }).catch(err => {
+              console.warn("Preload getItems failed:", err);
+              appState.preloadCursor += 50;
+            }).finally(() => {
+              appState.isFetchingPreload = false;
+              this.processNext();
+            });
+          }
+          break; // wait for fetch
+        }
+        // 3. Preload Queue
+        else if (this.preloadQueue.length > 0) {
+          appState.isPreloadRunning = true;
+          let found = false;
+          while (this.preloadQueue.length > 0) {
+            const p = this.preloadQueue.shift();
+            if (appState.thumbnailUrls.has(p)) {
+              if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
+            } else if (!this.activeTasks.has(p)) {
+              targetFile = p;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            if (appState.preloadCursor >= appState.totalCount) {
+              appState.isPreloadRunning = false;
+            }
+            continue;
           }
         }
-      }
 
-      if (!targetFile) {
-        if (appState.preloadCursor >= appState.totalCount) {
-          appState.isPreloadRunning = false;
-        }
-        break; // 完全に処理する画像がなくなったので補充ループを抜ける
+        if (!targetFile) break;
+
+        this.activeTasks.add(targetFile);
+        this.runTask(targetFile);
       }
+    } finally {
+      this.isProcessing = false;
     }
-
-    // タスクの開始を登録
-    appState.pendingThumbnails.add(targetFile);
-    appState.activeThumbnailTasks++;
-
-    // 非同期でサムネイルを取得
-    fetchThumbnailWithTimeout(targetFile).then(url => {
-      const finalUrl = url || window.veloceAPI.convertFileSrc(targetFile);
-      appState.thumbnailUrls.set(targetFile, finalUrl);
-
-      const safePath = targetFile.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
-      if (currentImg) currentImg.src = finalUrl;
-
-
-    }).catch(() => {
-      const fallbackUrl = window.veloceAPI.convertFileSrc(targetFile);
-      appState.thumbnailUrls.set(targetFile, fallbackUrl);
-
-      const safePath = targetFile.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const currentImg = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
-      if (currentImg) currentImg.src = fallbackUrl;
-
-
-    }).finally(() => {
-      window.markThumbnailCompleted(targetFile);
-      // 成功・失敗に関わらず、タスクが1つ終わったら枠を空けて次を1つだけキックする
-      appState.activeThumbnailTasks = Math.max(0, appState.activeThumbnailTasks - 1);
-      appState.pendingThumbnails.delete(targetFile);
-      setTimeout(window.processNextTask, 0);
-    });
   }
-};
+
+  async runTask(filePath) {
+    try {
+      const url = await fetchThumbnailWithTimeout(filePath);
+      const finalUrl = url || window.veloceAPI.convertFileSrc(filePath);
+      appState.thumbnailUrls.set(filePath, finalUrl);
+      this.updateDOM(filePath, finalUrl);
+    } catch (err) {
+      const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
+      appState.thumbnailUrls.set(filePath, fallbackUrl);
+      this.updateDOM(filePath, fallbackUrl);
+    } finally {
+      this.activeTasks.delete(filePath);
+      if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(filePath);
+      this.processNext();
+    }
+  }
+
+  updateDOM(filePath, url) {
+    const safePath = filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const img = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
+    if (img) img.src = url;
+  }
+}
+
+window.thumbnailManager = new ThumbnailQueueManager(MAX_CONCURRENT_THUMBNAILS);
+window.processNextTask = () => window.thumbnailManager.processNext();
 
 function clearMetadataUI() {
   const staticTable = document.getElementById('static-file-info-table');
@@ -4056,9 +4088,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onFileChanged(async (newFile) => {
       appState.thumbnailUrls.delete(newFile.path);
 
-      appState.pendingThumbnails.delete(newFile.path);
-      const qIdx = appState.thumbnailRequestQueue.findIndex(req => req.filePath === newFile.path);
-      if (qIdx > -1) appState.thumbnailRequestQueue.splice(qIdx, 1);
+      if (window.thumbnailManager) window.thumbnailManager.remove(newFile.path);
 
       await window.veloceAPI.notifyFileChanged(newFile);
       scheduleRefresh();
