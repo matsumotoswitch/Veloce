@@ -1174,41 +1174,57 @@ class UIManager {
 
     const items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
 
-    // DOMの再構築
-    content.innerHTML = '';
-    const fragment = document.createDocumentFragment();
+    // DOMの再構築（要素の再利用）
+    const targetCount = endIndex - startIndex + 1;
+
+    // 足りない要素を追加
+    while (content.children.length < targetCount) {
+      const img = document.createElement('img');
+      img.className = 'thumbnail-item';
+      img.style.objectFit = 'contain';
+      img.style.width = '100%';
+      img.draggable = true;
+      img.decoding = "async";
+      img.dataset.isVisible = 'true';
+      content.appendChild(img);
+    }
+
+    // 余分な要素を削除
+    while (content.children.length > targetCount) {
+      content.removeChild(content.lastChild);
+    }
 
     for (let i = startIndex; i <= endIndex; i++) {
       const file = items[i - startIndex];
       if (!file) continue;
 
+      const img = content.children[i - startIndex];
       const isSelected = appState.selection.has(i);
-      const img = document.createElement('img');
-      if (isSelected) img.classList.add('selected');
-      img.decoding = "async";
-      img.dataset.filepath = file.path;
-      img.dataset.index = i;
-      img.className = 'thumbnail-item';
-      img.style.objectFit = 'contain';
-      img.style.width = '100%';
-      img.style.height = `${itemSize}px`;
-      img.draggable = true;
 
-      // 仮想スクロールでは常に表示領域内となるため直接フラグを立てる
-      img.dataset.isVisible = 'true';
-
-      if (appState.thumbnailUrls.has(file.path)) {
-          img.src = appState.thumbnailUrls.get(file.path);
-          if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+      if (isSelected) {
+        img.classList.add('selected');
       } else {
-          img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-          if (window.thumbnailManager) {
-            window.thumbnailManager.enqueuePriority(file.path, appState.currentRenderId || Date.now());
-          }
+        img.classList.remove('selected');
       }
-      fragment.appendChild(img);
+
+      img.style.height = `${itemSize}px`;
+
+      // パスが変わった場合のみ画像ソースとイベントを更新する
+      if (img.dataset.filepath !== file.path || img.dataset.index != i) {
+        img.dataset.filepath = file.path;
+        img.dataset.index = i;
+
+        if (appState.thumbnailUrls.has(file.path)) {
+            img.src = appState.thumbnailUrls.get(file.path);
+            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+        } else {
+            img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+            if (window.thumbnailManager) {
+              window.thumbnailManager.enqueuePriority(file.path, appState.currentRenderId || Date.now());
+            }
+        }
+      }
     }
-    content.appendChild(fragment);
 
     // 画像読み込みタスクをキック
     if (typeof window.processNextTask === 'function') window.processNextTask();
