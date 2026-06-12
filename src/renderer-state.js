@@ -24,7 +24,7 @@ class AppState {
   constructor() {
     /** @type {number} Rust側のフィルタリング済みファイルの総件数 */
     this.totalCount = 0;
-    /** @type {string[]} Rust側のフィルタリング済みファイルのパス一覧 */
+    /** @type {string[]} 以前使用していたパス一覧（現在は不要だが互換性のために空配列） */
     this.currentPaths = [];
     /** @type {{key: string, asc: boolean}} 現在のソート設定 */
     this.sortConfig = { key: 'name', asc: true };
@@ -85,14 +85,10 @@ class AppState {
   async setViewParams() {
     if (window.veloceAPI && window.veloceAPI.setViewParams) {
       try {
-        const [totalCount, paths] = await window.veloceAPI.setViewParams(
+        const totalCount = await window.veloceAPI.setViewParams(
           this.sortConfig.key, this.sortConfig.asc, this.searchQuery
         );
         this.totalCount = totalCount;
-        this.currentPaths = paths;
-        if (window.veloceAPI.syncImagePaths) {
-          await window.veloceAPI.syncImagePaths(paths);
-        }
       } catch (err) {
         console.error('Failed to set view params:', err);
       }

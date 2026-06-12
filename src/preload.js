@@ -11,7 +11,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(path: string) => Promise<boolean>} pathExists
  * @property {(path: string) => Promise<void>} loadDirectory
  * @property {(callback: (payload: {path: string, totalCount: number}) => void) => void} onDirectoryLoaded
- * @property {(sortKey: string, asc: boolean, searchQuery: string) => Promise<[number, string[]]>} setViewParams
+ * @property {(sortKey: string, asc: boolean, searchQuery: string) => Promise<number>} setViewParams
  * @property {(offset: number, limit: number) => Promise<Array<import('./renderer-state.js').ImageFile>>} getItems
  * @property {(index: number) => Promise<import('./renderer-state.js').ImageFile|null>} getFileByIndex
  * @property {(updates: any[]) => Promise<void>} updateMetadataInState
@@ -49,7 +49,6 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<void>} arrangeViewers
  * @property {() => void} focusWindow
  * @property {() => Promise<void>} showWindow
- * @property {(paths: string[]) => Promise<void>} syncImagePaths
  * @property {() => Promise<string>} getLicenseText
  * @property {() => Promise<void>} openCacheFolder
  * @property {() => Promise<void>} clearCache
@@ -371,11 +370,6 @@ window.veloceAPI = {
    * Rust側にウィンドウの表示を要求します。
    */
   showWindow: () => invoke('show_window'),
-  /**
-   * Rust側の画像パス配列をフロントエンドのソート結果と同期します。
-   * @param {string[]} paths - ソート済みの画像パス配列
-   */
-  syncImagePaths: (paths) => invoke('sync_image_paths', { paths }),
   /**
    * ライセンス情報を取得します。
    */

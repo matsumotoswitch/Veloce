@@ -970,9 +970,20 @@ function createTreeNode(folder, isRoot = false) {
   return li;
 }
 
-function getPathsFromDragEvent(e) {
+async function getPathsFromDragEventAsync(e) {
   if (appState.dragState.paths && appState.dragState.paths.length > 0) {
     return [...appState.dragState.paths];
+  }
+
+  const indicesStr = e.dataTransfer.getData('application/json-indices');
+  if (indicesStr) {
+    try {
+      const indices = JSON.parse(indicesStr);
+      if (indices && indices.length > 0 && window.veloceAPI.getFilesByIndices) {
+        const files = await window.veloceAPI.getFilesByIndices(indices);
+        if (files) return files.map(f => f.path);
+      }
+    } catch (err) { }
   }
 
   const paths = [];
@@ -2349,21 +2360,21 @@ document.body.appendChild(dragTooltip);
 
 document.addEventListener('dragover', (e) => {
   if (appState.dragState && appState.dragState.isAppDragging) {
-    const paths = appState.dragState.paths || [];
-    const count = paths.length;
+    const count = (appState.dragState.indices && appState.dragState.indices.length > 0) ? appState.dragState.indices.length : (appState.dragState.paths ? appState.dragState.paths.length : 0);
     let text = count > 1 ? `${count} 個のアイテム` : `1 個のアイテム`;
 
     const itemDiv = e.target.closest('#dir-tree .tree-item');
     if (itemDiv && itemDiv.dataset.path) {
       let actionStr = 'コピー';
-      if (paths.length > 0) {
+      if (count > 0) {
         if (e.ctrlKey) {
           actionStr = 'コピー';
         } else if (e.shiftKey) {
           actionStr = '移動';
         } else {
           const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-          actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+          const cachedRoot = appState.dragState.cachedRoot || (appState.dragState.paths && appState.dragState.paths.length > 0 ? getRoot(appState.dragState.paths[0]) : null);
+          actionStr = cachedRoot === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
         }
       }
       const isRoot = itemDiv.dataset.isRoot === 'true';
@@ -2408,17 +2419,23 @@ function handleItemDragStart(e, isGrid) {
   const index = parseInt(item.dataset.index, 10);
 
   if (!appState.selection.has(index)) selectImage(index);
-  const paths = Array.from(appState.selection).map(idx => appState.currentPaths[idx]).filter(Boolean);
-  e.dataTransfer.setData('application/json', JSON.stringify(paths));
-  e.dataTransfer.setData('text/plain', paths[0]);
+  
+  const selectedIndices = Array.from(appState.selection);
+  e.dataTransfer.setData('application/json-indices', JSON.stringify(selectedIndices));
+  if (item.dataset.filepath) {
+      e.dataTransfer.setData('text/plain', item.dataset.filepath);
+  }
   e.dataTransfer.effectAllowed = 'copyMove';
 
   e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
 
-  appState.dragState.paths = paths;
+  const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
+  appState.dragState.paths = []; // dropped paths will be fetched async
+  appState.dragState.indices = selectedIndices;
   appState.dragState.isAppDragging = true;
+  appState.dragState.cachedRoot = getRoot(item.dataset.filepath || '');
 
-  const count = paths.length;
+  const count = selectedIndices.length;
   const text = count > 1 ? `${count} 個のアイテム` : `1 個のアイテム`;
   dragTooltip.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="color: var(--accent-color); width: 14px; height: 14px;">${UIManager.ICONS.COPY}</span>${text}</span>`;
   dragTooltip.style.left = (e.clientX + 15) + 'px';
@@ -2604,14 +2621,16 @@ uiManager.elements.dirTree.addEventListener('dragover', (e) => {
   e.preventDefault();
 
   let actionStr = 'コピー';
-  if (appState.dragState.paths.length > 0) {
+  const hasItems = (appState.dragState.indices && appState.dragState.indices.length > 0) || (appState.dragState.paths && appState.dragState.paths.length > 0);
+  if (hasItems) {
     if (e.ctrlKey) {
       actionStr = 'コピー';
     } else if (e.shiftKey) {
       actionStr = '移動';
     } else {
       const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-      actionStr = getRoot(appState.dragState.paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
+      const cachedRoot = appState.dragState.cachedRoot || (appState.dragState.paths && appState.dragState.paths.length > 0 ? getRoot(appState.dragState.paths[0]) : null);
+      actionStr = cachedRoot === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
     }
   }
   e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
@@ -2626,7 +2645,7 @@ uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
   }
 });
 
-uiManager.elements.dirTree.addEventListener('drop', (e) => {
+uiManager.elements.dirTree.addEventListener('drop', async (e) => {
   if (draggedFavoriteId) return;
   const itemDiv = e.target.closest('.tree-item');
   if (!itemDiv) return;
@@ -2634,7 +2653,7 @@ uiManager.elements.dirTree.addEventListener('drop', (e) => {
   itemDiv.style.backgroundColor = '';
   dragTooltip.classList.remove('show');
 
-  const paths = getPathsFromDragEvent(e);
+  const paths = await getPathsFromDragEventAsync(e);
   if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
     let actionStr = 'コピー';
     let intent = 'auto';

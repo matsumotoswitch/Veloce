@@ -338,8 +338,8 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
 
     Ok(())
 }
-/// Rust側でソート・フィルタリングを実行するヘルパー関数
-fn apply_filters_and_sort(state: &AppState) -> (usize, Vec<String>) {
+/// Rust側でソート・フィルタリングを実行し、最新のpathsをViewerにも同期する
+fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
     let all_files = state.all_files.lock().unwrap();
     let sort_config = state.sort_config.lock().unwrap();
     let search_query = state.search_query.lock().unwrap();
@@ -390,24 +390,50 @@ fn apply_filters_and_sort(state: &AppState) -> (usize, Vec<String>) {
         *lock = paths.clone();
     }
 
-    (total, paths)
+    if let Some(app_handle) = app {
+        use std::path::Path;
+        use tauri::Manager;
+        let target_dir = if let Some(first_path) = paths.first() {
+            Some(Path::new(first_path).parent().unwrap_or(Path::new("")).to_string_lossy().to_string())
+        } else {
+            state.current_dir.lock().ok().map(|d| d.clone())
+        };
+
+        if let Some(dir_str) = target_dir {
+            if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+                for (label, viewer_list) in viewer_paths.iter_mut() {
+                    let v_dir = viewer_list.first()
+                        .and_then(|p| Path::new(p).parent())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if v_dir == dir_str {
+                        *viewer_list = paths.clone();
+                        let _ = app_handle.emit_to(&label, "viewer-list-updated", &paths);
+                    }
+                }
+            }
+        }
+    }
+
+    total
 }
 
 /// JS側からソート条件・検索クエリを受け取り、Rust側でフィルタリングとソートを実行する
 #[tauri::command]
 fn set_view_params(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     sort_key: String,
     asc: bool,
     search_query: String,
-) -> (usize, Vec<String>) {
+) -> usize {
     if let Ok(mut lock) = state.sort_config.lock() {
         *lock = SortConfig { key: sort_key, asc };
     }
     if let Ok(mut lock) = state.search_query.lock() {
         *lock = search_query;
     }
-    apply_filters_and_sort(&state)
+    apply_filters_and_sort(Some(&app), &state)
 }
 
 /// 仮想スクロール用: 指定範囲のImageFileをスライスして返す
@@ -459,7 +485,7 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
 
 /// ファイルウォッチャーから通知されたファイル変更をRust側のSource of Truthに反映する
 #[tauri::command]
-fn notify_file_changed(state: tauri::State<'_, AppState>, file: ImageFile) -> usize {
+fn notify_file_changed(app: tauri::AppHandle, state: tauri::State<'_, AppState>, file: ImageFile) -> usize {
     if let Ok(mut all_files) = state.all_files.lock() {
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
             *existing = file.clone();
@@ -467,16 +493,16 @@ fn notify_file_changed(state: tauri::State<'_, AppState>, file: ImageFile) -> us
             all_files.push(file);
         }
     }
-    apply_filters_and_sort(&state).0
+    apply_filters_and_sort(Some(&app), &state)
 }
 
 /// ファイルウォッチャーから通知されたファイル削除をRust側のSource of Truthに反映する
 #[tauri::command]
-fn notify_file_removed(state: tauri::State<'_, AppState>, path: String) -> usize {
+fn notify_file_removed(app: tauri::AppHandle, state: tauri::State<'_, AppState>, path: String) -> usize {
     if let Ok(mut all_files) = state.all_files.lock() {
         all_files.retain(|f| f.path != path);
     }
-    apply_filters_and_sort(&state).0
+    apply_filters_and_sort(Some(&app), &state)
 }
 
 #[tauri::command]
@@ -1348,34 +1374,6 @@ fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
     }
 }
 
-#[tauri::command]
-fn sync_image_paths(app: tauri::AppHandle, state: tauri::State<'_, AppState>, paths: Vec<String>) {
-    if let Ok(mut lock) = state.image_paths.lock() {
-        *lock = paths.clone();
-    }
-
-    let target_dir = if let Some(first_path) = paths.first() {
-        Some(Path::new(first_path).parent().unwrap_or(Path::new("")).to_string_lossy().to_string())
-    } else {
-        state.current_dir.lock().ok().map(|d| d.clone())
-    };
-
-    if let Some(dir_str) = target_dir {
-        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-            for (label, viewer_list) in viewer_paths.iter_mut() {
-                let v_dir = viewer_list.first()
-                    .and_then(|p| Path::new(p).parent())
-                    .map(|p| p.to_string_lossy().to_string());
-                
-                if v_dir == Some(dir_str.clone()) {
-                    *viewer_list = paths.clone();
-                    let _ = app.emit_to(label, "viewer-list-updated", paths.clone());
-                }
-            }
-        }
-    }
-}
-
 // --- ファイル・システム操作コマンド ---
 
 fn collect_cache_paths_to_remove(target_path: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -1988,7 +1986,6 @@ fn main() {
             show_window,
             get_thumbnail,
             arrange_viewers,
-            sync_image_paths,
             trash_file,
             trash_folder,
             copy_image_to_clipboard,
