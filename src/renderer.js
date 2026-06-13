@@ -3220,7 +3220,34 @@ window.addEventListener('keydown', async (e) => {
           showNotification('画像をクリップボードにコピーしました', 'success');
 
           const applyFlash = (el) => {
-            uiManager.applyGlowEffect(el);
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            
+            const flash = document.createElement('div');
+            flash.style.position = 'fixed';
+            flash.style.top = rect.top + 'px';
+            flash.style.left = rect.left + 'px';
+            flash.style.width = rect.width + 'px';
+            flash.style.height = rect.height + 'px';
+            flash.style.backgroundColor = 'var(--glow-gold, rgba(243, 212, 125, 1))';
+            flash.style.pointerEvents = 'none';
+            flash.style.zIndex = '9998';
+            flash.style.borderRadius = window.getComputedStyle(el).borderRadius || '0px';
+            flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
+            document.body.appendChild(flash);
+
+            flash.style.opacity = '0.5';
+
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                flash.style.opacity = '0';
+              });
+            });
+
+            setTimeout(() => {
+              if (flash.parentNode) flash.remove();
+            }, 600);
           };
 
           applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${idx}"]`));

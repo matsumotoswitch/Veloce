@@ -913,11 +913,32 @@ window.addEventListener('keydown', async (e) => {
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
 	if (viewerState.currentImagePath) {
 	  window.veloceAPI.copyImageToClipboard(viewerState.currentImagePath);
-      // 共通の光るエフェクトを適用
-      if (viewerUI.elements.viewerImg) {
-        viewerUI.applyGlowEffect(viewerUI.elements.viewerImg);
+      // 画面全体のフラッシュエフェクト（シャッターエフェクト）
+      let flash = document.getElementById('viewer-flash-effect');
+      if (!flash) {
+        flash = document.createElement('div');
+        flash.id = 'viewer-flash-effect';
+        flash.style.position = 'fixed';
+        flash.style.top = '0';
+        flash.style.left = '0';
+        flash.style.width = '100vw';
+        flash.style.height = '100vh';
+        flash.style.pointerEvents = 'none';
+        flash.style.zIndex = '9998'; // トーストの手前・画像の奥など適度な位置
+        flash.style.backgroundColor = 'var(--glow-gold, rgba(243, 212, 125, 1))';
+        flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
+        document.body.appendChild(flash);
       }
       
+      flash.style.transition = 'none';
+      flash.style.opacity = '0.35';
+      
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
+          flash.style.opacity = '0';
+        });
+      });
       // トースト通知を表示
       let toast = document.getElementById('viewer-toast');
       if (!toast) {
