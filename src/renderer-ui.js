@@ -1071,6 +1071,7 @@ class UIManager {
       const tr = document.createElement('tr');
       if (isSelected) tr.classList.add('selected');
       tr.dataset.index = i;
+      tr.dataset.filepath = file.path;
       tr.style.height = `${rowHeight}px`;
       tr.innerHTML = `
         <td>${file.name}</td>

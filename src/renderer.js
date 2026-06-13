@@ -1264,6 +1264,11 @@ async function showLicenseDialog() {
 }
 
 function toggleHelpOverlay(forceShow) {
+  const licenseOverlay = document.getElementById('license-overlay');
+  if (licenseOverlay) {
+    licenseOverlay.remove();
+  }
+
   let overlay = document.getElementById('help-overlay');
 
   if (overlay) {
@@ -1353,7 +1358,7 @@ function toggleHelpOverlay(forceShow) {
   `;
 
   overlay.addEventListener('click', (e) => {
-    if (e.target.id === 'license-link') {
+    if (e.target.closest('#license-link')) {
       showLicenseDialog();
       return;
     }
@@ -1488,7 +1493,8 @@ const menuNewFolder = createMenuItem('フォルダを新規作成', UIManager.IC
         }
       }
     } else {
-      alert('フォルダの作成に失敗しました:\n' + (result ? result.error : 'Unknown error'));
+      const errorMsg = result ? result.error : 'Unknown error';
+      showNotification(`フォルダの作成に失敗しました: ${errorMsg}`, 'error');
     }
   }
 });
@@ -1846,7 +1852,8 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
       }
       await refreshTree();
     } else {
-      alert('フォルダの削除に失敗しました:\n' + (result ? result.error : 'Unknown error'));
+      const errorMsg = result ? result.error : 'Unknown error';
+      showNotification(`フォルダの削除に失敗しました: ${errorMsg}`, 'error');
     }
   }
 }, true);
