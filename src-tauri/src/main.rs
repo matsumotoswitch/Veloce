@@ -1421,7 +1421,7 @@ fn remove_collected_caches(cache_paths: Vec<std::path::PathBuf>) {
 }
 
 #[tauri::command]
-async fn get_files_by_indices(state: tauri::State<'_, AppState>, indices: Vec<usize>) -> Result<Vec<ImageFile>, String> {
+fn get_files_by_indices(state: tauri::State<'_, AppState>, indices: Vec<usize>) -> Result<Vec<ImageFile>, String> {
     let lock = state.filtered_files.lock().unwrap();
     let mut files = Vec::with_capacity(indices.len());
     for idx in indices {

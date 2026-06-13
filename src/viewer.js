@@ -887,20 +887,24 @@ window.addEventListener('keydown', async (e) => {
   
   if (e.key === 'Delete') {
 	if (viewerState.currentImagePath) {
-	  const success = await window.veloceAPI.trashFile(viewerState.currentImagePath);
+	  const deletedPath = viewerState.currentImagePath;
+	  const success = await window.veloceAPI.trashFile(deletedPath);
 	  if (success) {
-        viewerState.paths.splice(viewerState.currentIndex, 1);
-        viewerState.totalImages = viewerState.paths.length;
-
-        // 削除成功時、ビューアーを閉じずに次の画像（最後なら前の画像）へ移動する
-        if (viewerState.paths.length > 0) {
-          if (viewerState.currentIndex >= viewerState.paths.length) {
-            viewerState.currentIndex = viewerState.paths.length - 1;
-          }
-          loadImage(); 
+        if (window.veloceAPI.notifyFileRemoved) {
+          // メイン画面に通知し、そこからbroadcastされる `viewer-list-updated` イベントで画像の切り替えを処理する
+          await window.veloceAPI.notifyFileRemoved(deletedPath);
         } else {
-          // 画像が1枚もなくなった場合はウィンドウを閉じる
-          if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
+          // APIがない場合のフォールバック
+          viewerState.paths.splice(viewerState.currentIndex, 1);
+          viewerState.totalImages = viewerState.paths.length;
+          if (viewerState.paths.length > 0) {
+            if (viewerState.currentIndex >= viewerState.paths.length) {
+              viewerState.currentIndex = viewerState.paths.length - 1;
+            }
+            loadImage(); 
+          } else {
+            if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
+          }
         }
 	  }
 	}
