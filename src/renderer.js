@@ -3618,36 +3618,44 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       // 現在アクティブなタブのみ、専用のハイライトスタイルを個別に適用する
       if (index === appState.activeTabIndex) {
-        option.style.color = '#ffffff';
-        option.style.backgroundColor = 'rgba(37, 126, 140, 0.15)';
-        option.style.boxShadow = 'inset 3px 0 0 var(--accent-color)';
+        option.classList.add('active');
       }
 
       const fav = appState.favorites.find(f => f.path === tab.path);
       let iconHtml = '';
       let iconColor = '';
       if (fav) {
-        if (fav.icon && ICON_SVGS[fav.icon]) {
+        const c = COLORS.find(c => c.id === (fav.color || 'default'));
+        const favColorHex = c ? c.hex : 'var(--glow-gold)';
+        iconColor = favColorHex;
+        
+        if (fav.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[fav.icon]) {
           iconHtml = ICON_SVGS[fav.icon];
-          const c = COLORS.find(c => c.id === (fav.color || 'default'));
-          iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : (c ? c.hex : 'var(--glow-gold)');
+        } else if (fav.icon && fav.icon.startsWith('FAV_')) {
+          iconHtml = UIManager.ICONS[fav.icon] || UIManager.ICONS.FAV_STAR;
         } else {
-          const iconKey = fav.icon && fav.icon.startsWith('FAV_') ? fav.icon : 'FAV_STAR';
-          iconHtml = UIManager.ICONS[iconKey] || UIManager.ICONS.FAV_STAR;
-          iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
+          iconHtml = UIManager.ICONS.FAV_STAR;
         }
       } else {
         iconHtml = UIManager.ICONS.FOLDER;
-        iconColor = index === appState.activeTabIndex ? 'var(--accent-color)' : '#4da8da';
+        iconColor = '#4da8da';
       }
 
       const iconSpan = document.createElement('span');
+      iconSpan.className = 'tab-list-icon';
       iconSpan.style.display = 'flex';
       iconSpan.style.alignItems = 'center';
+      iconSpan.style.justifyContent = 'center';
       iconSpan.style.flexShrink = '0';
       iconSpan.style.width = '16px';
       iconSpan.innerHTML = iconHtml;
       if (iconColor) iconSpan.style.color = iconColor;
+
+      const svg = iconSpan.querySelector('svg');
+      if (svg) {
+        svg.setAttribute('width', '14');
+        svg.setAttribute('height', '14');
+      }
 
       const textContainer = document.createElement('div');
       textContainer.style.display = 'flex';
@@ -3664,13 +3672,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       nameLabel.style.fontSize = '13px';
 
       const pathLabel = document.createElement('span');
+      pathLabel.className = 'path-label';
       pathLabel.textContent = tab.path;
       pathLabel.title = tab.path;
       pathLabel.style.whiteSpace = 'nowrap';
       pathLabel.style.overflow = 'hidden';
       pathLabel.style.textOverflow = 'ellipsis';
       pathLabel.style.fontSize = '11px';
-      pathLabel.style.opacity = '0.6';
       pathLabel.style.marginTop = '2px';
 
       textContainer.appendChild(nameLabel);
@@ -3699,13 +3707,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       option.appendChild(textContainer);
       option.appendChild(closeBtn);
 
-      // ホバー時の背景色・文字色の変化はCSS（context-menu-item:hover）に任せ、アイコンの色変化だけを残す
-      option.onmouseenter = () => {
-        if (iconColor) iconSpan.style.color = '#fff';
-      };
-      option.onmouseleave = () => {
-        if (iconColor) iconSpan.style.color = index === appState.activeTabIndex ? 'var(--accent-color)' : 'var(--glow-gold)';
-      };
+      // ホバー時の背景色・文字色の変化はCSS（context-menu-item:hover）に任せ、アイコンの色変化は行わない（常にお気に入り/フォルダ固有の色を保つ）
 
       option.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
       option.addEventListener('auxclick', async (e) => {

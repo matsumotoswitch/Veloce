@@ -1368,6 +1368,43 @@ input[type="range"]:focus {
   display: block;
 }
 
+/* tab-list-item 固有の調整 */
+.tab-list-item.active {
+  color: #ffffff;
+  background-color: rgba(37, 126, 140, 0.15);
+  box-shadow: inset 3px 0 0 var(--accent-color);
+}
+.tab-list-item.active:hover {
+  background-color: rgba(37, 126, 140, 0.35); /* アクティブかつホバー時は少し明るく */
+}
+
+.tab-list-item .path-label {
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+.tab-list-item:hover .path-label {
+  opacity: 0.85; /* ホバー時にパスが見やすくなる */
+}
+
+/* アイコンの中のSVGがコンテキストメニューのグローバル設定でズレないようにリセット */
+.tab-list-item .tab-list-icon svg {
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  margin: 0 !important;
+  opacity: 1 !important;
+}
+
+/* 右側の閉じるボタンがズレないように */
+.tab-list-item .tab-close-btn svg {
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  width: 7px !important;
+  height: 7px !important;
+  margin: 0 !important;
+}
+
 .menu-check {
   display: inline-flex;
   align-items: center;
@@ -1425,8 +1462,8 @@ th[data-sort] svg path {
   position: relative;
   cursor: pointer;
   font-size: 13px;
-  max-width: 250px;
-  min-width: 120px;
+  max-width: 320px;
+  min-width: 160px;
   flex-shrink: 0;
 
   /* 非アクティブタブ（面と上部エッジの光で表現） */
@@ -1962,4 +1999,3 @@ html.viewer-html,
 :focus-visible {
   outline: none !important;
 }
-

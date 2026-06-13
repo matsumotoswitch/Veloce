@@ -215,6 +215,15 @@ class UIManager {
         tabEl.className = 'tab-item';
         tabEl.draggable = true;
 
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'tab-icon';
+        iconSpan.style.marginRight = '6px';
+        iconSpan.style.display = 'inline-flex';
+        iconSpan.style.alignItems = 'center';
+        iconSpan.style.flexShrink = '0';
+        iconSpan.style.opacity = '0.8';
+        tabEl.appendChild(iconSpan);
+
         const label = document.createElement('span');
         label.className = 'tab-label';
         tabEl.appendChild(label);
@@ -350,6 +359,33 @@ class UIManager {
         tabEl.classList.add('active');
       } else {
         tabEl.classList.remove('active');
+      }
+
+      const iconSpan = tabEl.querySelector('.tab-icon');
+      if (iconSpan) {
+        const fav = this.state.favorites ? this.state.favorites.find(f => f.path === tab.path) : null;
+        if (fav) {
+          if (fav.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[fav.icon]) {
+            iconSpan.innerHTML = ICON_SVGS[fav.icon];
+            iconSpan.className = `tab-icon icon-color-${fav.color || 'default'}`;
+          } else if (fav.icon && fav.icon.startsWith('FAV_')) {
+            iconSpan.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS.FAV_STAR;
+            iconSpan.className = `tab-icon icon-color-${fav.color || 'default'}`;
+          } else {
+            iconSpan.innerHTML = UIManager.ICONS.FAV_STAR;
+            iconSpan.className = `tab-icon icon-color-${fav.color || 'default'}`;
+          }
+        } else {
+          iconSpan.innerHTML = UIManager.ICONS.FOLDER;
+          iconSpan.className = 'tab-icon';
+        }
+        
+        // アイコンのサイズを強制的に14pxに
+        const svg = iconSpan.querySelector('svg');
+        if (svg) {
+          svg.setAttribute('width', '14');
+          svg.setAttribute('height', '14');
+        }
       }
 
       const label = tabEl.querySelector('.tab-label');
