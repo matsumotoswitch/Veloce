@@ -363,6 +363,7 @@ class UIManager {
 
       const iconSpan = tabEl.querySelector('.tab-icon');
       if (iconSpan) {
+        iconSpan.style.color = ''; // 再利用時のためにリセット
         const fav = this.state.favorites ? this.state.favorites.find(f => f.path === tab.path) : null;
         if (fav) {
           if (fav.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[fav.icon]) {
@@ -378,6 +379,7 @@ class UIManager {
         } else {
           iconSpan.innerHTML = UIManager.ICONS.FOLDER;
           iconSpan.className = 'tab-icon';
+          iconSpan.style.color = '#4da8da';
         }
         
         // アイコンのサイズを強制的に14pxに
