@@ -462,18 +462,18 @@ async function rebuildSelectedCache() {
 
     if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
       await window.veloceAPI.clearMetadataCache(pathsToRebuild);
-      
+
       if (appState.thumbnailTotalRequested === 0) {
         appState.thumbnailCompleted = 0;
       }
       appState.thumbnailTotalRequested += pathsToRebuild.length;
-      
+
       pathsToRebuild.forEach(p => {
         appState.thumbnailCounted.delete(p);
       });
 
       if (window.thumbnailManager) window.thumbnailManager.unshiftPreload(pathsToRebuild);
-      
+
       if (typeof window.updateThumbnailToast === 'function') window.updateThumbnailToast();
       if (typeof window.processNextTask === 'function') window.processNextTask();
     } else {
@@ -743,9 +743,9 @@ class ThumbnailQueueManager {
             return document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`) !== null;
           });
           if (targetIndex === -1) targetIndex = 0;
-          
+
           const req = this.priorityQueue.splice(targetIndex, 1)[0];
-          
+
           if (appState.currentRenderId !== req.renderId) continue;
           if (appState.thumbnailUrls.has(req.filePath)) {
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(req.filePath);
@@ -1246,10 +1246,19 @@ async function showLicenseDialog() {
   };
 
   const keydownHandler = (e) => {
-    if (e.key === 'Escape') {
+    // Escキー、またはF1/Hキーでライセンス画面を閉じる
+    if (e.key === 'Escape' || e.key === 'F1' || e.key.toLowerCase() === 'h') {
       e.preventDefault();
       e.stopImmediatePropagation();
       cleanup();
+
+      // F1/Hキーの場合は背後のヘルプ画面も一緒に閉じる
+      if (e.key === 'F1' || e.key.toLowerCase() === 'h') {
+        const helpOverlay = document.getElementById('help-overlay');
+        if (helpOverlay) {
+          helpOverlay.remove();
+        }
+      }
     }
   };
 
@@ -2430,11 +2439,11 @@ function handleItemDragStart(e, isGrid) {
   const index = parseInt(item.dataset.index, 10);
 
   if (!appState.selection.has(index)) selectImage(index);
-  
+
   const selectedIndices = Array.from(appState.selection);
   e.dataTransfer.setData('application/json-indices', JSON.stringify(selectedIndices));
   if (item.dataset.filepath) {
-      e.dataTransfer.setData('text/plain', item.dataset.filepath);
+    e.dataTransfer.setData('text/plain', item.dataset.filepath);
   }
   e.dataTransfer.effectAllowed = 'copyMove';
 
@@ -3219,11 +3228,12 @@ window.addEventListener('keydown', async (e) => {
           window.veloceAPI.copyImageToClipboard(file.path);
           showNotification('画像をクリップボードにコピーしました', 'success');
 
+          // 対象要素（サムネイルまたはリスト行）の領域にシャッターフラッシュエフェクトを適用
           const applyFlash = (el) => {
             if (!el) return;
             const rect = el.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
-            
+
             const flash = document.createElement('div');
             flash.style.position = 'fixed';
             flash.style.top = rect.top + 'px';
@@ -3250,6 +3260,7 @@ window.addEventListener('keydown', async (e) => {
             }, 600);
           };
 
+          // 現在の表示モードに応じた要素にエフェクトを適用
           applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${idx}"]`));
           applyFlash(uiManager.elements.fileListBody.querySelector(`tr[data-index="${idx}"]`));
         }
@@ -3796,12 +3807,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (uiManager.elements.openCacheBtn) {
     uiManager.elements.openCacheBtn.innerHTML = UIManager.ICONS.FOLDER_OPEN;
     uiManager.elements.openCacheBtn.removeAttribute('title');
-    let openCacheText = 'キャッシュフォルダを開きます';
+    let openCacheText = 'キャッシュフォルダを開く';
     uiManager.elements.openCacheBtn.addEventListener('mouseenter', async (e) => {
       uiManager.showCustomTooltip(openCacheText, e.clientX, e.clientY);
       if (window.veloceAPI.getCacheInfo) {
         const info = await window.veloceAPI.getCacheInfo();
-        openCacheText = `キャッシュフォルダを開きます\nパス: ${info.path}`;
+        openCacheText = `キャッシュフォルダを開く\nパス: ${info.path}`;
         if (uiManager.isTooltipVisible) {
           uiManager.showCustomTooltip(openCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
         }
@@ -3823,13 +3834,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (uiManager.elements.clearCacheBtn) {
     uiManager.elements.clearCacheBtn.innerHTML = UIManager.ICONS.FLAME;
     uiManager.elements.clearCacheBtn.removeAttribute('title');
-    let clearCacheText = 'キャッシュを削除します';
+    let clearCacheText = 'キャッシュを削除';
     uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async (e) => {
       uiManager.showCustomTooltip(clearCacheText, e.clientX, e.clientY);
       if (window.veloceAPI.getCacheInfo) {
         const info = await window.veloceAPI.getCacheInfo();
         const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
-        clearCacheText = `キャッシュを削除します\n保存数: ${info.fileCount.toLocaleString()}ファイル\n合計サイズ: ${sizeMB} MB`;
+        clearCacheText = `キャッシュを削除\n保存数: ${info.fileCount.toLocaleString()}ファイル\n合計サイズ: ${sizeMB} MB`;
         if (uiManager.isTooltipVisible) {
           uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
         }

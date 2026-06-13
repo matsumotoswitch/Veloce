@@ -913,7 +913,7 @@ window.addEventListener('keydown', async (e) => {
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
 	if (viewerState.currentImagePath) {
 	  window.veloceAPI.copyImageToClipboard(viewerState.currentImagePath);
-      // 画面全体のフラッシュエフェクト（シャッターエフェクト）
+      // 画像のコピーとシャッターフラッシュエフェクトの適用
       let flash = document.getElementById('viewer-flash-effect');
       if (!flash) {
         flash = document.createElement('div');
@@ -924,7 +924,7 @@ window.addEventListener('keydown', async (e) => {
         flash.style.width = '100vw';
         flash.style.height = '100vh';
         flash.style.pointerEvents = 'none';
-        flash.style.zIndex = '9998'; // トーストの手前・画像の奥など適度な位置
+        flash.style.zIndex = '9998';
         flash.style.backgroundColor = 'var(--glow-gold, rgba(243, 212, 125, 1))';
         flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
         document.body.appendChild(flash);
@@ -939,7 +939,8 @@ window.addEventListener('keydown', async (e) => {
           flash.style.opacity = '0';
         });
       });
-      // トースト通知を表示（メイン画面と同じスタイル）
+
+      // コピー完了を通知するトーストの表示
       let container = document.getElementById('toast-container');
       if (!container) {
         container = document.createElement('div');
