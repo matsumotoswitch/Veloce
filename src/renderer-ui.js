@@ -970,18 +970,18 @@ class UIManager {
         this.state.thumbnailObserver.disconnect();
     }
 
-    if (this.elements.fileListBody) this.elements.fileListBody.innerHTML = '';
-    
-    // フォルダ選択時と同様に、タブ切り替え時等も以前のサムネイル表示を確実にクリアする
-    if (this.elements.thumbnailGrid) {
-      const content = this.elements.thumbnailGrid.querySelector('.virtual-content');
-      if (content) content.innerHTML = '';
-      const spacer = this.elements.thumbnailGrid.querySelector('.virtual-spacer');
-      if (spacer) spacer.style.height = '0px';
-    }
-
-    const fileListContainer = document.getElementById('center-top');
     if (resetScroll) {
+      if (this.elements.fileListBody) this.elements.fileListBody.innerHTML = '';
+      
+      // フォルダ選択時と同様に、タブ切り替え時等も以前のサムネイル表示を確実にクリアする
+      if (this.elements.thumbnailGrid) {
+        const content = this.elements.thumbnailGrid.querySelector('.virtual-content');
+        if (content) content.innerHTML = '';
+        const spacer = this.elements.thumbnailGrid.querySelector('.virtual-spacer');
+        if (spacer) spacer.style.height = '0px';
+      }
+
+      const fileListContainer = document.getElementById('center-top');
       if (fileListContainer) fileListContainer.scrollTop = 0;
       if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
     }
