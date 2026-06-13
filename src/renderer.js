@@ -958,6 +958,31 @@ function createTreeNode(folder, isRoot = false) {
   // 外部から展開処理を呼び出せるように要素に紐付ける
   itemDiv.expandNode = expandNode;
 
+  itemDiv.reloadFolder = async () => {
+    isLoaded = false;
+    childrenUl.innerHTML = '';
+    const wasExpanded = childrenUl.classList.contains('expanded');
+
+    // サブフォルダの有無を事前に確認する
+    const subFolders = await window.veloceAPI.getFolders(folder.path);
+    if (subFolders.length === 0) {
+      toggleIcon.style.visibility = 'hidden';
+      childrenUl.style.display = 'none';
+      childrenUl.classList.remove('expanded');
+      childrenUl.classList.add('collapsed');
+      toggleIcon.classList.remove('expanded');
+      isLoaded = true;
+      return;
+    }
+
+    // サブフォルダがある場合はトグルアイコンを表示
+    toggleIcon.style.visibility = 'visible';
+
+    if (wasExpanded) {
+      await expandNode();
+    }
+  };
+
   // ノードを折りたたむ処理
   const collapseNode = () => {
     childrenUl.style.display = 'none';
@@ -2108,6 +2133,26 @@ const menuOpenInNewTab = createMenuItem('新しいタブで開く', UIManager.IC
   }
 });
 
+const menuReloadFolder = createMenuItem('フォルダを再読み込み', UIManager.ICONS.RELOAD, async () => {
+  if (contextMenu.targetFolderElement && contextMenu.targetFolderElement.reloadFolder) {
+    await contextMenu.targetFolderElement.reloadFolder();
+    
+    // 現在アクティブなタブで開いているフォルダ（またはその親）なら、メインビューも再読込する
+    const currentTab = appState.tabs[appState.activeTabIndex];
+    if (currentTab && contextMenu.targetFolder && currentTab.path === contextMenu.targetFolder.path) {
+      if (typeof refreshFileList === 'function') {
+        await refreshFileList(true);
+      } else if (window.veloceAPI && window.veloceAPI.loadDirectory) {
+        await window.veloceAPI.loadDirectory(currentTab.path);
+      }
+    }
+    
+    if (typeof uiManager.showCustomTooltip === 'function') {
+      uiManager.showCustomTooltip('フォルダを再読み込みしました', window.innerWidth / 2, window.innerHeight - 50, 1500);
+    }
+  }
+});
+
 // --- タブ用メニューの作成 ---
 const menuTabClose = createMenuItem('閉じる', UIManager.ICONS.X, () => {
   if (contextMenu.targetTabIndex !== undefined) {
@@ -2237,6 +2282,7 @@ contextMenu.appendChild(menuOpenInNewTab);
 contextMenu.appendChild(menuOpenInExplorer);
 contextMenu.appendChild(menuTabOpenExplorer);
 contextMenu.appendChild(menuTabCopyPath);
+contextMenu.appendChild(menuReloadFolder);
 contextMenu.appendChild(menuSeparator1);
 
 // 2. タブ操作 (タブ管理)
@@ -2592,12 +2638,14 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
     path: itemDiv.dataset.path,
     name: itemDiv.dataset.name
   };
+  contextMenu.targetFolderElement = itemDiv;
   contextMenu.isRoot = isRoot;
 
   Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
   menuOpenInNewTab.style.display = 'block';
   menuOpenInExplorer.style.display = 'block';
+  menuReloadFolder.style.display = 'block';
   menuSeparator1.style.display = 'block';
   menuNewFolder.style.display = 'block';
 
