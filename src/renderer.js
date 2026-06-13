@@ -3234,12 +3234,32 @@ window.addEventListener('keydown', async (e) => {
             const rect = el.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
 
+            // スクロールコンテナ等のクリッピング領域を取得して、可視範囲のみにフラッシュを制限する
+            const container = el.closest('#center-top, #center-bottom');
+            let top = rect.top;
+            let left = rect.left;
+            let width = rect.width;
+            let height = rect.height;
+
+            if (container) {
+              const containerRect = container.getBoundingClientRect();
+              top = Math.max(rect.top, containerRect.top);
+              left = Math.max(rect.left, containerRect.left);
+              const bottom = Math.min(rect.bottom, containerRect.bottom);
+              const right = Math.min(rect.right, containerRect.right);
+              width = right - left;
+              height = bottom - top;
+            }
+
+            // 要素がコンテナの可視範囲外（完全に隠れている）場合はエフェクトを表示しない
+            if (width <= 0 || height <= 0) return;
+
             const flash = document.createElement('div');
             flash.style.position = 'fixed';
-            flash.style.top = rect.top + 'px';
-            flash.style.left = rect.left + 'px';
-            flash.style.width = rect.width + 'px';
-            flash.style.height = rect.height + 'px';
+            flash.style.top = top + 'px';
+            flash.style.left = left + 'px';
+            flash.style.width = width + 'px';
+            flash.style.height = height + 'px';
             flash.style.backgroundColor = 'var(--glow-gold, rgba(243, 212, 125, 1))';
             flash.style.pointerEvents = 'none';
             flash.style.zIndex = '9998';
