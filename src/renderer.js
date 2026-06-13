@@ -2518,6 +2518,11 @@ uiManager.elements.fileListBody.addEventListener('contextmenu', (e) => handleIte
 // ============================================================================
 // Directory Tree Event Delegation
 // ============================================================================
+document.getElementById('left-pane')?.addEventListener('mousedown', () => {
+  const dirSection = document.getElementById('directories-section');
+  if (dirSection) dirSection.focus();
+});
+
 uiManager.elements.dirTree.addEventListener('click', async (e) => {
   const toggleIcon = e.target.closest('.toggle-icon');
   const itemDiv = e.target.closest('.tree-item');
@@ -3314,6 +3319,13 @@ window.addEventListener('keydown', async (e) => {
   }
 
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    const isLeftPaneFocused = document.activeElement && document.activeElement.closest('#left-pane');
+    if (isLeftPaneFocused) {
+      e.preventDefault();
+      handleTreeNavigation(e.key);
+      return;
+    }
+
     if (appState.totalCount === 0) return;
 
     e.preventDefault();
@@ -3350,6 +3362,79 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (typeof closeAllMenus === 'function') closeAllMenus(e);
 });
+
+// ツリービューのキーボード操作ハンドラ
+async function handleTreeNavigation(key) {
+  const visibleItems = Array.from(document.querySelectorAll('#dir-tree .tree-item')).filter(el => el.offsetParent !== null);
+  if (visibleItems.length === 0) return;
+
+  const currentSelected = document.querySelector('#dir-tree .tree-item.selected');
+  let currentIndex = currentSelected ? visibleItems.indexOf(currentSelected) : -1;
+
+  if (currentIndex === -1) {
+    const currentItem = document.querySelector(`#dir-tree .tree-item[data-path="${CSS.escape(appState.currentDirectory)}"]`);
+    if (currentItem) currentIndex = visibleItems.indexOf(currentItem);
+    if (currentIndex === -1) currentIndex = 0;
+  }
+
+  const currentItem = visibleItems[currentIndex];
+  const childrenUl = currentItem.nextElementSibling;
+  const isExpanded = childrenUl && childrenUl.classList.contains('expanded');
+  const toggleIcon = currentItem.querySelector('.tree-toggle');
+  const hasChildren = toggleIcon && toggleIcon.style.visibility !== 'hidden';
+
+  const selectItem = async (item, autoExpand = false) => {
+    item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    
+    appState.selection.clear();
+    appState.selectedIndex = -1;
+    uiManager.updateSelectionUI();
+
+    const path = item.dataset.path;
+    if (window.veloceAPI.loadDirectory) {
+      const activeTab = appState.tabs[appState.activeTabIndex];
+      if (activeTab && activeTab.path !== path) {
+        activeTab.path = path;
+        activeTab.name = typeof getTabNameForPath === 'function' ? getTabNameForPath(path) : path.split(/[\\/]/).pop();
+        activeTab.scrollTop = 0;
+        appState.currentDirectory = path;
+        localStorage.setItem('currentDirectory', path);
+        uiManager.renderTabs();
+        if (typeof saveTabsState === 'function') saveTabsState();
+        refreshFileList(true);
+      }
+    }
+
+    if (autoExpand && !isExpanded) {
+      if (item.expandNode) await item.expandNode();
+    }
+
+    const activeItem = document.querySelector('#dir-tree .tree-item.selected');
+    if (activeItem) activeItem.classList.remove('selected');
+    item.classList.add('selected');
+  };
+
+  if (key === 'ArrowUp') {
+    if (currentIndex > 0) await selectItem(visibleItems[currentIndex - 1]);
+  } else if (key === 'ArrowDown') {
+    if (currentIndex < visibleItems.length - 1) await selectItem(visibleItems[currentIndex + 1]);
+  } else if (key === 'ArrowLeft') {
+    if (isExpanded) {
+      if (currentItem.collapseNode) currentItem.collapseNode();
+    } else {
+      const parentUl = currentItem.closest('ul.tree-children');
+      if (parentUl && parentUl.previousElementSibling && parentUl.previousElementSibling.classList.contains('tree-item')) {
+        await selectItem(parentUl.previousElementSibling);
+      }
+    }
+  } else if (key === 'ArrowRight') {
+    if (isExpanded) {
+      if (currentIndex < visibleItems.length - 1) await selectItem(visibleItems[currentIndex + 1]);
+    } else {
+      if (hasChildren && currentItem.expandNode) await currentItem.expandNode();
+    }
+  }
+}
 
 // ============================================================================
 // 5. Application Initialization
