@@ -94,8 +94,8 @@ export function extractMetadataFields(file, meta = {}) {
     }));
   }
 
-  const w = p.width || meta.width;
-  const h = p.height || meta.height;
+  const w = p.width || meta.width || file.width;
+  const h = p.height || meta.height || file.height;
   const res = (w && h) ? `${formatMetadataNumber(w)}x${formatMetadataNumber(h)}` : null;
 
   let sampler = p.sampler || file.sampler || null;
@@ -300,9 +300,9 @@ function parseComfyUI(file, meta, p) {
     }
   }
 
-  const w = width || meta.width;
-  const h = height || meta.height;
-  const res = (w && h) ? `x` : null;
+  const w = width || meta.width || file.width;
+  const h = height || meta.height || file.height;
+  const res = (w && h) ? `${formatMetadataNumber(w)}x${formatMetadataNumber(h)}` : null;
 
   return {
     name: file.name,
@@ -375,6 +375,25 @@ function parseA1111(file, meta, p) {
     source += ` (${parsedParams['Model']})`;
   }
 
+  let resolutionStr = parsedParams['Size'] || null;
+  if (resolutionStr && resolutionStr.includes('x')) {
+    const parts = resolutionStr.split('x');
+    if (parts.length === 2) {
+      const w = parseInt(parts[0], 10);
+      const h = parseInt(parts[1], 10);
+      if (!isNaN(w) && !isNaN(h)) {
+        resolutionStr = `${formatMetadataNumber(w)}x${formatMetadataNumber(h)}`;
+      }
+    }
+  }
+  if (!resolutionStr) {
+    const w = meta.width || file.width;
+    const h = meta.height || file.height;
+    if (w && h) {
+      resolutionStr = `${formatMetadataNumber(w)}x${formatMetadataNumber(h)}`;
+    }
+  }
+
   return {
     name: file.name,
     source: source,
@@ -383,7 +402,7 @@ function parseA1111(file, meta, p) {
     negativePrompt: negativePrompt || '',
     chars: [],
     params: {
-      resolution: parsedParams['Size'] || null,
+      resolution: resolutionStr,
       seed: parsedParams['Seed'] || null,
       steps: parsedParams['Steps'] ? formatMetadataNumber(parsedParams['Steps']) : null,
       sampler: parsedParams['Sampler'] || null,

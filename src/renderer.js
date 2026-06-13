@@ -1615,8 +1615,10 @@ async function renderMetadata(file) {
       if (cleanExt.startsWith('.')) cleanExt = cleanExt.substring(1);
       const fullName = cleanExt && !file.name.toLowerCase().endsWith('.' + cleanExt.toLowerCase()) ? `${file.name}.${cleanExt}` : file.name;
       const sizeStr = file.size ? `${formatSize(file.size)} bytes` : '-';
-      const resStr = (file.width && file.height) ? `${Number(file.width).toLocaleString()} x ${Number(file.height).toLocaleString()}` : '-';
-      const ratioStr = (file.width && file.height) ? ` (${getAspectRatio(file.width, file.height)})` : '';
+      const fileW = file.width || meta.width;
+      const fileH = file.height || meta.height;
+      const resStr = (fileW && fileH) ? `${Number(fileW).toLocaleString()} x ${Number(fileH).toLocaleString()}` : '-';
+      const ratioStr = (fileW && fileH) ? ` (${getAspectRatio(fileW, fileH)})` : '';
       const mtimeStr = file.mtime ? formatDate(file.mtime) : '-';
       let ctimeValue = file.ctime;
       if (!ctimeValue && meta) {
@@ -2500,6 +2502,7 @@ uiManager.elements.thumbnailGrid.addEventListener('dragstart', (e) => handleItem
 uiManager.elements.thumbnailGrid.addEventListener('contextmenu', (e) => handleItemContextMenu(e, true));
 
 uiManager.elements.fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
+uiManager.elements.fileListBody.addEventListener('dblclick', (e) => handleItemDblClick(e, false));
 uiManager.elements.fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
 uiManager.elements.fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
 

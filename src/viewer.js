@@ -917,6 +917,34 @@ window.addEventListener('keydown', async (e) => {
       if (viewerUI.elements.viewerImg) {
         viewerUI.applyGlowEffect(viewerUI.elements.viewerImg);
       }
+      
+      // トースト通知を表示
+      let toast = document.getElementById('viewer-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'viewer-toast';
+        toast.style.position = 'fixed';
+        toast.style.bottom = '20px';
+        toast.style.left = '50%';
+        toast.style.transform = 'translateX(-50%)';
+        toast.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        toast.style.color = '#fff';
+        toast.style.padding = '8px 16px';
+        toast.style.borderRadius = '20px';
+        toast.style.fontSize = '14px';
+        toast.style.zIndex = '10000';
+        toast.style.pointerEvents = 'none';
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = '画像をクリップボードにコピーしました';
+      toast.style.opacity = '1';
+      if (toast.hideTimeout) clearTimeout(toast.hideTimeout);
+      toast.hideTimeout = setTimeout(() => {
+        toast.style.opacity = '0';
+      }, 2000);
 	}
   }
 });
