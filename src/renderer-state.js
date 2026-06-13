@@ -24,8 +24,7 @@ class AppState {
   constructor() {
     /** @type {number} Rust側のフィルタリング済みファイルの総件数 */
     this.totalCount = 0;
-    /** @type {string[]} 以前使用していたパス一覧（現在は不要だが互換性のために空配列） */
-    this.currentPaths = [];
+
     /** @type {{key: string, asc: boolean}} 現在のソート設定 */
     this.sortConfig = { key: 'name', asc: true };
     /** @type {string} 検索クエリ文字列 */
@@ -64,6 +63,7 @@ class AppState {
     this.thumbnailUrls = new Map();  // サムネイル画像のURLキャッシュ（パス -> URL）
     this.preloadCursor = 0;          // バックグラウンドプリロードの現在のインデックス
     this.isPreloadRunning = false;   // プリロード処理が実行中かどうか
+    this.isFetchingPreload = false;  // 次のバッチのメタデータを取得中かどうか
 
     // トースト通知状態管理
     this.thumbnailTotalRequested = 0; // サムネイル生成リクエストの総数

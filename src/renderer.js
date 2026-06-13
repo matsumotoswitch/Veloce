@@ -29,7 +29,7 @@ const CONFIG = {
 appState.tabs = [];
 appState.activeTabIndex = -1;
 
-const logicalCores = navigator.hardwareConcurrency || 8;
+
 // サムネイル生成の同時実行数を制限します。
 // Rust側で直接リサイズ処理を行うため、I/Oやシェル依存のボトルネックが解消され、並列数を引き上げても高速に処理されます。
 const MAX_CONCURRENT_THUMBNAILS = 8;
@@ -2400,6 +2400,8 @@ document.addEventListener('dragover', (e) => {
 document.addEventListener('dragend', async () => {
   dragTooltip.classList.remove('show');
   appState.dragState.paths = [];
+  appState.dragState.indices = [];
+  appState.dragState.cachedRoot = null;
   appState.dragState.isAppDragging = false;
 
   if (appState.dragState.pendingRefresh) {
@@ -2609,7 +2611,9 @@ uiManager.elements.dirTree.addEventListener('dragstart', (e) => {
   e.dataTransfer.setData('application/json-folder', JSON.stringify(folderData));
   e.dataTransfer.effectAllowed = 'copyMove';
 
+  const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
   appState.dragState.paths = [itemDiv.dataset.path];
+  appState.dragState.cachedRoot = getRoot(itemDiv.dataset.path);
   appState.dragState.isAppDragging = true;
 });
 

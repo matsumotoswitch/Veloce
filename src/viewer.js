@@ -125,7 +125,7 @@ window.addEventListener('DOMContentLoaded', () => {
         resetZoomAndFit();
       });
       listen('viewer-list-updated', (event) => {
-        const newPaths = event.payload; // 更新されたファイルパスのリスト
+        const newPaths = event.payload || []; // 更新されたファイルパスのリスト
         viewerState.paths = newPaths;
         const newIndex = newPaths.indexOf(viewerState.currentImagePath);
         
