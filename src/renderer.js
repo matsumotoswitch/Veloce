@@ -610,14 +610,16 @@ function showNotification(message, type = 'info') {
 }
 
 // アイコン付きメニュー項目の生成ヘルパー
-function createMenuItem(label, iconSvg, onClick, isDanger = false) {
+function createMenuItem(label, iconSvg, onClick, isDanger = false, shortcut = '') {
   const item = document.createElement('div');
   item.className = 'context-menu-item';
   if (isDanger) item.classList.add('danger');
 
   item.innerHTML = `
     ${iconSvg || '<div style="width:16px;height:16px;"></div>'}
-    <span>${label}</span>
+    <span style="text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">${label}</span>
+    <span style="text-align: right; opacity: 0.6; font-size: 0.9em;">${shortcut}</span>
+    <div></div>
   `;
 
   item.addEventListener('click', (e) => {
@@ -1913,19 +1915,50 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
       showNotification(`フォルダの削除に失敗しました: ${errorMsg}`, 'error');
     }
   }
-}, true);
+}, true, 'Delete');
 
-const menuRenameFile = createMenuItem('ファイル名を変更...', UIManager.ICONS.FILE_PEN, renameSelectedFile);
-const menuRebuildCache = createMenuItem('キャッシュとサムネイルを再構築', UIManager.ICONS.REFRESH, rebuildSelectedCache);
-const menuDeleteFile = createMenuItem('ファイルを削除', UIManager.ICONS.FILE_X, deleteSelectedFiles, true);
+const menuRenameFile = createMenuItem('ファイル名を変更...', UIManager.ICONS.FILE_PEN, renameSelectedFile, false, 'F2');
+const menuRebuildCache = createMenuItem('選択項目のキャッシュを再構築', UIManager.ICONS.REFRESH, rebuildSelectedCache);
+
+const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシュを再構築', UIManager.ICONS.REFRESH, async () => {
+  try {
+    if (!appState.currentDirectory) return;
+    uiManager.showToast('フォルダ全体のキャッシュを再構築しています...', 0, 'rebuild-folder', 'info');
+
+    const pathsToRebuild = [];
+    const total = appState.totalCount;
+    const batchSize = 1000;
+    for (let i = 0; i < total; i += batchSize) {
+      const size = Math.min(batchSize, total - i);
+      const files = await window.veloceAPI.getItems(i, size);
+      for (const file of files) {
+        pathsToRebuild.push(file.path);
+      }
+    }
+
+    if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
+      await window.veloceAPI.clearMetadataCache(pathsToRebuild);
+      appState.thumbnailUrls.forEach(url => URL.revokeObjectURL(url));
+      appState.thumbnailUrls.clear();
+      appState.thumbnailTotalRequested = 0;
+      appState.thumbnailCompleted = 0;
+      uiManager.showToast('キャッシュの再構築が完了しました', 3000, 'rebuild-folder', 'success');
+      await refreshFileList(true);
+    }
+  } catch (err) {
+    uiManager.showToast(`再構築に失敗しました: ${err}`, 3000, 'rebuild-folder', 'error');
+  }
+});
+const menuDeleteFile = createMenuItem('ファイルを削除', UIManager.ICONS.FILE_X, deleteSelectedFiles, true, 'Delete');
 
 // --- コンテキストメニュー「並べ替え」の作成 ---
 const menuSortRoot = document.createElement('div');
 menuSortRoot.className = 'context-menu-item';
 menuSortRoot.innerHTML = `
   ${UIManager.ICONS.SORT || '<div style="width:16px;height:16px;"></div>'}
-  <span style="flex: 1;">並べ替え</span>
-  <span style="display: inline-flex; align-items: center; opacity: 0.7;">${UIManager.ICONS.CHEVRON_RIGHT}</span>
+  <span style="text-align: left; white-space: nowrap;">並べ替え</span>
+  <span></span>
+  <span style="display: inline-flex; align-items: center; justify-content: flex-end; opacity: 0.7;">${UIManager.ICONS.CHEVRON_RIGHT}</span>
 `;
 
 menuSortRoot.onmouseenter = () => {
@@ -2102,7 +2135,7 @@ const menuDeleteFavorite = createMenuItem('お気に入りを削除', UIManager.
       showNotification(`お気に入りから削除しました`, 'success');
     }
   }
-}, true);
+}, true, 'Delete');
 
 const menuOpenInExplorer = createMenuItem('エクスプローラで開く', UIManager.ICONS.FOLDER_OPEN, async () => {
   let path = '';
@@ -2167,12 +2200,13 @@ const menuReloadFolder = createMenuItem('フォルダを再読み込み', UIMana
         await window.veloceAPI.loadDirectory(currentTab.path);
       }
     }
-    
-    if (typeof uiManager.showCustomTooltip === 'function') {
-      uiManager.showCustomTooltip('フォルダを再読み込みしました', window.innerWidth / 2, window.innerHeight - 50, 1500);
+  } else {
+    // 中央ペインの背景などから呼ばれた場合は、現在のフォルダを再読み込みする
+    if (typeof refreshFileList === 'function') {
+      await refreshFileList(true);
     }
   }
-});
+}, false, 'F5');
 
 // --- タブ用メニューの作成 ---
 const menuTabClose = createMenuItem('閉じる', UIManager.ICONS.X, () => {
@@ -2330,6 +2364,7 @@ contextMenu.appendChild(menuDeleteFavorite);
 // 6. キャッシュ操作系
 contextMenu.appendChild(menuSeparatorCache);
 contextMenu.appendChild(menuRebuildCache);
+contextMenu.appendChild(menuRebuildFolderCache);
 
 // 並べ替え (ファイル操作メニュー時に表示)
 contextMenu.appendChild(menuSeparatorSort);
@@ -2352,15 +2387,15 @@ window.onTabContextMenu = (e, index) => {
   // メニューを一度すべて非表示にする
   Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-  menuTabOpenExplorer.style.display = 'block';
-  menuTabCopyPath.style.display = 'block';
-  menuSeparator1.style.display = 'block';
-  menuTabDuplicate.style.display = 'block';
-  menuTabClose.style.display = 'block';
-  menuTabCloseOthers.style.display = 'block';
-  menuTabCloseRight.style.display = 'block';
-  menuSeparator2.style.display = 'block';
-  menuTabAddFavorite.style.display = 'block';
+  menuTabOpenExplorer.style.display = '';
+  menuTabCopyPath.style.display = '';
+  menuSeparator1.style.display = '';
+  menuTabDuplicate.style.display = '';
+  menuTabClose.style.display = '';
+  menuTabCloseOthers.style.display = '';
+  menuTabCloseRight.style.display = '';
+  menuSeparator2.style.display = '';
+  menuTabAddFavorite.style.display = '';
 
   // 「お気に入りに追加」の状態制御
   const isFavorite = appState.favorites.some(f => f.path === tab.path);
@@ -2534,19 +2569,27 @@ function handleItemContextMenu(e, isGrid) {
   e.preventDefault();
   e.stopPropagation();
 
+  // 他のペインでのコンテキストメニューの対象が残っていると誤動作するためクリアする
+  contextMenu.targetFolderElement = null;
+  contextMenu.targetFolder = null;
+  contextMenu.targetFavoriteId = null;
+  contextMenu.targetFavoritePath = null;
+
   const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
 
   if (!item || !item.dataset.index) {
-    if (!isGrid) return;
-
     appState.selection.clear();
     appState.selectedIndex = -1;
     uiManager.updateSelectionUI();
 
     Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
+    menuReloadFolder.style.display = '';
+    menuSeparatorCache.style.display = '';
+    menuRebuildFolderCache.style.display = '';
+    menuSeparatorSort.style.display = '';
     updateSortCheckmarks();
-    menuSortRoot.style.display = 'flex';
+    menuSortRoot.style.display = '';
 
     showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
     return;
@@ -2558,15 +2601,15 @@ function handleItemContextMenu(e, isGrid) {
 
   Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-  menuRenameFile.style.display = appState.selection.size === 1 ? 'block' : 'none';
-  menuDeleteFile.style.display = 'block';
-  menuSeparatorCache.style.display = 'block';
-  menuRebuildCache.style.display = 'block';
+  menuRenameFile.style.display = appState.selection.size === 1 ? '' : 'none';
+  menuDeleteFile.style.display = '';
+  menuSeparatorCache.style.display = '';
+  menuRebuildCache.style.display = '';
 
   if (isGrid) {
-    menuSeparatorSort.style.display = 'block';
+    menuSeparatorSort.style.display = '';
     updateSortCheckmarks();
-    menuSortRoot.style.display = 'flex';
+    menuSortRoot.style.display = '';
   }
 
   showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
@@ -2664,18 +2707,18 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
 
   Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-  menuOpenInNewTab.style.display = 'block';
-  menuOpenInExplorer.style.display = 'block';
-  menuReloadFolder.style.display = 'block';
-  menuSeparator1.style.display = 'block';
-  menuNewFolder.style.display = 'block';
+  menuOpenInNewTab.style.display = '';
+  menuOpenInExplorer.style.display = '';
+  menuReloadFolder.style.display = '';
+  menuSeparator1.style.display = '';
+  menuNewFolder.style.display = '';
 
   if (!isRoot) {
-    menuSeparator3.style.display = 'block';
-    menuRenameFolder.style.display = 'block';
-    menuDeleteFolder.style.display = 'block';
-    menuSeparator4.style.display = 'block';
-    menuAddFavorite.style.display = 'block';
+    menuSeparator3.style.display = '';
+    menuRenameFolder.style.display = '';
+    menuDeleteFolder.style.display = '';
+    menuSeparator4.style.display = '';
+    menuAddFavorite.style.display = '';
   }
 
   showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
@@ -4251,11 +4294,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-      menuOpenInNewTab.style.display = 'block';
-      menuOpenInExplorer.style.display = 'block';
-      menuSeparator1.style.display = 'block';
-      menuEditFavorite.style.display = 'block';
-      menuDeleteFavorite.style.display = 'block';
+      menuOpenInNewTab.style.display = '';
+      menuOpenInExplorer.style.display = '';
+      menuSeparator1.style.display = '';
+      menuEditFavorite.style.display = '';
+      menuDeleteFavorite.style.display = '';
 
       showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
     });

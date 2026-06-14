@@ -1310,10 +1310,10 @@ input[type="range"]:focus {
 .context-menu-item {
   position: relative;
   padding: 6px 14px;
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 16px auto minmax(50px, 1fr) 16px;
   gap: 10px;
-  /* アイコンとテキストの隙間 */
+  align-items: center;
   color: var(--text-color);
   font-size: 13px;
   cursor: pointer;
@@ -1322,14 +1322,11 @@ input[type="range"]:focus {
 
 .context-menu-item svg,
 .context-menu-item>div[style*="width:16px"] {
-  width: 15px !important;
-  height: 15px !important;
-  flex-shrink: 0;
+  width: 16px !important;
+  height: 16px !important;
   opacity: 0.75;
   transition: opacity 0.15s ease;
-  position: relative;
-  top: 2px;
-  left: -5px;
+  justify-self: center;
 }
 
 .context-menu-item:hover {
