@@ -346,6 +346,7 @@ async function renameSelectedFolder() {
 
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
+      appState.undoStack.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
       showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (appState.currentDirectory.startsWith(oldPath)) {
         appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
@@ -411,6 +412,7 @@ async function renameSelectedFile() {
 
       const result = await window.veloceAPI.renameFile(oldPath, newName);
       if (result && result.success) {
+        appState.undoStack.push({ type: 'RENAME_FILE', oldPath, newPath: result.path });
         uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
 
         const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
@@ -1856,6 +1858,7 @@ const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager
 
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
+      appState.undoStack.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
       showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (appState.currentDirectory.startsWith(oldPath)) {
         appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
@@ -2780,6 +2783,11 @@ uiManager.elements.dirTree.addEventListener('drop', async (e) => {
         const result = await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path, intent);
         if (result && result.success) {
           successCount++;
+          if (result.action === 'move') {
+            appState.undoStack.push({ type: 'MOVE_FILE', sourcePath: p, targetPath: result.targetPath });
+          } else if (result.action === 'copy') {
+            appState.undoStack.push({ type: 'COPY_FILE', sourcePath: p, targetPath: result.targetPath });
+          }
         }
       }
       if (successCount > 0) {
@@ -3243,6 +3251,11 @@ window.addEventListener('keydown', async (e) => {
   if (e.key === 'F5') {
     e.preventDefault();
     await refreshFileList();
+  }
+
+  if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    performUndo();
   }
 
   if (e.key === 'F2') {
@@ -4352,3 +4365,56 @@ window.addEventListener('DOMContentLoaded', async () => {
     }).catch(() => { });
   }
 });
+
+/**
+ * 履歴（Undoスタック）から直前の操作を取り消す
+ */
+async function performUndo() {
+  if (appState.undoStack.length === 0) {
+    uiManager.showToast('元に戻す操作はありません', 2000, 'undo', 'info');
+    return;
+  }
+
+  const action = appState.undoStack.pop();
+  try {
+    const { fs, path } = window.__TAURI__;
+    
+    if (action.type === 'RENAME_FOLDER') {
+      const oldName = await path.basename(action.oldPath);
+      const result = await window.veloceAPI.renameFolder(action.newPath, oldName);
+      if (result.success) {
+        uiManager.showToast(`フォルダ名の変更を元に戻しました`, 3000, 'undo', 'success');
+        if (appState.currentDirectory.startsWith(action.newPath)) {
+          appState.currentDirectory = appState.currentDirectory.replace(action.newPath, action.oldPath);
+          localStorage.setItem('currentDirectory', appState.currentDirectory);
+        }
+        await refreshTree();
+      }
+    } else if (action.type === 'RENAME_FILE') {
+      const oldName = await path.basename(action.oldPath);
+      const result = await window.veloceAPI.renameFile(action.newPath, oldName);
+      if (result.success) {
+        uiManager.showToast(`ファイル名の変更を元に戻しました`, 3000, 'undo', 'success');
+        appState.thumbnailUrls.delete(action.newPath);
+        scheduleRefresh();
+      }
+    } else if (action.type === 'MOVE_FILE') {
+      const originalDir = await path.dirname(action.sourcePath);
+      const result = await window.veloceAPI.moveOrCopyFile(action.targetPath, originalDir, 'move');
+      if (result.success) {
+        uiManager.showToast(`ファイルの移動を元に戻しました`, 3000, 'undo', 'success');
+        scheduleRefresh();
+      }
+    } else if (action.type === 'COPY_FILE') {
+      await fs.removeFile(action.targetPath);
+      if (window.veloceAPI.notifyFileRemoved) {
+        await window.veloceAPI.notifyFileRemoved(action.targetPath);
+      }
+      uiManager.showToast(`ファイルのコピーを元に戻しました`, 3000, 'undo', 'success');
+      scheduleRefresh();
+    }
+  } catch (err) {
+    console.error('Undo failed:', err);
+    uiManager.showToast(`元に戻す操作に失敗しました`, 3000, 'undo', 'warning');
+  }
+}

@@ -76,6 +76,7 @@ class AppState {
 
     // 履歴管理
     this.isNavigatingHistory = false; // 履歴操作による遷移中のフラグ
+    this.undoStack = [];              // アンドゥ（元に戻す）用の操作履歴
   }
 
   /**

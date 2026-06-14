@@ -2050,3 +2050,20 @@ fn main() {
         .run(context)
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::natural_cmp;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn test_natural_cmp() {
+        assert_eq!(natural_cmp("1.png", "2.png"), Ordering::Less);
+        assert_eq!(natural_cmp("2.png", "10.png"), Ordering::Less);
+        assert_eq!(natural_cmp("10.png", "1.png"), Ordering::Greater);
+        assert_eq!(natural_cmp("file01.txt", "file2.txt"), Ordering::Less);
+        assert_eq!(natural_cmp("v1.2", "v1.10"), Ordering::Less);
+        assert_eq!(natural_cmp("a", "b"), Ordering::Less);
+        assert_eq!(natural_cmp("A", "b"), Ordering::Less); // Case insensitive
+    }
+}

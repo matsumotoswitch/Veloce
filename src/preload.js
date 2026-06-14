@@ -325,7 +325,7 @@ window.veloceAPI = {
           }
         }
       }
-      return { success: true, action, reason: null };
+      return { success: true, action, targetPath, reason: null };
     } catch (error) {
       return { success: false, action: '', reason: String(error) };
     }
