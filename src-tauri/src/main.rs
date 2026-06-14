@@ -37,6 +37,39 @@ pub struct ImageFile {
     source: String,
     #[serde(default)]
     meta_loaded: bool,
+    #[serde(skip)]
+    search_text: String,
+}
+
+fn extract_searchable_text(val: &serde_json::Value) -> String {
+    let mut text = String::new();
+    match val {
+        serde_json::Value::String(s) => {
+            if s.len() < 10000 {
+                text.push_str(s);
+                text.push(' ');
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                text.push_str(&extract_searchable_text(v));
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                if k == "reference_image_multiple" || k == "reference_image" || k == "image" {
+                    continue;
+                }
+                text.push_str(&extract_searchable_text(v));
+            }
+        }
+        serde_json::Value::Number(n) => {
+            text.push_str(&n.to_string());
+            text.push(' ');
+        }
+        _ => {}
+    }
+    text
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -232,6 +265,7 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                                 negative_prompt: String::new(),
                                 source: String::new(),
                                 meta_loaded: false,
+                                search_text: String::new(),
                             });
                         }
                     }
@@ -311,6 +345,7 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                                 f.prompt = full_meta.prompt.clone();
                                 f.negative_prompt = full_meta.negative_prompt.clone();
                                 f.source = full_meta.source.clone();
+                                f.search_text = extract_searchable_text(&full_meta.params);
                                 f.meta_loaded = true;
                             }
                         }
@@ -321,6 +356,7 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                                 f.prompt = full_meta.prompt.clone();
                                 f.negative_prompt = full_meta.negative_prompt.clone();
                                 f.source = full_meta.source.clone();
+                                f.search_text = extract_searchable_text(&full_meta.params);
                                 f.meta_loaded = true;
                             }
                         }
@@ -395,11 +431,11 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     } else {
         let terms: Vec<String> = search_query.to_lowercase().split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
         all_files.iter().filter(|f| {
-            let text = format!("{} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source).to_lowercase();
+            let text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
             terms.iter().all(|term| text.contains(term))
         }).cloned().collect()
     };
-
+    
     // ソート
     let key = sort_config.key.as_str();
     let asc = sort_config.asc;
@@ -511,6 +547,7 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
                 file.prompt = meta.prompt.clone();
                 file.negative_prompt = meta.negative_prompt.clone();
                 file.source = meta.source.clone();
+                file.search_text = extract_searchable_text(&meta.params);
                 file.meta_loaded = true;
             }
         }
@@ -523,6 +560,7 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
                 file.prompt = meta.prompt.clone();
                 file.negative_prompt = meta.negative_prompt.clone();
                 file.source = meta.source.clone();
+                file.search_text = extract_searchable_text(&meta.params);
                 file.meta_loaded = true;
             }
         }
@@ -565,6 +603,31 @@ async fn get_full_metadata_batch(file_paths: Vec<String>) -> Result<Vec<FullMeta
 
 // --- バイナリ解析パーサー群 (JSの実装をRustへ移植) ---
 
+fn decode_metadata_string(bytes: &[u8]) -> String {
+    if bytes.len() >= 2 {
+        if bytes[0] == 0xFF && bytes[1] == 0xFE {
+            let u16_data: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            return String::from_utf16_lossy(&u16_data);
+        } else if bytes[0] == 0xFE && bytes[1] == 0xFF {
+            let u16_data: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+            return String::from_utf16_lossy(&u16_data);
+        }
+    }
+    
+    let le_zeros = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
+    let be_zeros = bytes.iter().step_by(2).filter(|&&b| b == 0).count();
+    
+    if bytes.len() > 4 && le_zeros > bytes.len() / 3 && bytes.len() % 2 == 0 {
+        let u16_data: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        return String::from_utf16_lossy(&u16_data);
+    } else if bytes.len() > 4 && be_zeros > bytes.len() / 3 && bytes.len() % 2 == 0 {
+        let u16_data: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        return String::from_utf16_lossy(&u16_data);
+    }
+
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
     let mtime = std::fs::metadata(file_path)
         .and_then(|m| m.modified())
@@ -589,7 +652,13 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
     if let Some(cache_path) = &cache_file_path {
         if cache_path.exists() {
             if let Ok(json_str) = std::fs::read_to_string(cache_path) {
-                if let Ok(cached_meta) = serde_json::from_str::<FullMetadata>(&json_str) {
+                if let Ok(mut cached_meta) = serde_json::from_str::<FullMetadata>(&json_str) {
+                    // 古いキャッシュの互換性対応 (A1111のプロンプトが空の場合のパッチ)
+                    if cached_meta.prompt.is_empty() {
+                        if let Some(raw) = cached_meta.params.get("rawParameters").and_then(|v| v.as_str()) {
+                            cached_meta.prompt = raw.to_string();
+                        }
+                    }
                     return cached_meta;
                 }
             }
@@ -629,15 +698,17 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
         let exif_data = if lower_path.ends_with(".webp") { parse_webp_exif(file_path) } else { parse_jpeg_exif(file_path) };
 
         if let Some(desc) = exif_data.get("ImageDescription") {
-            raw_description = String::from_utf8_lossy(desc).trim_end_matches('\0').to_string();
+            raw_description = decode_metadata_string(desc).trim_end_matches('\0').to_string();
         }
         if let Some(comment) = exif_data.get("UserComment") {
-            let mut start = 0;
-            if comment.starts_with(b"UNICODE\0") || comment.starts_with(b"ASCII\0\0\0") { start = 8; }
-            raw_comment = String::from_utf8_lossy(&comment[start..]).trim_end_matches('\0').trim().to_string();
+            let mut content = comment.as_slice();
+            if content.starts_with(b"UNICODE\0") || content.starts_with(b"ASCII\0\0\0") {
+                content = &content[8..];
+            }
+            raw_comment = decode_metadata_string(content).trim_end_matches('\0').trim().to_string();
         }
         if let Some(sw) = exif_data.get("Software") {
-            source = String::from_utf8_lossy(sw).trim_end_matches('\0').to_string();
+            source = decode_metadata_string(sw).trim_end_matches('\0').to_string();
         }
     }
 
@@ -771,12 +842,18 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
     if params.as_object().map_or(true, |m| m.is_empty()) {
         if !raw_parameters.is_empty() {
             let mut map = serde_json::Map::new();
-            map.insert("rawParameters".to_string(), serde_json::Value::String(raw_parameters));
+            map.insert("rawParameters".to_string(), serde_json::Value::String(raw_parameters.clone()));
             params = serde_json::Value::Object(map);
+            if prompt.is_empty() {
+                prompt = raw_parameters; // 検索用プロンプトとして代入
+            }
         } else if comment_string.contains("Steps: ") {
             let mut map = serde_json::Map::new();
             map.insert("rawParameters".to_string(), serde_json::Value::String(comment_string.to_string()));
             params = serde_json::Value::Object(map);
+            if prompt.is_empty() {
+                prompt = comment_string.to_string(); // 検索用プロンプトとして代入
+            }
         } else if prompt.is_empty() && !comment_string.is_empty() {
             prompt = comment_string.to_string();
         } else if !comment_string.is_empty() && !comment_string.contains("Steps: ") {
@@ -1920,13 +1997,13 @@ fn main() {
                                                 if old_size != size || old_mtime != mtime {
                                                     let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                                                     let file_name = entry.file_name().to_string_lossy().into_owned();
-                                                    let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false };
+                                                    let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false, search_text: String::new() };
                                                     let _ = app_handle.emit_all("file-changed", img_file);
                                                 }
                                             } else {
                                                 let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                                                 let file_name = entry.file_name().to_string_lossy().into_owned();
-                                                let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false };
+                                                let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false, search_text: String::new() };
                                                 let _ = app_handle.emit_all("file-changed", img_file);
                                             }
                                         }
@@ -2065,5 +2142,57 @@ mod tests {
         assert_eq!(natural_cmp("v1.2", "v1.10"), Ordering::Less);
         assert_eq!(natural_cmp("a", "b"), Ordering::Less);
         assert_eq!(natural_cmp("A", "b"), Ordering::Less); // Case insensitive
+    }
+
+    #[test]
+    fn test_decode_metadata_string() {
+        use super::decode_metadata_string;
+        
+        // 1. UTF-8 (ASCII)
+        let utf8_bytes = b"hair and eyes";
+        assert_eq!(decode_metadata_string(utf8_bytes), "hair and eyes");
+
+        // 2. UTF-16LE without BOM
+        let utf16_le_bytes: Vec<u8> = "hair".encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        assert_eq!(decode_metadata_string(&utf16_le_bytes), "hair");
+
+        // 3. UTF-16BE without BOM
+        let utf16_be_bytes: Vec<u8> = "hair".encode_utf16().flat_map(|c| c.to_be_bytes()).collect();
+        assert_eq!(decode_metadata_string(&utf16_be_bytes), "hair");
+
+        // 4. UTF-16LE with BOM
+        let mut utf16_le_bom = vec![0xFF, 0xFE];
+        utf16_le_bom.extend_from_slice(&utf16_le_bytes);
+        assert_eq!(decode_metadata_string(&utf16_le_bom), "hair");
+    }
+
+    #[test]
+    fn test_extract_searchable_text() {
+        use super::extract_searchable_text;
+        use serde_json::json;
+
+        let data = json!({
+            "prompt": "1girl, hair",
+            "reference_image": "HUGE_BASE64_STRING",
+            "nested": {
+                "characterPrompts": [
+                    { "prompt": "takao" }
+                ]
+            },
+            "steps": 20
+        });
+
+        let extracted = extract_searchable_text(&data);
+        
+        // 抽出されるべきテキストが含まれているか
+        assert!(extracted.contains("1girl, hair"));
+        assert!(extracted.contains("takao"));
+        assert!(extracted.contains("20")); // 数値も文字列化される
+        
+        // 画像データ(キーが reference_image 等)はスキップされるべき
+        assert!(!extracted.contains("HUGE_BASE64_STRING"));
+        
+        // キー名は抽出されないべき
+        assert!(!extracted.contains("characterPrompts"));
     }
 }
