@@ -1334,7 +1334,7 @@ function toggleHelpOverlay(forceShow) {
 
   content.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-      <h2 style="margin: 0; color: var(--glow-gold); font-size: 1.2em;">ヘルプ・ショートカット一覧</h2>
+      <h2 style="margin: 0; color: var(--glow-gold); font-size: 1.2em; border-bottom: none;">ヘルプ・ショートカット一覧</h2>
       <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid var(--modal-border); border-radius: 20px; color: var(--text-color); font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(0, 0, 0, 0.2);"
         onmouseover="this.style.backgroundColor='rgba(37, 126, 140, 0.15)'; this.style.borderColor='var(--accent-color)'; this.style.color='#fff';"
         onmouseout="this.style.backgroundColor='rgba(0, 0, 0, 0.2)'; this.style.borderColor='var(--modal-border)'; this.style.color='var(--text-color)';">
@@ -1697,6 +1697,8 @@ async function renderMetadata(file) {
       secEl.title.textContent = section.title;
       secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
 
+      let sectionHasMatch = false;
+
       if (section.isRaw) {
         secEl.box.className = 'prompt-look';
         secEl.box.style.whiteSpace = 'pre-wrap';
@@ -1705,7 +1707,17 @@ async function renderMetadata(file) {
         secEl.box.style.wordBreak = 'break-all';
         secEl.box.style.maxHeight = '400px';
         secEl.box.style.overflowY = 'auto';
-        secEl.box.textContent = String(section.value);
+        const rawText = String(section.value);
+        if (terms.length > 0) {
+            sectionHasMatch = terms.some(term => rawText.toLowerCase().includes(term));
+            if (sectionHasMatch) {
+                secEl.box.innerHTML = highlightSearchTerms(rawText, terms);
+            } else {
+                secEl.box.textContent = rawText;
+            }
+        } else {
+            secEl.box.textContent = rawText;
+        }
       } else {
         secEl.box.className = section.isParam ? 'prompt-look param-box' : 'prompt-look';
         secEl.box.style.cssText = '';
@@ -1716,10 +1728,10 @@ async function renderMetadata(file) {
           if (terms.length > 0) {
             const isMatch = terms.some(term => t.toLowerCase().includes(term));
             if (isMatch) {
+              sectionHasMatch = true;
               tagEl.style.border = '1px solid #ffcc00';
               tagEl.style.backgroundColor = 'rgba(255, 204, 0, 0.25)';
               tagEl.style.color = '#ffcc00';
-              tagEl.style.fontWeight = 'bold';
               tagEl.style.boxShadow = '0 0 8px rgba(255,204,0,0.3)';
             } else {
               tagEl.style.cssText = '';
@@ -1731,6 +1743,12 @@ async function renderMetadata(file) {
           }
           secEl.box.appendChild(tagEl);
         }
+      }
+
+      if (sectionHasMatch) {
+        secEl.title.style.color = 'var(--glow-gold)';
+      } else {
+        secEl.title.style.color = '';
       }
 
       if (section.subLabel && section.subLabel !== 'Text to Image') {
