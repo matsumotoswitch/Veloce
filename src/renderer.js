@@ -1682,7 +1682,7 @@ async function renderMetadata(file) {
       searchStr = appState.searchQuery;
     }
     const terms = searchStr.trim() !== ''
-      ? searchStr.toLowerCase().split(',').map(t => t.trim()).filter(Boolean)
+      ? searchStr.toLowerCase().split(/[,\n\r]+/).map(t => t.trim()).filter(Boolean)
       : [];
 
     resetInspectorPools();
@@ -1722,7 +1722,7 @@ async function renderMetadata(file) {
         secEl.box.className = section.isParam ? 'prompt-look param-box' : 'prompt-look';
         secEl.box.style.cssText = '';
 
-        const tags = section.isParam ? [String(section.value)] : String(section.value).split(',').map(t => t.trim()).filter(t => t);
+        const tags = section.isParam ? [String(section.value)] : String(section.value).split(/[,\n\r]+/).map(t => t.trim()).filter(t => t);
         for (const t of tags) {
           const tagEl = getInspectorTag();
           if (terms.length > 0) {

@@ -124,7 +124,7 @@ export function extractMetadataFields(file, meta = {}) {
  */
 export function parsePromptTags(text) {
   if (!text) return [];
-  return String(text).split(',').map(t => t.trim()).filter(Boolean);
+  return String(text).split(/[,\n\r]+/).map(t => t.trim()).filter(Boolean);
 }
 
 /**
