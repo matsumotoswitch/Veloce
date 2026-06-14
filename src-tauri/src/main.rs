@@ -242,7 +242,7 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
         // Rust側のAppStateに全ファイルを格納（Source of Truth）
         if let Some(state) = app_clone.try_state::<AppState>() {
             // デフォルトソート（名前順昇順）を適用
-            files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            files.sort_by(|a, b| natural_cmp(&a.name, &b.name));
 
             let total_count = files.len();
             let sorted_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
@@ -338,6 +338,52 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
 
     Ok(())
 }
+/// 数値を解釈する自然なソート（Natural Sort）の比較関数
+fn natural_cmp(s1: &str, s2: &str) -> std::cmp::Ordering {
+    let mut it1 = s1.chars().peekable();
+    let mut it2 = s2.chars().peekable();
+
+    loop {
+        match (it1.peek(), it2.peek()) {
+            (Some(&c1), Some(&c2)) => {
+                if c1.is_ascii_digit() && c2.is_ascii_digit() {
+                    let mut n1 = 0u64;
+                    let mut n2 = 0u64;
+                    while let Some(&c) = it1.peek() {
+                        if c.is_ascii_digit() {
+                            n1 = n1.saturating_mul(10).saturating_add((c as u8 - b'0') as u64);
+                            it1.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    while let Some(&c) = it2.peek() {
+                        if c.is_ascii_digit() {
+                            n2 = n2.saturating_mul(10).saturating_add((c as u8 - b'0') as u64);
+                            it2.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if n1 != n2 {
+                        return n1.cmp(&n2);
+                    }
+                } else {
+                    let cmp = c1.to_ascii_lowercase().cmp(&c2.to_ascii_lowercase());
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp;
+                    }
+                    it1.next();
+                    it2.next();
+                }
+            }
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (None, None) => return std::cmp::Ordering::Equal,
+        }
+    }
+}
+
 /// Rust側でソート・フィルタリングを実行し、最新のpathsをViewerにも同期する
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
     let all_files = state.all_files.lock().unwrap();
@@ -359,18 +405,18 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     let asc = sort_config.asc;
     filtered.sort_by(|a, b| {
         let cmp = match key {
-            "name" => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            "name" => natural_cmp(&a.name, &b.name),
             "ext" => a.ext.cmp(&b.ext),
             "size" => a.size.cmp(&b.size),
             "mtime" => a.mtime.cmp(&b.mtime),
             "ctime" => a.ctime.cmp(&b.ctime),
             "width" => a.width.cmp(&b.width),
             "height" => a.height.cmp(&b.height),
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            _ => natural_cmp(&a.name, &b.name),
         };
         let cmp = if asc { cmp } else { cmp.reverse() };
         if cmp == std::cmp::Ordering::Equal {
-            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+            natural_cmp(&a.name, &b.name)
         } else {
             cmp
         }

@@ -118,9 +118,12 @@ window.veloceAPI = {
     try {
       const entries = await fs.readDir(dirPath);
       // Tauri v1では、ディレクトリの場合のみ children プロパティが（空でも）付与されます
-      return entries
+      const folders = entries
         .filter(entry => entry.children !== undefined)
         .map(entry => ({ name: entry.name, path: entry.path }));
+      
+      folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+      return folders;
     } catch (error) {
       console.warn("Failed to get folders:", error);
       return [];
