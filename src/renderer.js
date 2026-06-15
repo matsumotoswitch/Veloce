@@ -617,7 +617,7 @@ function createMenuItem(label, iconSvg, onClick, isDanger = false, shortcut = ''
 
   item.innerHTML = `
     ${iconSvg || '<div style="width:16px;height:16px;"></div>'}
-    <span style="text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">${label}</span>
+    <span style="text-align: left; white-space: nowrap;">${label}</span>
     <span style="text-align: right; opacity: 0.6; font-size: 0.9em;">${shortcut}</span>
     <div></div>
   `;
@@ -1962,7 +1962,33 @@ menuSortRoot.innerHTML = `
 `;
 
 menuSortRoot.onmouseenter = () => {
-  sortSubmenu.style.transformOrigin = 'top left';
+  // Reset position
+  sortSubmenu.style.left = 'calc(100% + 2px)';
+  sortSubmenu.style.right = 'auto';
+  sortSubmenu.style.top = '-7px';
+  sortSubmenu.style.bottom = 'auto';
+
+  // We need to temporarily force display block if not already to measure it
+  // But CSS :hover handles display:block immediately.
+  const rect = sortSubmenu.getBoundingClientRect();
+  
+  let originX = 'left';
+  let originY = 'top';
+
+  if (rect.right > window.innerWidth) {
+    sortSubmenu.style.left = 'auto';
+    sortSubmenu.style.right = 'calc(100% + 2px)';
+    originX = 'right';
+  }
+
+  if (rect.bottom > window.innerHeight) {
+    sortSubmenu.style.top = 'auto';
+    sortSubmenu.style.bottom = '-7px';
+    originY = 'bottom';
+  }
+
+  sortSubmenu.style.transformOrigin = `${originY} ${originX}`;
+  
   sortSubmenu.animate([
     { opacity: 0, transform: 'scale(0.95)' },
     { opacity: 1, transform: 'scale(1)' }
@@ -2009,7 +2035,13 @@ const createSubOption = (label, onClick, dataKey, dataVal) => {
   opt.className = 'context-menu-item';
   if (dataKey === 'sortKey') opt.dataset.sortKey = dataVal;
   if (dataKey === 'sortOrder') opt.dataset.sortOrder = dataVal;
-  opt.innerHTML = `<span class="menu-check" style="width:16px;height:16px;display:inline-flex;justify-content:center;align-items:center;"></span><span>${label}</span>`;
+  
+  opt.innerHTML = `
+    <span class="menu-check" style="display:inline-flex;justify-content:center;align-items:center;width:16px;height:16px;"></span>
+    <span style="text-align: left; white-space: nowrap;">${label}</span>
+    <span></span>
+    <div></div>
+  `;
 
   opt.addEventListener('click', (e) => {
     e.stopPropagation();
