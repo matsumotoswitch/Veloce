@@ -2,7 +2,7 @@
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
   --bg-color: #0b1012;
   --panel-bg: #162226;
-  --border-color: #23343a;
+  --border-color: rgba(255, 255, 255, 0.08);
   --text-color: #cddbe0;
   --accent-color: #257e8c;
   --accent-hover: #2e96a6;
@@ -281,7 +281,7 @@ input:-webkit-autofill:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: var(--border-color);
+  background-color: rgba(255, 255, 255, 0.15);
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -466,7 +466,6 @@ body.is-resizing #file-info-section {
   align-items: center;
   gap: 8px;
   background-color: var(--panel-bg);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .toolbar #search-container {
@@ -571,7 +570,6 @@ table#file-table {
 #file-table th,
 #file-table td {
   padding: 4px 8px;
-  border-right: 1px dotted var(--border-color);
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
 }
@@ -1499,7 +1497,7 @@ th[data-sort] svg path {
   color: #ffffff !important;
   border-left: 1px solid var(--border-color) !important;
   border-right: 1px solid var(--border-color) !important;
-  border-top: 2px solid var(--accent-color) !important;
+  border-top: 1px solid var(--border-color) !important;
   border-bottom: 1px solid transparent !important;
   /* 下線を透明にして隙間を埋める準備 */
   border-top-left-radius: 6px !important;
