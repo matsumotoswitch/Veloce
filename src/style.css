@@ -66,6 +66,7 @@ textarea {
   top: 0;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   height: 100%;
   -webkit-app-region: no-drag;
 }
@@ -79,6 +80,16 @@ textarea {
   color: var(--text-color);
   cursor: default;
   transition: background-color 0.1s;
+}
+
+.titlebar-divider {
+  width: 1px;
+  min-width: 1px;
+  height: 16px;
+  background-color: rgba(255, 255, 255, 0.4);
+  margin: 0 4px;
+  flex-shrink: 0;
+  z-index: 10;
 }
 
 .titlebar-button svg {
