@@ -1,26 +1,19 @@
 :root {
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
-  --bg-color: #131b1e;
-  --panel-bg: #131b1e;
-  --border-color: #2b3d41;
+  --bg-color: #0b1012;
+  --panel-bg: #162226;
+  --border-color: #23343a;
   --text-color: #cddbe0;
   --accent-color: #257e8c;
-  /* 落ち着いた青緑に変更 */
   --accent-hover: #2e96a6;
-  --modal-bg: #131b1e;
+  --modal-bg: #1c2b30;
   --modal-border: #364b50;
   --danger-red: #e05263;
-  /* 落ち着いたソフトレッドに変更 */
   --glow-gold: #e6c762;
-  /* 落ち着いたシャンパンゴールドに変更 */
-  --resizer-color: #1c282c;
-  /* 背景とボーダーの中間の暗さ */
+  --resizer-color: #0b1012;
   --radius-lg: 8px;
-  /* モーダル、メニューなどの最前面レイヤー */
   --radius-md: 6px;
-  /* ツールチップなどの中間レイヤー */
   --radius-sm: 4px;
-  /* 検索窓、ボタンなどの操作・入力レイヤー */
 }
 
 * {
@@ -472,7 +465,8 @@ body.is-resizing #file-info-section {
   display: flex;
   align-items: center;
   gap: 8px;
-  background-color: var(--bg-color);
+  background-color: var(--panel-bg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .toolbar #search-container {
@@ -845,7 +839,7 @@ input[type="range"]:focus {
 
 #dir-tree .tree-item.selected,
 #favorites-list .tree-item.selected {
-  background-color: rgba(37, 126, 140, 0.15);
+  background-color: rgba(37, 126, 140, 0.25);
   /* 背景は薄く染める */
   color: #ffffff;
   /* 文字は明るく */
@@ -1505,7 +1499,7 @@ th[data-sort] svg path {
   color: #ffffff !important;
   border-left: 1px solid var(--border-color) !important;
   border-right: 1px solid var(--border-color) !important;
-  border-top: 1px solid var(--border-color) !important;
+  border-top: 2px solid var(--accent-color) !important;
   border-bottom: 1px solid transparent !important;
   /* 下線を透明にして隙間を埋める準備 */
   border-top-left-radius: 6px !important;
