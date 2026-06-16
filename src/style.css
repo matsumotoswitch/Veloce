@@ -1996,3 +1996,117 @@ html.viewer-html,
 :focus-visible {
   outline: none !important;
 }
+
+/* --- ヘルプ画面用スタイル --- */
+.help-modal-content {
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  width: 90vw;
+  max-width: 600px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.help-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 15px;
+  flex-shrink: 0;
+}
+
+.help-tab {
+  padding: 10px 20px;
+  cursor: pointer;
+  color: var(--text-color);
+  opacity: 0.6;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+  font-weight: bold;
+}
+
+.help-tab:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.help-tab.active {
+  opacity: 1;
+  color: var(--glow-gold);
+  border-bottom: 2px solid var(--glow-gold);
+}
+
+.help-tab-content {
+  display: none;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.help-tab-content.active {
+  display: block;
+}
+
+/* カスタムスクロールバー（ヘルプ用） */
+.help-tab-content::-webkit-scrollbar {
+  width: 8px;
+}
+.help-tab-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+.help-tab-content::-webkit-scrollbar-thumb {
+  background: var(--modal-border);
+  border-radius: 4px;
+}
+.help-tab-content::-webkit-scrollbar-thumb:hover {
+  background: var(--text-color);
+}
+
+/* キーボード風ショートカットキー */
+kbd {
+  display: inline-block;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 0.85em;
+  font-weight: bold;
+  color: #fff;
+  background-color: #333;
+  border: 1px solid #555;
+  border-bottom: 2px solid #222;
+  border-radius: 4px;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1);
+  white-space: nowrap;
+}
+
+.help-group-title {
+  color: var(--accent-color);
+  font-size: 0.95em;
+  margin-top: 15px;
+  margin-bottom: 5px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.help-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+
+.help-table td {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.help-table tr:last-child td {
+  border-bottom: none;
+}
+
+.help-table td:first-child {
+  padding-right: 15px;
+  width: 40%;
+  vertical-align: top;
+}

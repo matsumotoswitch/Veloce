@@ -1331,11 +1331,11 @@ function toggleHelpOverlay(forceShow) {
   overlay.style.cursor = 'pointer';
 
   const content = document.createElement('div');
-  content.className = 'modal-content';
+  content.className = 'help-modal-content';
   content.style.cursor = 'default';
 
   content.innerHTML = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-shrink: 0;">
       <h2 style="margin: 0; color: var(--glow-gold); font-size: 1.2em; border-bottom: none;">ヘルプ・ショートカット一覧</h2>
       <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid var(--modal-border); border-radius: 20px; color: var(--text-color); font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(0, 0, 0, 0.2);"
         onmouseover="this.style.backgroundColor='rgba(37, 126, 140, 0.15)'; this.style.borderColor='var(--accent-color)'; this.style.color='#fff';"
@@ -1347,60 +1347,102 @@ function toggleHelpOverlay(forceShow) {
         ライセンス ＆ クレジット
       </span>
     </div>
-    <div style="display: flex; gap: 40px; font-size: inherit;">
-      <div>
-        <h3 style="color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 0;">メイン画面</h3>
-        <table style="border-collapse: collapse; width: 100%;">
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F1 / H</td><td style="padding: 6px 15px;">ヘルプ（ショートカット一覧）の表示 / 非表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">矢印キー</td><td style="padding: 6px 15px;">画像の選択を移動（Shift 併用で範囲選択）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + A</td><td style="padding: 6px 15px;">現在のフォルダ内のすべての画像を選択</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl / Shift + クリック</td><td style="padding: 6px 15px;">画像の複数選択</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">ダブルクリック</td><td style="padding: 6px 15px;">選択したサムネイルから独立ビューアーウィンドウを開く</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F5</td><td style="padding: 6px 15px;">最新の情報に更新（ディレクトリの再読み込み）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + F</td><td style="padding: 6px 15px;">検索キーワード入力欄（検索バー）にフォーカス</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Alt + ← / Alt + →</td><td style="padding: 6px 15px;">フォルダ移動履歴の「戻る」 / 「進む」</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F2</td><td style="padding: 6px 15px;">選択中のファイル、または左ツリーで選択中のフォルダの名前を変更</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">選択中のファイル、または左ツリーで選択中のフォルダを安全にゴミ箱へ移動</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">選択中の画像をクリップボードに直接コピー（テキスト選択中はテキストコピー）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているすべてのビューアーウィンドウを画面に横一列に整列</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">D</td><td style="padding: 6px 15px;">選択した2枚の画像のプロンプト・パラメータ情報を取得して比較 (Diffモーダル)</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Tab / Ctrl + PageDown</td><td style="padding: 6px 15px;">次のタブへ切り替え</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + Shift + Tab / Ctrl + PageUp</td><td style="padding: 6px 15px;">前のタブへ切り替え</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">各種モーダル（Diff/お気に入り編集）、ヘルプ、コンテキストメニューを閉じる</td></tr>
-        </table>
-      </div>
-      <div>
-        <h3 style="color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 0;">ビューワー画面</h3>
-        <table style="border-collapse: collapse; width: 100%;">
-          <tr><td style="padding: 6px 15px; font-weight: bold;">← / →</td><td style="padding: 6px 15px;">前の画像 / 次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスクリック</td><td style="padding: 6px 15px;">左クリックで前の画像 / 右クリックで次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">マウスホイール</td><td style="padding: 6px 15px;">上スクロールで前の画像 / 下スクロールで次の画像を表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + ホイール</td><td style="padding: 6px 15px;">画像のズームイン / ズームアウト（手動倍率変更）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">左ドラッグ</td><td style="padding: 6px 15px;">ウィンドウの移動（非ズーム時） / スクロール（ズーム時）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + 左ドラッグ</td><td style="padding: 6px 15px;">ズームイン時、画像内を自由に移動（パン操作）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">↑ / ↓</td><td style="padding: 6px 15px;">画像を右に90度回転 / 左に90度回転</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">H</td><td style="padding: 6px 15px;">画像を左右反転（水平反転）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">V</td><td style="padding: 6px 15px;">画像を上下反転（垂直反転）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">0</td><td style="padding: 6px 15px;">100%表示（ただしモニターより大きい画像は画面に収まるようリサイズ）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">1</td><td style="padding: 6px 15px;">完全な100%等倍ウィンドウ表示（画面外へのはみ出しを許可して強制追従）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">F11</td><td style="padding: 6px 15px;">ウィンドウのフルスクリーン表示切り替え</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">A</td><td style="padding: 6px 15px;">開いているすべてのビューアーウィンドウを画面に横一列に整列</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">B</td><td style="padding: 6px 15px;">ウィンドウ枠（アクセントボーダー）および右上コントロール群の表示 / 非表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">U</td><td style="padding: 6px 15px;">画像のシャープ表示（アンシャープマスク） / 滑らか表示の切り替え</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Delete</td><td style="padding: 6px 15px;">現在の画像をゴミ箱に移動し、自動的に次の画像を読み込んで表示</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Ctrl + C</td><td style="padding: 6px 15px;">現在表示中の画像をクリップボードにコピー（黄金のフラッシュ余韻エフェクト付き）</td></tr>
-          <tr><td style="padding: 6px 15px; font-weight: bold;">Esc</td><td style="padding: 6px 15px;">ビューワーウィンドウを閉じる</td></tr>
-        </table>
-      </div>
+
+    <div class="help-tabs">
+      <div class="help-tab active" data-target="help-main">メイン画面</div>
+      <div class="help-tab" data-target="help-viewer">ビューワー画面</div>
+    </div>
+
+    <div id="help-main" class="help-tab-content active">
+      <h3 class="help-group-title">ナビゲーション・選択</h3>
+      <table class="help-table">
+        <tr><td><kbd>矢印キー</kbd></td><td>画像の選択を移動（Shift 併用で範囲選択）</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>現在のフォルダ内のすべての画像を選択</td></tr>
+        <tr><td><kbd>Ctrl</kbd> / <kbd>Shift</kbd> + クリック</td><td>画像の複数選択</td></tr>
+        <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>フォルダ移動履歴の「戻る」 / 「進む」</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>PageDown</kbd></td><td>次のタブへ切り替え</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> / <kbd>PageUp</kbd></td><td>前のタブへ切り替え</td></tr>
+      </table>
+
+      <h3 class="help-group-title">ファイル操作</h3>
+      <table class="help-table">
+        <tr><td><kbd>ダブルクリック</kbd> / <kbd>Enter</kbd></td><td>選択したサムネイルから独立ビューアーを開く</td></tr>
+        <tr><td><kbd>F2</kbd></td><td>選択中のファイル/フォルダの名前を変更</td></tr>
+        <tr><td><kbd>Delete</kbd></td><td>選択中のファイル/フォルダを安全にゴミ箱へ移動</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー</td></tr>
+      </table>
+
+      <h3 class="help-group-title">ツール・表示</h3>
+      <table class="help-table">
+        <tr><td><kbd>F5</kbd></td><td>最新の情報に更新（再読み込み）</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>検索キーワード入力欄にフォーカス</td></tr>
+        <tr><td><kbd>A</kbd></td><td>開いているビューアーウィンドウを横一列に整列</td></tr>
+        <tr><td><kbd>D</kbd></td><td>選択した2枚の画像の情報を比較 (Diffモーダル)</td></tr>
+        <tr><td><kbd>F1</kbd> / <kbd>H</kbd></td><td>ヘルプの表示 / 非表示</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>各種モーダル・ヘルプ・メニューを閉じる</td></tr>
+      </table>
+    </div>
+
+    <div id="help-viewer" class="help-tab-content">
+      <h3 class="help-group-title">画像切り替え</h3>
+      <table class="help-table">
+        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>前の画像 / 次の画像を表示</td></tr>
+        <tr><td>左クリック / 右クリック</td><td>前の画像 / 次の画像を表示</td></tr>
+        <tr><td>マウスホイール</td><td>上スクロールで前 / 下スクロールで次を表示</td></tr>
+      </table>
+
+      <h3 class="help-group-title">ズーム・移動</h3>
+      <table class="help-table">
+        <tr><td><kbd>Ctrl</kbd> + ホイール</td><td>画像のズームイン / ズームアウト</td></tr>
+        <tr><td>左ドラッグ</td><td>ウィンドウの移動 / スクロール（ズーム時）</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + 左ドラッグ</td><td>ズームイン時、画像内を自由にパン移動</td></tr>
+        <tr><td><kbd>0</kbd></td><td>100%表示（モニターより大きい画像はリサイズ）</td></tr>
+        <tr><td><kbd>1</kbd></td><td>完全な100%等倍ウィンドウ表示（画面外許可）</td></tr>
+      </table>
+
+      <h3 class="help-group-title">変形・フィルター</h3>
+      <table class="help-table">
+        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>右に90度回転 / 左に90度回転</td></tr>
+        <tr><td><kbd>H</kbd></td><td>画像を左右反転（水平反転）</td></tr>
+        <tr><td><kbd>V</kbd></td><td>画像を上下反転（垂直反転）</td></tr>
+        <tr><td><kbd>U</kbd></td><td>シャープ表示 / 滑らか表示の切り替え</td></tr>
+      </table>
+
+      <h3 class="help-group-title">ウィンドウ・操作</h3>
+      <table class="help-table">
+        <tr><td><kbd>F11</kbd></td><td>フルスクリーン表示切り替え</td></tr>
+        <tr><td><kbd>A</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
+        <tr><td><kbd>B</kbd></td><td>ウィンドウ枠（ボーダー）・UIの表示切替</td></tr>
+        <tr><td><kbd>Delete</kbd></td><td>画像をゴミ箱に移動し、次の画像を表示</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる</td></tr>
+      </table>
     </div>
   `;
+
+  const tabs = content.querySelectorAll('.help-tab');
+  const tabContents = content.querySelectorAll('.help-tab-content');
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      tabs.forEach(t => t.classList.remove('active'));
+      tabContents.forEach(c => c.classList.remove('active'));
+      
+      tab.classList.add('active');
+      const targetId = tab.dataset.target;
+      content.querySelector('#' + targetId).classList.add('active');
+    });
+  });
 
   overlay.addEventListener('click', (e) => {
     if (e.target.closest('#license-link')) {
       showLicenseDialog();
       return;
     }
-    toggleHelpOverlay(false);
+    if (!e.target.closest('.help-modal-content')) {
+      toggleHelpOverlay(false);
+    }
   });
 
   overlay.appendChild(content);
