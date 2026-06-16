@@ -911,10 +911,10 @@ input[type="range"]:focus {
 
 .toast-message {
   position: relative;
-  background-color: #1a2327;
-  color: #fff;
-  border: 1px solid #0d1315;
-  border-radius: var(--radius-lg);
+  background-color: var(--modal-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   padding: 8px 12px 8px 16px;
   /* バーの幅(4px)だけ左の余白を増やす */
   font-size: 13px;
