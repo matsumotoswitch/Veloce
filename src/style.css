@@ -6,14 +6,14 @@
   --text-color: #cddbe0;
   --accent-color: #257e8c;
   --accent-hover: #2e96a6;
-  --modal-bg: #1c2b30;
-  --modal-border: #364b50;
+  --modal-bg: #1a2327;
+  --modal-border: rgba(255, 255, 255, 0.12);
   --danger-red: #e05263;
   --glow-gold: #e6c762;
   --resizer-color: #0b1012;
-  --radius-lg: 8px;
-  --radius-md: 6px;
-  --radius-sm: 4px;
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
 }
 
 * {
@@ -592,7 +592,7 @@ table#file-table {
 }
 
 #file-table tr.selected {
-  background: var(--accent-color);
+  background: linear-gradient(135deg, rgba(37, 126, 140, 0.85), rgba(28, 94, 105, 0.95));
   color: #fff;
   font-weight: normal;
 }
@@ -643,13 +643,17 @@ table#file-table {
   border-radius: 4px;
   color: var(--text-color);
   opacity: 0.8;
-  transition: background-color 0.2s, color 0.2s, opacity 0.2s;
+  transition: background-color 0.2s, color 0.2s, opacity 0.2s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .icon-btn:hover {
   background-color: transparent;
   color: #fff;
   opacity: 1;
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
 }
 
 /* --- Slider (Range Input) --- */
@@ -812,7 +816,12 @@ input[type="range"]:focus {
   position: relative;
   overflow: hidden;
   /* インジケーターの左端を角丸に合わせてクリップする */
-  transition: color 0.2s, background-color 0.2s;
+  transition: color 0.2s, background-color 0.2s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#dir-tree .tree-item:active,
+#favorites-list .tree-item:active {
+  transform: scale(0.98);
 }
 
 #dir-tree .tree-item::before,
@@ -837,7 +846,7 @@ input[type="range"]:focus {
 
 #dir-tree .tree-item.selected,
 #favorites-list .tree-item.selected {
-  background-color: rgba(37, 126, 140, 0.25);
+  background: linear-gradient(135deg, rgba(37, 126, 140, 0.25), rgba(28, 94, 105, 0.35));
   /* 背景は薄く染める */
   color: #ffffff;
   /* 文字は明るく */
@@ -1049,8 +1058,8 @@ input[type="range"]:focus {
 }
 
 .modal-content {
-  background-color: #1a2327 !important;
-  border: 1px solid #0d1315 !important;
+  background-color: var(--modal-bg) !important;
+  border: 1px solid var(--modal-border) !important;
   border-radius: var(--radius-lg) !important;
   padding: 24px;
   box-shadow:
@@ -1060,7 +1069,6 @@ input[type="range"]:focus {
     inset 1px 0 0 rgba(255, 255, 255, 0.02) !important;
   color: var(--text-color);
   font-family: inherit;
-  backdrop-filter: none !important;
 }
 
 /* --- 共通: モーダル/ダイアログのタイトル --- */
@@ -1258,11 +1266,8 @@ input[type="range"]:focus {
 .submenu,
 #tab-list-menu,
 #history-menu {
-  /* 透過やぼかしを一切やめる */
-  background-color: #1a2327;
-  /* 背景よりほんの少し明るいリッチなダークグレー */
-  border: 1px solid #0d1315;
-  /* 外側は暗く引き締める */
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
   border-radius: var(--radius-lg);
 
   /* 影で浮遊感を出し、内側の白線(0.05)でエッジを立たせる */
