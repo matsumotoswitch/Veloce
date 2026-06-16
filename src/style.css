@@ -2013,7 +2013,7 @@ html.viewer-html,
   padding: 20px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
   width: 90vw;
-  max-width: 600px;
+  max-width: 800px;
   max-height: 85vh;
   display: flex;
   flex-direction: column;
@@ -2077,15 +2077,14 @@ html.viewer-html,
 kbd {
   display: inline-block;
   padding: 3px 8px;
+  margin: 2px 0;
   font-family: inherit;
   font-size: 0.85em;
-  font-weight: bold;
-  color: #fff;
-  background-color: #333;
-  border: 1px solid #555;
-  border-bottom: 2px solid #222;
+  color: var(--text-color);
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  box-shadow: 0 1px 1px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1);
+  box-shadow: none;
   white-space: nowrap;
 }
 
@@ -2105,8 +2104,9 @@ kbd {
 }
 
 .help-table td {
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 4px 0;
+  border-bottom: none;
+  line-height: 1.6;
 }
 
 .help-table tr:last-child td {
@@ -2115,6 +2115,8 @@ kbd {
 
 .help-table td:first-child {
   padding-right: 15px;
-  width: 40%;
-  vertical-align: top;
+  width: 45%;
+  min-width: 280px;
+  white-space: nowrap;
+  vertical-align: middle;
 }
