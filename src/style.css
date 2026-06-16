@@ -513,7 +513,7 @@ body.is-resizing #file-info-section {
 }
 
 #search-clear-btn:hover {
-  color: var(--accent-color);
+  color: #fff;
   opacity: 1;
 }
 
@@ -1163,7 +1163,7 @@ input[type="range"]:focus {
 }
 
 .diff-copy-btn:hover {
-  color: var(--accent-color);
+  color: #fff;
   opacity: 1;
 }
 
