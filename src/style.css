@@ -1052,7 +1052,6 @@ img.thumbnail-item.loading {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite linear;
   background-color: var(--panel-bg);
-  border-radius: var(--radius-sm);
 }
 
 /* --- Diff Modal --- */
