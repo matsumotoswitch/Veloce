@@ -2064,6 +2064,8 @@ html.viewer-html,
   display: none;
   overflow-y: auto;
   padding-right: 10px;
+  flex: 1;
+  min-height: 0;
 }
 
 .help-tab-content.active {
