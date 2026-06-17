@@ -1846,6 +1846,10 @@ html.viewer-html,
   z-index: 9999;
   visibility: visible;
   transition: opacity 0.2s;
+  /* 上部にうっすらとグラデーションを敷き、明るい画像でも文字が読めるようにする */
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 100%);
+  height: 60px; /* グラデーションの高さ */
+  pointer-events: none; /* 下の画像にイベントを透過（必要な要素だけautoに戻す） */
 }
 
 .viewer-body #window-controls.controls-hidden {
@@ -1859,17 +1863,20 @@ html.viewer-html,
 .window-filename {
   flex: 1;
   height: 30px;
-  background-color: rgba(37, 126, 140, 0.4);
-  color: rgba(255, 255, 255, 0.85); /* Slightly brighter for better legibility */
+  background-color: transparent; /* ベタ塗りを廃止 */
+  color: rgba(255, 255, 255, 0.9);
   font-size: 14px;
+  font-weight: 500;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); /* 視認性を確保 */
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0 15px;
+  padding: 0 20px;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: auto; /* ドラッグ操作を受け付ける */
 }
 
 .window-ctrl-btn {
@@ -1880,11 +1887,13 @@ html.viewer-html,
   align-items: center;
   cursor: default;
   transition: background-color 0.1s;
+  background-color: transparent; /* デフォルトは透明に */
+  pointer-events: auto; /* クリックを受け付ける */
 }
 
 .window-ctrl-btn--min,
 .window-ctrl-btn--max {
-  background-color: rgba(37, 126, 140, 0.4);
+  background-color: transparent;
 }
 
 .window-ctrl-btn--min:hover,
@@ -1893,7 +1902,7 @@ html.viewer-html,
 }
 
 .window-ctrl-btn--close {
-  background-color: rgba(224, 82, 99, 0.4);
+  background-color: transparent;
 }
 
 .window-ctrl-btn--close:hover {
