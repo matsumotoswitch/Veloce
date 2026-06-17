@@ -220,7 +220,7 @@ async function expandTreeToPath(targetPath, disableScroll = false, rootElement =
         if (activeItem) activeItem.classList.remove('selected');
         itemDiv.classList.add('selected');
         if (!disableScroll) {
-          itemDiv.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          itemDiv.scrollIntoView({ block: 'center', behavior: 'instant' });
         }
       } else {
         if (itemDiv.expandNode) await itemDiv.expandNode();
@@ -3313,7 +3313,7 @@ window.addEventListener('keydown', async (e) => {
         if (container) {
           const tabEls = container.querySelectorAll('.tab-item:not(.new-tab-btn)');
           if (tabEls[nextIndex]) {
-            tabEls[nextIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            tabEls[nextIndex].scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
           }
         }
       }
@@ -3588,7 +3588,9 @@ async function handleTreeNavigation(key) {
   const hasChildren = toggleIcon && toggleIcon.style.visibility !== 'hidden';
 
   const selectItem = async (item, autoExpand = false) => {
-    item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (item) {
+      item.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+    }
     
     appState.selection.clear();
     appState.selectedIndex = -1;
@@ -3933,7 +3935,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (container) {
           const tabEls = container.querySelectorAll('.tab-item:not(.new-tab-btn)');
           if (tabEls[index]) {
-            tabEls[index].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            tabEls[index].scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
           }
         }
       });
