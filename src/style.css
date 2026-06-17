@@ -1839,8 +1839,9 @@ html.viewer-html,
 
 .viewer-body #window-controls {
   position: fixed;
-  top: 1px;
-  right: 1px;
+  top: 0;
+  right: 0;
+  left: 0;
   display: flex;
   z-index: 9999;
   visibility: visible;
@@ -1853,6 +1854,22 @@ html.viewer-html,
 
 .viewer-body #window-controls.fs-hidden {
   display: none;
+}
+
+.window-filename {
+  flex: 1;
+  height: 30px;
+  background-color: rgba(37, 126, 140, 0.4);
+  color: rgba(255, 255, 255, 0.85); /* Slightly brighter for better legibility */
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 15px;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .window-ctrl-btn {

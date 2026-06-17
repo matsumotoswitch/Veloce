@@ -478,6 +478,10 @@ async function loadImage() {
     preloadAdjacentImages();
 
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
+    const filenameEl = document.getElementById('window-filename-display');
+    if (filenameEl && path) {
+      filenameEl.textContent = path.split(/[/\\]/).pop();
+    }
   }
 }
 
@@ -607,6 +611,11 @@ function createWindowControls() {
     if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };
 
+  const filenameDisplay = document.createElement('div');
+  filenameDisplay.id = 'window-filename-display';
+  filenameDisplay.className = 'window-filename';
+
+  controlsContainer.appendChild(filenameDisplay);
   controlsContainer.appendChild(minBtn);
   controlsContainer.appendChild(maxBtn);
   controlsContainer.appendChild(closeBtn);
