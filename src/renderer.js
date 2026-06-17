@@ -833,7 +833,12 @@ class ThumbnailQueueManager {
     const img = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
     if (img) {
       img.src = url;
-      img.classList.remove('loading');
+      if (img.complete) {
+        img.classList.remove('loading');
+      } else {
+        img.onload = function() { this.classList.remove('loading'); };
+        img.onerror = function() { this.classList.remove('loading'); };
+      }
     }
   }
 }

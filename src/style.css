@@ -1704,6 +1704,8 @@ th[data-sort] svg path {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #diff-modal .modal-content {

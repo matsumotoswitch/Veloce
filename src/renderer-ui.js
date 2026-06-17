@@ -1266,11 +1266,19 @@ class UIManager {
 
         if (appState.thumbnailUrls.has(file.path)) {
             img.src = appState.thumbnailUrls.get(file.path);
-            img.classList.remove('loading');
+            if (img.complete) {
+                img.classList.remove('loading');
+            } else {
+                img.classList.add('loading');
+                img.onload = function() { this.classList.remove('loading'); };
+                img.onerror = function() { this.classList.remove('loading'); };
+            }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
         } else {
             img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
             img.classList.add('loading');
+            img.onload = null;
+            img.onerror = null;
             if (window.thumbnailManager) {
               window.thumbnailManager.enqueuePriority(file.path, appState.currentRenderId || Date.now());
             }
