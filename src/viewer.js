@@ -585,8 +585,7 @@ function createWindowControls() {
   const controlsContainer = document.createElement('div');
   controlsContainer.id = 'window-controls';
   if (!viewerState.isBorderVisible) controlsContainer.classList.add('controls-hidden');
-  // ドラッグ操作や画像の切り替え操作と干渉しないようにする
-  ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(evt => {
+  ['click', 'dblclick'].forEach(evt => {
     controlsContainer.addEventListener(evt, (e) => e.stopPropagation());
   });
 
@@ -610,6 +609,12 @@ function createWindowControls() {
   closeBtn.onclick = () => {
     if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };
+
+  [minBtn, maxBtn, closeBtn].forEach(btn => {
+    ['mousedown', 'mouseup'].forEach(evt => {
+      btn.addEventListener(evt, (e) => e.stopPropagation());
+    });
+  });
 
   const filenameDisplay = document.createElement('div');
   filenameDisplay.id = 'window-filename-display';
