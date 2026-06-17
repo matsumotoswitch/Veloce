@@ -414,6 +414,8 @@ body.is-resizing #favorites-section {
 
 #file-info-section {
   flex: 0 0 var(--right-top-height, 200px);
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
@@ -595,6 +597,7 @@ table#file-table {
   background: linear-gradient(135deg, rgba(37, 126, 140, 0.85), rgba(28, 94, 105, 0.95));
   color: #fff;
   font-weight: normal;
+  box-shadow: 0 0 12px rgba(37, 126, 140, 0.5), inset 3px 0 0 #fff;
 }
 
 #file-table td {
@@ -750,7 +753,7 @@ input[type="range"]:focus {
 
 .thumbnail-item.selected {
   border-color: var(--accent-color);
-  box-shadow: 0 0 6px rgba(37, 126, 140, 0.6);
+  box-shadow: 0 0 16px rgba(37, 126, 140, 0.8);
 }
 
 /* Right Pane: Inspector */
@@ -831,10 +834,10 @@ input[type="range"]:focus {
   top: 0;
   left: 0;
   bottom: 0;
-  width: 3px;
+  width: 4px;
   background-color: var(--accent-color);
   opacity: 0;
-  transform: translateX(-3px);
+  transform: translateX(-4px);
   transition: opacity 0.2s, transform 0.2s;
 }
 
@@ -847,9 +850,8 @@ input[type="range"]:focus {
 #dir-tree .tree-item.selected,
 #favorites-list .tree-item.selected {
   background: linear-gradient(135deg, rgba(37, 126, 140, 0.25), rgba(28, 94, 105, 0.35));
-  /* 背景は薄く染める */
   color: #ffffff;
-  /* 文字は明るく */
+  box-shadow: 0 0 12px rgba(37, 126, 140, 0.3);
 }
 
 #dir-tree .tree-item.selected::before,
@@ -1037,6 +1039,20 @@ input[type="range"]:focus {
 #license-text a:hover {
   color: var(--accent-hover);
   text-decoration: underline;
+}
+
+/* --- スケルトンローディング --- */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+img.thumbnail-item.loading {
+  background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.02) 25%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.02) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  background-color: var(--panel-bg);
+  border-radius: var(--radius-sm);
 }
 
 /* --- Diff Modal --- */
@@ -1683,14 +1699,11 @@ th[data-sort] svg path {
   color: var(--text-color);
   opacity: 0.5;
   text-align: center;
-}
-
-#file-info-content .empty-state-msg {
-  margin-top: 20px;
-}
-
-#inspector-content .empty-state-msg {
-  margin-top: 50px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 #diff-modal .modal-content {

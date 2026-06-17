@@ -831,7 +831,10 @@ class ThumbnailQueueManager {
   updateDOM(filePath, url) {
     const safePath = filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const img = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
-    if (img) img.src = url;
+    if (img) {
+      img.src = url;
+      img.classList.remove('loading');
+    }
   }
 }
 
@@ -843,7 +846,7 @@ function clearMetadataUI() {
   const emptyInfoMsg = document.getElementById('file-info-empty');
   if (staticTable && emptyInfoMsg) {
     staticTable.style.display = 'none';
-    emptyInfoMsg.style.display = 'block';
+    emptyInfoMsg.style.display = 'flex';
   } else {
     const infoContainer = document.getElementById('file-info-content');
     if (infoContainer) {
@@ -853,7 +856,7 @@ function clearMetadataUI() {
 
   const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (emptyInspectorMsg) {
-    emptyInspectorMsg.style.display = 'block';
+    emptyInspectorMsg.style.display = 'flex';
   } else {
     const container = document.getElementById('inspector-content');
     if (container) {

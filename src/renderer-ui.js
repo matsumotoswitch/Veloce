@@ -1146,6 +1146,7 @@ class UIManager {
       container.innerHTML = `
         <div class="virtual-spacer" style="width: 1px; visibility: hidden; pointer-events: none;"></div>
         <div class="virtual-content" style="position: absolute; top: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumbnail-size), 1fr)); gap: 8px; padding: 0 8px; justify-content: center;"></div>
+        <div class="empty-state-container" style="display: none; position: absolute; inset: 0; align-items: center; justify-content: center; flex-direction: column; opacity: 0.5; pointer-events: none; color: var(--text-color);"></div>
       `;
       content = container.querySelector('.virtual-content');
       spacer = container.querySelector('.virtual-spacer');
@@ -1165,9 +1166,19 @@ class UIManager {
     if (appState.totalCount === 0) {
       content.innerHTML = '';
       spacer.style.height = '0px';
+      const emptyContainer = container.querySelector('.empty-state-container');
+      if (emptyContainer) {
+        emptyContainer.style.display = 'flex';
+        emptyContainer.innerHTML = appState.searchQuery 
+          ? `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><div style="font-size: 14px; letter-spacing: 0.5px;">検索結果が見つかりません</div>`
+          : `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div style="font-size: 14px; letter-spacing: 0.5px;">このフォルダには画像がありません</div>`;
+      }
       this.lastGridStartIndex = -1;
       this.lastGridEndIndex = -1;
       return;
+    } else {
+      const emptyContainer = container.querySelector('.empty-state-container');
+      if (emptyContainer) emptyContainer.style.display = 'none';
     }
 
     const itemSize = parseFloat(this.elements.thumbnailSizeSlider?.value) || 120;
@@ -1255,9 +1266,11 @@ class UIManager {
 
         if (appState.thumbnailUrls.has(file.path)) {
             img.src = appState.thumbnailUrls.get(file.path);
+            img.classList.remove('loading');
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
         } else {
             img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+            img.classList.add('loading');
             if (window.thumbnailManager) {
               window.thumbnailManager.enqueuePriority(file.path, appState.currentRenderId || Date.now());
             }
