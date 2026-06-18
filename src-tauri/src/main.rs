@@ -448,6 +448,11 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             "ctime" => a.ctime.cmp(&b.ctime),
             "width" => a.width.cmp(&b.width),
             "height" => a.height.cmp(&b.height),
+            "ratio" => {
+                let r_a = if a.height > 0 { a.width as f64 / a.height as f64 } else { 0.0 };
+                let r_b = if b.height > 0 { b.width as f64 / b.height as f64 } else { 0.0 };
+                r_a.partial_cmp(&r_b).unwrap_or(std::cmp::Ordering::Equal)
+            },
             _ => natural_cmp(&a.name, &b.name),
         };
         let cmp = if asc { cmp } else { cmp.reverse() };

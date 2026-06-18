@@ -302,7 +302,7 @@ async function loadAllMetadataInBackground() {
   }
 
   if (appState.currentMetaBatchId === batchId) {
-    if (['width', 'height'].includes(appState.sortConfig.key)) {
+    if (['width', 'height', 'ratio'].includes(appState.sortConfig.key)) {
       scheduleRefresh();
     } else if (appState.searchQuery.trim() !== '') {
       scheduleRefresh();
@@ -1055,6 +1055,7 @@ const TABLE_HEADERS = {
   ext: '拡張子',
   width: '幅',
   height: '高さ',
+  ratio: '比率',
   size: 'サイズ',
   mtime: '更新日時',
 };
@@ -1129,14 +1130,21 @@ async function selectImage(index, event = null) {
     }
   }
 
-  const targetRow = uiManager.elements.fileListBody?.querySelector(`tr[data-index="${index}"]`);
-  if (targetRow) {
-    const thead = document.querySelector('#file-table thead');
-    if (thead) {
-      targetRow.style.scrollMarginTop = `${thead.getBoundingClientRect().height}px`;
+  // リストビューのスクロール位置を調整 (仮想スクロール対応)
+  const listContainer = document.getElementById('center-top');
+  if (listContainer) {
+    const rowHeight = 28;
+    const theadHeight = document.querySelector('#file-table thead')?.getBoundingClientRect().height || 28;
+    const targetY = theadHeight + (index * rowHeight);
+    
+    // ヘッダーが position: sticky; top: 0; であるため、表示領域の上端は scrollTop + theadHeight
+    if (targetY < listContainer.scrollTop + theadHeight) {
+      listContainer.scrollTop = targetY - theadHeight;
+    } else if (targetY + rowHeight > listContainer.scrollTop + listContainer.clientHeight) {
+      listContainer.scrollTop = targetY + rowHeight - listContainer.clientHeight;
     }
-    targetRow.scrollIntoView({ block: 'nearest' });
   }
+
 
   // インスペクターの更新
   if (file) renderMetadata(file);
@@ -1684,46 +1692,6 @@ async function renderMetadata(file) {
     const rawMeta = await window.veloceAPI.parseMetadata(file.path);
     const meta = rawMeta || {};
 
-    const staticTable = document.getElementById('static-file-info-table');
-    const emptyInfoMsg = document.getElementById('file-info-empty');
-    if (staticTable && emptyInfoMsg) {
-      emptyInfoMsg.style.display = 'none';
-      staticTable.style.display = 'table';
-
-      const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
-      const getAspectRatio = (w, h) => {
-        if (!w || !h) return '';
-        const d = gcd(w, h);
-        const rw = w / d;
-        const rh = h / d;
-        if (rw > 100 || rh > 100) return `${(w / h).toFixed(2)}:1`;
-        return `${rw}:${rh}`;
-      };
-      let cleanExt = file.ext || '';
-      if (cleanExt.startsWith('.')) cleanExt = cleanExt.substring(1);
-      const fullName = cleanExt && !file.name.toLowerCase().endsWith('.' + cleanExt.toLowerCase()) ? `${file.name}.${cleanExt}` : file.name;
-      const sizeStr = file.size ? `${formatSize(file.size)} bytes` : '-';
-      const fileW = file.width || meta.width;
-      const fileH = file.height || meta.height;
-      const resStr = (fileW && fileH) ? `${Number(fileW).toLocaleString()} x ${Number(fileH).toLocaleString()}` : '-';
-      const ratioStr = (fileW && fileH) ? ` (${getAspectRatio(fileW, fileH)})` : '';
-      const mtimeStr = file.mtime ? formatDate(file.mtime) : '-';
-      let ctimeValue = file.ctime;
-      if (!ctimeValue && meta) {
-        const metaDate = meta.timestamp || meta.date || meta.CreationTime || meta['Creation Time'];
-        if (metaDate) {
-          const parsed = Date.parse(metaDate);
-          if (!isNaN(parsed)) ctimeValue = parsed;
-        }
-      }
-      const ctimeStr = ctimeValue ? formatDate(ctimeValue) : '-';
-
-      document.getElementById('static-file-name').textContent = fullName;
-      document.getElementById('static-file-size').textContent = sizeStr;
-      document.getElementById('static-file-res').textContent = `${resStr}${ratioStr}`;
-      document.getElementById('static-file-ctime').textContent = ctimeStr;
-      document.getElementById('static-file-mtime').textContent = mtimeStr;
-    }
 
     const d = extractMetadataFields(file, meta);
 
@@ -2053,6 +2021,7 @@ const sortOptions = [
   { key: 'ext', label: '拡張子' },
   { key: 'width', label: '幅' },
   { key: 'height', label: '高さ' },
+  { key: 'ratio', label: '比率' },
   { key: 'size', label: 'サイズ' },
   { key: 'mtime', label: '更新日時' }
 ];

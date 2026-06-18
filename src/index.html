@@ -70,6 +70,7 @@
 			<th data-sort="ext">拡張子</th>
 			<th data-sort="width">幅</th>
 			<th data-sort="height">高さ</th>
+			<th data-sort="ratio">比率</th>
 			<th data-sort="size">サイズ</th>
 			<th data-sort="mtime">更新日時</th>
 		  </tr>
@@ -103,59 +104,7 @@
 
   <!-- 右ペイン: インスペクター -->
   <div id="right-pane">
-    <div id="file-info-section" tabindex="-1">
-      <div id="file-info-content" class="inspector-data">
-        <table id="static-file-info-table" style="width: 100%; border-collapse: collapse; font-size: 0.9em; color: var(--text-color); display: none;">
-          <tbody>
-            <tr>
-              <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
-                <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">ファイル名</h3>
-              </td>
-              <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
-                <span id="static-file-name"></span>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
-                <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">ファイルサイズ</h3>
-              </td>
-              <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
-                <span id="static-file-size"></span>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
-                <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">解像度・比率</h3>
-              </td>
-              <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
-                <span id="static-file-res"></span>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
-                <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">作成日時</h3>
-              </td>
-              <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
-                <span id="static-file-ctime"></span>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding: 8px 0; white-space: nowrap; vertical-align: top; width: 35%;">
-                <h3 style="font-size: 0.9em; margin: 0; color: var(--text-color); transition: color 0.2s;">更新日時</h3>
-              </td>
-              <td style="padding: 8px 0; word-break: break-all; vertical-align: top;">
-                <span id="static-file-mtime"></span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div id="file-info-empty" class="empty-state-msg">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:12px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-          <div style="font-size: 13px; letter-spacing: 0.5px;">画像を選択して詳細を表示</div>
-        </div>
-      </div>
-    </div>
-    <div class="resizer-h" id="resizer-right-pane"></div>
+
     <div id="inspector-section" tabindex="-1">
       <div id="inspector-content" class="inspector-data">
         <div id="inspector-empty" class="empty-state-msg">

@@ -412,41 +412,6 @@ body.is-resizing #favorites-section {
   overflow: hidden;
 }
 
-#file-info-section {
-  flex: 0 0 var(--right-top-height, 200px);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-  transition: flex-basis 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-  padding: 0;
-}
-
-#file-info-content {
-  padding: 10px 10px 0 10px;
-}
-
-body.is-resizing #file-info-section {
-  transition: none;
-}
-
-/* --- 右ペインのリサイザ --- */
-#resizer-right-pane {
-  background-color: var(--resizer-color);
-  cursor: row-resize;
-  height: 5px;
-  flex: none;
-  z-index: 10;
-  transition: background-color 0.2s ease;
-  position: relative;
-}
-
-#resizer-right-pane:hover:not(:has(.resizer-toggle:hover)),
-#resizer-right-pane:active,
-#resizer-right-pane.resizing {
-  background-color: var(--accent-color);
-}
 
 #inspector-section {
   flex: 1;
@@ -546,34 +511,42 @@ table#file-table {
 }
 
 #file-table th:nth-child(1) {
-  width: 35%;
+  /* 幅を指定せず、残りの領域をすべて名前列が使うようにする */
 }
 
 #file-table th:nth-child(2) {
-  width: 10%;
+  width: 85px;
 }
 
 #file-table th:nth-child(3) {
-  width: 10%;
+  width: 75px;
 }
 
 #file-table th:nth-child(4) {
-  width: 10%;
+  width: 75px;
 }
 
 #file-table th:nth-child(5) {
-  width: 10%;
+  width: 75px;
 }
 
 #file-table th:nth-child(6) {
-  width: 25%;
+  width: 95px;
+}
+
+#file-table th:nth-child(7) {
+  width: 160px;
 }
 
 #file-table th,
 #file-table td {
   padding: 4px 8px;
   border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #file-table th {

@@ -1096,14 +1096,14 @@ class UIManager {
     if (topSpacerHeight > 0) {
       const tr = document.createElement('tr');
       tr.style.height = `${topSpacerHeight}px`;
-      tr.innerHTML = `<td colspan="6" style="padding: 0; border: none;"></td>`;
+      tr.innerHTML = `<td colspan="7" style="padding: 0; border: none;"></td>`;
       fragment.appendChild(tr);
     }
 
     const items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
 
     for (let i = safeStartRow; i <= endRow; i++) {
-      const file = items[i - safeStartRow];
+        const file = items[i - safeStartRow];
       if (!file) continue;
       const isSelected = appState.selection.has(i);
       const tr = document.createElement('tr');
@@ -1111,11 +1111,22 @@ class UIManager {
       tr.dataset.index = i;
       tr.dataset.filepath = file.path;
       tr.style.height = `${rowHeight}px`;
+      
+      let ratioStr = '-';
+      if (file.width && file.height) {
+        const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+        const d = gcd(file.width, file.height);
+        const rw = file.width / d;
+        const rh = file.height / d;
+        ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
+      }
+
       tr.innerHTML = `
         <td>${file.name}</td>
         <td>${file.ext}</td>
         <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
         <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
+        <td style="text-align: right;">${ratioStr}</td>
         <td style="text-align: right;">${formatSize(file.size)}</td>
         <td>${formatDate(file.mtime)}</td>
       `;
@@ -1126,7 +1137,7 @@ class UIManager {
     if (bottomSpacerHeight > 0) {
       const tr = document.createElement('tr');
       tr.style.height = `${bottomSpacerHeight}px`;
-      tr.innerHTML = `<td colspan="6" style="padding: 0; border: none;"></td>`;
+      tr.innerHTML = `<td colspan="7" style="padding: 0; border: none;"></td>`;
       fragment.appendChild(tr);
     }
 
