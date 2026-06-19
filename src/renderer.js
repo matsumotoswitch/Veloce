@@ -4316,7 +4316,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       draggedFavoriteId = null;
       // 全てのドロップインジケータ（線）をクリア
       favListElement.querySelectorAll('.bookmark-item').forEach(item => {
-        item.style.boxShadow = '';
+        item.classList.remove('drop-target-left', 'drop-target-right');
       });
     });
 
@@ -4328,7 +4328,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       const itemDiv = e.target.closest('.bookmark-item');
 
-      favListElement.querySelectorAll('.bookmark-item').forEach(item => item.style.boxShadow = '');
+      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
+        item.classList.remove('drop-target-left', 'drop-target-right');
+      });
 
       if (!itemDiv || (draggedFavoriteId && itemDiv.dataset.id === draggedFavoriteId)) {
         // 余白にドラッグしている場合、一番最後のアイテムの下にインジケータを表示する
@@ -4336,7 +4338,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (items.length > 0) {
           const lastItem = items[items.length - 1];
           if (lastItem.dataset.id !== draggedFavoriteId) {
-            lastItem.style.boxShadow = '0 2px 0 var(--glow-gold)';
+            lastItem.classList.add('drop-target-right');
           }
         }
         return;
@@ -4347,16 +4349,16 @@ window.addEventListener('DOMContentLoaded', async () => {
       const midX = rect.left + rect.width / 2;
 
       if (e.clientX < midX) {
-        itemDiv.style.boxShadow = '-2px 0 0 var(--glow-gold)'; // 左に線
+        itemDiv.classList.add('drop-target-left'); // 左に線
       } else {
-        itemDiv.style.boxShadow = '2px 0 0 var(--glow-gold)';  // 右に線
+        itemDiv.classList.add('drop-target-right');  // 右に線
       }
     });
 
     favListElement.addEventListener('dragleave', (e) => {
       if (e.relatedTarget && favListElement.contains(e.relatedTarget)) return;
       favListElement.querySelectorAll('.bookmark-item').forEach(item => {
-        item.style.boxShadow = '';
+        item.classList.remove('drop-target-left', 'drop-target-right');
       });
     });
 
@@ -4365,7 +4367,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (!draggedFavoriteId && !isFolderDrop) return;
       e.preventDefault();
 
-      favListElement.querySelectorAll('.bookmark-item').forEach(item => item.style.boxShadow = '');
+      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
+        item.classList.remove('drop-target-left', 'drop-target-right');
+      });
 
       if (isFolderDrop) {
         const jsonData = e.dataTransfer.getData('application/json-folder');

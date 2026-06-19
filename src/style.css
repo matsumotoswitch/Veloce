@@ -391,6 +391,36 @@ input:-webkit-autofill:focus {
   box-shadow: 0 0 12px rgba(37, 126, 140, 0.3);
 }
 
+.bookmark-item.drop-target-left {
+  position: relative;
+}
+.bookmark-item.drop-target-left::before {
+  content: '';
+  position: absolute;
+  left: -3px; /* ギャップ(4px)の真ん中 */
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--glow-gold);
+  border-radius: 0;
+  z-index: 10;
+}
+
+.bookmark-item.drop-target-right {
+  position: relative;
+}
+.bookmark-item.drop-target-right::after {
+  content: '';
+  position: absolute;
+  right: -3px; /* ギャップ(4px)の真ん中 */
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--glow-gold);
+  border-radius: 0;
+  z-index: 10;
+}
+
 .bookmark-item svg {
   opacity: 0.8;
 }
