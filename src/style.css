@@ -2,12 +2,12 @@
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
   --bg-color: #0b1012;
   --panel-bg: #162226;
-  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color: rgba(255, 255, 255, 0.15);
   --text-color: #cddbe0;
   --accent-color: #257e8c;
   --accent-hover: #2e96a6;
   --modal-bg: #1a2327;
-  --modal-border: rgba(255, 255, 255, 0.12);
+  --modal-border: rgba(255, 255, 255, 0.2);
   --danger-red: #e05263;
   --glow-gold: #e6c762;
   --resizer-color: #0b1012;
@@ -115,7 +115,7 @@ body {
   grid-template-columns: var(--left-width, 200px) 5px 1fr 5px var(--right-width, 300px);
   grid-template-rows: minmax(0, 1fr);
   height: calc(100vh - 108px);
-  /* タイトルバー(38px) + ツールバー(38px) + ブックマークバー(32px) */
+  box-sizing: border-box;
   color: var(--text-color);
   transition: grid-template-columns 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -294,7 +294,8 @@ input:-webkit-autofill:focus {
 
 /* Resizers */
 .resizer {
-  background-color: var(--resizer-color);
+  background-color: var(--panel-bg);
+  border-left: 1px solid var(--border-color);
   cursor: col-resize;
   z-index: 10;
   transition: background-color 0.2s ease;
@@ -308,7 +309,8 @@ input:-webkit-autofill:focus {
 }
 
 .resizer-h {
-  background-color: var(--resizer-color);
+  background-color: var(--panel-bg);
+  border-top: 1px solid var(--border-color);
   cursor: row-resize;
   height: 5px;
   flex: none;
@@ -338,7 +340,6 @@ input:-webkit-autofill:focus {
 /* Panes */
 #left-pane {
   background: var(--panel-bg);
-  border-right: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -397,12 +398,13 @@ input:-webkit-autofill:focus {
 .bookmark-item.drop-target-left::before {
   content: '';
   position: absolute;
-  left: -3px; /* ギャップ(4px)の真ん中 */
+  left: -3px; /* ギャップの真ん中 */
   top: 0;
   bottom: 0;
-  width: 2px;
+  width: 3px;
   background-color: var(--glow-gold);
-  border-radius: 0;
+  border-radius: 2px;
+  box-shadow: 0 0 8px var(--glow-gold), 0 0 2px #fff;
   z-index: 10;
 }
 
@@ -412,12 +414,13 @@ input:-webkit-autofill:focus {
 .bookmark-item.drop-target-right::after {
   content: '';
   position: absolute;
-  right: -3px; /* ギャップ(4px)の真ん中 */
+  right: -3px; /* ギャップの真ん中 */
   top: 0;
   bottom: 0;
-  width: 2px;
+  width: 3px;
   background-color: var(--glow-gold);
-  border-radius: 0;
+  border-radius: 2px;
+  box-shadow: 0 0 8px var(--glow-gold), 0 0 2px #fff;
   z-index: 10;
 }
 
@@ -435,6 +438,7 @@ input:-webkit-autofill:focus {
 }
 
 #center-pane {
+  background: var(--panel-bg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -443,7 +447,6 @@ input:-webkit-autofill:focus {
 
 #right-pane {
   background: var(--panel-bg);
-  border-left: none;
   display: flex;
   flex-direction: column;
   padding: 0;

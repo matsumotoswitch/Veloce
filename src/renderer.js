@@ -2961,15 +2961,18 @@ function createResizerToggle(resizer, type) {
 
   const btn = document.createElement('div');
   btn.className = 'resizer-toggle';
+  const isHorizontal = type === 'center' || type === 'leftTop' || type === 'rightTop';
+  const topPos = isHorizontal ? '0' : '50%';
+  const leftPos = isHorizontal ? '50%' : '0';
+
   btn.style.cssText = `
     position: absolute; display: flex; justify-content: center; align-items: center; opacity: 0.6;
     background-color: var(--border-color); border: 1px solid var(--modal-border); border-radius: 2px; cursor: pointer; color: var(--text-color);
-    z-index: 1000; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 1000; top: ${topPos}; left: ${leftPos}; transform: translate(-50%, -50%);
   `;
 
-  const isVertical = type === 'center' || type === 'leftTop' || type === 'rightTop';
-  btn.style.width = isVertical ? '30px' : '14px';
-  btn.style.height = isVertical ? '14px' : '30px';
+  btn.style.width = isHorizontal ? '30px' : '14px';
+  btn.style.height = isHorizontal ? '14px' : '30px';
 
   let openIcon, closeIcon;
   if (type === 'left') { openIcon = UIManager.ICONS.CHEVRON_LEFT; closeIcon = UIManager.ICONS.CHEVRON_RIGHT; }
