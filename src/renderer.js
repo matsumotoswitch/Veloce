@@ -541,64 +541,89 @@ async function deleteSelectedFiles() {
   }
 }
 
+let bookmarkOverflowMenu = null;
+
+function checkBookmarkOverflow() {
+  const bar = document.getElementById('bookmark-bar');
+  const list = document.getElementById('bookmark-list');
+  const overflowBtn = document.getElementById('bookmark-overflow-btn');
+  if (!bar || !list || !overflowBtn) return;
+
+  if (list.scrollWidth > list.clientWidth) {
+    overflowBtn.style.display = 'flex';
+  } else {
+    overflowBtn.style.display = 'none';
+    if (bookmarkOverflowMenu && bookmarkOverflowMenu.parentNode) {
+      bookmarkOverflowMenu.parentNode.removeChild(bookmarkOverflowMenu);
+      bookmarkOverflowMenu = null;
+    }
+  }
+}
+
+const bookmarkResizeObserver = new ResizeObserver(() => {
+  checkBookmarkOverflow();
+});
+
+window.addEventListener('click', (e) => {
+  if (bookmarkOverflowMenu && !e.target.closest('#bookmark-overflow-btn') && !e.target.closest('#bookmark-overflow-menu')) {
+    bookmarkOverflowMenu.style.display = 'none';
+  }
+});
+      
+
+
 function renderFavorites() {
-  const container = document.getElementById('favorites-list');
+  const container = document.getElementById('bookmark-list');
   if (!container) return;
   container.innerHTML = '';
 
   if (appState.favorites.length === 0) {
-    const li = document.createElement('li');
-    li.style.padding = '20px 10px';
-    li.style.color = 'var(--text-color)';
-    li.style.opacity = '0.5';
-    li.style.fontSize = '0.9em';
-    li.style.textAlign = 'center';
-    li.style.lineHeight = '1.6';
-    li.style.pointerEvents = 'none'; // ドラッグ操作の邪魔にならないようにする
-    li.innerHTML = 'フォルダをここにドラッグして<br>お気に入りに追加できます';
-    container.appendChild(li);
+    const emptyMsg = document.createElement('div');
+    emptyMsg.style.padding = '4px 8px';
+    emptyMsg.style.color = 'var(--text-color)';
+    emptyMsg.style.opacity = '0.5';
+    emptyMsg.style.fontSize = '0.85em';
+    emptyMsg.style.pointerEvents = 'none';
+    emptyMsg.textContent = 'フォルダをここにドラッグしてお気に入りに追加';
+    container.appendChild(emptyMsg);
+    
+    const btn = document.getElementById('bookmark-overflow-btn');
+    if (btn) btn.style.display = 'none';
     return;
   }
 
   appState.favorites.forEach(fav => {
-    const li = document.createElement('li');
-    li.className = 'tree-node';
-    li.style.fontSize = '0.9em';
-
     const itemDiv = document.createElement('div');
-    itemDiv.className = 'tree-item favorite-item';
+    itemDiv.className = 'bookmark-item';
     itemDiv.dataset.path = fav.path;
     itemDiv.dataset.id = fav.id;
     itemDiv.dataset.isFavorite = 'true';
-    itemDiv.style.display = 'flex';
-    itemDiv.style.alignItems = 'center';
-    itemDiv.draggable = true; // ドラッグ可能にする
+    itemDiv.draggable = true;
 
     const icon = document.createElement('span');
-    icon.className = 'tree-icon';
     if (fav.icon && ICON_SVGS[fav.icon]) {
       icon.innerHTML = ICON_SVGS[fav.icon];
       icon.classList.add(`icon-color-${fav.color || 'default'}`);
     } else if (fav.icon && fav.icon.startsWith('FAV_')) {
       icon.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
-      icon.style.color = 'var(--glow-gold)'; // お気に入りのデフォルト色
+      icon.style.color = 'var(--glow-gold)';
     } else {
       icon.textContent = fav.icon || '⭐';
     }
-    icon.style.marginRight = '4px';
-    icon.style.marginLeft = '2px';
-    icon.style.display = 'inline-flex';
+    icon.style.display = 'flex';
     icon.style.alignItems = 'center';
 
     const label = document.createElement('span');
-    label.className = 'tree-label';
     label.textContent = fav.name;
 
     itemDiv.appendChild(icon);
     itemDiv.appendChild(label);
-    li.appendChild(itemDiv);
-    container.appendChild(li);
+    container.appendChild(itemDiv);
   });
+  
+  if (typeof checkBookmarkOverflow === 'function') {
+    checkBookmarkOverflow();
+  }
 }
 
 // ============================================================================
@@ -2491,7 +2516,7 @@ const closeAllMenus = (e) => {
 
   if (t && t.closest) {
     // メニュー自身をクリックした場合は閉じない
-    if (t.closest('#context-menu') || t.closest('#tab-list-menu') || t.closest('#history-menu')) return;
+    if (t.closest('#context-menu') || t.closest('#tab-list-menu') || t.closest('#history-menu') || t.closest('#bookmark-overflow-menu')) return;
     // タブリスト展開ボタンは専用のトグル制御があるため無視
     if (t.closest('#titlebar-tab-list')) return;
     // 履歴ボタンでのクリック時は長押しによるメニュー維持を優先するため除外
@@ -2503,6 +2528,8 @@ const closeAllMenus = (e) => {
   if (typeof tabListMenu !== 'undefined' && tabListMenu) tabListMenu.style.display = 'none';
   const historyMenu = document.getElementById('history-menu');
   if (historyMenu) historyMenu.style.display = 'none';
+  const overflowMenu = document.getElementById('bookmark-overflow-menu');
+  if (overflowMenu) overflowMenu.style.display = 'none';
 };
 
 // 全てのマウス・タッチ操作の「キャプチャフェーズ（最優先）」で強制実行する
@@ -3625,6 +3652,98 @@ window.addEventListener('DOMContentLoaded', async () => {
     updateSortIndicators
   });
 
+  const bar = document.getElementById('bookmark-list');
+  if (bar) bookmarkResizeObserver.observe(bar);
+  
+  const overflowBtn = document.getElementById('bookmark-overflow-btn');
+  if (overflowBtn) {
+    overflowBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (bookmarkOverflowMenu && bookmarkOverflowMenu.style.display !== 'none') {
+        bookmarkOverflowMenu.style.display = 'none';
+        return;
+      }
+      
+      const list = document.getElementById('bookmark-list');
+      const items = Array.from(list.children);
+      const listRect = list.getBoundingClientRect();
+      const hiddenItems = items.filter(item => {
+        const itemRect = item.getBoundingClientRect();
+        return itemRect.right > listRect.right;
+      });
+      
+      if (hiddenItems.length === 0) return;
+      
+      bookmarkOverflowMenu = document.getElementById('bookmark-overflow-menu');
+      if (!bookmarkOverflowMenu) {
+        bookmarkOverflowMenu = document.createElement('div');
+        bookmarkOverflowMenu.id = 'bookmark-overflow-menu';
+        document.body.appendChild(bookmarkOverflowMenu);
+      }
+      bookmarkOverflowMenu.innerHTML = '';
+      bookmarkOverflowMenu.style.display = 'block';
+      bookmarkOverflowMenu.style.zIndex = '10001';
+      
+      hiddenItems.forEach(domItem => {
+        const path = domItem.dataset.path;
+        const fav = appState.favorites.find(f => f.path === path);
+        if (!fav) return;
+        
+        let iconSvg = '';
+        if (fav.icon && ICON_SVGS[fav.icon]) {
+          iconSvg = ICON_SVGS[fav.icon];
+        } else if (fav.icon && fav.icon.startsWith('FAV_')) {
+          iconSvg = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
+        }
+        
+        const menuItem = createMenuItem(fav.name, iconSvg, async () => {
+          bookmarkOverflowMenu.style.display = 'none';
+          
+          if (window.veloceAPI.loadDirectory) {
+            const activeTab = appState.tabs[appState.activeTabIndex];
+            if (activeTab) {
+              activeTab.path = fav.path;
+              activeTab.name = fav.name;
+              activeTab.scrollTop = 0;
+              appState.currentDirectory = fav.path;
+              localStorage.setItem('currentDirectory', appState.currentDirectory);
+              if (window.uiManager) window.uiManager.renderTabs();
+              
+              if (typeof saveTabsState === 'function') saveTabsState();
+              if (typeof refreshFileList === 'function') refreshFileList(true);
+              if (typeof expandTreeToPath === 'function') await expandTreeToPath(fav.path);
+            }
+          }
+        });
+        
+        const iconSpan = menuItem.querySelector('svg, div');
+        if (iconSpan && iconSpan.tagName.toLowerCase() === 'svg') {
+          if (fav.icon && fav.icon.startsWith('FAV_')) {
+            iconSpan.style.color = 'var(--glow-gold)';
+          } else {
+            iconSpan.classList.add(`icon-color-${fav.color || 'default'}`);
+          }
+        }
+        
+        bookmarkOverflowMenu.appendChild(menuItem);
+      });
+      
+      const rect = e.currentTarget.getBoundingClientRect();
+      bookmarkOverflowMenu.style.top = `${rect.bottom + 4}px`;
+      bookmarkOverflowMenu.style.left = 'auto';
+      bookmarkOverflowMenu.style.right = `${window.innerWidth - rect.right}px`;
+      bookmarkOverflowMenu.style.transform = 'scale(0.95)';
+      bookmarkOverflowMenu.style.opacity = '0';
+      
+      // animation
+      requestAnimationFrame(() => {
+        bookmarkOverflowMenu.style.transition = 'opacity 0.15s ease, transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1)';
+        bookmarkOverflowMenu.style.opacity = '1';
+        bookmarkOverflowMenu.style.transform = 'scale(1)';
+      });
+    });
+  }
+
   renderFavorites();
 
   const setupNavButtonEvents = (btnId, direction, tooltipText) => {
@@ -4155,11 +4274,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // D&Dの受け入れ範囲を広げるため、リストではなくセクション全体を取得
-  const favListElement = document.getElementById('favorites-section') || document.getElementById('favorites-list');
+  const favListElement = document.getElementById('bookmark-list');
   if (favListElement) {
     // --- お気に入りのドラッグ＆ドロップ並び替え処理 ---
     favListElement.addEventListener('dragstart', (e) => {
-      const itemDiv = e.target.closest('.favorite-item');
+      const itemDiv = e.target.closest('.bookmark-item');
       if (!itemDiv) {
         e.preventDefault();
         return;
@@ -4192,11 +4311,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 
     favListElement.addEventListener('dragend', (e) => {
-      const itemDiv = e.target.closest('.favorite-item');
+      const itemDiv = e.target.closest('.bookmark-item');
       if (itemDiv) itemDiv.style.opacity = '1';
       draggedFavoriteId = null;
       // 全てのドロップインジケータ（線）をクリア
-      favListElement.querySelectorAll('.favorite-item').forEach(item => {
+      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
         item.style.boxShadow = '';
       });
     });
@@ -4207,13 +4326,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       e.preventDefault();
       e.dataTransfer.dropEffect = isFolderDrop ? 'copy' : 'move';
 
-      const itemDiv = e.target.closest('.favorite-item');
+      const itemDiv = e.target.closest('.bookmark-item');
 
-      favListElement.querySelectorAll('.favorite-item').forEach(item => item.style.boxShadow = '');
+      favListElement.querySelectorAll('.bookmark-item').forEach(item => item.style.boxShadow = '');
 
       if (!itemDiv || (draggedFavoriteId && itemDiv.dataset.id === draggedFavoriteId)) {
         // 余白にドラッグしている場合、一番最後のアイテムの下にインジケータを表示する
-        const items = favListElement.querySelectorAll('.favorite-item');
+        const items = favListElement.querySelectorAll('.bookmark-item');
         if (items.length > 0) {
           const lastItem = items[items.length - 1];
           if (lastItem.dataset.id !== draggedFavoriteId) {
@@ -4223,20 +4342,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      // マウス位置がターゲットの半分より上か下かで線の位置を変える
+      // マウス位置がターゲットの半分より左か右かで線の位置を変える
       const rect = itemDiv.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
+      const midX = rect.left + rect.width / 2;
 
-      if (e.clientY < midY) {
-        itemDiv.style.boxShadow = '0 -2px 0 var(--glow-gold)'; // 上に線
+      if (e.clientX < midX) {
+        itemDiv.style.boxShadow = '-2px 0 0 var(--glow-gold)'; // 左に線
       } else {
-        itemDiv.style.boxShadow = '0 2px 0 var(--glow-gold)';  // 下に線
+        itemDiv.style.boxShadow = '2px 0 0 var(--glow-gold)';  // 右に線
       }
     });
 
     favListElement.addEventListener('dragleave', (e) => {
       if (e.relatedTarget && favListElement.contains(e.relatedTarget)) return;
-      favListElement.querySelectorAll('.favorite-item').forEach(item => {
+      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
         item.style.boxShadow = '';
       });
     });
@@ -4246,7 +4365,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (!draggedFavoriteId && !isFolderDrop) return;
       e.preventDefault();
 
-      favListElement.querySelectorAll('.favorite-item').forEach(item => item.style.boxShadow = '');
+      favListElement.querySelectorAll('.bookmark-item').forEach(item => item.style.boxShadow = '');
 
       if (isFolderDrop) {
         const jsonData = e.dataTransfer.getData('application/json-folder');
@@ -4259,12 +4378,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
 
             let insertIndex = appState.favorites.length;
-            const itemDiv = e.target.closest('.favorite-item');
+            const itemDiv = e.target.closest('.bookmark-item');
             if (itemDiv) {
               const targetId = itemDiv.dataset.id;
               const rect = itemDiv.getBoundingClientRect();
-              const midY = rect.top + rect.height / 2;
-              const insertAfter = e.clientY >= midY;
+              const midX = rect.left + rect.width / 2;
+              const insertAfter = e.clientX >= midX;
               const newIndex = appState.favorites.findIndex(f => f.id === targetId);
               if (newIndex > -1) {
                 insertIndex = insertAfter ? newIndex + 1 : newIndex;
@@ -4281,7 +4400,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      const itemDiv = e.target.closest('.favorite-item');
+      const itemDiv = e.target.closest('.bookmark-item');
       if (itemDiv && itemDiv.dataset.id === draggedFavoriteId) return;
 
       const fromIndex = appState.favorites.findIndex(f => f.id === draggedFavoriteId);
@@ -4294,8 +4413,8 @@ window.addEventListener('DOMContentLoaded', async () => {
           newIndex = appState.favorites.findIndex(f => f.id === targetId);
           if (newIndex > -1) {
             const rect = itemDiv.getBoundingClientRect();
-            const midY = rect.top + rect.height / 2;
-            const insertAfter = e.clientY >= midY;
+            const midX = rect.left + rect.width / 2;
+            const insertAfter = e.clientX >= midX;
             if (insertAfter) newIndex += 1;
           } else {
             newIndex = appState.favorites.length;
@@ -4310,7 +4429,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 
     favListElement.addEventListener('click', async (e) => {
-      const itemDiv = e.target.closest('.tree-item');
+      const itemDiv = e.target.closest('.bookmark-item');
       if (!itemDiv) return;
 
       const path = itemDiv.dataset.path;
@@ -4336,7 +4455,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 
     favListElement.addEventListener('contextmenu', (e) => {
-      const itemDiv = e.target.closest('.tree-item');
+      const itemDiv = e.target.closest('.bookmark-item');
       if (!itemDiv) return;
       e.preventDefault();
       e.stopPropagation();

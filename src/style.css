@@ -114,8 +114,8 @@ body {
   display: grid;
   grid-template-columns: var(--left-width, 200px) 5px 1fr 5px var(--right-width, 300px);
   grid-template-rows: minmax(0, 1fr);
-  height: calc(100vh - 76px);
-  /* タイトルバー(38px) + ツールバー(38px) */
+  height: calc(100vh - 108px);
+  /* タイトルバー(38px) + ツールバー(38px) + ブックマークバー(32px) */
   color: var(--text-color);
   transition: grid-template-columns 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -348,12 +348,51 @@ input:-webkit-autofill:focus {
   /* paddingをセクション側に移動 */
 }
 
-#favorites-section {
-  flex: 0 0 var(--left-top-height, 150px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-  transition: flex-basis 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+#bookmark-bar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background-color: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 8px;
+  gap: 4px;
+}
+
+#bookmark-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.bookmark-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--text-color);
+  font-size: 0.85em;
+  transition: background-color 0.2s, color 0.2s;
+  user-select: none;
+}
+
+.bookmark-item:hover {
+  background-color: rgba(37, 126, 140, 0.25);
+  color: #fff;
+}
+
+.bookmark-item.selected {
+  background: linear-gradient(135deg, rgba(37, 126, 140, 0.25), rgba(28, 94, 105, 0.35));
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(37, 126, 140, 0.3);
+}
+
+.bookmark-item svg {
+  opacity: 0.8;
 }
 
 #directories-section {
@@ -363,36 +402,6 @@ input:-webkit-autofill:focus {
   overflow: hidden;
   min-height: 0;
   padding: 0 10px 10px 10px;
-}
-
-body.is-resizing #favorites-section {
-  transition: none;
-}
-
-#favorites-list {
-  list-style: none;
-  /* 中点を消す */
-  padding: 10px 10px 0 10px;
-  margin: 0;
-}
-
-/* --- お気に入りペインのリサイザ --- */
-#resizer-left-pane {
-  background-color: var(--resizer-color);
-  cursor: row-resize;
-  height: 5px;
-  flex: none;
-  z-index: 10;
-  transition: background-color 0.2s ease;
-  position: relative;
-  /* トグルスイッチの配置用 */
-}
-
-/* ホバー時の色変化（トグルスイッチホバー時は除く） */
-#resizer-left-pane:hover:not(:has(.resizer-toggle:hover)),
-#resizer-left-pane:active,
-#resizer-left-pane.resizing {
-  background-color: var(--accent-color);
 }
 
 #center-pane {
@@ -790,8 +799,7 @@ input[type="range"]:focus {
   padding-left: 0;
 }
 
-#dir-tree .tree-item,
-#favorites-list .tree-item {
+#dir-tree .tree-item {
   display: flex;
   align-items: center;
   padding: 4px;
@@ -806,13 +814,11 @@ input[type="range"]:focus {
   transition: color 0.2s, background-color 0.2s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-#dir-tree .tree-item:active,
-#favorites-list .tree-item:active {
+#dir-tree .tree-item:active {
   transform: scale(0.98);
 }
 
-#dir-tree .tree-item::before,
-#favorites-list .tree-item::before {
+#dir-tree .tree-item::before {
   content: '';
   position: absolute;
   top: 0;
@@ -825,27 +831,23 @@ input[type="range"]:focus {
   transition: opacity 0.2s, transform 0.2s;
 }
 
-#dir-tree .tree-item:hover,
-#favorites-list .tree-item:hover {
+#dir-tree .tree-item:hover {
   background-color: rgba(37, 126, 140, 0.25);
   color: #fff;
 }
 
-#dir-tree .tree-item.selected,
-#favorites-list .tree-item.selected {
+#dir-tree .tree-item.selected {
   background: linear-gradient(135deg, rgba(37, 126, 140, 0.25), rgba(28, 94, 105, 0.35));
   color: #ffffff;
   box-shadow: 0 0 12px rgba(37, 126, 140, 0.3);
 }
 
-#dir-tree .tree-item.selected::before,
-#favorites-list .tree-item.selected::before {
+#dir-tree .tree-item.selected::before {
   opacity: 1;
   transform: translateX(0);
 }
 
-#dir-tree .tree-icon,
-#favorites-list .tree-icon {
+#dir-tree .tree-icon {
   margin-right: 6px;
   font-size: 14px;
 }
@@ -1262,7 +1264,8 @@ img.thumbnail-item.loading {
 #context-menu,
 .submenu,
 #tab-list-menu,
-#history-menu {
+#history-menu,
+#bookmark-overflow-menu {
   background-color: var(--modal-bg);
   border: 1px solid var(--modal-border);
   border-radius: var(--radius-lg);
@@ -1277,7 +1280,8 @@ img.thumbnail-item.loading {
 
 #context-menu,
 #tab-list-menu,
-#history-menu {
+#history-menu,
+#bookmark-overflow-menu {
   position: fixed;
   z-index: 10001;
   padding: 6px 0;

@@ -46,13 +46,20 @@
     </div>
     <button id="search-clear-btn" class="icon-btn"></button>
   </div>
+  <!-- ブックマークバー (お気に入り) -->
+  <div id="bookmark-bar">
+    <div id="bookmark-list"></div>
+    <button id="bookmark-overflow-btn" class="icon-btn" title="隠れたお気に入り" style="display: none;">
+      <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m13 17 5-5-5-5"/>
+        <path d="m6 17 5-5-5-5"/>
+      </svg>
+    </button>
+  </div>
   <div class="app-content">
   <!-- 左ペイン: ディレクトリツリー等 -->
   <div id="left-pane">
-    <div id="favorites-section">
-      <ul id="favorites-list" class="tree-root"></ul>
-    </div>
-    <div class="resizer-h" id="resizer-left-pane"></div>
+
     <div id="directories-section" tabindex="-1">
       <div id="dir-tree"></div>
     </div>
