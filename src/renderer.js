@@ -2962,12 +2962,18 @@ function createResizerToggle(resizer, type) {
   const btn = document.createElement('div');
   btn.className = 'resizer-toggle';
   const isHorizontal = type === 'center' || type === 'leftTop' || type === 'rightTop';
-  const topPos = isHorizontal ? '0' : '50%';
-  const leftPos = isHorizontal ? '50%' : '0';
+  let topPos = '50%';
+  let leftPos = '50%';
+  
+  if (isHorizontal) {
+    topPos = '0';
+  } else {
+    leftPos = type === 'left' ? '100%' : '0';
+  }
 
   btn.style.cssText = `
-    position: absolute; display: flex; justify-content: center; align-items: center; opacity: 0.6;
-    background-color: var(--border-color); border: 1px solid var(--modal-border); border-radius: 2px; cursor: pointer; color: var(--text-color);
+    position: absolute; display: flex; justify-content: center; align-items: center; opacity: 1;
+    background-color: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; color: var(--text-color);
     z-index: 1000; top: ${topPos}; left: ${leftPos}; transform: translate(-50%, -50%);
   `;
 
@@ -3003,12 +3009,14 @@ function createResizerToggle(resizer, type) {
         // 閉じる前の高さを復元（なければデフォルト250px）
         const restoreHeight = localStorage.getItem('prevTopHeight') || '250px';
         root.style.setProperty('--top-height', restoreHeight);
+        root.removeAttribute('data-center-collapsed');
         localStorage.setItem('topHeight', restoreHeight);
         btn.innerHTML = openIcon;
       } else {
         // 閉じる直前の高さを prevTopHeight として退避させてから 0px にする
         localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
         root.style.setProperty('--top-height', '0px');
+        root.setAttribute('data-center-collapsed', 'true');
         localStorage.setItem('topHeight', '0px');
         btn.innerHTML = closeIcon;
       }
@@ -3116,6 +3124,7 @@ window.addEventListener('mousemove', (e) => {
         if (root.style.getPropertyValue('--top-height') !== '0px') {
           localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
           root.style.setProperty('--top-height', '0px');
+          root.setAttribute('data-center-collapsed', 'true');
           localStorage.setItem('topHeight', '0px');
           const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
           if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
@@ -3124,6 +3133,7 @@ window.addEventListener('mousemove', (e) => {
         newHeight = Math.max(50, Math.min(newHeight, rect.height - 50));
         const root = document.documentElement;
         root.style.setProperty('--top-height', `${newHeight}px`);
+        root.removeAttribute('data-center-collapsed');
 
         const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
         if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
@@ -4148,9 +4158,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   const savedTopHeight = localStorage.getItem('topHeight');
   if (savedTopHeight) {
     document.documentElement.style.setProperty('--top-height', savedTopHeight);
-    if (savedTopHeight === '0px' && uiManager.elements.resizerCenter) {
-      const btn = uiManager.elements.resizerCenter.querySelector('.resizer-toggle');
-      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+    if (savedTopHeight === '0px') {
+      document.documentElement.setAttribute('data-center-collapsed', 'true');
+      if (uiManager.elements.resizerCenter) {
+        const btn = uiManager.elements.resizerCenter.querySelector('.resizer-toggle');
+        if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+      }
+    } else {
+      document.documentElement.removeAttribute('data-center-collapsed');
     }
   }
 
