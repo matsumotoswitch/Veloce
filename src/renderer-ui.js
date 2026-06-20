@@ -1240,14 +1240,21 @@ class UIManager {
 
     // 足りない要素を追加
     while (content.children.length < targetCount) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'thumbnail-item';
+      wrapper.dataset.isVisible = 'true';
+      wrapper.draggable = true;
+      
       const img = document.createElement('img');
-      img.className = 'thumbnail-item';
-      img.style.objectFit = 'contain';
-      img.style.width = '100%';
-      img.draggable = true;
+      img.className = 'thumbnail-img';
       img.decoding = "async";
-      img.dataset.isVisible = 'true';
-      content.appendChild(img);
+      
+      const label = document.createElement('div');
+      label.className = 'thumbnail-label';
+      
+      wrapper.appendChild(img);
+      wrapper.appendChild(label);
+      content.appendChild(wrapper);
     }
 
     // 余分な要素を削除
@@ -1259,21 +1266,33 @@ class UIManager {
       const file = items[i - startIndex];
       if (!file) continue;
 
-      const img = content.children[i - startIndex];
+      const wrapper = content.children[i - startIndex];
+      const img = wrapper.querySelector('.thumbnail-img');
+      const label = wrapper.querySelector('.thumbnail-label');
       const isSelected = appState.selection.has(i);
 
       if (isSelected) {
-        img.classList.add('selected');
+        wrapper.classList.add('selected');
       } else {
-        img.classList.remove('selected');
+        wrapper.classList.remove('selected');
       }
 
+      wrapper.style.height = `${itemSize}px`;
       img.style.height = `${itemSize}px`;
 
       // パスが変わった場合のみ画像ソースとイベントを更新する
-      if (img.dataset.filepath !== file.path || img.dataset.index != i) {
-        img.dataset.filepath = file.path;
-        img.dataset.index = i;
+      if (file.name) {
+        label.textContent = file.name;
+        label.title = file.name;
+      } else {
+        label.textContent = '';
+        label.title = '';
+      }
+
+      if (wrapper.dataset.filepath !== file.path || wrapper.dataset.index != i) {
+        wrapper.dataset.filepath = file.path;
+        wrapper.dataset.index = i;
+        img.dataset.currentSrc = file.path;
 
         if (appState.thumbnailUrls.has(file.path)) {
             img.src = appState.thumbnailUrls.get(file.path);

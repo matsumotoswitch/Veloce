@@ -681,10 +681,60 @@ table#file-table {
   position: relative;
 }
 
-#thumbnail-controls label {
+#thumbnail-controls label:not(.custom-checkbox-wrapper) {
   font-size: 12px;
   color: var(--text-color);
   opacity: 0.8;
+}
+
+/* Custom Checkbox Styles */
+.custom-checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.custom-checkbox-wrapper input[type="checkbox"] {
+  display: none;
+}
+
+.custom-checkbox {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  margin-right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s, border-color 0.15s;
+  background-color: transparent;
+}
+
+.custom-checkbox-wrapper input[type="checkbox"]:checked + .custom-checkbox {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.custom-checkbox-wrapper input[type="checkbox"]:checked + .custom-checkbox::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-1px);
+}
+
+.checkbox-label {
+  font-size: 11px;
+  color: var(--text-color);
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.custom-checkbox-wrapper:hover .checkbox-label {
+  opacity: 1;
 }
 
 #thumbnail-controls input {
@@ -804,7 +854,6 @@ input[type="range"]:focus {
 }
 
 .thumbnail-item {
-  object-fit: contain;
   border: 1px solid transparent;
   cursor: pointer;
   border-radius: 4px;
@@ -813,6 +862,37 @@ input[type="range"]:focus {
   transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
   position: relative;
   z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.thumbnail-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.thumbnail-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  pointer-events: none;
+  display: none; /* Default hidden */
+}
+
+body.show-thumbnail-names .thumbnail-label {
+  display: block;
 }
 
 .thumbnail-item:hover {
@@ -1947,6 +2027,7 @@ html.viewer-html,
   right: 0;
   left: 0;
   display: flex;
+  justify-content: flex-end; /* Keep buttons on right even if filename is hidden */
   z-index: 9999;
   visibility: visible;
   transition: opacity 0.2s;

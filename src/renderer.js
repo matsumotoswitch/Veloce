@@ -854,14 +854,17 @@ class ThumbnailQueueManager {
 
   updateDOM(filePath, url) {
     const safePath = filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const img = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
-    if (img) {
-      img.src = url;
-      if (img.complete) {
-        img.classList.remove('loading');
-      } else {
-        img.onload = function() { this.classList.remove('loading'); };
-        img.onerror = function() { this.classList.remove('loading'); };
+    const wrapper = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
+    if (wrapper) {
+      const img = wrapper.querySelector('.thumbnail-img');
+      if (img) {
+        img.src = url;
+        if (img.complete) {
+          img.classList.remove('loading');
+        } else {
+          img.onload = function() { this.classList.remove('loading'); };
+          img.onerror = function() { this.classList.remove('loading'); };
+        }
       }
     }
   }
@@ -4290,6 +4293,34 @@ window.addEventListener('DOMContentLoaded', async () => {
           uiManager.showToast('キャッシュの削除に失敗しました。', 3000, 'cache-clear', 'error');
         }
       }
+    });
+  }
+
+  // --- ツールバー：ファイル名表示設定の初期化 ---
+  const chkThumbnailName = document.getElementById('show-thumbnail-name-chk');
+  const chkViewerName = document.getElementById('show-viewer-name-chk');
+
+  if (chkThumbnailName) {
+    const showThumbnailName = localStorage.getItem('showThumbnailNames') === 'true';
+    chkThumbnailName.checked = showThumbnailName;
+    if (showThumbnailName) {
+      document.body.classList.add('show-thumbnail-names');
+    }
+    chkThumbnailName.addEventListener('change', (e) => {
+      localStorage.setItem('showThumbnailNames', e.target.checked);
+      if (e.target.checked) {
+        document.body.classList.add('show-thumbnail-names');
+      } else {
+        document.body.classList.remove('show-thumbnail-names');
+      }
+    });
+  }
+
+  if (chkViewerName) {
+    const showViewerName = localStorage.getItem('showViewerFilename') !== 'false'; // Default to true
+    chkViewerName.checked = showViewerName;
+    chkViewerName.addEventListener('change', (e) => {
+      localStorage.setItem('showViewerFilename', e.target.checked);
     });
   }
 

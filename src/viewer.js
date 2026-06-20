@@ -148,6 +148,19 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       });
     }
+
+    // --- ファイル名の表示設定の初期化と監視 ---
+    const updateFilenameVisibility = () => {
+      const filenameEl = document.getElementById('window-filename-display');
+      if (filenameEl) {
+        const show = localStorage.getItem('showViewerFilename') !== 'false';
+        filenameEl.style.display = show ? 'flex' : 'none';
+      }
+    };
+    updateFilenameVisibility();
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'showViewerFilename') updateFilenameVisibility();
+    });
 });
 
 // ============================================================================
