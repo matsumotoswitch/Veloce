@@ -6,7 +6,7 @@
   --text-color: #cddbe0;
   --accent-color: #257e8c;
   --accent-hover: #2e96a6;
-  --modal-bg: #1a2327;
+  --modal-bg: #141a1d;
   --modal-border: rgba(255, 255, 255, 0.2);
   --danger-red: #e05263;
   --glow-gold: #e6c762;
@@ -131,8 +131,7 @@ body.is-resizing .app-content {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.05) !important;
-  backdrop-filter: blur(4px) !important;
+  background: rgba(0, 0, 0, 0.5) !important;
   z-index: 10002;
   display: flex;
   justify-content: center;
@@ -299,14 +298,18 @@ input:-webkit-autofill:focus {
   z-index: 10;
   transition: background-color 0.2s ease;
   position: relative;
-}
-
-#resizer-left {
+  border-left: none;
   border-right: 1px solid var(--border-color);
 }
 
+#resizer-left {
+  box-shadow: none;
+}
+
 #resizer-right {
+  box-shadow: none;
   border-left: 1px solid var(--border-color);
+  border-right: none;
 }
 
 /* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
@@ -318,7 +321,9 @@ input:-webkit-autofill:focus {
 
 .resizer-h {
   background-color: var(--panel-bg);
+  box-shadow: none;
   border-top: 1px solid var(--border-color);
+  border-bottom: none;
   cursor: row-resize;
   height: 5px;
   flex: none;
@@ -329,26 +334,6 @@ input:-webkit-autofill:focus {
 
 :root[data-center-collapsed="true"] #resizer-center {
   border-top: none;
-}
-
-.resizer-h::before {
-  content: '';
-  position: absolute;
-  left: -1px;
-  top: -1px;
-  width: 1px;
-  height: 1px;
-  background-color: var(--border-color);
-}
-
-.resizer-h::after {
-  content: '';
-  position: absolute;
-  right: -1px;
-  top: -1px;
-  width: 1px;
-  height: 1px;
-  background-color: var(--border-color);
 }
 
 /* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
@@ -423,15 +408,18 @@ input:-webkit-autofill:focus {
   background: linear-gradient(135deg, rgba(37, 126, 140, 0.25), rgba(28, 94, 105, 0.35));
   color: #ffffff;
   box-shadow: 0 0 12px rgba(37, 126, 140, 0.3);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .bookmark-item.drop-target-left {
   position: relative;
 }
+
 .bookmark-item.drop-target-left::before {
   content: '';
   position: absolute;
-  left: -3px; /* ギャップの真ん中 */
+  left: -3px;
+  /* ギャップの真ん中 */
   top: 0;
   bottom: 0;
   width: 3px;
@@ -444,10 +432,12 @@ input:-webkit-autofill:focus {
 .bookmark-item.drop-target-right {
   position: relative;
 }
+
 .bookmark-item.drop-target-right::after {
   content: '';
   position: absolute;
-  right: -3px; /* ギャップの真ん中 */
+  right: -3px;
+  /* ギャップの真ん中 */
   top: 0;
   bottom: 0;
   width: 3px;
@@ -461,13 +451,30 @@ input:-webkit-autofill:focus {
   opacity: 0.8;
 }
 
+.bookmark-empty-msg {
+  display: flex;
+  align-items: center;
+  color: var(--text-color);
+  opacity: 0.6;
+  font-size: 13px;
+  gap: 8px;
+  padding: 0 8px;
+  user-select: none;
+  pointer-events: none;
+  height: 100%;
+}
+
+.bookmark-empty-msg svg {
+  opacity: 0.6;
+}
+
 #directories-section {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
-  padding: 0 10px 10px 10px;
+  padding: 0 12px 10px 12px;
 }
 
 #center-pane {
@@ -569,6 +576,8 @@ input:-webkit-autofill:focus {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
+  background-color: var(--bg-color);
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2);
   transition: flex-basis 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -640,11 +649,17 @@ table#file-table {
   background: rgba(37, 126, 140, 0.15);
 }
 
+#file-list-body tr {
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
 #file-table tr.selected {
-  background: linear-gradient(135deg, rgba(37, 126, 140, 0.85), rgba(28, 94, 105, 0.95));
+  background: rgba(37, 126, 140, 0.4);
   color: #fff;
   font-weight: normal;
-  box-shadow: 0 0 12px rgba(37, 126, 140, 0.5), inset 3px 0 0 #fff;
+  box-shadow: inset 4px 0 0 var(--accent-color);
 }
 
 #file-table td {
@@ -664,26 +679,6 @@ table#file-table {
   border-bottom: 1px solid var(--border-color);
   gap: 8px;
   position: relative;
-}
-
-#thumbnail-controls::before {
-  content: '';
-  position: absolute;
-  left: -1px;
-  bottom: -1px;
-  width: 1px;
-  height: 1px;
-  background-color: var(--border-color);
-}
-
-#thumbnail-controls::after {
-  content: '';
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 1px;
-  height: 1px;
-  background-color: var(--border-color);
 }
 
 #thumbnail-controls label {
@@ -777,11 +772,11 @@ input[type="range"]:focus {
 
   0%,
   20% {
-    /* 100ms(20%)まで最高輝度を維持。芯を白くし、白とゴールドの多重シャドウをかける */
-    color: #fff !important;
-    fill: #fff !important;
-    stroke: #fff !important;
-    filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #ebc06d) drop-shadow(0 0 10px #ebc06d) brightness(1.1);
+    /* 微細なハイライトとごく小さなドロップシャドウ */
+    color: var(--text-color) !important;
+    fill: var(--text-color) !important;
+    stroke: var(--text-color) !important;
+    filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3)) brightness(1.2);
   }
 
   100% {
@@ -810,7 +805,7 @@ input[type="range"]:focus {
 
 .thumbnail-item {
   object-fit: contain;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   cursor: pointer;
   border-radius: 4px;
   will-change: border-color, transform, box-shadow;
@@ -822,19 +817,22 @@ input[type="range"]:focus {
 
 .thumbnail-item:hover {
   border-color: var(--border-color);
-  transform: translateZ(0) scale(1.03);
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
+  /* Scale instead of sub-pixel blur */
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25);
   z-index: 2;
 }
 
 .thumbnail-item.selected {
   border-color: var(--accent-color);
-  box-shadow: 0 0 16px rgba(37, 126, 140, 0.8);
+  box-shadow: none;
   z-index: 2;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .thumbnail-item.selected:hover {
-  box-shadow: 0 8px 20px rgba(37, 126, 140, 0.9);
+  border-color: var(--accent-color);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 /* Right Pane: Inspector */
@@ -920,14 +918,15 @@ input[type="range"]:focus {
 }
 
 #dir-tree .tree-item:hover {
-  background-color: rgba(37, 126, 140, 0.25);
+  background-color: rgba(37, 126, 140, 0.15);
   color: #fff;
 }
 
 #dir-tree .tree-item.selected {
-  background: linear-gradient(135deg, rgba(37, 126, 140, 0.25), rgba(28, 94, 105, 0.35));
+  background: rgba(37, 126, 140, 0.4);
   color: #ffffff;
-  box-shadow: 0 0 12px rgba(37, 126, 140, 0.3);
+  box-shadow: none;
+  transition: background 0.2s ease;
 }
 
 #dir-tree .tree-item.selected::before {
@@ -1117,8 +1116,13 @@ input[type="range"]:focus {
 
 /* --- スケルトンローディング --- */
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 img.thumbnail-item.loading {
@@ -1129,19 +1133,18 @@ img.thumbnail-item.loading {
 }
 
 /* --- Diff Modal --- */
-.modal {
-  display: none;
+#diff-modal {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  z-index: 10005;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 9999;
+  display: none;
   justify-content: center;
   align-items: center;
+  padding: 40px;
 }
 
 .modal-content {
@@ -1468,16 +1471,20 @@ img.thumbnail-item.loading {
   background-color: rgba(37, 126, 140, 0.15);
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
+
 .tab-list-item.active:hover {
-  background-color: rgba(37, 126, 140, 0.35); /* アクティブかつホバー時は少し明るく */
+  background-color: rgba(37, 126, 140, 0.35);
+  /* アクティブかつホバー時は少し明るく */
 }
 
 .tab-list-item .path-label {
   opacity: 0.6;
   transition: opacity 0.15s ease;
 }
+
 .tab-list-item:hover .path-label {
-  opacity: 0.85; /* ホバー時にパスが見やすくなる */
+  opacity: 0.85;
+  /* ホバー時にパスが見やすくなる */
 }
 
 /* アイコンの中のSVGがコンテキストメニューのグローバル設定でズレないようにリセット */
@@ -1772,15 +1779,36 @@ th[data-sort] svg path {
 
 .empty-state-msg {
   color: var(--text-color);
-  opacity: 0.5;
+  opacity: 0.6;
   text-align: center;
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  user-select: none;
-  -webkit-user-select: none;
+  gap: 12px;
+  font-size: 0.9em;
+  padding: 24px;
+}
+
+.empty-state-msg svg {
+  width: 80px;
+  height: 80px;
+  opacity: 0.8;
+  /* We reduce opacity on the parent, so keep this higher or remove it entirely, let's keep 0.8 to match 0.6 * 0.8 = 0.48 opacity overall */
+  margin-bottom: 4px;
+}
+
+@keyframes staggeredFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 #diff-modal .modal-content {
@@ -1924,8 +1952,10 @@ html.viewer-html,
   transition: opacity 0.2s;
   /* 上部にうっすらとグラデーションを敷き、明るい画像でも文字が読めるようにする */
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 100%);
-  height: 60px; /* グラデーションの高さ */
-  pointer-events: none; /* 下の画像にイベントを透過（必要な要素だけautoに戻す） */
+  height: 60px;
+  /* グラデーションの高さ */
+  pointer-events: none;
+  /* 下の画像にイベントを透過（必要な要素だけautoに戻す） */
 }
 
 .viewer-body #window-controls.controls-hidden {
@@ -1939,11 +1969,13 @@ html.viewer-html,
 .window-filename {
   flex: 1;
   height: 30px;
-  background-color: transparent; /* ベタ塗りを廃止 */
+  background-color: transparent;
+  /* ベタ塗りを廃止 */
   color: rgba(255, 255, 255, 0.9);
   font-size: 14px;
   font-weight: 500;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); /* 視認性を確保 */
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  /* 視認性を確保 */
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -1952,7 +1984,8 @@ html.viewer-html,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: auto; /* ドラッグ操作を受け付ける */
+  pointer-events: auto;
+  /* ドラッグ操作を受け付ける */
 }
 
 .window-ctrl-btn {
@@ -1963,8 +1996,10 @@ html.viewer-html,
   align-items: center;
   cursor: default;
   transition: background-color 0.1s;
-  background-color: transparent; /* デフォルトは透明に */
-  pointer-events: auto; /* クリックを受け付ける */
+  background-color: transparent;
+  /* デフォルトは透明に */
+  pointer-events: auto;
+  /* クリックを受け付ける */
 }
 
 .window-ctrl-btn--min,
@@ -2177,14 +2212,17 @@ html.viewer-html,
 .help-tab-content::-webkit-scrollbar {
   width: 8px;
 }
+
 .help-tab-content::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
 }
+
 .help-tab-content::-webkit-scrollbar-thumb {
   background: var(--modal-border);
   border-radius: 4px;
 }
+
 .help-tab-content::-webkit-scrollbar-thumb:hover {
   background: var(--text-color);
 }

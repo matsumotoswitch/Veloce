@@ -579,12 +579,11 @@ function renderFavorites() {
 
   if (appState.favorites.length === 0) {
     const emptyMsg = document.createElement('div');
-    emptyMsg.style.padding = '4px 8px';
-    emptyMsg.style.color = 'var(--text-color)';
-    emptyMsg.style.opacity = '0.5';
-    emptyMsg.style.fontSize = '0.85em';
-    emptyMsg.style.pointerEvents = 'none';
-    emptyMsg.textContent = 'フォルダをここにドラッグしてお気に入りに追加';
+    emptyMsg.className = 'bookmark-empty-msg';
+    emptyMsg.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+      <span>フォルダをここにドラッグしてお気に入りに追加</span>
+    `;
     container.appendChild(emptyMsg);
     
     const btn = document.getElementById('bookmark-overflow-btn');
@@ -880,17 +879,19 @@ function clearMetadataUI() {
   } else {
     const infoContainer = document.getElementById('file-info-content');
     if (infoContainer) {
-      infoContainer.innerHTML = '<div class="empty-state-msg">画像を選択してください</div>';
+      infoContainer.innerHTML = '<div class="empty-state-msg"><svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div>画像を選択してください</div></div>';
     }
   }
 
   const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (emptyInspectorMsg) {
     emptyInspectorMsg.style.display = 'flex';
+    emptyInspectorMsg.className = 'empty-state-msg';
+    emptyInspectorMsg.innerHTML = '<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>画像を選択すると詳細が表示されます</div>';
   } else {
     const container = document.getElementById('inspector-content');
     if (container) {
-      container.innerHTML = '<div class="empty-state-msg">画像を選択すると詳細が表示されます</div>';
+      container.innerHTML = '<div class="empty-state-msg"><svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>画像を選択すると詳細が表示されます</div></div>';
     }
   }
 
@@ -1852,8 +1853,9 @@ async function renderMetadata(file) {
         if (secEl.root.parentNode !== container) container.appendChild(secEl.root);
       } else {
         if (emptyInspectorMsg) {
-          emptyInspectorMsg.textContent = 'メタデータが含まれていないか、読み取れませんでした。';
-          emptyInspectorMsg.style.display = 'block';
+          emptyInspectorMsg.className = 'empty-state-msg';
+          emptyInspectorMsg.innerHTML = '<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>メタデータが含まれていないか、読み取れませんでした。</div>';
+          emptyInspectorMsg.style.display = 'flex';
         }
       }
     }
