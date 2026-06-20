@@ -32,9 +32,9 @@ export function applyGlowEffect(el) {
   flash.style.left = rect.left + 'px';
   flash.style.width = rect.width + 'px';
   flash.style.height = rect.height + 'px';
-  flash.style.backgroundColor = 'var(--glow-gold, rgba(243, 212, 125, 1))';
+  flash.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
   flash.style.pointerEvents = 'none';
-  flash.style.zIndex = '9998';
+  flash.style.zIndex = '10005';
   flash.style.borderRadius = window.getComputedStyle(el).borderRadius || '0px';
   
   document.body.appendChild(flash);

@@ -291,6 +291,10 @@ input:-webkit-autofill:focus {
   background-color: var(--accent-color);
 }
 
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Resizers */
 .resizer {
   background-color: var(--panel-bg);
@@ -423,9 +427,8 @@ input:-webkit-autofill:focus {
   top: 0;
   bottom: 0;
   width: 3px;
-  background-color: var(--glow-gold);
+  background-color: var(--accent-color);
   border-radius: 2px;
-  box-shadow: 0 0 8px var(--glow-gold), 0 0 2px #fff;
   z-index: 10;
 }
 
@@ -441,9 +444,8 @@ input:-webkit-autofill:focus {
   top: 0;
   bottom: 0;
   width: 3px;
-  background-color: var(--glow-gold);
+  background-color: var(--accent-color);
   border-radius: 2px;
-  box-shadow: 0 0 8px var(--glow-gold), 0 0 2px #fff;
   z-index: 10;
 }
 
@@ -474,7 +476,7 @@ input:-webkit-autofill:focus {
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
-  padding: 0 12px 10px 12px;
+  padding: 0 0 10px 12px; /* 右のパディングを0にしてスクロールバーとリサイザを密着させる */
 }
 
 #center-pane {
@@ -876,23 +878,33 @@ input[type="range"]:focus {
 
 .thumbnail-label {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(0, 0, 0, 0.6);
+  bottom: 0; /* 余白をなくして下端にピッタリつける */
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 12px);
+  background: rgba(0, 0, 0, 0.8); /* 非ホバー時でも背景を暗くして読みやすく */
+  border-radius: 10px; /* やや小さめのピル */
   color: #fff;
-  font-size: 11px;
-  padding: 4px 6px;
+  font-size: 10.5px; /* 少し小さく */
+  padding: 2px 8px; /* 余白を削ってスリムに */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
   pointer-events: none;
+  opacity: 0.75; /* 透過度を少し上げて視認性を確保 */
+  transition: opacity 0.2s ease, background 0.2s ease;
   display: none; /* Default hidden */
 }
 
 body.show-thumbnail-names .thumbnail-label {
   display: block;
+}
+
+/* サムネイルにマウスを乗せた時だけクッキリ見えるようにする */
+.thumbnail-item:hover .thumbnail-label {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.95);
 }
 
 .thumbnail-item:hover {
@@ -1342,15 +1354,7 @@ img.thumbnail-item.loading {
   transition: stroke 0.2s, filter 0.2s;
 }
 
-/* 発光状態のクラス */
-.glow {
-  color: #fff !important;
-  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 8px var(--glow-gold)) drop-shadow(0 0 15px var(--glow-gold)) !important;
-}
-
-.glow svg {
-  stroke: #fff !important;
-}
+/* 発光状態のクラスは廃止 (JS側のapplyGlowEffectでソリッドなエフェクトに統合) */
 
 /* チップの基本スタイル（文字サイズを 0.85em に戻す） */
 .diff-tag {

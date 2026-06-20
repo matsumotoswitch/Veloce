@@ -952,7 +952,7 @@ window.addEventListener('keydown', async (e) => {
         flash.style.height = '100vh';
         flash.style.pointerEvents = 'none';
         flash.style.zIndex = '9998';
-        flash.style.backgroundColor = 'var(--glow-gold, rgba(243, 212, 125, 1))';
+        flash.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
         flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
         document.body.appendChild(flash);
       }

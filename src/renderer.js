@@ -3483,9 +3483,9 @@ window.addEventListener('keydown', async (e) => {
             flash.style.left = left + 'px';
             flash.style.width = width + 'px';
             flash.style.height = height + 'px';
-            flash.style.backgroundColor = 'var(--glow-gold, rgba(243, 212, 125, 1))';
+            flash.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
             flash.style.pointerEvents = 'none';
-            flash.style.zIndex = '9998';
+            flash.style.zIndex = '10005';
             flash.style.borderRadius = window.getComputedStyle(el).borderRadius || '0px';
             flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
             document.body.appendChild(flash);
