@@ -4166,6 +4166,7 @@ dependencies = [
  "image 0.25.10",
  "md5",
  "mimalloc",
+ "rayon",
  "serde",
  "serde_json",
  "tauri",
