@@ -55,6 +55,8 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 
 * **Rust** (https://www.rust-lang.org/)
 * **Tauri** (https://tauri.app/)
+* **rayon** (https://github.com/rayon-rs/rayon)
+* **fast_image_resize** (https://github.com/cykooz/fast_image_resize)
 
 ## 2. MIT License
 以下のソフトウェアおよび多くのフロントエンド・パッケージ（Vite等）は、MIT License の下で提供されています。
