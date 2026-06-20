@@ -221,27 +221,6 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
             .map(|p| p.join("Metadata"))
             .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
 
-        // キャッシュディレクトリの中身を事前に1回だけ読み込んでHashSetに格納する（I/Oボトルネック解消）
-        let mut thumbnail_cache_set = std::collections::HashSet::new();
-        if let Ok(entries) = std::fs::read_dir(&cache_dir_path) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if let Some(name) = entry.file_name().to_str() {
-                    thumbnail_cache_set.insert(name.to_string());
-                }
-            }
-        }
-
-        let mut metadata_cache_set = std::collections::HashSet::new();
-        if let Ok(entries) = std::fs::read_dir(&meta_cache_dir_path) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if let Some(name) = entry.file_name().to_str() {
-                    metadata_cache_set.insert(name.to_string());
-                }
-            }
-        }
-
-        use rayon::prelude::*;
-
         // max_depth(1) なので std::fs::read_dir の方が軽量
         let dir_entries: Vec<_> = std::fs::read_dir(&path_clone)
             .into_iter()
@@ -249,62 +228,78 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
             .filter_map(|e| e.ok())
             .collect();
 
-        // rayon によるマルチスレッド処理
-        let mut files: Vec<ImageFile> = dir_entries
-            .into_par_iter()
-            .filter_map(|entry| {
-                let p = entry.path();
-                if p.is_file() {
-                    if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                        let ext_lower = ext.to_lowercase();
-                        if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
-                            // std::fs::metadata の代わりに entry.metadata() を用いることで Syscall を削減
-                            if let Ok(metadata) = entry.metadata() {
-                                let size = metadata.len();
-                                let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                
-                                let file_name = entry.file_name().to_string_lossy().into_owned();
-                                let full_path = p.to_string_lossy().into_owned();
-                                let clean_path = full_path.replace("\\\\?\\", "");
+        // 非同期ランタイムのワーカースレッドをブロックしないよう、spawn_blockingでラップする
+        let files_result = tokio::task::spawn_blocking(move || {
+            use rayon::prelude::*;
 
-                                let cache_file_name = format!("{}_{}", clean_path, mtime);
-                                let digest = md5::compute(cache_file_name.as_bytes());
-                                let digest_hex = format!("{:x}", digest);
-                                
-                                // ディスクにアクセスせず、HashSetでの高速 O(1) チェック
-                                let has_thumbnail_cache = thumbnail_cache_set.contains(&format!("{}.jpg", digest_hex));
-                                let has_metadata_cache = metadata_cache_set.contains(&format!("{}.json", digest_hex));
+            // rayon によるマルチスレッド処理
+            let mut files: Vec<ImageFile> = dir_entries
+                .into_par_iter()
+                .filter_map(|entry| {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                            let ext_lower = ext.to_lowercase();
+                            if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                                // std::fs::metadata の代わりに entry.metadata() を用いることで Syscall を削減
+                                if let Ok(metadata) = entry.metadata() {
+                                    let size = metadata.len();
+                                    let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                    let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                    
+                                    let file_name = entry.file_name().to_string_lossy().into_owned();
+                                    let full_path = p.to_string_lossy().into_owned();
+                                    let clean_path = full_path.replace("\\\\?\\", "");
 
-                                return Some(ImageFile {
-                                    name: file_name,
-                                    ext: format!(".{}", ext_lower),
-                                    path: clean_path,
-                                    size,
-                                    mtime,
-                                    ctime,
-                                    has_thumbnail_cache,
-                                    has_metadata_cache,
-                                    width: 0,
-                                    height: 0,
-                                    prompt: String::new(),
-                                    negative_prompt: String::new(),
-                                    source: String::new(),
-                                    meta_loaded: false,
-                                    search_text: String::new(),
-                                });
+                                    let cache_file_name = format!("{}_{}", clean_path, mtime);
+                                    let digest = md5::compute(cache_file_name.as_bytes());
+                                    let digest_hex = format!("{:x}", digest);
+                                    
+                                    // ディスクアクセスは発生するが、rayonの並列処理で高速化
+                                    let cache_path = cache_dir_path.join(format!("{}.jpg", digest_hex));
+                                    let has_thumbnail_cache = cache_path.exists();
+                                    
+                                    let meta_cache_path = meta_cache_dir_path.join(format!("{}.json", digest_hex));
+                                    let has_metadata_cache = meta_cache_path.exists();
+
+                                    return Some(ImageFile {
+                                        name: file_name,
+                                        ext: format!(".{}", ext_lower),
+                                        path: clean_path,
+                                        size,
+                                        mtime,
+                                        ctime,
+                                        has_thumbnail_cache,
+                                        has_metadata_cache,
+                                        width: 0,
+                                        height: 0,
+                                        prompt: String::new(),
+                                        negative_prompt: String::new(),
+                                        source: String::new(),
+                                        meta_loaded: false,
+                                        search_text: String::new(),
+                                    });
+                                }
                             }
                         }
                     }
-                }
-                None
-            })
-            .collect();
+                    None
+                })
+                .collect();
+            
+            // デフォルトソート（名前順昇順）も並列処理で適用
+            files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
+            
+            files
+        }).await;
+
+        let files = match files_result {
+            Ok(f) => f,
+            Err(_) => return,
+        };
 
         // Rust側のAppStateに全ファイルを格納（Source of Truth）
         if let Some(state) = app_clone.try_state::<AppState>() {
-            // デフォルトソート（名前順昇順）を並列処理で適用
-            files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
 
             let total_count = files.len();
             let sorted_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
