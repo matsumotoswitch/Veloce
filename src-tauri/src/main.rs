@@ -1424,7 +1424,45 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         // ロックを外して並列処理させ、生成速度を向上させます。
         
         let img = image::open(&file_path).map_err(|e| format!("image::open failed: {}", e))?;
-        let thumbnail = img.thumbnail(512, 512);
+        let rgba_img = img.to_rgba8();
+        let width = rgba_img.width();
+        let height = rgba_img.height();
+        
+        let mut dst_width = width;
+        let mut dst_height = height;
+        if width > 512 || height > 512 {
+            let ratio = f32::min(512.0 / width as f32, 512.0 / height as f32);
+            dst_width = (width as f32 * ratio).round() as u32;
+            dst_height = (height as f32 * ratio).round() as u32;
+        }
+
+        use std::num::NonZeroU32;
+        use fast_image_resize as fr;
+
+        let src_width = NonZeroU32::new(width).ok_or("Invalid width")?;
+        let src_height = NonZeroU32::new(height).ok_or("Invalid height")?;
+        let src_image = fr::images::Image::from_vec_u8(
+            src_width.get(),
+            src_height.get(),
+            rgba_img.into_raw(),
+            fr::PixelType::U8x4,
+        ).map_err(|e| format!("src_image creation failed: {:?}", e))?;
+
+        let dst_w_nz = NonZeroU32::new(dst_width).ok_or("Invalid dst width")?;
+        let dst_h_nz = NonZeroU32::new(dst_height).ok_or("Invalid dst height")?;
+        let mut dst_image = fr::images::Image::new(
+            dst_w_nz.get(),
+            dst_h_nz.get(),
+            fr::PixelType::U8x4,
+        );
+
+        let mut resizer = fr::Resizer::new();
+        resizer.resize(&src_image, &mut dst_image, None)
+            .map_err(|e| format!("resize failed: {:?}", e))?;
+
+        let result_img = image::RgbaImage::from_raw(dst_width, dst_height, dst_image.into_vec())
+            .ok_or("Failed to create RgbaImage from resized buffer")?;
+        let thumbnail = image::DynamicImage::ImageRgba8(result_img);
         
         let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
         thumbnail.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
@@ -2199,5 +2237,53 @@ mod tests {
         
         // キー名は抽出されないべき
         assert!(!extracted.contains("characterPrompts"));
+    }
+
+    #[test]
+    fn test_fast_image_resize_logic() {
+        use std::num::NonZeroU32;
+        use fast_image_resize as fr;
+        use image::RgbaImage;
+
+        // 1920x1080 のダミー画像を生成
+        let width = 1920;
+        let height = 1080;
+        let dummy_pixels = vec![255u8; (width * height * 4) as usize];
+        let rgba_img = RgbaImage::from_raw(width, height, dummy_pixels).unwrap();
+
+        let mut dst_width = width;
+        let mut dst_height = height;
+        if width > 512 || height > 512 {
+            let ratio = f32::min(512.0 / width as f32, 512.0 / height as f32);
+            dst_width = (width as f32 * ratio).round() as u32;
+            dst_height = (height as f32 * ratio).round() as u32;
+        }
+
+        assert_eq!(dst_width, 512);
+        assert_eq!(dst_height, 288);
+
+        let src_width = NonZeroU32::new(width).unwrap();
+        let src_height = NonZeroU32::new(height).unwrap();
+        let src_image = fr::images::Image::from_vec_u8(
+            src_width.get(),
+            src_height.get(),
+            rgba_img.into_raw(),
+            fr::PixelType::U8x4,
+        ).unwrap();
+
+        let dst_w_nz = NonZeroU32::new(dst_width).unwrap();
+        let dst_h_nz = NonZeroU32::new(dst_height).unwrap();
+        let mut dst_image = fr::images::Image::new(
+            dst_w_nz.get(),
+            dst_h_nz.get(),
+            fr::PixelType::U8x4,
+        );
+
+        let mut resizer = fr::Resizer::new();
+        resizer.resize(&src_image, &mut dst_image, None).unwrap();
+
+        let result_img = RgbaImage::from_raw(dst_width, dst_height, dst_image.into_vec()).unwrap();
+        assert_eq!(result_img.width(), 512);
+        assert_eq!(result_img.height(), 288);
     }
 }
