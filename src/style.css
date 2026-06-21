@@ -2037,7 +2037,7 @@ html.viewer-html,
   transition: opacity 0.2s;
   /* 上部にうっすらとグラデーションを敷き、明るい画像でも文字が読めるようにする */
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 100%);
-  height: 60px;
+  height: 40px;
   /* グラデーションの高さ */
   pointer-events: none;
   /* 下の画像にイベントを透過（必要な要素だけautoに戻す） */
@@ -2094,7 +2094,7 @@ html.viewer-html,
 
 .window-ctrl-btn--min:hover,
 .window-ctrl-btn--max:hover {
-  background-color: #257e8c;
+  background-color: rgba(37, 126, 140, 0.5);
 }
 
 .window-ctrl-btn--close {
@@ -2102,7 +2102,7 @@ html.viewer-html,
 }
 
 .window-ctrl-btn--close:hover {
-  background-color: #e05263;
+  background-color: rgba(224, 82, 99, 0.6);
 }
 
 .unsharp-svg {

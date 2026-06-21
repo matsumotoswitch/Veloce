@@ -1415,6 +1415,7 @@ function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>F2</kbd></td><td>選択中のファイル/フォルダの名前を変更</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>選択中のファイル/フォルダを安全にゴミ箱へ移動</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>直前のファイル/フォルダ名の変更を元に戻す</td></tr>
       </table>
 
       <h3 class="help-group-title">ツール・表示</h3>
@@ -1966,6 +1967,26 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
 }, true, 'Delete');
 
 const menuRenameFile = createMenuItem('ファイル名を変更...', UIManager.ICONS.FILE_PEN, renameSelectedFile, false, 'F2');
+const menuDiffFiles = createMenuItem('2つの画像を比較...', UIManager.ICONS.DIFF, async () => {
+  if (appState.selection.size === 2) {
+    const indices = Array.from(appState.selection);
+    const file1 = await window.veloceAPI.getFileByIndex(indices[0]);
+    const file2 = await window.veloceAPI.getFileByIndex(indices[1]);
+
+    uiManager.showToast('比較データを読み込み中', 0, 'diff-loading', 'info');
+    Promise.all([
+      window.veloceAPI.parseMetadata(file1.path),
+      window.veloceAPI.parseMetadata(file2.path)
+    ]).then(([meta1, meta2]) => {
+      const t = document.getElementById('toast-diff-loading');
+      if (t) {
+        t.classList.remove('show');
+        setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+      }
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+    });
+  }
+}, false, 'D');
 const menuRebuildCache = createMenuItem('選択項目のキャッシュを再構築', UIManager.ICONS.REFRESH, rebuildSelectedCache);
 
 const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシュを再構築', UIManager.ICONS.REFRESH, async () => {
@@ -2216,7 +2237,7 @@ const menuDeleteFavorite = createMenuItem('お気に入りを削除', UIManager.
       showNotification(`お気に入りから削除しました`, 'success');
     }
   }
-}, true, 'Delete');
+}, true);
 
 const menuOpenInExplorer = createMenuItem('エクスプローラで開く', UIManager.ICONS.FOLDER_OPEN, async () => {
   let path = '';
@@ -2435,6 +2456,7 @@ contextMenu.appendChild(menuSeparator3);
 // 4. 編集・変更系 (安全)
 contextMenu.appendChild(menuRenameFolder);
 contextMenu.appendChild(menuRenameFile);
+contextMenu.appendChild(menuDiffFiles);
 contextMenu.appendChild(menuEditFavorite);
 
 // 5. 削除系
@@ -2685,6 +2707,7 @@ function handleItemContextMenu(e, isGrid) {
   Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
   menuRenameFile.style.display = appState.selection.size === 1 ? '' : 'none';
+  menuDiffFiles.style.display = appState.selection.size === 2 ? '' : 'none';
   menuDeleteFile.style.display = '';
   menuSeparatorCache.style.display = '';
   menuRebuildCache.style.display = '';
