@@ -151,10 +151,20 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- ファイル名の表示設定の初期化と監視 ---
     const updateFilenameVisibility = () => {
+      const show = localStorage.getItem('showViewerFilename') !== 'false';
+      
       const filenameEl = document.getElementById('window-filename-display');
       if (filenameEl) {
-        const show = localStorage.getItem('showViewerFilename') !== 'false';
         filenameEl.style.display = show ? 'flex' : 'none';
+      }
+
+      const controlsEl = document.getElementById('window-controls');
+      if (controlsEl) {
+        if (show) {
+          controlsEl.classList.add('has-gradient');
+        } else {
+          controlsEl.classList.remove('has-gradient');
+        }
       }
     };
     updateFilenameVisibility();

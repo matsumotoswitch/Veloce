@@ -1859,7 +1859,7 @@ th[data-sort] svg path {
   pointer-events: none;
   box-sizing: border-box;
   border: 1px solid var(--accent-color);
-  z-index: 9998;
+  z-index: 10001;
 }
 
 #titlebar-tab-list {
@@ -2044,9 +2044,9 @@ html.viewer-html,
   justify-content: flex-end; /* Keep buttons on right even if filename is hidden */
   z-index: 9999;
   visibility: visible;
-  transition: opacity 0.2s;
-  /* 上部にうっすらとグラデーションを敷き、明るい画像でも文字が読めるようにする */
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 100%);
+  visibility: visible;
+  transition: opacity 0.2s, background 0.3s;
+  background: transparent;
   height: 40px;
   /* グラデーションの高さ */
   pointer-events: none;
@@ -2055,6 +2055,10 @@ html.viewer-html,
 
 .viewer-body #window-controls.controls-hidden {
   opacity: 0;
+}
+
+.viewer-body #window-controls.has-gradient {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 100%);
 }
 
 .viewer-body #window-controls.fs-hidden {
@@ -2095,6 +2099,26 @@ html.viewer-html,
   /* デフォルトは透明に */
   pointer-events: auto;
   /* クリックを受け付ける */
+}
+
+/* グラデーションOFF時のみ、ボタン自体に半透明の背景をつけて視認性を確保する */
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn {
+  background-color: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(4px);
+}
+
+/* 一番左の最小化ボタンの左下だけ丸くして、自然なコーナーブロック感を出す */
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min {
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+/* ホバー時の上書き（背景色がついている状態でのホバー対応） */
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min:hover,
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:hover {
+  background-color: rgba(37, 126, 140, 0.6);
+}
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:hover {
+  background-color: #e05263;
 }
 
 .window-ctrl-btn--min,
