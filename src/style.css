@@ -2103,8 +2103,7 @@ html.viewer-html,
 
 /* グラデーションOFF時のみ、ボタン自体に半透明の背景をつけて視認性を確保する */
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn {
-  background-color: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(4px);
+  background-color: rgba(0, 0, 0, 0.4);
 }
 
 /* 一番左の最小化ボタンの左下だけ丸くして、自然なコーナーブロック感を出す */
