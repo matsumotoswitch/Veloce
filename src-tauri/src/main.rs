@@ -221,16 +221,18 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
             .map(|p| p.join("Metadata"))
             .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
 
-        // max_depth(1) なので std::fs::read_dir の方が軽量
-        let dir_entries: Vec<_> = std::fs::read_dir(&path_clone)
-            .into_iter()
-            .flat_map(|d| d)
-            .filter_map(|e| e.ok())
-            .collect();
-
+        let path_for_spawn = path_clone.clone();
         // 非同期ランタイムのワーカースレッドをブロックしないよう、spawn_blockingでラップする
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
+
+            // max_depth(1) なので std::fs::read_dir の方が軽量。
+            // I/Oによるブロックを防ぐため、asyncスレッドではなくspawn_blocking内のOSスレッドで実行する
+            let dir_entries: Vec<_> = std::fs::read_dir(&path_for_spawn)
+                .into_iter()
+                .flat_map(|d| d)
+                .filter_map(|e| e.ok())
+                .collect();
 
             // rayon によるマルチスレッド処理
             let mut files: Vec<ImageFile> = dir_entries
@@ -1599,14 +1601,14 @@ fn collect_single_file_cache(path: &std::path::Path, cache_dir: &mut std::path::
 
         let clean_path = path.to_string_lossy().to_string().replace("\\\\?\\", "");
         let cache_file_name = format!("{}_{}", clean_path, mtime);
-        let digest = md5::compute(cache_file_name.as_bytes());
+        let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
 
         cache_dir.push("Thumbnails");
-        cache_paths.push(cache_dir.join(format!("{:x}.jpg", digest)));
+        cache_paths.push(cache_dir.join(format!("{:016x}.jpg", digest)));
         cache_dir.pop();
         
         cache_dir.push("Metadata");
-        cache_paths.push(cache_dir.join(format!("{:x}.json", digest)));
+        cache_paths.push(cache_dir.join(format!("{:016x}.json", digest)));
         cache_dir.pop();
     }
 }
@@ -1648,14 +1650,14 @@ async fn clear_metadata_cache(file_paths: Vec<String>) -> Result<Vec<String>, St
                 let clean_path = file_path.replace("\\\\?\\", "");
                 
                 // Raw path digest
-                let digest_raw = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
-                let json_raw = meta_dir.join(format!("{:x}.json", digest_raw));
-                let jpg_raw = thumb_dir.join(format!("{:x}.jpg", digest_raw));
+                let digest_raw = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+                let json_raw = meta_dir.join(format!("{:016x}.json", digest_raw));
+                let jpg_raw = thumb_dir.join(format!("{:016x}.jpg", digest_raw));
                 
                 // Clean path digest
-                let digest_clean = md5::compute(format!("{}_{}", clean_path, mtime).as_bytes());
-                let json_clean = meta_dir.join(format!("{:x}.json", digest_clean));
-                let jpg_clean = thumb_dir.join(format!("{:x}.jpg", digest_clean));
+                let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+                let json_clean = meta_dir.join(format!("{:016x}.json", digest_clean));
+                let jpg_clean = thumb_dir.join(format!("{:016x}.jpg", digest_clean));
 
                 for cache_file in [json_raw, jpg_raw, json_clean, jpg_clean] {
                     if cache_file.exists() {
@@ -2126,10 +2128,10 @@ fn main() {
                             // MD5ハッシュベースで特定し、ストレージ容量の無駄遣いを防ぐために即時削除します。
                             if let Some(data_dir) = get_veloce_data_dir() {
                                 let cache_file_name = format!("{}_{}", path_str, mtime);
-                                let digest = md5::compute(cache_file_name.as_bytes());
+                                let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
 
-                                let thumb_path = data_dir.join("Thumbnails").join(format!("{:x}.jpg", digest));
-                                let meta_path = data_dir.join("Metadata").join(format!("{:x}.json", digest));
+                                let thumb_path = data_dir.join("Thumbnails").join(format!("{:016x}.jpg", digest));
+                                let meta_path = data_dir.join("Metadata").join(format!("{:016x}.json", digest));
 
                                 let _ = std::fs::remove_file(thumb_path);
                                 let _ = std::fs::remove_file(meta_path);
