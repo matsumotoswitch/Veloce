@@ -14,6 +14,14 @@
   --radius-lg: 12px;
   --radius-md: 8px;
   --radius-sm: 6px;
+  --radius-xs: 4px;
+
+  --modal-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+
+  --font-size-base: 14px;
+  --font-size-sm: 13px;
+  --font-size-xs: 12px;
+  --font-size-lg: 16px;
 }
 
 * {
@@ -27,7 +35,7 @@ button,
 select,
 table {
   font-family: inherit;
-  font-size: 1em;
+  font-size: var(--font-size-base);
 }
 
 /* --- テキスト選択・コピーを明示的に許可するエリア --- */
@@ -281,7 +289,7 @@ input:-webkit-autofill:focus {
 
 ::-webkit-scrollbar-thumb {
   background-color: #3a454a;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 3px solid transparent;
   background-clip: padding-box;
   /* 透明なフチとpadding-boxを使って、どんな背景色の上でも細く見せる */
@@ -394,11 +402,11 @@ input:-webkit-autofill:focus {
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   white-space: nowrap;
   color: var(--text-color);
-  font-size: 0.85em;
+  font-size: var(--font-size-xs);
   transition: background-color 0.2s, color 0.2s;
   user-select: none;
 }
@@ -458,7 +466,7 @@ input:-webkit-autofill:focus {
   align-items: center;
   color: var(--text-color);
   opacity: 0.6;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   gap: 8px;
   padding: 0 8px;
   user-select: none;
@@ -567,7 +575,7 @@ input:-webkit-autofill:focus {
   color: var(--text-color);
   outline: none;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   padding: 0;
 }
 
@@ -592,7 +600,7 @@ table#file-table {
   border-collapse: collapse;
   text-align: left;
   table-layout: fixed;
-  font-size: 0.9em;
+  font-size: var(--font-size-sm);
 }
 
 #file-table th:nth-child(1) {
@@ -758,7 +766,7 @@ table#file-table {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--text-color);
   opacity: 0.8;
   transition: background-color 0.2s, color 0.2s, opacity 0.2s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
@@ -858,7 +866,7 @@ input[type="range"]:focus {
 .thumbnail-item {
   border: 1px solid transparent;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   will-change: border-color, transform, box-shadow;
   transform: translateZ(0) scale(1);
   transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
@@ -936,7 +944,7 @@ body.show-thumbnail-names .thumbnail-label {
 }
 
 .inspector-data label {
-  font-size: 0.85em;
+  font-size: var(--font-size-xs);
   margin: 10px 0 5px 0;
   color: var(--text-color);
   opacity: 0.7;
@@ -983,7 +991,7 @@ body.show-thumbnail-names .thumbnail-label {
   padding: 4px;
   cursor: pointer;
   user-select: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
   color: var(--text-color);
   position: relative;
@@ -1083,7 +1091,7 @@ body.show-thumbnail-names .thumbnail-label {
   border: 1px solid var(--modal-border);
   border-radius: var(--radius-lg);
   padding: 8px 12px 8px 16px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   box-shadow:
     0 12px 28px rgba(0, 0, 0, 0.6),
     0 2px 8px rgba(0, 0, 0, 0.4),
@@ -1298,11 +1306,11 @@ img.thumbnail-item.loading {
   background-color: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--border-color);
   padding: 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   min-height: 120px;
   max-height: 250px;
   overflow-y: auto;
-  font-size: 0.9em;
+  font-size: var(--font-size-sm);
   /* ここを1.1emから0.9emに修正 */
   line-height: 1.5;
   color: var(--text-color);
@@ -1325,7 +1333,7 @@ img.thumbnail-item.loading {
 .diff-section h3 {
   color: var(--text-color);
   margin-bottom: 4px;
-  font-size: 0.9em;
+  font-size: var(--font-size-sm);
   transition: color 0.2s;
 }
 
@@ -1342,7 +1350,7 @@ img.thumbnail-item.loading {
   align-items: center;
   justify-content: center;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: color 0.2s, filter 0.2s, background-color 0.2s, opacity 0.2s;
 }
 
@@ -1396,7 +1404,7 @@ img.thumbnail-item.loading {
   /* サムネイルの最大高さ */
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   margin-top: 10px;
 }
@@ -1422,7 +1430,7 @@ img.thumbnail-item.loading {
     0 2px 8px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     inset 1px 0 0 rgba(255, 255, 255, 0.02);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.4;
   white-space: pre-wrap;
   opacity: 0;
@@ -1463,7 +1471,7 @@ img.thumbnail-item.loading {
   z-index: 10001;
   padding: 6px 0;
   display: none;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   transform-origin: top left;
 }
 
@@ -1501,7 +1509,7 @@ img.thumbnail-item.loading {
   gap: 10px;
   align-items: center;
   color: var(--text-color);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
@@ -1648,7 +1656,7 @@ th[data-sort] svg path {
   align-items: center;
   position: relative;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   max-width: 320px;
   min-width: 160px;
   flex-shrink: 0;
@@ -1829,7 +1837,7 @@ th[data-sort] svg path {
 .tab-close-btn:hover {
   background-color: rgba(224, 82, 99, 0.2) !important;
   color: var(--danger-red) !important;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .tab-label {
@@ -1873,7 +1881,7 @@ th[data-sort] svg path {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  font-size: 0.9em;
+  font-size: var(--font-size-sm);
   padding: 24px;
 }
 
@@ -2136,7 +2144,7 @@ html.viewer-html,
 .icon-grid .icon-btn {
   background: transparent;
   border: 2px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px;
   cursor: pointer;
   color: var(--text-color, #ececec);
@@ -2245,9 +2253,9 @@ html.viewer-html,
 .help-modal-content {
   background-color: var(--modal-bg);
   border: 1px solid var(--modal-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--modal-shadow);
   width: 90vw;
   max-width: 800px;
   max-height: 85vh;
@@ -2303,11 +2311,11 @@ kbd {
   padding: 3px 8px;
   margin: 2px 0;
   font-family: inherit;
-  font-size: 0.85em;
+  font-size: var(--font-size-xs);
   color: var(--text-color);
   background-color: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   box-shadow: none;
   white-space: nowrap;
 }
@@ -2324,7 +2332,7 @@ kbd {
 .help-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.9em;
+  font-size: var(--font-size-sm);
 }
 
 .help-table td {
