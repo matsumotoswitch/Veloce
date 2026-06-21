@@ -1276,7 +1276,7 @@ async function showLicenseDialog() {
   content.style.height = '80%';
   content.style.display = 'flex';
   content.style.flexDirection = 'column';
-  content.style.boxShadow = '0 24px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
+  content.style.boxShadow = 'var(--modal-shadow)';
   content.style.cursor = 'default';
 
   let licenseText = "ライセンス情報を読み込み中";
@@ -1647,7 +1647,7 @@ function getInspectorSection() {
   section.style.marginBottom = '15px';
 
   const h3 = document.createElement('h3');
-  h3.style.fontSize = '0.9em';
+  h3.style.fontSize = 'var(--font-size-sm)';
   h3.style.marginBottom = '4px';
   h3.style.display = 'flex';
   h3.style.justifyContent = 'space-between';
@@ -1753,7 +1753,7 @@ async function renderMetadata(file) {
         secEl.box.className = 'prompt-look';
         secEl.box.style.whiteSpace = 'pre-wrap';
         secEl.box.style.fontFamily = 'Consolas, monospace';
-        secEl.box.style.fontSize = '0.85em';
+        secEl.box.style.fontSize = 'var(--font-size-xs)';
         secEl.box.style.wordBreak = 'break-all';
         secEl.box.style.maxHeight = '400px';
         secEl.box.style.overflowY = 'auto';
@@ -1822,7 +1822,7 @@ async function renderMetadata(file) {
             color = '#4ade80';
           }
           const span = document.createElement('span');
-          span.style.fontSize = '0.85em';
+          span.style.fontSize = 'var(--font-size-xs)';
           span.style.color = color;
           span.style.opacity = opacity;
           span.style.fontWeight = 'normal';
@@ -1849,7 +1849,7 @@ async function renderMetadata(file) {
         secEl.box.className = 'prompt-look';
         secEl.box.style.whiteSpace = 'pre-wrap';
         secEl.box.style.fontFamily = 'Consolas, monospace';
-        secEl.box.style.fontSize = '0.85em';
+        secEl.box.style.fontSize = 'var(--font-size-xs)';
         secEl.box.style.wordBreak = 'break-all';
         secEl.box.style.maxHeight = '400px';
         secEl.box.style.overflowY = 'auto';
@@ -4004,7 +4004,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       nameLabel.style.whiteSpace = 'nowrap';
       nameLabel.style.overflow = 'hidden';
       nameLabel.style.textOverflow = 'ellipsis';
-      nameLabel.style.fontSize = '13px';
+      nameLabel.style.fontSize = 'var(--font-size-sm)';
 
       const pathLabel = document.createElement('span');
       pathLabel.className = 'path-label';
@@ -4027,7 +4027,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       closeBtn.style.width = '16px';
       closeBtn.style.height = '16px';
       closeBtn.style.flexShrink = '0';
-      closeBtn.style.borderRadius = '3px';
+      closeBtn.style.borderRadius = 'var(--radius-xs)';
       closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="7" height="7"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
       closeBtn.addEventListener('click', async (e) => {
@@ -4370,7 +4370,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       dragGhost.style.backgroundColor = 'var(--panel-bg, #1a2024)';
       dragGhost.style.border = '1px solid var(--accent-color, #257e8c)';
       dragGhost.style.color = 'var(--text-color, #ffffff)';
-      dragGhost.style.borderRadius = '4px';
+      dragGhost.style.borderRadius = 'var(--radius-xs)';
       dragGhost.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
       document.body.appendChild(dragGhost);
 
