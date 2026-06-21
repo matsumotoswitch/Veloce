@@ -280,7 +280,7 @@ input:-webkit-autofill:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: #3a454a;
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -1080,13 +1080,15 @@ body.show-thumbnail-names .thumbnail-label {
   position: relative;
   background-color: var(--modal-bg);
   color: var(--text-color);
-  border: none;
-  border-radius: var(--radius-md);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-lg);
   padding: 8px 12px 8px 16px;
   font-size: 13px;
   box-shadow:
-    0 8px 16px rgba(0, 0, 0, 0.4),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    0 12px 28px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 1px 0 0 rgba(255, 255, 255, 0.02);
   opacity: 0;
   transform: translateY(5px);
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -1420,7 +1422,7 @@ img.thumbnail-item.loading {
     0 2px 8px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     inset 1px 0 0 rgba(255, 255, 255, 0.02);
-  font-size: 0.85em;
+  font-size: 13px;
   line-height: 1.4;
   white-space: pre-wrap;
   opacity: 0;
@@ -2261,7 +2263,9 @@ html.viewer-html,
 }
 
 .help-tab {
-  padding: 10px 20px;
+  flex: 1;
+  text-align: left;
+  padding: 10px 0;
   cursor: pointer;
   color: var(--text-color);
   opacity: 0.6;
@@ -2293,25 +2297,6 @@ html.viewer-html,
   display: block;
 }
 
-/* カスタムスクロールバー（ヘルプ用） */
-.help-tab-content::-webkit-scrollbar {
-  width: 8px;
-}
-
-.help-tab-content::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-}
-
-.help-tab-content::-webkit-scrollbar-thumb {
-  background: var(--modal-border);
-  border-radius: 4px;
-}
-
-.help-tab-content::-webkit-scrollbar-thumb:hover {
-  background: var(--text-color);
-}
-
 /* キーボード風ショートカットキー */
 kbd {
   display: inline-block;
@@ -2333,7 +2318,7 @@ kbd {
   margin-top: 15px;
   margin-bottom: 5px;
   padding-bottom: 4px;
-  border-bottom: 1px dashed var(--border-color);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .help-table {
