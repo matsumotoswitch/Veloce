@@ -252,8 +252,8 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                                     let clean_path = full_path.replace("\\\\?\\", "");
 
                                     let cache_file_name = format!("{}_{}", clean_path, mtime);
-                                    let digest = md5::compute(cache_file_name.as_bytes());
-                                    let digest_hex = format!("{:x}", digest);
+                                    let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
+                                    let digest_hex = format!("{:016x}", digest);
                                     
                                     // ディスクアクセスは発生するが、rayonの並列処理で高速化
                                     let cache_path = cache_dir_path.join(format!("{}.jpg", digest_hex));
@@ -671,8 +671,8 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
 
     let cache_file_path = if let Some(dir) = &cache_dir {
         let _ = std::fs::create_dir_all(dir);
-        let digest = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
-        Some(dir.join(format!("{:x}.json", digest)))
+        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+        Some(dir.join(format!("{:016x}.json", digest)))
     } else {
         None
     };
@@ -1096,20 +1096,24 @@ fn extract_stealth_pnginfo(path: &str) -> Option<String> {
 
 fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
     let mut results = std::collections::HashMap::new();
-    if let Ok(buffer) = std::fs::read(path) {
-        if buffer.len() < 12 || &buffer[0..4] != b"RIFF" || &buffer[8..12] != b"WEBP" { return results; }
-        let mut offset = 12;
-        while offset + 8 <= buffer.len() {
-            let chunk_id = &buffer[offset..offset+4];
-            let chunk_size = u32::from_le_bytes(buffer[offset+4..offset+8].try_into().unwrap_or_default()) as usize;
-            let data_offset = offset + 8;
-            if chunk_id == b"EXIF" && data_offset + chunk_size <= buffer.len() {
-                let mut exif_data = &buffer[data_offset..data_offset+chunk_size];
-                if exif_data.len() >= 6 && &exif_data[0..4] == b"Exif" { exif_data = &exif_data[6..]; }
-                results.extend(parse_tiff_ifd(exif_data));
+    if let Ok(file) = std::fs::File::open(path) {
+        if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
+            let buffer = &mmap[..];
+            if buffer.len() >= 12 && &buffer[0..4] == b"RIFF" && &buffer[8..12] == b"WEBP" {
+                let mut offset = 12;
+                while offset + 8 <= buffer.len() {
+                    let chunk_id = &buffer[offset..offset+4];
+                    let chunk_size = u32::from_le_bytes(buffer[offset+4..offset+8].try_into().unwrap_or_default()) as usize;
+                    let data_offset = offset + 8;
+                    if chunk_id == b"EXIF" && data_offset + chunk_size <= buffer.len() {
+                        let mut exif_data = &buffer[data_offset..data_offset+chunk_size];
+                        if exif_data.len() >= 6 && &exif_data[0..4] == b"Exif" { exif_data = &exif_data[6..]; }
+                        results.extend(parse_tiff_ifd(exif_data));
+                    }
+                    offset = data_offset + chunk_size;
+                    if chunk_size % 2 != 0 { offset += 1; }
+                }
             }
-            offset = data_offset + chunk_size;
-            if chunk_size % 2 != 0 { offset += 1; }
         }
     }
     results
@@ -1117,20 +1121,24 @@ fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
 
 fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
     let mut results = std::collections::HashMap::new();
-    if let Ok(buffer) = std::fs::read(path) {
-        if buffer.len() < 2 || buffer[0] != 0xFF || buffer[1] != 0xD8 { return results; }
-        let mut offset = 2;
-        while offset + 4 <= buffer.len() {
-            if buffer[offset] != 0xFF { break; }
-            let marker = buffer[offset+1];
-            let length = u16::from_be_bytes(buffer[offset+2..offset+4].try_into().unwrap_or_default()) as usize;
-            if marker == 0xE1 && offset + 2 + length <= buffer.len() {
-                let app1_data = &buffer[offset+4..offset+2+length];
-                if app1_data.len() >= 6 && &app1_data[0..4] == b"Exif" {
-                    results.extend(parse_tiff_ifd(&app1_data[6..]));
+    if let Ok(file) = std::fs::File::open(path) {
+        if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
+            let buffer = &mmap[..];
+            if buffer.len() >= 2 && buffer[0] == 0xFF && buffer[1] == 0xD8 {
+                let mut offset = 2;
+                while offset + 4 <= buffer.len() {
+                    if buffer[offset] != 0xFF { break; }
+                    let marker = buffer[offset+1];
+                    let length = u16::from_be_bytes(buffer[offset+2..offset+4].try_into().unwrap_or_default()) as usize;
+                    if marker == 0xE1 && offset + 2 + length <= buffer.len() {
+                        let app1_data = &buffer[offset+4..offset+2+length];
+                        if app1_data.len() >= 6 && &app1_data[0..4] == b"Exif" {
+                            results.extend(parse_tiff_ifd(&app1_data[6..]));
+                        }
+                    }
+                    offset += 2 + length;
                 }
             }
-            offset += 2 + length;
         }
     }
     results
@@ -1328,8 +1336,8 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
             if let Err(e) = std::fs::create_dir_all(dir) {
                 eprintln!("create_dir_all failed: {}", e);
             }
-            let digest = md5::compute(format!("{}_{}", file_path, mtime).as_bytes());
-            Some(dir.join(format!("{:x}.jpg", digest)))
+            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+            Some(dir.join(format!("{:016x}.jpg", digest)))
         } else {
             None
         };
@@ -2312,23 +2320,20 @@ mod tests {
 
     #[test]
     fn test_cache_filename_hashing() {
-        // load_directory内で使用されている、HashSetのキーとなるハッシュ文字列生成ロジックの検証
         let clean_path = "D:\\Images\\test.jpg";
         let mtime = 1700000000000u64;
         let cache_file_name = format!("{}_{}", clean_path, mtime);
         
-        let digest = md5::compute(cache_file_name.as_bytes());
-        let digest_hex = format!("{:x}", digest);
+        let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
+        let digest_hex = format!("{:016x}", digest);
         
-        // 1. MD5ハッシュが正しく32文字の16進数文字列になること
-        assert_eq!(digest_hex.len(), 32);
+        assert_eq!(digest_hex.len(), 16);
         
-        // 2. HashSetのキーとして使われる形式（"{}.jpg", "{}.json"）が正しいこと
         let thumb_key = format!("{}.jpg", digest_hex);
         let meta_key = format!("{}.json", digest_hex);
         assert!(thumb_key.ends_with(".jpg"));
         assert!(meta_key.ends_with(".json"));
-        assert_eq!(thumb_key.len(), 32 + 4);
-        assert_eq!(meta_key.len(), 32 + 5);
+        assert_eq!(thumb_key.len(), 16 + 4);
+        assert_eq!(meta_key.len(), 16 + 5);
     }
 }
