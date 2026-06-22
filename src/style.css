@@ -10,6 +10,7 @@
   --border-color: rgba(255, 255, 255, 0.15);
   --text-color: #cddbe0;
   --accent-color: #257e8c;
+  --accent-rgb: 37, 126, 140;
   --accent-hover: #2e96a6;
   --modal-bg: #141a1d;
   --modal-border: rgba(255, 255, 255, 0.2);
@@ -104,7 +105,7 @@ textarea {
 }
 
 .titlebar-button:hover {
-  background-color: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.15);
 }
 
 .titlebar-button.titlebar-close:hover {
@@ -251,7 +252,7 @@ body.is-resizing .app-content {
 .dialog-input:focus {
   outline: none;
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 25%, transparent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
 .dialog-input.error {
@@ -413,14 +414,14 @@ input:-webkit-autofill:focus {
 }
 
 .bookmark-item:hover {
-  background-color: color-mix(in srgb, var(--accent-color) 25%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.25);
   color: #fff;
 }
 
 .bookmark-item.selected {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-color) 25%, transparent), rgba(28, 94, 105, 0.35));
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.25), rgba(28, 94, 105, 0.35));
   color: #ffffff;
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-color) 30%, transparent);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
   transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -548,7 +549,7 @@ input:-webkit-autofill:focus {
 #search-container:focus-within {
   background: #1e1e1e;
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 25%, transparent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
 #search-clear-btn {
@@ -657,7 +658,7 @@ table#file-table {
 }
 
 #file-table tr:hover {
-  background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  background: rgba(var(--accent-rgb), 0.15);
 }
 
 #file-list-body tr {
@@ -667,7 +668,7 @@ table#file-table {
 }
 
 #file-table tr.selected {
-  background: color-mix(in srgb, var(--accent-color) 40%, transparent);
+  background: rgba(var(--accent-rgb), 0.4);
   color: #fff;
   font-weight: normal;
   box-shadow: inset 4px 0 0 var(--accent-color);
@@ -809,7 +810,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 input[type="range"]::-webkit-slider-thumb:hover {
   background: var(--accent-color);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
 }
 
 input[type="range"]:focus {
@@ -1019,12 +1020,12 @@ body.show-thumbnail-names .thumbnail-label {
 }
 
 #dir-tree .tree-item:hover {
-  background-color: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.15);
   color: #fff;
 }
 
 #dir-tree .tree-item.selected {
-  background: color-mix(in srgb, var(--accent-color) 40%, transparent);
+  background: rgba(var(--accent-rgb), 0.4);
   color: #ffffff;
   box-shadow: none;
   transition: background 0.2s ease;
@@ -1365,14 +1366,14 @@ img.thumbnail-item.loading {
   padding: 2px 6px;
   margin: 2px;
   border-radius: 3px;
-  background-color: color-mix(in srgb, var(--accent-color) 10%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.1);
   color: var(--text-color);
   font-family: inherit;
   word-break: break-all;
 }
 
 .diff-tag.added {
-  background-color: color-mix(in srgb, var(--accent-color) 25%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.25);
   color: #61c7d6;
   border: 1px solid var(--accent-color);
 }
@@ -1509,7 +1510,7 @@ img.thumbnail-item.loading {
 }
 
 .context-menu-item:hover {
-  background-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.3);
   /* アクセントカラーの透過 */
   color: #ffffff;
 }
@@ -1547,12 +1548,12 @@ img.thumbnail-item.loading {
 /* tab-list-item 固有の調整 */
 .tab-list-item.active {
   color: #ffffff;
-  background-color: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.15);
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
 
 .tab-list-item.active:hover {
-  background-color: color-mix(in srgb, var(--accent-color) 35%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.35);
   /* アクティブかつホバー時は少し明るく */
 }
 
@@ -1665,7 +1666,7 @@ th[data-sort] svg path {
 }
 
 #tab-container .tab-item:not(.active):hover {
-  background-color: color-mix(in srgb, var(--accent-color) 35%, transparent) !important;
+  background-color: rgba(var(--accent-rgb), 0.35) !important;
   color: #ffffff !important;
   opacity: 1 !important;
 }
@@ -1790,7 +1791,7 @@ th[data-sort] svg path {
 
 /* クリックした瞬間は押し込まれつつVeloceのテーマカラーで微発光 */
 .titlebar #new-tab-btn:active {
-  background: color-mix(in srgb, var(--accent-color) 20%, transparent) !important;
+  background: rgba(var(--accent-rgb), 0.2) !important;
   /* Veloceのテーマ色で微発光 */
   transform: scale(0.92);
 }
@@ -2099,7 +2100,7 @@ html.viewer-html,
 /* ホバー時の上書き（背景色がついている状態でのホバー対応） */
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min:hover,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:hover {
-  background-color: color-mix(in srgb, var(--accent-color) 60%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.6);
 }
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:hover {
   background-color: #e05263;
@@ -2112,7 +2113,7 @@ html.viewer-html,
 
 .window-ctrl-btn--min:hover,
 .window-ctrl-btn--max:hover {
-  background-color: color-mix(in srgb, var(--accent-color) 50%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.5);
 }
 
 .window-ctrl-btn--close {
