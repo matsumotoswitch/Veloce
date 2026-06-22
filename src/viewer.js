@@ -314,6 +314,7 @@ function updateFullscreenStyles() {
     setViewerBodyAlignment('center');
     img.style.margin = '0';
     window.scrollTo(0, 0);
+    if (window.updateScaleDisplay) window.updateScaleDisplay();
     return;
   }
 
@@ -346,6 +347,7 @@ function updateFullscreenStyles() {
     document.body.scrollLeft = (imgWidth - winW) / 2;
     document.body.scrollTop = (imgHeight - winH) / 2;
   }
+  if (window.updateScaleDisplay) window.updateScaleDisplay();
 }
 
 // リサイズ後のフォーカス要求をデバウンスして、連続切り替え時の競合を防ぐ
@@ -366,6 +368,7 @@ function resizeWindowToFitImage() {
   const scale = Math.min(maxWindowWidth / natW, maxWindowHeight / natH, 1.0);
   const targetWidth = Math.floor(natW * scale);
   const targetHeight = Math.floor(natH * scale);
+  if (window.updateScaleDisplay) setTimeout(window.updateScaleDisplay, 50);
 
   // 現在のウィンドウサイズと同じ場合は無駄なリサイズ要求をスキップする
   if (Math.abs(window.innerWidth - targetWidth) < 2 && Math.abs(window.innerHeight - targetHeight) < 2) {
@@ -644,6 +647,11 @@ function createWindowControls() {
   filenameDisplay.className = 'window-filename';
 
   controlsContainer.appendChild(filenameDisplay);
+  const scaleDisplay = document.createElement('div');
+  scaleDisplay.id = 'window-scale-display';
+  scaleDisplay.className = 'window-scale-display';
+  scaleDisplay.style.display = 'none';
+  controlsContainer.appendChild(scaleDisplay);
   controlsContainer.appendChild(minBtn);
   controlsContainer.appendChild(maxBtn);
   controlsContainer.appendChild(closeBtn);
@@ -1003,3 +1011,34 @@ window.addEventListener('keydown', async (e) => {
 	}
   }
 });
+
+// --- 拡大縮小率の表示更新 ---
+window.updateScaleDisplay = function() {
+  const scaleDisplay = document.getElementById('window-scale-display');
+  const controls = document.getElementById('window-controls');
+  if (!scaleDisplay || !controls) return;
+
+  let currentScale = 1.0;
+  if (viewerState.isZoomed) {
+    currentScale = viewerState.currentScale;
+  } else {
+    const { width: natW, height: natH } = getNaturalDimensions();
+    if (natW > 0 && natH > 0) {
+      if (viewerState.isFitToWindow) {
+        currentScale = Math.min(window.innerWidth / natW, window.innerHeight / natH);
+      } else {
+        currentScale = Math.min(1.0, window.innerWidth / natW, window.innerHeight / natH);
+      }
+    }
+  }
+
+  const percent = Math.round(currentScale * 100);
+  if (percent !== 100) {
+    scaleDisplay.textContent = `${percent}%`;
+    scaleDisplay.style.display = 'flex';
+    controls.classList.add('showing-scale');
+  } else {
+    scaleDisplay.style.display = 'none';
+    controls.classList.remove('showing-scale');
+  }
+};

@@ -2093,7 +2093,33 @@ html.viewer-html,
 }
 
 /* 一番左の最小化ボタンの左下だけ丸くして、自然なコーナーブロック感を出す */
-.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min {
+
+.window-scale-display {
+  height: 30px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: var(--font-size-xs);
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.viewer-body #window-controls:not(.has-gradient).showing-scale .window-scale-display {
+  background-color: rgba(0, 0, 0, 0.4);
+  border-bottom-left-radius: var(--radius-sm);
+  text-shadow: none;
+}
+
+.viewer-body #window-controls:not(.has-gradient):not(.showing-scale) .window-ctrl-btn--min {
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+/* Override old rule */
+.viewer-body #window-controls.dummy-override .window-ctrl-btn--min {
   border-bottom-left-radius: var(--radius-sm);
 }
 
