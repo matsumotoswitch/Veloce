@@ -37,6 +37,11 @@ class AppState {
     this.currentDirectory = '';
     /** @type {Array<{id: string, name: string, path: string, icon: string}>} お気に入りリスト */
     this.favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+    
+    /** @type {Object<string, number>} レーティング一覧 (path -> rating) */
+    this.ratings = JSON.parse(localStorage.getItem('ratings') || '{}');
+    this.ratingFilterVal = 0;
+    this.ratingFilterOp = 'gte';
 
     // レイアウト状態の管理
     this.layout = {
@@ -87,7 +92,8 @@ class AppState {
     if (window.veloceAPI && window.veloceAPI.setViewParams) {
       try {
         const totalCount = await window.veloceAPI.setViewParams(
-          this.sortConfig.key, this.sortConfig.asc, this.searchQuery
+          this.sortConfig.key, this.sortConfig.asc, this.searchQuery,
+          this.ratingFilterVal, this.ratingFilterOp
         );
         this.totalCount = totalCount;
       } catch (err) {

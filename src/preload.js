@@ -86,7 +86,9 @@ window.veloceAPI = {
   /**
    * Rust側でソート・検索を実行し、フィルタリング後の件数とパス一覧を返す
    */
-  setViewParams: (sortKey, asc, searchQuery) => invoke('set_view_params', { sortKey, asc, searchQuery }),
+  setViewParams: (sortKey, asc, searchQuery, ratingFilterVal = 0, ratingFilterOp = 'gte') => invoke('set_view_params', { sortKey, asc, searchQuery, ratingFilterVal, ratingFilterOp }),
+  syncRatings: (ratings) => invoke('sync_ratings', { ratings }),
+  setRating: (path, rating) => invoke('set_rating', { path, rating }),
   /**
    * 仮想スクロール用: 指定範囲のImageFileをRustから取得する
    */

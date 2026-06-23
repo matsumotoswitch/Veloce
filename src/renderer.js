@@ -3368,6 +3368,51 @@ window.addEventListener('keydown', async (e) => {
     return;
   }
 
+  if (['0', '1', '2', '3', '4', '5'].includes(e.key) && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    if (appState.selectedIndex !== -1) {
+      e.preventDefault();
+      const rating = parseInt(e.key, 10);
+      const file = await window.veloceAPI.getFileByIndex(appState.selectedIndex);
+      if (file) {
+        const currentRating = appState.ratings[file.path] || 0;
+        const newRating = (rating === currentRating) ? 0 : rating;
+        
+        if (newRating === 0) {
+          delete appState.ratings[file.path];
+        } else {
+          appState.ratings[file.path] = newRating;
+        }
+        localStorage.setItem('ratings', JSON.stringify(appState.ratings));
+        
+        if (window.veloceAPI.setRating) {
+          await window.veloceAPI.setRating(file.path, newRating);
+          
+          if (uiManager.elements.thumbnailGrid) {
+            const thumbs = uiManager.elements.thumbnailGrid.querySelectorAll('.thumbnail-item');
+            for (const thumb of thumbs) {
+              if (thumb.dataset.filepath === file.path) {
+                let badge = thumb.querySelector('.rating-badge');
+                if (badge) {
+                  if (newRating > 0) {
+                    badge.querySelector('.rating-value').textContent = newRating;
+                    badge.style.display = 'flex';
+                  } else {
+                    badge.style.display = 'none';
+                  }
+                }
+                break;
+              }
+            }
+          }
+          if (appState.ratingFilterVal > 0) {
+            scheduleRefresh();
+          }
+        }
+      }
+      return;
+    }
+  }
+
   if (e.key === 'Escape') {
     const diffModal = document.getElementById('diff-modal');
     if (diffModal && diffModal.style.display === 'flex') {
@@ -4241,13 +4286,34 @@ window.addEventListener('DOMContentLoaded', async () => {
       uiManager.hideCustomTooltip();
     });
     uiManager.elements.searchClearBtn.addEventListener('click', () => {
-      if (uiManager.elements.searchBar) {
+      let changed = false;
+      if (uiManager.elements.searchBar && uiManager.elements.searchBar.value !== '') {
+        uiManager.elements.searchBar.value = '';
+        appState.searchQuery = '';
+        changed = true;
+      }
+      
+      const ratingFilterValSel = document.getElementById('rating-filter-val');
+      const ratingFilterOpSel = document.getElementById('rating-filter-op');
+      if (appState.ratingFilterVal !== 0 || appState.ratingFilterOp !== 'gte') {
+        appState.ratingFilterVal = 0;
+        appState.ratingFilterOp = 'gte';
+        if (ratingFilterValSel) ratingFilterValSel.value = '0';
+        if (ratingFilterOpSel) ratingFilterOpSel.value = 'gte';
+        changed = true;
+      }
+
+      if (changed) {
+        scheduleRefresh();
+      } else if (uiManager.elements.searchBar) {
+        // Fallback for visual clear even if already empty
         uiManager.elements.searchBar.value = '';
         appState.searchQuery = '';
         scheduleRefresh();
-        uiManager.applyGlowEffect(uiManager.elements.searchClearBtn);
-        uiManager.hideCustomTooltip();
       }
+      
+      uiManager.applyGlowEffect(uiManager.elements.searchClearBtn);
+      uiManager.hideCustomTooltip();
     });
   }
 
@@ -4612,6 +4678,26 @@ window.addEventListener('DOMContentLoaded', async () => {
   appState.searchQuery = currentTab.searchQuery || '';
   if (uiManager.elements.searchBar) {
     uiManager.elements.searchBar.value = appState.searchQuery;
+  }
+  
+  if (window.veloceAPI.syncRatings) {
+    window.veloceAPI.syncRatings(appState.ratings);
+  }
+  
+  const ratingFilterValSel = document.getElementById('rating-filter-val');
+  const ratingFilterOpSel = document.getElementById('rating-filter-op');
+  if (ratingFilterValSel && ratingFilterOpSel) {
+    ratingFilterValSel.value = appState.ratingFilterVal;
+    ratingFilterOpSel.value = appState.ratingFilterOp;
+    
+    ratingFilterValSel.addEventListener('change', (e) => {
+      appState.ratingFilterVal = parseInt(e.target.value, 10);
+      scheduleRefresh();
+    });
+    ratingFilterOpSel.addEventListener('change', (e) => {
+      appState.ratingFilterOp = e.target.value;
+      scheduleRefresh();
+    });
   }
   if (currentTab.sortConfig) {
     appState.sortConfig = JSON.parse(JSON.stringify(currentTab.sortConfig));

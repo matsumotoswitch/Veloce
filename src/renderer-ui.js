@@ -1253,8 +1253,14 @@ class UIManager {
       const label = document.createElement('div');
       label.className = 'thumbnail-label';
       
+      const badge = document.createElement('div');
+      badge.className = 'rating-badge';
+      badge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="rating-value"></span>';
+      badge.style.display = 'none';
+      
       wrapper.appendChild(img);
       wrapper.appendChild(label);
+      wrapper.appendChild(badge);
       content.appendChild(wrapper);
     }
 
@@ -1288,6 +1294,17 @@ class UIManager {
       } else {
         label.textContent = '';
         label.title = '';
+      }
+
+      const rating = appState.ratings[file.path];
+      let badge = wrapper.querySelector('.rating-badge');
+      if (badge) {
+        if (rating && rating > 0) {
+          badge.querySelector('.rating-value').textContent = rating;
+          badge.style.display = 'flex';
+        } else {
+          badge.style.display = 'none';
+        }
       }
 
       if (wrapper.dataset.filepath !== file.path || wrapper.dataset.index != i) {

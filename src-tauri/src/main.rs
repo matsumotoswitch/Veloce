@@ -149,6 +149,9 @@ pub struct AppState {
     filtered_files: Mutex<Vec<ImageFile>>,
     sort_config: Mutex<SortConfig>,
     search_query: Mutex<String>,
+    ratings: Mutex<std::collections::HashMap<String, u8>>,
+    rating_filter_val: Mutex<u8>,
+    rating_filter_op: Mutex<String>,
     thumbnail_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
@@ -446,6 +449,30 @@ fn natural_cmp(s1: &str, s2: &str) -> std::cmp::Ordering {
 }
 
 /// Rust側でソート・フィルタリングを実行し、最新のpathsをViewerにも同期する
+
+#[tauri::command]
+fn sync_ratings(state: tauri::State<'_, AppState>, ratings: std::collections::HashMap<String, u8>) -> usize {
+    if let Ok(mut lock) = state.ratings.lock() {
+        *lock = ratings;
+    }
+    apply_filters_and_sort(None, &state)
+}
+
+#[tauri::command]
+fn set_rating(state: tauri::State<'_, AppState>, path: String, rating: u8) -> usize {
+    if let Ok(mut lock) = state.ratings.lock() {
+        if rating == 0 {
+            lock.remove(&path);
+        } else {
+            lock.insert(path, rating);
+        }
+    }
+    apply_filters_and_sort(None, &state)
+}
+
+
+
+
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
     let all_files = state.all_files.lock().unwrap();
     let sort_config = state.sort_config.lock().unwrap();
@@ -460,6 +487,20 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             terms.iter().all(|term| text.contains(term))
         }).cloned().collect()
     };
+
+    let rating_val = *state.rating_filter_val.lock().unwrap();
+    let rating_op = state.rating_filter_op.lock().unwrap().clone();
+    if rating_val > 0 {
+        let ratings_map = state.ratings.lock().unwrap();
+        filtered.retain(|f| {
+            let rating = ratings_map.get(&f.path).copied().unwrap_or(0);
+            match rating_op.as_str() {
+                "eq" => rating == rating_val,
+                "lte" => rating > 0 && rating <= rating_val,
+                "gte" | _ => rating >= rating_val,
+            }
+        });
+    }
     
     // ソート
     let key = sort_config.key.as_str();
@@ -538,12 +579,20 @@ fn set_view_params(
     sort_key: String,
     asc: bool,
     search_query: String,
+    rating_filter_val: u8,
+    rating_filter_op: String,
 ) -> usize {
     if let Ok(mut lock) = state.sort_config.lock() {
         *lock = SortConfig { key: sort_key, asc };
     }
     if let Ok(mut lock) = state.search_query.lock() {
         *lock = search_query;
+    }
+    if let Ok(mut lock) = state.rating_filter_val.lock() {
+        *lock = rating_filter_val;
+    }
+    if let Ok(mut lock) = state.rating_filter_op.lock() {
+        *lock = rating_filter_op;
     }
     apply_filters_and_sort(Some(&app), &state)
 }
@@ -1950,6 +1999,9 @@ fn main() {
             filtered_files: Mutex::new(Vec::new()),
             sort_config: Mutex::new(SortConfig { key: "name".to_string(), asc: true }),
             search_query: Mutex::new(String::new()),
+            ratings: Mutex::new(std::collections::HashMap::new()),
+            rating_filter_val: Mutex::new(0),
+            rating_filter_op: Mutex::new("gte".to_string()),
             thumbnail_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
         })
         .setup(move |app| {
@@ -2173,6 +2225,8 @@ fn main() {
             path_exists,
             load_directory,
             set_view_params,
+            sync_ratings,
+            set_rating,
             get_items,
             get_file_by_index,
             update_metadata_in_state,

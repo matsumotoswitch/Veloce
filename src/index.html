@@ -44,6 +44,21 @@
     <div id="search-container">
       <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
     </div>
+    <div id="rating-filter-container" style="display: flex; gap: 4px; margin-left: 8px;">
+      <select id="rating-filter-val" class="rating-filter-select" title="レーティング">
+        <option value="0">指定なし</option>
+        <option value="1">★1</option>
+        <option value="2">★2</option>
+        <option value="3">★3</option>
+        <option value="4">★4</option>
+        <option value="5">★5</option>
+      </select>
+      <select id="rating-filter-op" class="rating-filter-select" title="条件">
+        <option value="gte">以上</option>
+        <option value="lte">以下</option>
+        <option value="eq">ちょうど</option>
+      </select>
+    </div>
     <button id="search-clear-btn" class="icon-btn"></button>
   </div>
   <!-- ブックマークバー (お気に入り) -->
