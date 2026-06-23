@@ -145,6 +145,9 @@ window.veloceAPI = {
   getThumbnail: async (filePath) => {
     try {
       const thumbnailPath = await invoke('get_thumbnail', { filePath });
+      if (thumbnailPath && thumbnailPath.startsWith('data:')) {
+          return thumbnailPath;
+      }
       return convertFileSrc(thumbnailPath);
     } catch (error) {
       console.warn("Failed to generate thumbnail:", error);

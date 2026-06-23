@@ -153,9 +153,39 @@ pub struct AppState {
     rating_filter_val: Mutex<u8>,
     rating_filter_op: Mutex<String>,
     thumbnail_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    db_conn: std::sync::Arc<Mutex<rusqlite::Connection>>,
 }
 
 // --- ユーティリティ ---
+
+fn init_db() -> rusqlite::Result<rusqlite::Connection> {
+    let mut db_path = get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
+    if !db_path.exists() {
+        let _ = std::fs::create_dir_all(&db_path);
+    }
+    db_path.push("veloce_cache.db");
+    
+    let conn = rusqlite::Connection::open(&db_path)?;
+    
+    // パフォーマンスチューニング
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA cache_size = -64000;
+         PRAGMA temp_store = MEMORY;"
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS cache (
+            hash_key TEXT PRIMARY KEY,
+            thumbnail BLOB,
+            metadata TEXT,
+            last_accessed INTEGER
+        )",
+        [],
+    )?;
+    Ok(conn)
+}
 
 /// アプリケーション専用のローカルデータディレクトリを取得する (`AppData/Local/Veloce`)
 fn get_veloce_data_dir() -> Option<std::path::PathBuf> {
@@ -359,8 +389,9 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
 
                     if needs_parsing {
                         let path_clone_for_blocking = path.clone();
+                        let db_conn_clone = state.db_conn.clone();
                         let full_meta = match tokio::task::spawn_blocking(move || {
-                            get_full_metadata_for_path(&path_clone_for_blocking)
+                            get_full_metadata_for_path(&path_clone_for_blocking, &db_conn_clone)
                         }).await {
                             Ok(meta) => meta,
                             Err(_) => continue,
@@ -669,13 +700,14 @@ fn notify_file_removed(app: tauri::AppHandle, state: tauri::State<'_, AppState>,
 }
 
 #[tauri::command]
-async fn get_full_metadata_batch(file_paths: Vec<String>) -> Result<Vec<FullMetadata>, String> {
+async fn get_full_metadata_batch(state: tauri::State<'_, AppState>, file_paths: Vec<String>) -> Result<Vec<FullMetadata>, String> {
     // rayonによるスレッドプール占有を防ぐため、通常のイテレータを使用する。
     // I/Oバウンドな処理であり、フロントエンド側で既にチャンク化（100件ずつ等）
     // されているため、Rust側では直列処理でも十分に高速かつ安全に動作します。
+    let db_conn_clone = state.db_conn.clone();
     Ok(tokio::task::spawn_blocking(move || {
         file_paths.into_iter().map(|path| {
-            get_full_metadata_for_path(&path)
+            get_full_metadata_for_path(&path, &db_conn_clone)
         }).collect()
     }).await.unwrap_or_default())
 }
@@ -707,7 +739,7 @@ fn decode_metadata_string(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
+fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqlite::Connection>) -> FullMetadata {
     let mtime = std::fs::metadata(file_path)
         .and_then(|m| m.modified())
         .unwrap_or(std::time::UNIX_EPOCH)
@@ -715,30 +747,22 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
         .unwrap_or_default()
         .as_millis();
 
-    let cache_dir = get_veloce_data_dir().map(|mut p| {
-        p.push("Metadata");
-        p
-    });
+    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+    let hash_key = format!("{:016x}", digest);
 
-    let cache_file_path = if let Some(dir) = &cache_dir {
-        let _ = std::fs::create_dir_all(dir);
-        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
-        Some(dir.join(format!("{:016x}.json", digest)))
-    } else {
-        None
-    };
-
-    if let Some(cache_path) = &cache_file_path {
-        if cache_path.exists() {
-            if let Ok(json_str) = std::fs::read_to_string(cache_path) {
-                if let Ok(mut cached_meta) = serde_json::from_str::<FullMetadata>(&json_str) {
-                    // 古いキャッシュの互換性対応 (A1111のプロンプトが空の場合のパッチ)
-                    if cached_meta.prompt.is_empty() {
-                        if let Some(raw) = cached_meta.params.get("rawParameters").and_then(|v| v.as_str()) {
-                            cached_meta.prompt = raw.to_string();
+    if let Ok(conn) = db_conn.lock() {
+        if let Ok(mut stmt) = conn.prepare_cached("SELECT metadata FROM cache WHERE hash_key = ?") {
+            if let Ok(json_str) = stmt.query_row([&hash_key], |row| row.get::<_, String>(0)) {
+                if !json_str.is_empty() {
+                    if let Ok(mut cached_meta) = serde_json::from_str::<FullMetadata>(&json_str) {
+                        // 古いキャッシュの互換性対応 (A1111のプロンプトが空の場合のパッチ)
+                        if cached_meta.prompt.is_empty() {
+                            if let Some(raw) = cached_meta.params.get("rawParameters").and_then(|v| v.as_str()) {
+                                cached_meta.prompt = raw.to_string();
+                            }
                         }
+                        return cached_meta;
                     }
-                    return cached_meta;
                 }
             }
         }
@@ -942,9 +966,14 @@ fn get_full_metadata_for_path(file_path: &str) -> FullMetadata {
 
     let meta = FullMetadata { path: file_path.to_string(), prompt, negative_prompt, width, height, params, source };
 
-    if let Some(cache_path) = &cache_file_path {
-        if let Ok(json_str) = serde_json::to_string(&meta) {
-            let _ = std::fs::write(cache_path, json_str);
+    if let Ok(json_str) = serde_json::to_string(&meta) {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        if let Ok(conn) = db_conn.lock() {
+            let _ = conn.execute(
+                "INSERT INTO cache (hash_key, metadata, last_accessed) VALUES (?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, last_accessed=excluded.last_accessed",
+                rusqlite::params![&hash_key, &json_str, now]
+            );
         }
     }
 
@@ -1214,9 +1243,10 @@ async fn check_conflicts(paths: Vec<String>, dest_dir: String) -> Result<Vec<Str
 }
 
 #[tauri::command]
-async fn parse_metadata(file_path: String) -> Result<ParseMetadataResult, String> {
+async fn parse_metadata(state: tauri::State<'_, AppState>, file_path: String) -> Result<ParseMetadataResult, String> {
+    let db_conn_clone = state.db_conn.clone();
     Ok(tokio::task::spawn_blocking(move || {
-        let full_meta = get_full_metadata_for_path(&file_path);
+        let full_meta = get_full_metadata_for_path(&file_path, &db_conn_clone);
         ParseMetadataResult {
             prompt: full_meta.prompt,
             negative_prompt: full_meta.negative_prompt,
@@ -1373,6 +1403,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
     });
 
     let semaphore = state.thumbnail_semaphore.clone();
+    let db_conn_clone = state.db_conn.clone();
     let _permit = semaphore.acquire_owned().await.map_err(|_| "Semaphore closed".to_string())?;
 
     tokio::task::spawn_blocking(move || {
@@ -1383,21 +1414,32 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
             .unwrap_or_default()
             .as_millis();
 
-        let cache_file_path = if let Some(dir) = &cache_dir {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("create_dir_all failed: {}", e);
+        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+        let hash_key = format!("{:016x}", digest);
+
+        // SQLite キャッシュの確認
+        let cached_b64: Option<String> = {
+            let mut result = None;
+            let conn = db_conn_clone.lock().unwrap();
+            if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ?") {
+                if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                    if !bytes.is_empty() {
+                        use base64::{Engine as _, engine::general_purpose};
+                        let b64 = general_purpose::STANDARD.encode(&bytes);
+                        result = Some(format!("data:image/jpeg;base64,{}", b64));
+                    }
+                }
             }
-            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
-            Some(dir.join(format!("{:016x}.jpg", digest)))
-        } else {
-            None
+            result
         };
 
-        if let Some(cache_path) = &cache_file_path {
-            if cache_path.exists() {
-                // キャッシュが既に存在する場合は、I/Oをスキップしてパスのみを即座に返す
-                return Ok(cache_path.to_string_lossy().to_string());
-            }
+        if let Some(b64) = cached_b64 {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let _ = db_conn_clone.lock().unwrap().execute(
+                "UPDATE cache SET last_accessed = ? WHERE hash_key = ?",
+                rusqlite::params![now, &hash_key]
+            );
+            return Ok(b64);
         }
 
         // Windows環境ではOS標準のAPIを使用してサムネイルを高速に取得する
@@ -1490,13 +1532,15 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
 
                 // WindowsAPIでの取得が成功した場合はそのまま返す
                 if let Some(bytes) = result {
-                    if let Some(cache_path) = &cache_file_path {
-                        if let Err(e) = std::fs::write(cache_path, &bytes) {
-                            eprintln!("Thumbnail write failed: {}", e);
-                        } else {
-                            return Ok(cache_path.to_string_lossy().to_string());
-                        }
-                    }
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                    let _ = db_conn_clone.lock().unwrap().execute(
+                        "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                         ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                        rusqlite::params![&hash_key, &bytes, now],
+                    );
+                    use base64::{Engine as _, engine::general_purpose};
+                    let b64 = general_purpose::STANDARD.encode(&bytes);
+                    return Ok(format!("data:image/jpeg;base64,{}", b64));
                 }
             }
         }
@@ -1550,15 +1594,15 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         thumbnail.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
         
         let bytes = buf.into_inner();
-        if let Some(cache_path) = &cache_file_path {
-            if let Err(e) = std::fs::write(cache_path, &bytes) {
-                eprintln!("Thumbnail write failed (fallback): {}", e);
-            } else {
-                return Ok(cache_path.to_string_lossy().to_string());
-            }
-        }
-        
-        Err("Could not save thumbnail cache".to_string())
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let _ = db_conn_clone.lock().unwrap().execute(
+            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+            rusqlite::params![&hash_key, &bytes, now],
+        );
+        use base64::{Engine as _, engine::general_purpose};
+        let b64 = general_purpose::STANDARD.encode(&bytes);
+        Ok(format!("data:image/jpeg;base64,{}", b64))
     }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
@@ -1681,43 +1725,29 @@ fn get_files_by_indices(state: tauri::State<'_, AppState>, indices: Vec<usize>) 
 }
 
 #[tauri::command]
-async fn clear_metadata_cache(file_paths: Vec<String>) -> Result<Vec<String>, String> {
+async fn clear_metadata_cache(state: tauri::State<'_, AppState>, file_paths: Vec<String>) -> Result<Vec<String>, String> {
+    let db_conn_clone = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
         let mut messages = Vec::new();
-        if let Some(base_dir) = get_veloce_data_dir() {
-            let meta_dir = base_dir.join("Metadata");
-            let thumb_dir = base_dir.join("Thumbnails");
+        let conn = db_conn_clone.lock().unwrap();
+        
+        for file_path in file_paths {
+            let mtime = std::fs::metadata(&file_path)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH)
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
             
-            for file_path in file_paths {
-                let mtime = std::fs::metadata(&file_path)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH)
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
-                
-                let clean_path = file_path.replace("\\\\?\\", "");
-                
-                // Raw path digest
-                let digest_raw = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
-                let json_raw = meta_dir.join(format!("{:016x}.json", digest_raw));
-                let jpg_raw = thumb_dir.join(format!("{:016x}.jpg", digest_raw));
-                
-                // Clean path digest
-                let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-                let json_clean = meta_dir.join(format!("{:016x}.json", digest_clean));
-                let jpg_clean = thumb_dir.join(format!("{:016x}.jpg", digest_clean));
-
-                for cache_file in [json_raw, jpg_raw, json_clean, jpg_clean] {
-                    if cache_file.exists() {
-                        if let Err(e) = std::fs::remove_file(&cache_file) {
-                            messages.push(format!("Failed: {}: {}", cache_file.display(), e));
-                        } else {
-                            messages.push(format!("Deleted: {}", cache_file.display()));
-                        }
-                    }
-                }
-            }
+            let clean_path = file_path.replace("\\\\?\\", "");
+            let digest_raw = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+            let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+            
+            let hash_key_raw = format!("{:016x}", digest_raw);
+            let hash_key_clean = format!("{:016x}", digest_clean);
+            
+            let _ = conn.execute("DELETE FROM cache WHERE hash_key IN (?, ?)", rusqlite::params![&hash_key_raw, &hash_key_clean]);
+            messages.push(format!("Cleared cache for {}", file_path));
         }
         Ok(messages)
     }).await.map_err(|e| e.to_string())?
@@ -1876,8 +1906,15 @@ fn open_cache_folder() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn clear_cache() -> Result<(), String> {
+async fn clear_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let db_conn_clone = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
+        // SQLite のキャッシュをクリア
+        let conn = db_conn_clone.lock().unwrap();
+        let _ = conn.execute("DELETE FROM cache", []);
+        let _ = conn.execute("VACUUM", []); // ファイルサイズを切り詰める
+        
+        // 既存の古いファイルベースのキャッシュも念のため削除
         if let Some(mut path) = get_veloce_data_dir() {
             // Clear Thumbnails
             path.push("Thumbnails");
@@ -1943,8 +1980,17 @@ async fn get_cache_info() -> CacheInfo {
         if let Some(mut path) = get_veloce_data_dir() {
             path_str = path.to_string_lossy().to_string(); // 親ディレクトリ(Veloce)のパスを保持
 
+            // SQLite DBのファイルサイズを合算
+            let db_path = path.join("veloce_cache.db");
+            if let Ok(metadata) = std::fs::metadata(&db_path) {
+                if metadata.is_file() {
+                    file_count += 1;
+                    total_size_bytes += metadata.len();
+                }
+            }
+
+            // 古いサムネイルキャッシュの情報も合算する
             path.push("Thumbnails");
-            
             if let Ok(entries) = std::fs::read_dir(&path) {
                 for entry in entries.filter_map(Result::ok) {
                     if let Ok(metadata) = entry.metadata() {
@@ -1956,7 +2002,7 @@ async fn get_cache_info() -> CacheInfo {
                 }
             }
 
-            // メタデータキャッシュの情報も合算する
+            // 古いメタデータキャッシュの情報も合算する
             path.pop();
             path.push("Metadata");
             if let Ok(entries) = std::fs::read_dir(&path) {
@@ -2003,6 +2049,7 @@ fn main() {
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
             thumbnail_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
+            db_conn: std::sync::Arc::new(Mutex::new(init_db().expect("Failed to initialize SQLite database"))),
         })
         .setup(move |app| {
             let data_dir = get_veloce_data_dir().unwrap_or_default();
@@ -2391,5 +2438,44 @@ mod tests {
         assert!(meta_key.ends_with(".json"));
         assert_eq!(thumb_key.len(), 16 + 4);
         assert_eq!(meta_key.len(), 16 + 5);
+    }
+
+    #[test]
+    fn test_sqlite_cache() {
+        use rusqlite::Connection;
+        // In-memory database for testing
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                last_accessed INTEGER
+            )",
+            [],
+        ).unwrap();
+
+        let hash_key = "dummy_hash_123";
+        let dummy_thumb = vec![0u8, 1, 2, 3];
+        let dummy_meta = "{\"prompt\":\"test\"}";
+
+        // Insert
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, metadata, last_accessed) VALUES (?, ?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, metadata=excluded.metadata, last_accessed=excluded.last_accessed",
+            rusqlite::params![hash_key, &dummy_thumb, dummy_meta, 12345],
+        ).unwrap();
+
+        // Query
+        let mut stmt = conn.prepare("SELECT thumbnail, metadata FROM cache WHERE hash_key = ?").unwrap();
+        let (thumb, meta): (Vec<u8>, String) = stmt.query_row([hash_key], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        
+        assert_eq!(thumb, dummy_thumb);
+        assert_eq!(meta, dummy_meta);
+
+        // Delete
+        conn.execute("DELETE FROM cache WHERE hash_key = ?", rusqlite::params![hash_key]).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
     }
 }
