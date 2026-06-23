@@ -4293,13 +4293,24 @@ window.addEventListener('DOMContentLoaded', async () => {
         changed = true;
       }
       
-      const ratingFilterValSel = document.getElementById('rating-filter-val');
-      const ratingFilterOpSel = document.getElementById('rating-filter-op');
+      const resetCustomSelectUI = (containerId, val) => {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const items = container.querySelectorAll('.custom-select-item');
+        const targetItem = Array.from(items).find(i => i.dataset.value == val);
+        if (targetItem) {
+          items.forEach(i => i.classList.remove('selected'));
+          targetItem.classList.add('selected');
+          const label = container.querySelector('.custom-select-label');
+          if (label) label.textContent = targetItem.textContent;
+        }
+      };
+
       if (appState.ratingFilterVal !== 0 || appState.ratingFilterOp !== 'gte') {
         appState.ratingFilterVal = 0;
         appState.ratingFilterOp = 'gte';
-        if (ratingFilterValSel) ratingFilterValSel.value = '0';
-        if (ratingFilterOpSel) ratingFilterOpSel.value = 'gte';
+        resetCustomSelectUI('custom-rating-val-container', 0);
+        resetCustomSelectUI('custom-rating-op-container', 'gte');
         changed = true;
       }
 
@@ -4684,21 +4695,54 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.syncRatings(appState.ratings);
   }
   
-  const ratingFilterValSel = document.getElementById('rating-filter-val');
-  const ratingFilterOpSel = document.getElementById('rating-filter-op');
-  if (ratingFilterValSel && ratingFilterOpSel) {
-    ratingFilterValSel.value = appState.ratingFilterVal;
-    ratingFilterOpSel.value = appState.ratingFilterOp;
+  const setupCustomSelect = (containerId, valueKey) => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const label = container.querySelector('.custom-select-label');
+    const items = container.querySelectorAll('.custom-select-item');
     
-    ratingFilterValSel.addEventListener('change', (e) => {
-      appState.ratingFilterVal = parseInt(e.target.value, 10);
-      scheduleRefresh();
+    const initialVal = appState[valueKey];
+    const initialItem = Array.from(items).find(i => i.dataset.value == initialVal);
+    if (initialItem && label) {
+      label.textContent = initialItem.textContent;
+      items.forEach(i => i.classList.remove('selected'));
+      initialItem.classList.add('selected');
+    }
+
+    container.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.custom-select.open').forEach(el => {
+        if (el !== container) el.classList.remove('open');
+      });
+      container.classList.toggle('open');
     });
-    ratingFilterOpSel.addEventListener('change', (e) => {
-      appState.ratingFilterOp = e.target.value;
-      scheduleRefresh();
+
+    items.forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = item.dataset.value;
+        const parsedVal = valueKey === 'ratingFilterVal' ? parseInt(val, 10) : val;
+        
+        if (appState[valueKey] !== parsedVal) {
+          appState[valueKey] = parsedVal;
+          if (label) label.textContent = item.textContent;
+          items.forEach(i => i.classList.remove('selected'));
+          item.classList.add('selected');
+          scheduleRefresh();
+        }
+        container.classList.remove('open');
+      });
     });
-  }
+  };
+
+  setupCustomSelect('custom-rating-val-container', 'ratingFilterVal');
+  setupCustomSelect('custom-rating-op-container', 'ratingFilterOp');
+
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.custom-select.open').forEach(el => {
+      el.classList.remove('open');
+    });
+  });
   if (currentTab.sortConfig) {
     appState.sortConfig = JSON.parse(JSON.stringify(currentTab.sortConfig));
     updateSortIndicators();

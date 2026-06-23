@@ -45,19 +45,27 @@
       <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
     </div>
     <div id="rating-filter-container" style="display: flex; gap: 4px; margin-left: 8px;">
-      <select id="rating-filter-val" class="rating-filter-select" title="レーティング">
-        <option value="0">指定なし</option>
-        <option value="1">★1</option>
-        <option value="2">★2</option>
-        <option value="3">★3</option>
-        <option value="4">★4</option>
-        <option value="5">★5</option>
-      </select>
-      <select id="rating-filter-op" class="rating-filter-select" title="条件">
-        <option value="gte">以上</option>
-        <option value="lte">以下</option>
-        <option value="eq">ちょうど</option>
-      </select>
+      <div class="custom-select" id="custom-rating-val-container" tabindex="0" title="レーティング">
+        <div class="custom-select-label" id="custom-rating-val-label">指定なし</div>
+        <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        <div class="custom-select-menu" id="custom-rating-val-menu">
+          <div class="custom-select-item selected" data-value="0">指定なし</div>
+          <div class="custom-select-item" data-value="1">★1</div>
+          <div class="custom-select-item" data-value="2">★2</div>
+          <div class="custom-select-item" data-value="3">★3</div>
+          <div class="custom-select-item" data-value="4">★4</div>
+          <div class="custom-select-item" data-value="5">★5</div>
+        </div>
+      </div>
+      <div class="custom-select" id="custom-rating-op-container" tabindex="0" title="条件">
+        <div class="custom-select-label" id="custom-rating-op-label">以上</div>
+        <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        <div class="custom-select-menu" id="custom-rating-op-menu">
+          <div class="custom-select-item selected" data-value="gte">以上</div>
+          <div class="custom-select-item" data-value="lte">以下</div>
+          <div class="custom-select-item" data-value="eq">ちょうど</div>
+        </div>
+      </div>
     </div>
     <button id="search-clear-btn" class="icon-btn"></button>
   </div>

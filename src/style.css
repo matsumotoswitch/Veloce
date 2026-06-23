@@ -586,6 +586,7 @@ input:-webkit-autofill:focus {
   /* flexコンテナ内ではheightよりもflex-basisでサイズ指定する方が確実 */
   flex: 0 0 var(--top-height, 50%);
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overflow-x: hidden;
   min-height: 0;
   background-color: var(--bg-color);
@@ -856,6 +857,7 @@ input[type="range"]:focus {
 #center-bottom {
   flex: 1;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overflow-x: hidden;
   min-height: 0;
   padding: 8px;
@@ -2388,34 +2390,87 @@ kbd {
   vertical-align: middle;
 }
 
-/* Rating Feature Styles */
-.rating-filter-select {
-  background-color: rgba(0, 0, 0, 0.2);
+/* Custom Dropdown UI Styles */
+.custom-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 86px;
+  background-color: rgba(0, 0, 0, 0.25);
   color: var(--text-color);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 0 6px;
+  padding: 0 8px;
   font-size: var(--font-size-sm);
   outline: none;
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   height: 26px;
   box-sizing: border-box;
   font-family: inherit;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.rating-filter-select:hover {
+.custom-select:hover {
   border-color: rgba(255, 255, 255, 0.3);
 }
 
-.rating-filter-select:focus {
+.custom-select:focus,
+.custom-select.open {
   border-color: var(--accent-color);
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
-.rating-filter-select option {
-  background-color: var(--bg-color);
+.custom-select-label {
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.custom-select-arrow {
   color: var(--text-color);
+  transition: transform 0.2s ease;
+}
+
+.custom-select.open .custom-select-arrow {
+  transform: rotate(180deg);
+}
+
+.custom-select-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  background-color: var(--modal-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--popup-shadow);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.custom-select.open .custom-select-menu {
+  display: block;
+  animation: fadeInMenu 0.1s ease-out;
+}
+
+.custom-select-item {
+  padding: 6px 12px;
+  color: var(--text-color);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s;
+}
+
+.custom-select-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.custom-select-item.selected {
+  color: var(--accent-color);
+  background-color: rgba(var(--accent-rgb), 0.1);
 }
 
 .rating-badge {
