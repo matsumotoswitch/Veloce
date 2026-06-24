@@ -1513,6 +1513,12 @@ function saveTabsState() {
  * パスからタブの表示名を取得します。
  */
 function getTabNameForPath(path) {
+  if (path.startsWith('smart://')) {
+    if (path === 'smart://fav_5') return 'お気に入り (★5)';
+    if (path === 'smart://fav_4_plus') return '高評価 (★4以上)';
+    if (path === 'smart://history') return 'すべての履歴';
+    return 'スマートフォルダ';
+  }
   return resolveTabName(path, appState.favorites);
 }
 
@@ -3054,12 +3060,14 @@ function createResizerToggle(resizer, type) {
       if (isCollapsed) {
         const restoreHeight = localStorage.getItem('prevLeftTopHeight') || '150px';
         root.style.setProperty('--left-top-height', restoreHeight);
+        root.removeAttribute('data-left-top-collapsed');
         localStorage.setItem('leftTopHeight', restoreHeight);
         appState.layout.leftTopVisible = true;
         btn.innerHTML = openIcon;
       } else {
         localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
         root.style.setProperty('--left-top-height', '0px');
+        root.setAttribute('data-left-top-collapsed', 'true');
         localStorage.setItem('leftTopHeight', '0px');
         appState.layout.leftTopVisible = false;
         btn.innerHTML = closeIcon;
@@ -3178,6 +3186,7 @@ window.addEventListener('mousemove', (e) => {
         if (root.style.getPropertyValue('--left-top-height') !== '0px') {
           localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
           root.style.setProperty('--left-top-height', '0px');
+          root.setAttribute('data-left-top-collapsed', 'true');
           localStorage.setItem('leftTopHeight', '0px');
           const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
           if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
@@ -3186,6 +3195,7 @@ window.addEventListener('mousemove', (e) => {
         newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
         const root = document.documentElement;
         root.style.setProperty('--left-top-height', `${newHeight}px`);
+        root.removeAttribute('data-left-top-collapsed');
         appState.layout.leftTopHeight = newHeight;
 
         const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
@@ -4244,9 +4254,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const savedLeftTopHeight = localStorage.getItem('leftTopHeight');
   if (savedLeftTopHeight) {
+    document.documentElement.style.setProperty('--left-top-height', savedLeftTopHeight);
     if (savedLeftTopHeight === '0px') {
+      document.documentElement.setAttribute('data-left-top-collapsed', 'true');
       const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
       if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+    } else {
+      document.documentElement.removeAttribute('data-left-top-collapsed');
     }
   }
 
@@ -4647,6 +4661,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   updateSortIndicators();
 
   await refreshTree();
+  initSmartFolders();
 
   // --- 初期タブの生成と読み込み ---
   const savedTabsState = localStorage.getItem('tabsState');
@@ -4806,6 +4821,67 @@ window.addEventListener('DOMContentLoaded', async () => {
     }).catch(() => { });
   }
 });
+
+/**
+ * スマートフォルダのUI初期化とイベント設定を行います
+ */
+function initSmartFolders() {
+  const container = document.getElementById('smart-folders-list');
+  if (!container) return;
+
+  const folders = [
+    { id: 'fav_5', name: 'お気に入り (★5)', icon: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>' },
+    { id: 'fav_4_plus', name: '高評価 (★4以上)', icon: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>' },
+    { id: 'history', name: 'すべての履歴', icon: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>' }
+  ];
+
+  folders.forEach(f => {
+    const item = document.createElement('div');
+    item.className = 'smart-folder-item';
+    item.dataset.id = f.id;
+    
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'smart-folder-icon';
+    iconSpan.innerHTML = f.icon;
+    
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = f.name;
+    
+    item.appendChild(iconSpan);
+    item.appendChild(nameSpan);
+    
+    item.addEventListener('click', async () => {
+      // 選択状態の更新
+      document.querySelectorAll('.smart-folder-item').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+      
+      // ツリー側の選択状態を解除
+      document.querySelectorAll('.tree-node-content').forEach(el => el.classList.remove('selected'));
+      
+      const path = `smart://${f.id}`;
+      appState.selection.clear();
+      appState.selectedIndex = -1;
+      uiManager.updateSelectionUI();
+
+      if (window.veloceAPI.loadDirectory) {
+        const activeTab = appState.tabs[appState.activeTabIndex];
+        if (activeTab) {
+          activeTab.path = path;
+          activeTab.name = getTabNameForPath(path);
+          activeTab.scrollTop = 0;
+          appState.currentDirectory = path;
+          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          uiManager.renderTabs();
+          saveTabsState();
+          
+          refreshFileList(true);
+        }
+      }
+    });
+    
+    container.appendChild(item);
+  });
+}
 
 /**
  * 履歴（Undoスタック）から直前の操作を取り消す

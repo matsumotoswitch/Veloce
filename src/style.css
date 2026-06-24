@@ -350,6 +350,10 @@ input:-webkit-autofill:focus {
   border-top: none;
 }
 
+:root[data-left-top-collapsed="true"] #resizer-left-pane {
+  border-top: none;
+}
+
 /* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
 .resizer-h:hover:not(:has(.resizer-toggle:hover)),
 .resizer-h:active,
@@ -478,6 +482,73 @@ input:-webkit-autofill:focus {
 
 .bookmark-empty-msg svg {
   opacity: 0.6;
+}
+
+#smart-folders-section {
+  padding: 10px 12px 0 12px;
+  flex: 0 0 var(--left-top-height, 130px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overflow-x: hidden;
+}
+
+:root[data-left-top-collapsed="true"] #smart-folders-section {
+  padding: 0 !important;
+  border-bottom: none !important;
+}
+
+#smart-folders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pane-header {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--text-color);
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  user-select: none;
+}
+
+.smart-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  transition: background-color 0.15s;
+  user-select: none;
+}
+
+.smart-folder-item:hover {
+  background-color: rgba(var(--accent-rgb), 0.15);
+}
+
+.smart-folder-item.selected {
+  background-color: rgba(var(--accent-rgb), 0.3);
+  color: #fff;
+  font-weight: 500;
+}
+
+.smart-folder-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.smart-folder-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 #directories-section {

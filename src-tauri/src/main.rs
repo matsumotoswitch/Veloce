@@ -234,10 +234,38 @@ fn path_exists(path: String) -> bool {
     path_obj.exists() && path_obj.is_dir()
 }
 
+fn get_smart_folder_paths(
+    folder_type: &str,
+    ratings_map: &std::collections::HashMap<String, u8>,
+    db_conn: &std::sync::Arc<Mutex<rusqlite::Connection>>,
+) -> Vec<std::path::PathBuf> {
+    let mut target_paths = Vec::new();
+    if folder_type == "smart://fav_5" {
+        target_paths = ratings_map.iter().filter(|(_, &r)| r == 5).map(|(p, _)| std::path::PathBuf::from(p)).collect();
+    } else if folder_type == "smart://fav_4_plus" {
+        target_paths = ratings_map.iter().filter(|(_, &r)| r >= 4).map(|(p, _)| std::path::PathBuf::from(p)).collect();
+    } else if folder_type == "smart://history" {
+        if let Ok(conn) = db_conn.lock() {
+            if let Ok(mut stmt) = conn.prepare("SELECT metadata FROM cache") {
+                if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                    for meta_str in rows.flatten() {
+                        if let Ok(meta) = serde_json::from_str::<FullMetadata>(&meta_str) {
+                            target_paths.push(std::path::PathBuf::from(meta.path));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    target_paths
+}
+
 #[tauri::command]
 fn load_directory(window: tauri::Window, target_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let path_clone = target_path.clone();
     let app_clone = window.app_handle();
+    let db_conn_clone = state.db_conn.clone();
+    let ratings_map = if let Ok(lock) = state.ratings.lock() { lock.clone() } else { std::collections::HashMap::new() };
     
     // ディレクトリ変更時にRust側の状態をリセット
     if let Ok(mut lock) = state.all_files.lock() { lock.clear(); }
@@ -259,30 +287,34 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
 
-            // max_depth(1) なので std::fs::read_dir の方が軽量。
-            // I/Oによるブロックを防ぐため、asyncスレッドではなくspawn_blocking内のOSスレッドで実行する
-            let dir_entries: Vec<_> = std::fs::read_dir(&path_for_spawn)
-                .into_iter()
-                .flat_map(|d| d)
-                .filter_map(|e| e.ok())
-                .collect();
+            let target_paths: Vec<std::path::PathBuf>;
+
+            if path_for_spawn.starts_with("smart://") {
+                target_paths = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone);
+            } else {
+                // max_depth(1) なので std::fs::read_dir の方が軽量。
+                target_paths = std::fs::read_dir(&path_for_spawn)
+                    .into_iter()
+                    .flat_map(|d| d)
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .collect();
+            }
 
             // rayon によるマルチスレッド処理
-            let mut files: Vec<ImageFile> = dir_entries
+            let mut files: Vec<ImageFile> = target_paths
                 .into_par_iter()
-                .filter_map(|entry| {
-                    let p = entry.path();
+                .filter_map(|p| {
                     if p.is_file() {
                         if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                             let ext_lower = ext.to_lowercase();
                             if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
-                                // std::fs::metadata の代わりに entry.metadata() を用いることで Syscall を削減
-                                if let Ok(metadata) = entry.metadata() {
+                                if let Ok(metadata) = std::fs::metadata(&p) {
                                     let size = metadata.len();
                                     let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                                     let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                                     
-                                    let file_name = entry.file_name().to_string_lossy().into_owned();
+                                    let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
                                     let full_path = p.to_string_lossy().into_owned();
                                     let clean_path = full_path.replace("\\\\?\\", "");
 
@@ -2477,5 +2509,47 @@ mod tests {
         conn.execute("DELETE FROM cache WHERE hash_key = ?", rusqlite::params![hash_key]).unwrap();
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0);
+    }
+    #[test]
+    fn test_smart_folder_paths() {
+        let db_conn = std::sync::Arc::new(std::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
+        {
+            let conn = db_conn.lock().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+            
+            // Insert a fake metadata json
+            let meta1 = super::FullMetadata { path: "C:\\fake\\path1.png".to_string(), prompt: "".to_string(), negative_prompt: "".to_string(), width: 0, height: 0, params: serde_json::Value::Null, source: "".to_string() };
+            let meta2 = super::FullMetadata { path: "C:\\fake\\path2.png".to_string(), prompt: "".to_string(), negative_prompt: "".to_string(), width: 0, height: 0, params: serde_json::Value::Null, source: "".to_string() };
+            conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, last_accessed) VALUES (?1, ?2, ?3, ?4)", 
+                rusqlite::params!["hash1", vec![0u8], serde_json::to_string(&meta1).unwrap(), 0]).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, last_accessed) VALUES (?1, ?2, ?3, ?4)", 
+                rusqlite::params!["hash2", vec![0u8], serde_json::to_string(&meta2).unwrap(), 0]).unwrap();
+        }
+
+        let mut ratings = std::collections::HashMap::new();
+        ratings.insert("C:\\fake\\path1.png".to_string(), 5);
+        ratings.insert("C:\\fake\\path3.png".to_string(), 4);
+        ratings.insert("C:\\fake\\path4.png".to_string(), 3);
+
+        let fav5 = super::get_smart_folder_paths("smart://fav_5", &ratings, &db_conn);
+        assert_eq!(fav5.len(), 1);
+        assert_eq!(fav5[0].to_str().unwrap(), "C:\\fake\\path1.png");
+
+        let fav4 = super::get_smart_folder_paths("smart://fav_4_plus", &ratings, &db_conn);
+        assert_eq!(fav4.len(), 2);
+        
+        let history = super::get_smart_folder_paths("smart://history", &ratings, &db_conn);
+        assert_eq!(history.len(), 2);
+        let history_paths: Vec<_> = history.iter().map(|p| p.to_str().unwrap()).collect();
+        assert!(history_paths.contains(&"C:\\fake\\path1.png"));
+        assert!(history_paths.contains(&"C:\\fake\\path2.png"));
     }
 }
