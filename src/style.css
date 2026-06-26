@@ -317,8 +317,7 @@ input:-webkit-autofill:focus {
   z-index: 10;
   transition: background-color 0.2s ease;
   position: relative;
-  border-left: 1px solid var(--border-color);
-  border-right: 1px solid var(--border-color);
+  border: none;
 }
 
 /* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
@@ -331,8 +330,6 @@ input:-webkit-autofill:focus {
 .resizer-h {
   background-color: var(--panel-bg);
   box-shadow: none;
-  border-top: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
   cursor: row-resize;
   height: 5px;
   flex: none;
@@ -378,6 +375,14 @@ input:-webkit-autofill:focus {
   /* 幅が0になる時に中身がはみ出さないようにする */
   padding: 0;
   /* paddingをセクション側に移動 */
+}
+
+#right-pane {
+  background: var(--bg-color);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border-color);
 }
 
 #bookmark-bar {
@@ -485,6 +490,7 @@ input:-webkit-autofill:focus {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-bottom: 1px solid var(--border-color);
 }
 
 :root[data-left-top-collapsed="true"] #smart-folders-section {
@@ -500,6 +506,7 @@ input:-webkit-autofill:focus {
   overflow-y: auto;
   scrollbar-gutter: stable;
   flex: 1;
+  border-right: 1px solid var(--border-color);
 }
 
 .pane-header {
@@ -587,6 +594,20 @@ input:-webkit-autofill:focus {
   position: relative;
 }
 
+/* Erase border-right of #resizer-left next to the table header */
+#center-pane::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 32px;
+  background: var(--panel-bg);
+  pointer-events: none;
+  z-index: 11;
+}
+
+/* Erase border-left of #resizer-right next to the table header, and cover scrollbar track */
 #center-pane::after {
   content: '';
   position: absolute;
@@ -597,7 +618,7 @@ input:-webkit-autofill:focus {
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
   pointer-events: none;
-  z-index: 10;
+  z-index: 11;
   box-sizing: border-box;
 }
 
@@ -695,8 +716,10 @@ input:-webkit-autofill:focus {
   overflow-x: hidden;
   min-height: 0;
   background-color: var(--bg-color);
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2);
   transition: flex-basis 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
 }
 
 body.is-resizing #center-top {
@@ -798,12 +821,11 @@ table#file-table {
 #thumbnail-controls {
   background: var(--panel-bg);
   padding: 0 10px 5px 10px;
-  height: 27px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   flex: none;
-  border-bottom: 1px solid var(--border-color);
   gap: 8px;
   position: relative;
 }
@@ -982,7 +1004,9 @@ input[type="range"]:focus {
   position: relative;
   display: block;
   background-color: var(--bg-color);
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2);
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-color);
 }
 
 .thumbnail-item {
@@ -1092,6 +1116,7 @@ body.show-thumbnail-names .thumbnail-label {
   font-size: 14px;
   min-height: 0;
   padding: 8px 8px 10px 12px;
+  border-right: 1px solid var(--border-color);
 }
 
 #dir-tree>ul {
