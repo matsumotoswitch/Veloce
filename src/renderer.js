@@ -1514,9 +1514,9 @@ function saveTabsState() {
  */
 function getTabNameForPath(path) {
   if (path.startsWith('smart://')) {
-    if (path === 'smart://fav_5') return 'お気に入り (★5)';
-    if (path === 'smart://fav_4_plus') return '高評価 (★4以上)';
-    if (path === 'smart://history') return 'すべての履歴';
+    const id = path.replace('smart://', '');
+    const sf = appState.smartFolders?.find(f => f.id === id);
+    if (sf) return sf.name;
     return 'スマートフォルダ';
   }
   return resolveTabName(path, appState.favorites);
@@ -2164,6 +2164,190 @@ const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICO
   showNotification(`「${name}」をお気に入りに追加しました`, 'success');
 });
 
+function showEditSmartFolderModal(sf, isNew = false) {
+  const modal = document.getElementById('edit-smart-folder-modal');
+  const container = document.getElementById('smart-icon-selector');
+  const getIconData = createFavoriteEditorUI(container, sf.icon || 'FAV_STAR', sf.color || 'orange');
+  
+  const nameInput = document.getElementById('smart-name-input');
+  nameInput.value = sf.name || '';
+  
+  const conditionsList = document.getElementById('smart-conditions-list');
+  conditionsList.innerHTML = ''; // clear
+
+  const typeOptions = [
+    { value: 'rating', label: 'レーティング' },
+    { value: 'prompt', label: 'プロンプト' },
+    { value: 'negative_prompt', label: 'ネガティブプロンプト' },
+    { value: 'source', label: '生成元 (Source)' },
+    { value: 'aspect_ratio', label: 'アスペクト比' }
+  ];
+
+  const operatorOptions = {
+    rating: [{ value: '>=', label: '以上' }, { value: '<=', label: '以下' }, { value: '==', label: 'と一致' }],
+    prompt: [{ value: 'contains', label: 'を含む' }, { value: 'not_contains', label: 'を含まない' }],
+    negative_prompt: [{ value: 'contains', label: 'を含む' }, { value: 'not_contains', label: 'を含まない' }],
+    source: [{ value: '==', label: 'と一致' }, { value: '!=', label: 'と一致しない' }],
+    aspect_ratio: [{ value: 'portrait', label: '縦長' }, { value: 'landscape', label: '横長' }, { value: 'square', label: '正方形' }]
+  };
+
+  let currentConditions = Array.isArray(sf.conditions) ? JSON.parse(JSON.stringify(sf.conditions)) : [];
+
+  function renderConditions() {
+    conditionsList.innerHTML = '';
+    currentConditions.forEach((cond, index) => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '8px';
+      row.style.alignItems = 'center';
+
+      // Type select
+      const typeSel = document.createElement('select');
+      typeSel.className = 'dialog-input';
+      typeSel.style.width = '120px';
+      typeOptions.forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.label;
+        if (opt.value === cond.type) option.selected = true;
+        typeSel.appendChild(option);
+      });
+
+      // Operator select
+      const opSel = document.createElement('select');
+      opSel.className = 'dialog-input';
+      opSel.style.width = '100px';
+      const ops = operatorOptions[cond.type] || operatorOptions['prompt'];
+      ops.forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.label;
+        if (opt.value === cond.operator) option.selected = true;
+        opSel.appendChild(option);
+      });
+
+      // Value input
+      let valInput = null;
+      if (cond.type === 'aspect_ratio') {
+        // Value not needed, the operator is the value essentially (portrait/landscape/square)
+        cond.operator = cond.operator || 'portrait';
+        valInput = document.createElement('div'); // spacer
+        valInput.style.flex = '1';
+      } else {
+        valInput = document.createElement('input');
+        valInput.type = cond.type === 'rating' ? 'number' : 'text';
+        valInput.className = 'dialog-input';
+        valInput.style.flex = '1';
+        valInput.value = cond.value || '';
+        if (cond.type === 'rating') {
+          valInput.min = '0'; valInput.max = '5';
+        }
+        valInput.addEventListener('input', (e) => { cond.value = e.target.value; });
+      }
+
+      typeSel.addEventListener('change', (e) => {
+        cond.type = e.target.value;
+        cond.operator = operatorOptions[cond.type][0].value;
+        if (cond.type === 'aspect_ratio') cond.value = '';
+        renderConditions();
+      });
+
+      opSel.addEventListener('change', (e) => {
+        cond.operator = e.target.value;
+        renderConditions();
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'dialog-btn';
+      delBtn.style.padding = '4px 8px';
+      delBtn.textContent = '✕';
+      delBtn.addEventListener('click', () => {
+        currentConditions.splice(index, 1);
+        renderConditions();
+      });
+
+      row.appendChild(typeSel);
+      row.appendChild(opSel);
+      row.appendChild(valInput);
+      row.appendChild(delBtn);
+      conditionsList.appendChild(row);
+    });
+  }
+
+  renderConditions();
+
+  const addCondBtn = document.getElementById('smart-add-condition-btn');
+  const addCondHandler = () => {
+    currentConditions.push({ type: 'rating', operator: '>=', value: '4' });
+    renderConditions();
+  };
+  addCondBtn.replaceWith(addCondBtn.cloneNode(true));
+  document.getElementById('smart-add-condition-btn').addEventListener('click', addCondHandler);
+
+  const saveBtn = document.getElementById('smart-save-btn');
+  const cancelBtn = document.getElementById('smart-cancel-btn');
+
+  const newSaveBtn = saveBtn.cloneNode(true);
+  saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+
+  const newCancelBtn = cancelBtn.cloneNode(true);
+  cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+  newCancelBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    modal.style.display = 'none';
+  });
+
+  newSaveBtn.addEventListener('click', async () => {
+    const data = getIconData();
+    sf.icon = data.icon;
+    sf.color = data.color;
+    sf.name = nameInput.value || '無題のスマートフォルダ';
+    sf.conditions = currentConditions;
+    sf.matchType = 'all';
+
+    if (isNew) {
+      sf.id = 'smart_' + Date.now();
+      appState.smartFolders.push(sf);
+    }
+
+    localStorage.setItem('smartFolders', JSON.stringify(appState.smartFolders));
+    modal.style.display = 'none';
+    
+    initSmartFolders();
+    if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
+      await window.veloceAPI.updateSmartFolders(appState.smartFolders);
+    }
+  });
+
+  modal.style.display = 'flex';
+}
+
+const menuAddSmartFolder = createMenuItem('スマートフォルダを追加...', UIManager.ICONS.FOLDER_PLUS, () => {
+  showEditSmartFolderModal({ name: '', icon: 'FAV_STAR', color: 'orange', conditions: [] }, true);
+});
+
+const menuEditSmartFolder = createMenuItem('スマートフォルダを編集...', UIManager.ICONS.EDIT, () => {
+  if (!contextMenu.targetSmartFolderId) return;
+  const sf = appState.smartFolders.find(f => f.id === contextMenu.targetSmartFolderId);
+  if (sf) {
+    showEditSmartFolderModal(sf, false);
+  }
+});
+
+const menuDeleteSmartFolder = createMenuItem('スマートフォルダを削除', UIManager.ICONS.TRASH, async () => {
+  if (!contextMenu.targetSmartFolderId) return;
+  const index = appState.smartFolders.findIndex(f => f.id === contextMenu.targetSmartFolderId);
+  if (index !== -1) {
+    appState.smartFolders.splice(index, 1);
+    localStorage.setItem('smartFolders', JSON.stringify(appState.smartFolders));
+    initSmartFolders();
+    if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
+      await window.veloceAPI.updateSmartFolders(appState.smartFolders);
+    }
+  }
+}, true);
+
 const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager.ICONS.EDIT, () => {
   if (!contextMenu.targetFavoriteId) return;
   const fav = appState.favorites.find(f => f.id === contextMenu.targetFavoriteId);
@@ -2464,11 +2648,14 @@ contextMenu.appendChild(menuRenameFolder);
 contextMenu.appendChild(menuRenameFile);
 contextMenu.appendChild(menuDiffFiles);
 contextMenu.appendChild(menuEditFavorite);
+contextMenu.appendChild(menuAddSmartFolder);
+contextMenu.appendChild(menuEditSmartFolder);
 
 // 5. 削除系
 contextMenu.appendChild(menuDeleteFolder);
 contextMenu.appendChild(menuDeleteFile);
 contextMenu.appendChild(menuDeleteFavorite);
+contextMenu.appendChild(menuDeleteSmartFolder);
 
 // 6. キャッシュ操作系
 contextMenu.appendChild(menuSeparatorCache);
@@ -2998,12 +3185,6 @@ function createResizerToggle(resizer, type) {
   const isHorizontal = type === 'center' || type === 'leftTop' || type === 'rightTop';
   let topPos = '50%';
   let leftPos = '50%';
-  
-  if (isHorizontal) {
-    topPos = '0';
-  } else {
-    leftPos = type === 'left' ? '100%' : '0';
-  }
 
   btn.style.cssText = `
     position: absolute; display: flex; justify-content: center; align-items: center; opacity: 1;
@@ -4662,6 +4843,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await refreshTree();
   initSmartFolders();
+  if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
+    window.veloceAPI.updateSmartFolders(appState.smartFolders).catch(err => console.error("Failed to sync smart folders on init:", err));
+  }
 
   // --- 初期タブの生成と読み込み ---
   const savedTabsState = localStorage.getItem('tabsState');
@@ -4829,11 +5013,9 @@ function initSmartFolders() {
   const container = document.getElementById('smart-folders-list');
   if (!container) return;
 
-  const folders = [
-    { id: 'fav_5', name: 'お気に入り (★5)', icon: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>' },
-    { id: 'fav_4_plus', name: '高評価 (★4以上)', icon: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>' },
-    { id: 'history', name: 'すべての履歴', icon: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>' }
-  ];
+  container.innerHTML = '';
+
+  const folders = appState.smartFolders || [];
 
   folders.forEach(f => {
     const item = document.createElement('div');
@@ -4841,8 +5023,16 @@ function initSmartFolders() {
     item.dataset.id = f.id;
     
     const iconSpan = document.createElement('span');
-    iconSpan.className = 'smart-folder-icon';
-    iconSpan.innerHTML = f.icon;
+    if (f.icon && ICON_SVGS && ICON_SVGS[f.icon]) {
+      iconSpan.innerHTML = ICON_SVGS[f.icon];
+      iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
+    } else if (f.icon && f.icon.startsWith('FAV_')) {
+      iconSpan.innerHTML = UIManager.ICONS[f.icon] || UIManager.ICONS['FAV_STAR'];
+      iconSpan.className = `smart-folder-icon color-${f.color || 'default'}`;
+    } else {
+      iconSpan.className = 'smart-folder-icon';
+      iconSpan.innerHTML = f.icon || '⭐';
+    }
     
     const nameSpan = document.createElement('span');
     nameSpan.textContent = f.name;
@@ -4867,20 +5057,61 @@ function initSmartFolders() {
         const activeTab = appState.tabs[appState.activeTabIndex];
         if (activeTab) {
           activeTab.path = path;
-          activeTab.name = getTabNameForPath(path);
+          activeTab.name = getTabNameForPath(path, appState.favorites);
           activeTab.scrollTop = 0;
           appState.currentDirectory = path;
           localStorage.setItem('currentDirectory', appState.currentDirectory);
           uiManager.renderTabs();
-          saveTabsState();
+          saveTabsState(appState, uiManager);
           
           refreshFileList(true);
         }
       }
     });
-    
+
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      contextMenu.targetFavoriteId = null;
+      contextMenu.targetFavoritePath = null;
+      contextMenu.targetFolder = { path: `smart://${f.id}`, name: f.name };
+      contextMenu.targetSmartFolderId = f.id;
+
+      Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+
+      menuOpenInNewTab.style.display = '';
+      menuSeparator1.style.display = '';
+      menuEditSmartFolder.style.display = '';
+      menuDeleteSmartFolder.style.display = '';
+
+      showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
+    });
+
     container.appendChild(item);
   });
+
+  const section = document.getElementById('smart-folders-section');
+  if (section) {
+    section.addEventListener('contextmenu', (e) => {
+      // アイテム上での右クリックはアイテム側のイベントで処理されるため除外
+      if (e.target.closest('.smart-folder-item')) return;
+      
+      e.preventDefault();
+      e.stopPropagation();
+
+      contextMenu.targetFavoriteId = null;
+      contextMenu.targetFavoritePath = null;
+      contextMenu.targetFolder = null;
+      contextMenu.targetSmartFolderId = null;
+
+      Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+
+      menuAddSmartFolder.style.display = '';
+
+      showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
+    });
+  }
 }
 
 /**

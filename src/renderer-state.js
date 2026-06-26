@@ -37,6 +37,17 @@ class AppState {
     this.currentDirectory = '';
     /** @type {Array<{id: string, name: string, path: string, icon: string}>} お気に入りリスト */
     this.favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+
+    /** @type {Array<{id: string, name: string, icon: string, color: string, matchType: string, conditions: Array<any>}>} スマートフォルダリスト */
+    const defaultSmartFolders = [
+      { id: 'fav_5', name: 'お気に入り (★5)', icon: 'FAV_STAR', color: 'orange', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '5' }] },
+      { id: 'fav_4_plus', name: '高評価 (★4以上)', icon: 'FAV_STAR', color: 'yellow', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '4' }] }
+    ];
+    this.smartFolders = JSON.parse(localStorage.getItem('smartFolders')) || defaultSmartFolders;
+    // 初回起動時などに localStorage に保存されていない場合は保存しておく
+    if (!localStorage.getItem('smartFolders')) {
+      localStorage.setItem('smartFolders', JSON.stringify(this.smartFolders));
+    }
     
     /** @type {Object<string, number>} レーティング一覧 (path -> rating) */
     this.ratings = JSON.parse(localStorage.getItem('ratings') || '{}');

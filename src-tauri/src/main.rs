@@ -139,6 +139,23 @@ pub struct ViewerImageResult {
     total: usize,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderCondition {
+    pub r#type: String,
+    pub operator: String,
+    pub value: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderRule {
+    pub id: String,
+    pub name: String,
+    pub match_type: String,
+    pub conditions: Vec<SmartFolderCondition>,
+}
+
 // --- 状態管理 ---
 pub struct AppState {
     image_paths: Mutex<Vec<String>>,
@@ -154,6 +171,7 @@ pub struct AppState {
     rating_filter_op: Mutex<String>,
     thumbnail_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
     db_conn: std::sync::Arc<Mutex<rusqlite::Connection>>,
+    smart_folders: Mutex<Vec<SmartFolderRule>>,
 }
 
 // --- ユーティリティ ---
@@ -227,7 +245,7 @@ fn get_drives() -> Vec<String> {
 
 #[tauri::command]
 fn path_exists(path: String) -> bool {
-    if path == "PC" {
+    if path == "PC" || path.starts_with("smart://") {
         return true;
     }
     let path_obj = std::path::Path::new(&path);
@@ -238,25 +256,132 @@ fn get_smart_folder_paths(
     folder_type: &str,
     ratings_map: &std::collections::HashMap<String, u8>,
     db_conn: &std::sync::Arc<Mutex<rusqlite::Connection>>,
+    rules: &[SmartFolderRule]
 ) -> Vec<std::path::PathBuf> {
     let mut target_paths = Vec::new();
-    if folder_type == "smart://fav_5" {
-        target_paths = ratings_map.iter().filter(|(_, &r)| r == 5).map(|(p, _)| std::path::PathBuf::from(p)).collect();
-    } else if folder_type == "smart://fav_4_plus" {
-        target_paths = ratings_map.iter().filter(|(_, &r)| r >= 4).map(|(p, _)| std::path::PathBuf::from(p)).collect();
-    } else if folder_type == "smart://history" {
+    let folder_id = folder_type.replace("smart://", "");
+
+    if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.lock() {
             if let Ok(mut stmt) = conn.prepare("SELECT metadata FROM cache") {
                 if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
                     for meta_str in rows.flatten() {
-                        if let Ok(meta) = serde_json::from_str::<FullMetadata>(&meta_str) {
-                            target_paths.push(std::path::PathBuf::from(meta.path));
+                        if let Ok(mut meta) = serde_json::from_str::<FullMetadata>(&meta_str) {
+                            // 古いキャッシュの互換性対応 (A1111のプロンプトが空の場合のパッチ)
+                            if meta.prompt.is_empty() {
+                                if let Some(raw) = meta.params.get("rawParameters").and_then(|v| v.as_str()) {
+                                    meta.prompt = raw.to_string();
+                                }
+                            }
+                            let mut all_match = true;
+                            for cond in &rule.conditions {
+                                let mut matched = false;
+                                match cond.r#type.as_str() {
+                                    "rating" => {
+                                        let file_rating = *ratings_map.get(&meta.path).unwrap_or(&0);
+                                        if let Ok(val) = cond.value.parse::<u8>() {
+                                            matched = match cond.operator.as_str() {
+                                                ">=" => file_rating >= val,
+                                                "<=" => file_rating <= val,
+                                                "==" => file_rating == val,
+                                                _ => false,
+                                            };
+                                        }
+                                    }
+                                    "prompt" => {
+                                        let mut p = meta.prompt.clone();
+                                        // NovelAI V4 characterPrompts 対応
+                                        if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
+                                            for c in chars {
+                                                if let Some(cp) = c.get("prompt").and_then(|v| v.as_str()) {
+                                                    p.push_str(" ");
+                                                    p.push_str(cp);
+                                                }
+                                            }
+                                        }
+                                        let p_lower = p.to_lowercase();
+                                        let v = cond.value.to_lowercase();
+                                        matched = match cond.operator.as_str() {
+                                            "contains" => p_lower.contains(&v),
+                                            "not_contains" => !p_lower.contains(&v),
+                                            _ => false,
+                                        };
+                                    }
+                                    "negative_prompt" => {
+                                        let mut p = meta.negative_prompt.clone();
+                                        // NovelAI V4 characterPrompts 対応
+                                        if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
+                                            for c in chars {
+                                                if let Some(ucp) = c.get("uc").and_then(|v| v.as_str()) {
+                                                    p.push_str(" ");
+                                                    p.push_str(ucp);
+                                                }
+                                            }
+                                        }
+                                        let p_lower = p.to_lowercase();
+                                        let v = cond.value.to_lowercase();
+                                        matched = match cond.operator.as_str() {
+                                            "contains" => p_lower.contains(&v),
+                                            "not_contains" => !p_lower.contains(&v),
+                                            _ => false,
+                                        };
+                                    }
+                                    "source" => {
+                                        let s = meta.source.to_lowercase();
+                                        let v = cond.value.to_lowercase();
+                                        matched = match cond.operator.as_str() {
+                                            "==" => s == v,
+                                            "!=" => s != v,
+                                            _ => false,
+                                        };
+                                    }
+                                    "aspect_ratio" => {
+                                        if meta.width > 0 && meta.height > 0 {
+                                            let ratio = meta.width as f32 / meta.height as f32;
+                                            matched = match cond.operator.as_str() {
+                                                "portrait" => ratio < 0.95,
+                                                "landscape" => ratio > 1.05,
+                                                "square" => ratio >= 0.95 && ratio <= 1.05,
+                                                _ => false,
+                                            };
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                if !matched {
+                                    all_match = false;
+                                    break; // rule.match_type == "all"
+                                }
+                            }
+                            if all_match {
+                                target_paths.push(std::path::PathBuf::from(meta.path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Fallback for old default ids if rules are empty/missing
+        if folder_id == "fav_5" {
+            target_paths = ratings_map.iter().filter(|(_, &r)| r == 5).map(|(p, _)| std::path::PathBuf::from(p)).collect();
+        } else if folder_id == "fav_4_plus" {
+            target_paths = ratings_map.iter().filter(|(_, &r)| r >= 4).map(|(p, _)| std::path::PathBuf::from(p)).collect();
+        } else if folder_id == "history" {
+            if let Ok(conn) = db_conn.lock() {
+                if let Ok(mut stmt) = conn.prepare("SELECT metadata FROM cache") {
+                    if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                        for meta_str in rows.flatten() {
+                            if let Ok(meta) = serde_json::from_str::<FullMetadata>(&meta_str) {
+                                target_paths.push(std::path::PathBuf::from(meta.path));
+                            }
                         }
                     }
                 }
             }
         }
     }
+    
     target_paths
 }
 
@@ -266,6 +391,7 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
     let app_clone = window.app_handle();
     let db_conn_clone = state.db_conn.clone();
     let ratings_map = if let Ok(lock) = state.ratings.lock() { lock.clone() } else { std::collections::HashMap::new() };
+    let smart_folders_clone = if let Ok(lock) = state.smart_folders.lock() { lock.clone() } else { Vec::new() };
     
     // ディレクトリ変更時にRust側の状態をリセット
     if let Ok(mut lock) = state.all_files.lock() { lock.clear(); }
@@ -290,7 +416,7 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
             let target_paths: Vec<std::path::PathBuf>;
 
             if path_for_spawn.starts_with("smart://") {
-                target_paths = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone);
+                target_paths = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
             } else {
                 // max_depth(1) なので std::fs::read_dir の方が軽量。
                 target_paths = std::fs::read_dir(&path_for_spawn)
@@ -1403,6 +1529,19 @@ async fn open_viewer(
     Ok(())
 }
 
+
+
+#[tauri::command]
+fn update_smart_folders(rules: Vec<SmartFolderRule>, state: tauri::State<'_, AppState>) {
+    println!("Received smart folders update: {} rules", rules.len());
+    for rule in &rules {
+        println!("Rule ID: {}, match_type: {}, conditions: {}", rule.id, rule.match_type, rule.conditions.len());
+    }
+    if let Ok(mut lock) = state.smart_folders.lock() {
+        *lock = rules;
+    }
+}
+
 #[tauri::command]
 fn show_window(window: tauri::Window) {
     let _ = window.show();
@@ -1429,10 +1568,7 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         }
     }
 
-    let cache_dir = get_veloce_data_dir().map(|mut p| {
-        p.push("Thumbnails");
-        p
-    });
+
 
     let semaphore = state.thumbnail_semaphore.clone();
     let db_conn_clone = state.db_conn.clone();
@@ -2082,6 +2218,7 @@ fn main() {
             rating_filter_op: Mutex::new("gte".to_string()),
             thumbnail_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
             db_conn: std::sync::Arc::new(Mutex::new(init_db().expect("Failed to initialize SQLite database"))),
+            smart_folders: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
             let data_dir = get_veloce_data_dir().unwrap_or_default();
@@ -2310,6 +2447,7 @@ fn main() {
             get_file_by_index,
             update_metadata_in_state,
             notify_file_changed,
+            update_smart_folders,
             notify_file_removed,
             get_full_metadata_batch,
             parse_metadata,
@@ -2539,14 +2677,14 @@ mod tests {
         ratings.insert("C:\\fake\\path3.png".to_string(), 4);
         ratings.insert("C:\\fake\\path4.png".to_string(), 3);
 
-        let fav5 = super::get_smart_folder_paths("smart://fav_5", &ratings, &db_conn);
+        let fav5 = super::get_smart_folder_paths("smart://fav_5", &ratings, &db_conn, &[]);
         assert_eq!(fav5.len(), 1);
         assert_eq!(fav5[0].to_str().unwrap(), "C:\\fake\\path1.png");
 
-        let fav4 = super::get_smart_folder_paths("smart://fav_4_plus", &ratings, &db_conn);
+        let fav4 = super::get_smart_folder_paths("smart://fav_4_plus", &ratings, &db_conn, &[]);
         assert_eq!(fav4.len(), 2);
         
-        let history = super::get_smart_folder_paths("smart://history", &ratings, &db_conn);
+        let history = super::get_smart_folder_paths("smart://history", &ratings, &db_conn, &[]);
         assert_eq!(history.len(), 2);
         let history_paths: Vec<_> = history.iter().map(|p| p.to_str().unwrap()).collect();
         assert!(history_paths.contains(&"C:\\fake\\path1.png"));

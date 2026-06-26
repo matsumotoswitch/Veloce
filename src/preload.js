@@ -61,6 +61,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @type {VeloceAPI}
  */
 window.veloceAPI = {
+  updateSmartFolders: (rules) => invoke('update_smart_folders', { rules }),
   /**
    * 利用可能なドライブ文字（またはルートディレクトリ）のリストを取得します。
    * @returns {Promise<Array<string>>} ドライブパスの配列

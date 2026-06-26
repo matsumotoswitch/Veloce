@@ -88,7 +88,7 @@
     </div>
     <div class="resizer-h" id="resizer-left-pane"></div>
     <div id="directories-section" tabindex="-1">
-      <div class="pane-header" style="margin-top: 8px;">フォルダ</div>
+      <div class="pane-header">フォルダ</div>
       <div id="dir-tree"></div>
     </div>
   </div>
@@ -186,7 +186,7 @@
     </div>
   </div>
 
-  <div id="edit-favorite-modal" class="dialog-overlay">
+  <div id="edit-favorite-modal" class="dialog-overlay" style="display: none;">
     <div class="dialog-box">
       <div class="form-group">
         <div id="fav-icon-selector"></div>
@@ -202,6 +202,30 @@
       <div class="dialog-buttons">
         <button id="fav-cancel-btn" class="dialog-btn cancel">キャンセル</button>
         <button id="fav-save-btn" class="dialog-btn primary">保存</button>
+      </div>
+    </div>
+  </div>
+  <div id="edit-smart-folder-modal" class="dialog-overlay" style="display: none;">
+    <div class="dialog-box" style="width: 460px;">
+      <div class="form-group">
+        <div id="smart-icon-selector"></div>
+      </div>
+      <div class="form-group">
+        <label for="smart-name-input" class="form-label">名前</label>
+        <input type="text" id="smart-name-input" class="dialog-input" placeholder="スマートフォルダ名">
+      </div>
+      <div class="form-group">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <label class="form-label" style="margin-bottom: 0;">条件 (すべての条件に一致)</label>
+          <button id="smart-add-condition-btn" class="dialog-btn" style="padding: 4px 8px; font-size: 11px;">+ 条件を追加</button>
+        </div>
+        <div id="smart-conditions-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;">
+          <!-- JSで動的に追加 -->
+        </div>
+      </div>
+      <div class="dialog-buttons">
+        <button id="smart-cancel-btn" class="dialog-btn cancel">キャンセル</button>
+        <button id="smart-save-btn" class="dialog-btn primary">保存</button>
       </div>
     </div>
   </div>
