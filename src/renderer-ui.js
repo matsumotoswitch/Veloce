@@ -775,6 +775,18 @@ class UIManager {
     root.style.setProperty('--left-width', lWidth);
     root.style.setProperty('--right-width', rWidth);
 
+    if (this.state.layout.leftVisible) {
+      root.removeAttribute('data-left-collapsed');
+    } else {
+      root.setAttribute('data-left-collapsed', 'true');
+    }
+
+    if (this.state.layout.rightVisible) {
+      root.removeAttribute('data-right-collapsed');
+    } else {
+      root.setAttribute('data-right-collapsed', 'true');
+    }
+
     const lTopHeight = this.state.layout.leftTopVisible ? `${this.state.layout.leftTopHeight}px` : '0px';
     root.style.setProperty('--left-top-height', lTopHeight);
 
