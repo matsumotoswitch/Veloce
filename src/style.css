@@ -7,7 +7,7 @@
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
   --bg-color: #0b1012;
   --panel-bg: #162226;
-  --border-color: rgba(255, 255, 255, 0.15);
+  --border-color: #394346;
   --text-color: #cddbe0;
   --accent-color: #257e8c;
   --accent-rgb: 37, 126, 140;
@@ -606,10 +606,12 @@ input:-webkit-autofill:focus {
   top: 0;
   left: 0;
   width: 1px;
-  height: var(--header-height);
+  height: 32px;
   background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
   pointer-events: none;
   z-index: 11;
+  box-sizing: border-box;
 }
 
 /* Erase border-left of #resizer-right next to the table header, and cover scrollbar track */
@@ -618,8 +620,8 @@ input:-webkit-autofill:focus {
   position: absolute;
   top: 0;
   right: 0;
-  width: 12px;
-  height: var(--header-height);
+  width: 13px;
+  height: 32px;
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
   pointer-events: none;
@@ -724,7 +726,7 @@ body.is-resizing #center-top {
 }
 
 #center-top::-webkit-scrollbar-track {
-  margin-top: var(--header-height); /* Prevent overlapping the sticky header */
+  margin-top: 32px; /* Prevent overlapping the sticky header */
 }
 
 table#file-table {
