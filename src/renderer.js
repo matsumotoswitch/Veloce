@@ -2167,6 +2167,57 @@ const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICO
   showNotification(`「${name}」をお気に入りに追加しました`, 'success');
 });
 
+let sfModalDelegated = false;
+
+function updateSmartFolderRowUI(row, type, initialCond = null) {
+  const operatorSelect = row.querySelector('.cond-operator');
+  const valueContainer = row.querySelector('.cond-value-container');
+
+  const opVal = initialCond ? initialCond.operator : null;
+  const valVal = initialCond ? initialCond.value : '';
+
+  function makeOptions(ops) {
+    return ops.map(o => `<option value="${o.value}" ${o.value === opVal ? 'selected' : ''}>${o.label}</option>`).join('');
+  }
+
+  if (type === 'prompt' || type === 'negative_prompt') {
+    operatorSelect.innerHTML = makeOptions([
+      { value: 'contains', label: 'を含む' },
+      { value: 'not_contains', label: 'を含まない' }
+    ]);
+    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="キーワード" value="${valVal}">`;
+  } else if (type === 'source') {
+    operatorSelect.innerHTML = makeOptions([
+      { value: '==', label: 'と一致' },
+      { value: '!=', label: 'と一致しない' }
+    ]);
+    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="生成元" value="${valVal}">`;
+  } else if (type === 'rating') {
+    operatorSelect.innerHTML = makeOptions([
+      { value: '>=', label: '以上' },
+      { value: '<=', label: '以下' },
+      { value: '==', label: 'と一致' }
+    ]);
+    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0" max="5" value="${valVal || 0}">`;
+  } else if (type === 'aspect_ratio') {
+    operatorSelect.innerHTML = makeOptions([
+      { value: 'portrait', label: '縦長' },
+      { value: 'landscape', label: '横長' },
+      { value: 'square', label: '正方形' }
+    ]);
+    valueContainer.innerHTML = `<div style="flex:1"></div><input type="hidden" class="cond-value-input" value="">`;
+  } else if (type === 'path') {
+    operatorSelect.innerHTML = makeOptions([
+      { value: 'in_folder', label: '直下のみ' },
+      { value: 'under_folder', label: 'サブフォルダ含む' }
+    ]);
+    valueContainer.innerHTML = `
+      <input type="text" class="cond-value-input dialog-input" style="flex:1" value="${valVal}">
+      <button type="button" class="btn-browse-path dialog-btn" style="padding: 4px 8px;">参照...</button>
+    `;
+  }
+}
+
 function showEditSmartFolderModal(sf, isNew = false) {
   const modal = document.getElementById('edit-smart-folder-modal');
   const container = document.getElementById('smart-icon-selector');
@@ -2176,147 +2227,57 @@ function showEditSmartFolderModal(sf, isNew = false) {
   nameInput.value = sf.name || '';
   
   const conditionsList = document.getElementById('smart-conditions-list');
-  conditionsList.innerHTML = ''; // clear
+  
+  const template = document.getElementById('sf-condition-template');
+  const fragment = document.createDocumentFragment();
+  const conds = Array.isArray(sf.conditions) ? sf.conditions : [];
+  
+  conds.forEach(cond => {
+    const clone = template.content.cloneNode(true);
+    const row = clone.querySelector('.sf-condition-row');
+    const typeSel = row.querySelector('.cond-type');
+    typeSel.value = cond.type;
+    updateSmartFolderRowUI(row, cond.type, cond);
+    fragment.appendChild(clone);
+  });
+  conditionsList.replaceChildren(fragment);
 
-  const typeOptions = [
-    { value: 'rating', label: 'レーティング' },
-    { value: 'prompt', label: 'プロンプト' },
-    { value: 'negative_prompt', label: 'ネガティブプロンプト' },
-    { value: 'source', label: '生成元 (Source)' },
-    { value: 'aspect_ratio', label: 'アスペクト比' },
-    { value: 'path', label: 'フォルダ (パス)' }
-  ];
-
-  const operatorOptions = {
-    rating: [{ value: '>=', label: '以上' }, { value: '<=', label: '以下' }, { value: '==', label: 'と一致' }],
-    prompt: [{ value: 'contains', label: 'を含む' }, { value: 'not_contains', label: 'を含まない' }],
-    negative_prompt: [{ value: 'contains', label: 'を含む' }, { value: 'not_contains', label: 'を含まない' }],
-    source: [{ value: '==', label: 'と一致' }, { value: '!=', label: 'と一致しない' }],
-    aspect_ratio: [{ value: 'portrait', label: '縦長' }, { value: 'landscape', label: '横長' }, { value: 'square', label: '正方形' }],
-    path: [{ value: 'in_folder', label: '直下のみ' }, { value: 'under_folder', label: 'サブフォルダ含む' }]
-  };
-
-  let currentConditions = Array.isArray(sf.conditions) ? JSON.parse(JSON.stringify(sf.conditions)) : [];
-
-  function renderConditions() {
-    conditionsList.innerHTML = '';
-    currentConditions.forEach((cond, index) => {
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.gap = '8px';
-      row.style.alignItems = 'center';
-
-      // Type select
-      const typeSel = document.createElement('select');
-      typeSel.className = 'dialog-input';
-      typeSel.style.width = '120px';
-      typeOptions.forEach(opt => {
-        const option = document.createElement('option');
-        option.value = opt.value;
-        option.textContent = opt.label;
-        if (opt.value === cond.type) option.selected = true;
-        typeSel.appendChild(option);
-      });
-
-      // Operator select
-      const opSel = document.createElement('select');
-      opSel.className = 'dialog-input';
-      opSel.style.width = '100px';
-      const ops = operatorOptions[cond.type] || operatorOptions['prompt'];
-      ops.forEach(opt => {
-        const option = document.createElement('option');
-        option.value = opt.value;
-        option.textContent = opt.label;
-        if (opt.value === cond.operator) option.selected = true;
-        opSel.appendChild(option);
-      });
-
-      // Value input
-      let valInput = null;
-      if (cond.type === 'aspect_ratio') {
-        // Value not needed, the operator is the value essentially (portrait/landscape/square)
-        cond.operator = cond.operator || 'portrait';
-        valInput = document.createElement('div'); // spacer
-        valInput.style.flex = '1';
-      } else if (cond.type === 'path') {
-        valInput = document.createElement('div');
-        valInput.style.display = 'flex';
-        valInput.style.flex = '1';
-        valInput.style.gap = '4px';
-
-        const textInput = document.createElement('input');
-        textInput.type = 'text';
-        textInput.className = 'dialog-input';
-        textInput.style.flex = '1';
-        textInput.value = cond.value || '';
-        textInput.addEventListener('input', (e) => { cond.value = e.target.value; });
-
-        const browseBtn = document.createElement('button');
-        browseBtn.className = 'dialog-btn';
-        browseBtn.style.padding = '4px 8px';
-        browseBtn.textContent = '参照...';
-        browseBtn.addEventListener('click', async () => {
-          if (window.veloceAPI && window.veloceAPI.openFolderDialog) {
-            const folder = await window.veloceAPI.openFolderDialog();
-            if (folder) {
-              textInput.value = folder;
-              cond.value = folder;
-            }
-          }
-        });
-
-        valInput.appendChild(textInput);
-        valInput.appendChild(browseBtn);
-      } else {
-        valInput = document.createElement('input');
-        valInput.type = cond.type === 'rating' ? 'number' : 'text';
-        valInput.className = 'dialog-input';
-        valInput.style.flex = '1';
-        valInput.value = cond.value || '';
-        if (cond.type === 'rating') {
-          valInput.min = '0'; valInput.max = '5';
-        }
-        valInput.addEventListener('input', (e) => { cond.value = e.target.value; });
+  if (!sfModalDelegated) {
+    sfModalDelegated = true;
+    
+    modal.addEventListener('click', async (e) => {
+      if (e.target.closest('.btn-remove-cond')) {
+        const row = e.target.closest('.sf-condition-row');
+        if (row) row.remove();
+      }
+      
+      if (e.target.closest('#smart-add-condition-btn')) {
+        const clone = template.content.cloneNode(true);
+        const row = clone.querySelector('.sf-condition-row');
+        const list = document.getElementById('smart-conditions-list');
+        list.appendChild(clone);
+        const newRow = list.lastElementChild;
+        newRow.querySelector('.cond-type').value = 'rating';
+        updateSmartFolderRowUI(newRow, 'rating', { operator: '>=', value: '4' });
       }
 
-      typeSel.addEventListener('change', (e) => {
-        cond.type = e.target.value;
-        cond.operator = operatorOptions[cond.type][0].value;
-        if (cond.type === 'aspect_ratio') cond.value = '';
-        renderConditions();
-      });
+      if (e.target.closest('.btn-browse-path')) {
+        const row = e.target.closest('.sf-condition-row');
+        const input = row.querySelector('.cond-value-input');
+        if (window.veloceAPI && window.veloceAPI.openFolderDialog) {
+          const folder = await window.veloceAPI.openFolderDialog();
+          if (folder) input.value = folder;
+        }
+      }
+    });
 
-      opSel.addEventListener('change', (e) => {
-        cond.operator = e.target.value;
-        renderConditions();
-      });
-
-      const delBtn = document.createElement('button');
-      delBtn.className = 'dialog-btn';
-      delBtn.style.padding = '4px 8px';
-      delBtn.textContent = '✕';
-      delBtn.addEventListener('click', () => {
-        currentConditions.splice(index, 1);
-        renderConditions();
-      });
-
-      row.appendChild(typeSel);
-      row.appendChild(opSel);
-      row.appendChild(valInput);
-      row.appendChild(delBtn);
-      conditionsList.appendChild(row);
+    modal.addEventListener('change', (e) => {
+      if (e.target.classList.contains('cond-type')) {
+        const row = e.target.closest('.sf-condition-row');
+        updateSmartFolderRowUI(row, e.target.value);
+      }
     });
   }
-
-  renderConditions();
-
-  const addCondBtn = document.getElementById('smart-add-condition-btn');
-  const addCondHandler = () => {
-    currentConditions.push({ type: 'rating', operator: '>=', value: '4' });
-    renderConditions();
-  };
-  addCondBtn.replaceWith(addCondBtn.cloneNode(true));
-  document.getElementById('smart-add-condition-btn').addEventListener('click', addCondHandler);
 
   const saveBtn = document.getElementById('smart-save-btn');
   const cancelBtn = document.getElementById('smart-cancel-btn');
@@ -2333,18 +2294,28 @@ function showEditSmartFolderModal(sf, isNew = false) {
   });
 
   newSaveBtn.addEventListener('click', async () => {
+    const rules = [];
+    const rows = conditionsList.querySelectorAll('.sf-condition-row');
+    for (const row of rows) {
+      const type = row.querySelector('.cond-type').value;
+      const operator = row.querySelector('.cond-operator').value;
+      const valInput = row.querySelector('.cond-value-input');
+      const value = valInput ? valInput.value.trim() : '';
+      rules.push({ type, operator, value });
+    }
+
     const data = getIconData();
     sf.icon = data.icon;
     sf.color = data.color;
     sf.name = nameInput.value || '無題のスマートフォルダ';
-    sf.conditions = currentConditions;
+    sf.conditions = rules;
     sf.matchType = 'all';
 
     if (isNew) {
       sf.id = 'smart_' + Date.now();
       appState.smartFolders.push(sf);
-      const container = document.getElementById('smart-folders-list');
-      if (container) container.appendChild(createSmartFolderNode(sf));
+      const listContainer = document.getElementById('smart-folders-list');
+      if (listContainer) listContainer.appendChild(createSmartFolderNode(sf));
     } else {
       const oldNode = document.querySelector(`.smart-folder-item[data-id="${sf.id}"]`);
       if (oldNode) {

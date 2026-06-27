@@ -170,6 +170,22 @@
     </div>
   </template>
 
+  <template id="sf-condition-template">
+    <div class="sf-condition-row" style="display: flex; gap: 8px; align-items: center;">
+      <select class="cond-type dialog-input" style="width: 120px;">
+        <option value="rating">レーティング</option>
+        <option value="prompt">プロンプト</option>
+        <option value="negative_prompt">ネガティブプロンプト</option>
+        <option value="source">生成元 (Source)</option>
+        <option value="aspect_ratio">アスペクト比</option>
+        <option value="path">フォルダ (パス)</option>
+      </select>
+      <select class="cond-operator dialog-input" style="width: 100px;"></select>
+      <div class="cond-value-container" style="display: flex; flex: 1; gap: 4px;"></div>
+      <button type="button" class="btn-remove-cond dialog-btn" style="padding: 4px 8px;">✕</button>
+    </div>
+  </template>
+
   <script type="module" src="/preload.js"></script>
   <script type="module" src="/renderer-state.js"></script>
   <script type="module" src="/renderer-ui.js"></script>
