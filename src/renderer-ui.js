@@ -692,9 +692,9 @@ class UIManager {
     return showAppDialog({
       messageHtml: `宛先に同じ名前のファイルが <strong>${conflictCount}件</strong> 存在します。<br>どのように処理しますか？`,
       buttons: [
-        { label: 'キャンセル', className: 'dialog-btn cancel', value: 'cancel' },
+        { label: `上書きして${actionStr}`, className: 'dialog-btn danger', value: 'overwrite' },
         { label: '重複をスキップ', className: 'dialog-btn primary', value: 'skip' },
-        { label: `上書きして${actionStr}`, className: 'dialog-btn danger', value: 'overwrite' }
+        { label: 'キャンセル', className: 'dialog-btn cancel', value: 'cancel' }
       ],
       buttonsWrap: true,
       escapeValue: 'cancel',
