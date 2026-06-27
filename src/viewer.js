@@ -90,7 +90,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // 画像のロードイベントを初期化時に1度だけ設定
     if (viewerUI.elements.viewerImg) {
-      viewerUI.elements.viewerImg.decoding = 'sync'; // 非同期デコードによる一瞬の遅延（黒い画面）を防ぐ
+      viewerUI.elements.viewerImg.decoding = 'async'; // 非同期デコードでメインスレッドのブロック（フリーズ感）を防ぐ
       viewerUI.elements.viewerImg.onload = () => {
         setZoomState(viewerState.isZoomed);
         viewerUI.updateImageRendering();
