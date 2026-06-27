@@ -94,7 +94,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // 画像のロードイベントを初期化時に1度だけ設定
     if (viewerUI.elements.viewerImg) {
-      viewerUI.elements.viewerImg.decoding = 'async'; // 非同期デコードでメインスレッドのブロック（フリーズ感）を防ぐ
+      viewerUI.elements.viewerImg.decoding = 'async'; // メインスレッドをブロックさせないため非同期でデコードする
       viewerUI.elements.viewerImg.onload = () => {
         setZoomState(viewerState.isZoomed);
         viewerUI.updateImageRendering();
@@ -823,7 +823,7 @@ window.addEventListener('wheel', (e) => {
   } else {
     e.preventDefault(); // 親ウィンドウのスクロールを防止
     
-    // 一定時間ホイール操作がなければ端数をリセット（誤爆スクロール防止）
+    // 一定時間ホイール操作がない場合は移動量の端数をリセットする
     clearTimeout(window._wheelResetTimeout);
     window._wheelResetTimeout = setTimeout(() => {
       window._wheelDeltaAccumulator = 0;

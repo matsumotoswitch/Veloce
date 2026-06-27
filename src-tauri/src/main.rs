@@ -1013,7 +1013,7 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
             if let Ok(json_str) = stmt.query_row([&hash_key], |row| row.get::<_, String>(0)) {
                 if !json_str.is_empty() {
                     if let Ok(mut cached_meta) = serde_json::from_str::<FullMetadata>(&json_str) {
-                        // 古いキャッシュの互換性対応 (A1111のプロンプトが空の場合のパッチ)
+                        // A1111のプロンプトが空になるケースへの互換性を保持する
                         if cached_meta.prompt.is_empty() {
                             if let Some(raw) = cached_meta.params.get("rawParameters").and_then(|v| v.as_str()) {
                                 cached_meta.prompt = raw.to_string();

@@ -644,7 +644,7 @@ class UIManager {
           let finalValue = inputEl.value;
 
           /**
-           * ファイル名の変更において、誤って拡張子を変更または削除してしまうことを防ぐ保護機構。
+           * 拡張子の変更または削除を防止し、元の拡張子を維持する機構。
            * selectBaseNameOnly が有効な場合は、変更後の値に元の拡張子を強制的に補完します。
            */
           if (selectBaseNameOnly && originalExt) {
