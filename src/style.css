@@ -7,7 +7,7 @@
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
   --bg-color: #0b1012;
   --panel-bg: #162226;
-  --top-bar-bg: #2d4048;
+  --top-bar-bg: #203036;
   --border-color: #394346;
   --text-color: #cddbe0;
   --accent-color: #257e8c;
@@ -506,6 +506,16 @@ input:-webkit-autofill:focus {
   border-left: none !important;
 }
 
+:root[data-left-collapsed="true"] #center-top,
+:root[data-left-collapsed="true"] #thumbnail-grid {
+  border-left: none !important;
+}
+
+:root[data-right-collapsed="true"] #center-top,
+:root[data-right-collapsed="true"] #thumbnail-grid {
+  border-right: none !important;
+}
+
 #smart-folders-list {
   display: flex;
   flex-direction: column;
@@ -721,6 +731,15 @@ input:-webkit-autofill:focus {
   border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
+}
+
+:root[data-center-collapsed="true"] #center-top {
+  border-bottom: none !important;
+}
+
+:root[data-center-collapsed="true"] #center-pane::before,
+:root[data-center-collapsed="true"] #center-pane::after {
+  display: none !important;
 }
 
 body.is-resizing #center-top {
