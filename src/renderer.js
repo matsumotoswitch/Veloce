@@ -3636,6 +3636,12 @@ window.addEventListener('keydown', async (e) => {
       favModal.style.display = 'none';
       return;
     }
+    const sfModal = document.getElementById('edit-smart-folder-modal');
+    if (sfModal && sfModal.style.display === 'flex') {
+      e.preventDefault();
+      sfModal.style.display = 'none';
+      return;
+    }
     if (document.getElementById('help-overlay')) {
       e.preventDefault();
       toggleHelpOverlay(false);
