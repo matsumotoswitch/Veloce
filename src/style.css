@@ -1086,14 +1086,14 @@ body.show-thumbnail-names .thumbnail-label {
 
 .thumbnail-item.selected {
   border-color: var(--accent-color);
-  box-shadow: none;
+  box-shadow: 0 0 0 2px var(--accent-color);
   z-index: 2;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .thumbnail-item.selected:hover {
   border-color: var(--accent-color);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 2px var(--accent-color), 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 /* Right Pane: Inspector */
