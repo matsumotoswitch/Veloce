@@ -29,6 +29,10 @@ function initUnsharpFilter() {
   const svgNS = "http://www.w3.org/2000/svg";
   const svgElement = document.createElementNS(svgNS, "svg");
   svgElement.setAttribute("class", "unsharp-svg");
+  svgElement.style.position = 'absolute';
+  svgElement.style.width = '0';
+  svgElement.style.height = '0';
+  svgElement.style.pointerEvents = 'none';
 
   const unsharpFilter = document.createElementNS(svgNS, "filter");
   unsharpFilter.id = "unsharp-filter";
@@ -818,6 +822,12 @@ window.addEventListener('wheel', (e) => {
     debouncedFocusWindow();   // フォーカスの維持
   } else {
     e.preventDefault(); // 親ウィンドウのスクロールを防止
+    
+    // 一定時間ホイール操作がなければ端数をリセット（誤爆スクロール防止）
+    clearTimeout(window._wheelResetTimeout);
+    window._wheelResetTimeout = setTimeout(() => {
+      window._wheelDeltaAccumulator = 0;
+    }, 150);
     
     // トラックパッドの連続イベントやマウスの「カチッ」を吸収するため、移動量を累積する
     window._wheelDeltaAccumulator = (window._wheelDeltaAccumulator || 0) + e.deltaY;
