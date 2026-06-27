@@ -365,9 +365,20 @@ function resizeWindowToFitImage() {
   const maxWindowWidth = window.screen.width;
   const maxWindowHeight = window.screen.height - 1;
 
-  const scale = Math.min(maxWindowWidth / natW, maxWindowHeight / natH, 1.0);
-  const targetWidth = Math.floor(natW * scale);
-  const targetHeight = Math.floor(natH * scale);
+  let scale = Math.min(maxWindowWidth / natW, maxWindowHeight / natH, 1.0);
+  
+  // ズーム状態が維持されている場合は、そのスケールを反映させる
+  if (viewerState.isZoomed) {
+    scale = viewerState.currentScale;
+  }
+
+  let targetWidth = Math.floor(natW * scale);
+  let targetHeight = Math.floor(natH * scale);
+
+  // モニターサイズを超えないように制限
+  targetWidth = Math.min(targetWidth, maxWindowWidth);
+  targetHeight = Math.min(targetHeight, maxWindowHeight);
+
   if (window.updateScaleDisplay) setTimeout(window.updateScaleDisplay, 50);
 
   // 現在のウィンドウサイズと同じ場合は無駄なリサイズ要求をスキップする
