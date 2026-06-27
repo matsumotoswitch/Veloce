@@ -30,6 +30,10 @@
         "all": false,
         "open": true
       },
+      "dialog": {
+        "all": false,
+        "open": true
+      },
       "protocol": {
         "all": false,
         "asset": true,

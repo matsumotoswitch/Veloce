@@ -2180,7 +2180,8 @@ function showEditSmartFolderModal(sf, isNew = false) {
     { value: 'prompt', label: 'プロンプト' },
     { value: 'negative_prompt', label: 'ネガティブプロンプト' },
     { value: 'source', label: '生成元 (Source)' },
-    { value: 'aspect_ratio', label: 'アスペクト比' }
+    { value: 'aspect_ratio', label: 'アスペクト比' },
+    { value: 'path', label: 'フォルダ (パス)' }
   ];
 
   const operatorOptions = {
@@ -2188,7 +2189,8 @@ function showEditSmartFolderModal(sf, isNew = false) {
     prompt: [{ value: 'contains', label: 'を含む' }, { value: 'not_contains', label: 'を含まない' }],
     negative_prompt: [{ value: 'contains', label: 'を含む' }, { value: 'not_contains', label: 'を含まない' }],
     source: [{ value: '==', label: 'と一致' }, { value: '!=', label: 'と一致しない' }],
-    aspect_ratio: [{ value: 'portrait', label: '縦長' }, { value: 'landscape', label: '横長' }, { value: 'square', label: '正方形' }]
+    aspect_ratio: [{ value: 'portrait', label: '縦長' }, { value: 'landscape', label: '横長' }, { value: 'square', label: '正方形' }],
+    path: [{ value: 'in_folder', label: '直下のみ' }, { value: 'under_folder', label: 'サブフォルダ含む' }]
   };
 
   let currentConditions = Array.isArray(sf.conditions) ? JSON.parse(JSON.stringify(sf.conditions)) : [];
@@ -2233,6 +2235,35 @@ function showEditSmartFolderModal(sf, isNew = false) {
         cond.operator = cond.operator || 'portrait';
         valInput = document.createElement('div'); // spacer
         valInput.style.flex = '1';
+      } else if (cond.type === 'path') {
+        valInput = document.createElement('div');
+        valInput.style.display = 'flex';
+        valInput.style.flex = '1';
+        valInput.style.gap = '4px';
+
+        const textInput = document.createElement('input');
+        textInput.type = 'text';
+        textInput.className = 'dialog-input';
+        textInput.style.flex = '1';
+        textInput.value = cond.value || '';
+        textInput.addEventListener('input', (e) => { cond.value = e.target.value; });
+
+        const browseBtn = document.createElement('button');
+        browseBtn.className = 'dialog-btn';
+        browseBtn.style.padding = '4px 8px';
+        browseBtn.textContent = '参照...';
+        browseBtn.addEventListener('click', async () => {
+          if (window.veloceAPI && window.veloceAPI.openFolderDialog) {
+            const folder = await window.veloceAPI.openFolderDialog();
+            if (folder) {
+              textInput.value = folder;
+              cond.value = folder;
+            }
+          }
+        });
+
+        valInput.appendChild(textInput);
+        valInput.appendChild(browseBtn);
       } else {
         valInput = document.createElement('input');
         valInput.type = cond.type === 'rating' ? 'number' : 'text';
@@ -2317,6 +2348,10 @@ function showEditSmartFolderModal(sf, isNew = false) {
     initSmartFolders();
     if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
       await window.veloceAPI.updateSmartFolders(appState.smartFolders);
+    }
+    
+    if (appState.currentDirectory === 'smart://' + sf.id) {
+      refreshFileList(true);
     }
   });
 

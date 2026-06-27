@@ -346,6 +346,15 @@ fn get_smart_folder_paths(
                                             };
                                         }
                                     }
+                                    "path" => {
+                                        let p = std::path::Path::new(&meta.path);
+                                        let target = std::path::Path::new(&cond.value);
+                                        matched = match cond.operator.as_str() {
+                                            "in_folder" => p.parent() == Some(target),
+                                            "under_folder" => p.starts_with(target),
+                                            _ => false,
+                                        };
+                                    }
                                     _ => {}
                                 }
                                 if !matched {

@@ -402,5 +402,16 @@ window.veloceAPI = {
   /**
    * メタデータキャッシュをクリア
    */
-  clearMetadataCache: (filePaths) => invoke('clear_metadata_cache', { filePaths })
+  clearMetadataCache: (filePaths) => invoke('clear_metadata_cache', { filePaths }),
+  /**
+   * フォルダ選択ダイアログを開きます。
+   * @returns {Promise<string|null>} 選択されたフォルダパス
+   */
+  openFolderDialog: async () => {
+    if (window.__TAURI__ && window.__TAURI__.dialog) {
+      const selected = await window.__TAURI__.dialog.open({ directory: true, multiple: false });
+      return selected ? String(selected) : null;
+    }
+    return null;
+  }
 };
