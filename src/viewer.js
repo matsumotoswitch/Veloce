@@ -815,9 +815,9 @@ window.addEventListener('wheel', (e) => {
     }
 
     // 一旦スケールを適用し、縮小時にはみ出しを補正して再適用
-    if (typeof viewerUI.updateImageRendering === 'function') viewerUI.updateImageRendering();
-    if (typeof clampTranslate === 'function') clampTranslate();
-    if (typeof viewerUI.updateImageRendering === 'function') viewerUI.updateImageRendering();
+    viewerUI.updateImageRendering();
+    clampTranslate();
+    viewerUI.updateImageRendering();
     updateFullscreenStyles(); // マージンの再計算
     debouncedFocusWindow();   // フォーカスの維持
   } else {
@@ -842,18 +842,8 @@ window.addEventListener('wheel', (e) => {
       window._wheelDeltaAccumulator %= WHEEL_THRESHOLD;
     }
 
-    if (steps > 0) {
-      // 下スクロール（次へ）をsteps回分進める
-      for (let i = 0; i < steps; i++) {
-        viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
-      }
-      loadImage();
-    } else if (steps < 0) {
-      // 上スクロール（前へ）をsteps回分戻す
-      const absSteps = Math.abs(steps);
-      for (let i = 0; i < absSteps; i++) {
-        viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
-      }
+    if (steps !== 0) {
+      viewerState.currentIndex = (viewerState.currentIndex + steps % viewerState.totalImages + viewerState.totalImages) % viewerState.totalImages;
       loadImage();
     }
   }
@@ -960,10 +950,10 @@ window.addEventListener('keydown', async (e) => {
   }
   
   if (e.key === 'Delete') {
-	if (viewerState.currentImagePath) {
-	  const deletedPath = viewerState.currentImagePath;
-	  const success = await window.veloceAPI.trashFile(deletedPath);
-	  if (success) {
+    if (viewerState.currentImagePath) {
+      const deletedPath = viewerState.currentImagePath;
+      const success = await window.veloceAPI.trashFile(deletedPath);
+      if (success) {
         if (window.veloceAPI.notifyFileRemoved) {
           // メイン画面に通知し、そこからbroadcastされる `viewer-list-updated` イベントで画像の切り替えを処理する
           await window.veloceAPI.notifyFileRemoved(deletedPath);
@@ -980,13 +970,13 @@ window.addEventListener('keydown', async (e) => {
             if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
           }
         }
-	  }
-	}
+      }
+    }
   }
 
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
-	if (viewerState.currentImagePath) {
-	  window.veloceAPI.copyImageToClipboard(viewerState.currentImagePath);
+    if (viewerState.currentImagePath) {
+      window.veloceAPI.copyImageToClipboard(viewerState.currentImagePath);
       // 画像のコピーとシャッターフラッシュエフェクトの適用
       let flash = document.getElementById('viewer-flash-effect');
       if (!flash) {
@@ -1042,7 +1032,7 @@ window.addEventListener('keydown', async (e) => {
 });
 
 // --- 拡大縮小率の表示更新 ---
-window.updateScaleDisplay = function() {
+function updateScaleDisplay() {
   const scaleDisplay = document.getElementById('window-scale-display');
   const controls = document.getElementById('window-controls');
   if (!scaleDisplay || !controls) return;

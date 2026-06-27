@@ -4,13 +4,13 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::time::UNIX_EPOCH;
-use std::io::Read; // flate2のread_to_stringやバイナリ解析用
-use std::sync::Mutex;
-use tauri::Manager;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::io::Read; // flate2のread_to_stringやバイナリ解析用
+use std::path::Path;
+use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
+use tauri::Manager;
 
 // --- データ構造の定義 ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -177,20 +177,21 @@ pub struct AppState {
 // --- ユーティリティ ---
 
 fn init_db() -> rusqlite::Result<rusqlite::Connection> {
-    let mut db_path = get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
+    let mut db_path =
+        get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
     if !db_path.exists() {
         let _ = std::fs::create_dir_all(&db_path);
     }
     db_path.push("veloce_cache.db");
-    
+
     let conn = rusqlite::Connection::open(&db_path)?;
-    
+
     // パフォーマンスチューニング
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
          PRAGMA cache_size = -64000;
-         PRAGMA temp_store = MEMORY;"
+         PRAGMA temp_store = MEMORY;",
     )?;
 
     conn.execute(
@@ -210,7 +211,7 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN height INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN path TEXT DEFAULT ''", []);
-    
+
     // 既存データのバックフィル
     let _ = conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
     Ok(conn)
@@ -229,7 +230,7 @@ fn get_veloce_data_dir() -> Option<std::path::PathBuf> {
 #[tauri::command]
 fn get_drives() -> Vec<String> {
     let mut drives = Vec::new();
-    
+
     #[cfg(windows)]
     {
         // Windows APIを直接叩いて、接続済みのドライブ一覧を瞬時に取得する
@@ -245,7 +246,7 @@ fn get_drives() -> Vec<String> {
             }
         }
     }
-    
+
     #[cfg(not(windows))]
     {
         drives.push("/".to_string());
@@ -267,16 +268,16 @@ fn get_smart_folder_paths(
     folder_type: &str,
     ratings_map: &std::collections::HashMap<String, u8>,
     db_conn: &std::sync::Arc<Mutex<rusqlite::Connection>>,
-    rules: &[SmartFolderRule]
+    rules: &[SmartFolderRule],
 ) -> Vec<std::path::PathBuf> {
     let mut target_paths = Vec::new();
     let folder_id = folder_type.replace("smart://", "");
 
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.lock() {
-            let needs_metadata = rule.conditions.iter().any(|c| 
+            let needs_metadata = rule.conditions.iter().any(|c| {
                 c.r#type == "prompt" || c.r#type == "negative_prompt" || c.r#type == "source"
-            );
+            });
 
             let query = if needs_metadata {
                 "SELECT metadata, width, height, path FROM cache WHERE path != '' AND path IS NOT NULL"
@@ -290,21 +291,34 @@ fn get_smart_folder_paths(
                         row.get::<_, String>(0)?,
                         row.get::<_, u32>(1)?,
                         row.get::<_, u32>(2)?,
-                        row.get::<_, String>(3)?
+                        row.get::<_, String>(3)?,
                     ))
                 }) {
                     let all_rows: Vec<(String, u32, u32, String)> = rows.flatten().collect();
-                    
+
                     // 検索条件の事前計算
                     enum CondType {
-                        Rating, AspectRatio, Path, Prompt, NegativePrompt, Source, Unknown
+                        Rating,
+                        AspectRatio,
+                        Path,
+                        Prompt,
+                        NegativePrompt,
+                        Source,
+                        Unknown,
                     }
                     enum CondOp {
-                        Gte, Lte, Eq, Neq,
-                        Portrait, Landscape, Square,
-                        InFolder, UnderFolder,
-                        Contains, NotContains,
-                        Unknown
+                        Gte,
+                        Lte,
+                        Eq,
+                        Neq,
+                        Portrait,
+                        Landscape,
+                        Square,
+                        InFolder,
+                        UnderFolder,
+                        Contains,
+                        NotContains,
+                        Unknown,
                     }
                     struct PrecomputedCond {
                         cond_type: CondType,
@@ -313,187 +327,252 @@ fn get_smart_folder_paths(
                         val_lower: String,
                         val_path: std::path::PathBuf,
                     }
-                    let precomputed_conds: Vec<PrecomputedCond> = rule.conditions.iter().map(|c| {
-                        let cond_type = match c.r#type.as_str() {
-                            "rating" => CondType::Rating,
-                            "aspect_ratio" => CondType::AspectRatio,
-                            "path" => CondType::Path,
-                            "prompt" => CondType::Prompt,
-                            "negative_prompt" => CondType::NegativePrompt,
-                            "source" => CondType::Source,
-                            _ => CondType::Unknown,
-                        };
-                        let op = match c.operator.as_str() {
-                            ">=" => CondOp::Gte,
-                            "<=" => CondOp::Lte,
-                            "==" => CondOp::Eq,
-                            "!=" => CondOp::Neq,
-                            "portrait" => CondOp::Portrait,
-                            "landscape" => CondOp::Landscape,
-                            "square" => CondOp::Square,
-                            "in_folder" => CondOp::InFolder,
-                            "under_folder" => CondOp::UnderFolder,
-                            "contains" => CondOp::Contains,
-                            "not_contains" => CondOp::NotContains,
-                            _ => CondOp::Unknown,
-                        };
-                        PrecomputedCond {
-                            cond_type,
-                            op,
-                            val_u8: c.value.parse::<u8>().unwrap_or(0),
-                            val_lower: c.value.to_lowercase(),
-                            val_path: std::path::PathBuf::from(&c.value),
-                        }
-                    }).collect();
+                    let precomputed_conds: Vec<PrecomputedCond> = rule
+                        .conditions
+                        .iter()
+                        .map(|c| {
+                            let cond_type = match c.r#type.as_str() {
+                                "rating" => CondType::Rating,
+                                "aspect_ratio" => CondType::AspectRatio,
+                                "path" => CondType::Path,
+                                "prompt" => CondType::Prompt,
+                                "negative_prompt" => CondType::NegativePrompt,
+                                "source" => CondType::Source,
+                                _ => CondType::Unknown,
+                            };
+                            let op = match c.operator.as_str() {
+                                ">=" => CondOp::Gte,
+                                "<=" => CondOp::Lte,
+                                "==" => CondOp::Eq,
+                                "!=" => CondOp::Neq,
+                                "portrait" => CondOp::Portrait,
+                                "landscape" => CondOp::Landscape,
+                                "square" => CondOp::Square,
+                                "in_folder" => CondOp::InFolder,
+                                "under_folder" => CondOp::UnderFolder,
+                                "contains" => CondOp::Contains,
+                                "not_contains" => CondOp::NotContains,
+                                _ => CondOp::Unknown,
+                            };
+                            PrecomputedCond {
+                                cond_type,
+                                op,
+                                val_u8: c.value.parse::<u8>().unwrap_or(0),
+                                val_lower: c.value.to_lowercase(),
+                                val_path: std::path::PathBuf::from(&c.value),
+                            }
+                        })
+                        .collect();
 
                     use rayon::prelude::*;
-                    target_paths = all_rows.into_par_iter().filter_map(|(meta_str, width, height, path)| {
-                        let mut meta_opt: Option<FullMetadata> = None;
-                        
-                        if needs_metadata {
-                            meta_opt = serde_json::from_str::<FullMetadata>(&meta_str).ok();
-                            if meta_opt.is_none() {
-                                return None; // failed to parse metadata which is required
-                            }
-                            if let Some(mut m) = meta_opt.take() {
-                                if m.prompt.is_empty() {
-                                    if let Some(raw) = m.params.get("rawParameters").and_then(|v| v.as_str()) {
-                                        m.prompt = raw.to_string();
-                                    }
-                                }
-                                meta_opt = Some(m);
-                            }
-                        }
+                    target_paths = all_rows
+                        .into_par_iter()
+                        .filter_map(|(meta_str, width, height, path)| {
+                            let mut meta_opt: Option<FullMetadata> = None;
 
-                        let mut all_match = true;
-                        for cond in &precomputed_conds {
-                            let mut matched = false;
-                            match cond.cond_type {
-                                CondType::Rating => {
-                                    let file_rating = *ratings_map.get(&path).unwrap_or(&0);
-                                    matched = match cond.op {
-                                        CondOp::Gte => file_rating >= cond.val_u8,
-                                        CondOp::Lte => file_rating <= cond.val_u8,
-                                        CondOp::Eq => file_rating == cond.val_u8,
-                                        _ => false,
-                                    };
+                            if needs_metadata {
+                                meta_opt = serde_json::from_str::<FullMetadata>(&meta_str).ok();
+                                if meta_opt.is_none() {
+                                    return None; // failed to parse metadata which is required
                                 }
-                                CondType::AspectRatio => {
-                                    if width > 0 && height > 0 {
+                                if let Some(mut m) = meta_opt.take() {
+                                    if m.prompt.is_empty() {
+                                        if let Some(raw) =
+                                            m.params.get("rawParameters").and_then(|v| v.as_str())
+                                        {
+                                            m.prompt = raw.to_string();
+                                        }
+                                    }
+                                    meta_opt = Some(m);
+                                }
+                            }
+
+                            let mut all_match = true;
+                            for cond in &precomputed_conds {
+                                let mut matched = false;
+                                match cond.cond_type {
+                                    CondType::Rating => {
+                                        let file_rating = *ratings_map.get(&path).unwrap_or(&0);
                                         matched = match cond.op {
-                                            CondOp::Portrait => width * 100 < height * 95,
-                                            CondOp::Landscape => width * 100 > height * 105,
-                                            CondOp::Square => width * 100 >= height * 95 && width * 100 <= height * 105,
+                                            CondOp::Gte => file_rating >= cond.val_u8,
+                                            CondOp::Lte => file_rating <= cond.val_u8,
+                                            CondOp::Eq => file_rating == cond.val_u8,
                                             _ => false,
                                         };
                                     }
-                                }
-                                CondType::Path => {
-                                    let p = std::path::Path::new(&path);
-                                    matched = match cond.op {
-                                        CondOp::InFolder => p.parent() == Some(&cond.val_path),
-                                        CondOp::UnderFolder => p.starts_with(&cond.val_path),
-                                        _ => false,
-                                    };
-                                }
-                                CondType::Prompt => {
-                                    if let Some(meta) = &meta_opt {
-                                        let mut p = meta.prompt.clone();
-                                        if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
-                                            for c in chars {
-                                                if let Some(cp) = c.get("prompt").and_then(|v| v.as_str()) {
-                                                    p.push_str(" ");
-                                                    p.push_str(cp);
+                                    CondType::AspectRatio => {
+                                        if width > 0 && height > 0 {
+                                            matched = match cond.op {
+                                                CondOp::Portrait => width * 100 < height * 95,
+                                                CondOp::Landscape => width * 100 > height * 105,
+                                                CondOp::Square => {
+                                                    width * 100 >= height * 95
+                                                        && width * 100 <= height * 105
+                                                }
+                                                _ => false,
+                                            };
+                                        }
+                                    }
+                                    CondType::Path => {
+                                        let p = std::path::Path::new(&path);
+                                        matched = match cond.op {
+                                            CondOp::InFolder => p.parent() == Some(&cond.val_path),
+                                            CondOp::UnderFolder => p.starts_with(&cond.val_path),
+                                            _ => false,
+                                        };
+                                    }
+                                    CondType::Prompt => {
+                                        if let Some(meta) = &meta_opt {
+                                            let mut p = meta.prompt.clone();
+                                            if let Some(chars) = meta
+                                                .params
+                                                .get("characterPrompts")
+                                                .and_then(|v| v.as_array())
+                                            {
+                                                for c in chars {
+                                                    if let Some(cp) =
+                                                        c.get("prompt").and_then(|v| v.as_str())
+                                                    {
+                                                        p.push_str(" ");
+                                                        p.push_str(cp);
+                                                    }
                                                 }
                                             }
+                                            let p_lower = p.to_lowercase();
+                                            matched = match cond.op {
+                                                CondOp::Contains => {
+                                                    p_lower.contains(&cond.val_lower)
+                                                }
+                                                CondOp::NotContains => {
+                                                    !p_lower.contains(&cond.val_lower)
+                                                }
+                                                _ => false,
+                                            };
                                         }
-                                        let p_lower = p.to_lowercase();
-                                        matched = match cond.op {
-                                            CondOp::Contains => p_lower.contains(&cond.val_lower),
-                                            CondOp::NotContains => !p_lower.contains(&cond.val_lower),
-                                            _ => false,
-                                        };
                                     }
-                                }
-                                CondType::NegativePrompt => {
-                                    if let Some(meta) = &meta_opt {
-                                        let mut p = meta.negative_prompt.clone();
-                                        if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
-                                            for c in chars {
-                                                if let Some(ucp) = c.get("uc").and_then(|v| v.as_str()) {
-                                                    p.push_str(" ");
-                                                    p.push_str(ucp);
+                                    CondType::NegativePrompt => {
+                                        if let Some(meta) = &meta_opt {
+                                            let mut p = meta.negative_prompt.clone();
+                                            if let Some(chars) = meta
+                                                .params
+                                                .get("characterPrompts")
+                                                .and_then(|v| v.as_array())
+                                            {
+                                                for c in chars {
+                                                    if let Some(ucp) =
+                                                        c.get("uc").and_then(|v| v.as_str())
+                                                    {
+                                                        p.push_str(" ");
+                                                        p.push_str(ucp);
+                                                    }
                                                 }
                                             }
+                                            let p_lower = p.to_lowercase();
+                                            matched = match cond.op {
+                                                CondOp::Contains => {
+                                                    p_lower.contains(&cond.val_lower)
+                                                }
+                                                CondOp::NotContains => {
+                                                    !p_lower.contains(&cond.val_lower)
+                                                }
+                                                _ => false,
+                                            };
                                         }
-                                        let p_lower = p.to_lowercase();
-                                        matched = match cond.op {
-                                            CondOp::Contains => p_lower.contains(&cond.val_lower),
-                                            CondOp::NotContains => !p_lower.contains(&cond.val_lower),
-                                            _ => false,
-                                        };
                                     }
-                                }
-                                CondType::Source => {
-                                    if let Some(meta) = &meta_opt {
-                                        let s = meta.source.to_lowercase();
-                                        matched = match cond.op {
-                                            CondOp::Eq => s == cond.val_lower,
-                                            CondOp::Neq => s != cond.val_lower,
-                                            _ => false,
-                                        };
+                                    CondType::Source => {
+                                        if let Some(meta) = &meta_opt {
+                                            let s = meta.source.to_lowercase();
+                                            matched = match cond.op {
+                                                CondOp::Eq => s == cond.val_lower,
+                                                CondOp::Neq => s != cond.val_lower,
+                                                _ => false,
+                                            };
+                                        }
                                     }
+                                    CondType::Unknown => {}
                                 }
-                                CondType::Unknown => {}
+                                if !matched {
+                                    all_match = false;
+                                    break;
+                                }
                             }
-                            if !matched {
-                                all_match = false;
-                                break;
+                            if all_match {
+                                Some(std::path::PathBuf::from(path))
+                            } else {
+                                None
                             }
-                        }
-                        if all_match {
-                            Some(std::path::PathBuf::from(path))
-                        } else {
-                            None
-                        }
-                    }).collect();
+                        })
+                        .collect();
                 }
             }
         }
     } else {
         // Fallback for old default ids if rules are empty/missing
         if folder_id == "fav_5" {
-            target_paths = ratings_map.iter().filter(|(_, &r)| r == 5).map(|(p, _)| std::path::PathBuf::from(p)).collect();
+            target_paths = ratings_map
+                .iter()
+                .filter(|(_, &r)| r == 5)
+                .map(|(p, _)| std::path::PathBuf::from(p))
+                .collect();
         } else if folder_id == "fav_4_plus" {
-            target_paths = ratings_map.iter().filter(|(_, &r)| r >= 4).map(|(p, _)| std::path::PathBuf::from(p)).collect();
+            target_paths = ratings_map
+                .iter()
+                .filter(|(_, &r)| r >= 4)
+                .map(|(p, _)| std::path::PathBuf::from(p))
+                .collect();
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.lock() {
-                if let Ok(mut stmt) = conn.prepare("SELECT path FROM cache WHERE path != '' AND path IS NOT NULL") {
+                if let Ok(mut stmt) =
+                    conn.prepare("SELECT path FROM cache WHERE path != '' AND path IS NOT NULL")
+                {
                     if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                        target_paths = rows.flatten().map(|p| std::path::PathBuf::from(p)).collect();
+                        target_paths = rows
+                            .flatten()
+                            .map(|p| std::path::PathBuf::from(p))
+                            .collect();
                     }
                 }
             }
         }
     }
-    
+
     target_paths
 }
 
 #[tauri::command]
-fn load_directory(window: tauri::Window, target_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn load_directory(
+    window: tauri::Window,
+    target_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     let path_clone = target_path.clone();
     let app_clone = window.app_handle();
     let db_conn_clone = state.db_conn.clone();
-    let ratings_map = if let Ok(lock) = state.ratings.lock() { lock.clone() } else { std::collections::HashMap::new() };
-    let smart_folders_clone = if let Ok(lock) = state.smart_folders.lock() { lock.clone() } else { Vec::new() };
-    
+    let ratings_map = if let Ok(lock) = state.ratings.lock() {
+        lock.clone()
+    } else {
+        std::collections::HashMap::new()
+    };
+    let smart_folders_clone = if let Ok(lock) = state.smart_folders.lock() {
+        lock.clone()
+    } else {
+        Vec::new()
+    };
+
     // ディレクトリ変更時にRust側の状態をリセット
-    if let Ok(mut lock) = state.all_files.lock() { lock.clear(); }
-    if let Ok(mut lock) = state.filtered_files.lock() { lock.clear(); }
-    if let Ok(mut lock) = state.image_paths.lock() { lock.clear(); }
-    if let Ok(mut dir_lock) = state.current_dir.lock() { *dir_lock = path_clone.clone(); }
-    
+    if let Ok(mut lock) = state.all_files.lock() {
+        lock.clear();
+    }
+    if let Ok(mut lock) = state.filtered_files.lock() {
+        lock.clear();
+    }
+    if let Ok(mut lock) = state.image_paths.lock() {
+        lock.clear();
+    }
+    if let Ok(mut dir_lock) = state.current_dir.lock() {
+        *dir_lock = path_clone.clone();
+    }
+
     tauri::async_runtime::spawn(async move {
         // Veloceのキャッシュディレクトリ構造に合わせる
         let path_for_spawn = path_clone.clone();
@@ -593,7 +672,6 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
 
         // Rust側のAppStateに全ファイルを格納（Source of Truth）
         if let Some(state) = app_clone.try_state::<AppState>() {
-
             let total_count = files.len();
             let sorted_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
 
@@ -608,10 +686,13 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
             }
 
             // JS側には総件数のみを通知（ファイルデータ自体はIPCで送らない）
-            let _ = window.emit("directory-loaded", DirectoryLoadedPayload {
-                path: path_clone.clone(),
-                total_count,
-            });
+            let _ = window.emit(
+                "directory-loaded",
+                DirectoryLoadedPayload {
+                    path: path_clone.clone(),
+                    total_count,
+                },
+            );
         }
 
         let app_for_bg = app_clone.clone();
@@ -640,7 +721,10 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                     }
 
                     let needs_parsing = if let Ok(lock) = state.all_files.lock() {
-                        lock.iter().find(|f| f.path == path).map(|f| !f.meta_loaded).unwrap_or(false)
+                        lock.iter()
+                            .find(|f| f.path == path)
+                            .map(|f| !f.meta_loaded)
+                            .unwrap_or(false)
                     } else {
                         false
                     };
@@ -650,7 +734,9 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                         let db_conn_clone = state.db_conn.clone();
                         let full_meta = match tokio::task::spawn_blocking(move || {
                             get_full_metadata_for_path(&path_clone_for_blocking, &db_conn_clone)
-                        }).await {
+                        })
+                        .await
+                        {
                             Ok(meta) => meta,
                             Err(_) => continue,
                         };
@@ -704,7 +790,9 @@ fn natural_cmp(s1: &str, s2: &str) -> std::cmp::Ordering {
                     let mut n2 = 0u64;
                     while let Some(&c) = it1.peek() {
                         if c.is_ascii_digit() {
-                            n1 = n1.saturating_mul(10).saturating_add((c as u8 - b'0') as u64);
+                            n1 = n1
+                                .saturating_mul(10)
+                                .saturating_add((c as u8 - b'0') as u64);
                             it1.next();
                         } else {
                             break;
@@ -712,7 +800,9 @@ fn natural_cmp(s1: &str, s2: &str) -> std::cmp::Ordering {
                     }
                     while let Some(&c) = it2.peek() {
                         if c.is_ascii_digit() {
-                            n2 = n2.saturating_mul(10).saturating_add((c as u8 - b'0') as u64);
+                            n2 = n2
+                                .saturating_mul(10)
+                                .saturating_add((c as u8 - b'0') as u64);
                             it2.next();
                         } else {
                             break;
@@ -740,7 +830,10 @@ fn natural_cmp(s1: &str, s2: &str) -> std::cmp::Ordering {
 /// Rust側でソート・フィルタリングを実行し、最新のpathsをViewerにも同期する
 
 #[tauri::command]
-fn sync_ratings(state: tauri::State<'_, AppState>, ratings: std::collections::HashMap<String, u8>) -> usize {
+fn sync_ratings(
+    state: tauri::State<'_, AppState>,
+    ratings: std::collections::HashMap<String, u8>,
+) -> usize {
     if let Ok(mut lock) = state.ratings.lock() {
         *lock = ratings;
     }
@@ -759,9 +852,6 @@ fn set_rating(state: tauri::State<'_, AppState>, path: String, rating: u8) -> us
     apply_filters_and_sort(None, &state)
 }
 
-
-
-
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
     let all_files = state.all_files.lock().unwrap();
     let sort_config = state.sort_config.lock().unwrap();
@@ -770,17 +860,38 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     let mut filtered: Vec<ImageFile> = if search_query.trim().is_empty() {
         all_files.clone()
     } else {
-        let terms: Vec<String> = search_query.to_lowercase().split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
-        all_files.iter().filter(|f| {
-            let text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
-            terms.iter().all(|term| text.contains(term))
-        }).cloned().collect()
+        let terms: Vec<String> = search_query
+            .to_lowercase()
+            .split(',')
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        all_files
+            .iter()
+            .filter(|f| {
+                let text = format!(
+                    "{} {} {} {} {}",
+                    f.name, f.prompt, f.negative_prompt, f.source, f.search_text
+                )
+                .to_lowercase();
+                terms.iter().all(|term| text.contains(term))
+            })
+            .cloned()
+            .collect()
     };
 
-    let rating_val = *state.rating_filter_val.lock().unwrap();
-    let rating_op = state.rating_filter_op.lock().unwrap().clone();
+    let Ok(rating_val_lock) = state.rating_filter_val.lock() else {
+        return 0;
+    };
+    let rating_val = *rating_val_lock;
+    let Ok(rating_op_lock) = state.rating_filter_op.lock() else {
+        return 0;
+    };
+    let rating_op = rating_op_lock.clone();
     if rating_val > 0 {
-        let ratings_map = state.ratings.lock().unwrap();
+        let Ok(ratings_map) = state.ratings.lock() else {
+            return 0;
+        };
         filtered.retain(|f| {
             let rating = ratings_map.get(&f.path).copied().unwrap_or(0);
             match rating_op.as_str() {
@@ -790,7 +901,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             }
         });
     }
-    
+
     // ソート
     let key = sort_config.key.as_str();
     let asc = sort_config.asc;
@@ -804,10 +915,18 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             "width" => a.width.cmp(&b.width),
             "height" => a.height.cmp(&b.height),
             "ratio" => {
-                let r_a = if a.height > 0 { a.width as f64 / a.height as f64 } else { 0.0 };
-                let r_b = if b.height > 0 { b.width as f64 / b.height as f64 } else { 0.0 };
+                let r_a = if a.height > 0 {
+                    a.width as f64 / a.height as f64
+                } else {
+                    0.0
+                };
+                let r_b = if b.height > 0 {
+                    b.width as f64 / b.height as f64
+                } else {
+                    0.0
+                };
                 r_a.partial_cmp(&r_b).unwrap_or(std::cmp::Ordering::Equal)
-            },
+            }
             _ => natural_cmp(&a.name, &b.name),
         };
         let cmp = if asc { cmp } else { cmp.reverse() };
@@ -820,7 +939,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
 
     let total = filtered.len();
     let paths: Vec<String> = filtered.iter().map(|f| f.path.clone()).collect();
-    
+
     drop(all_files);
     drop(sort_config);
     drop(search_query);
@@ -836,7 +955,13 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
         use std::path::Path;
         use tauri::Manager;
         let target_dir = if let Some(first_path) = paths.first() {
-            Some(Path::new(first_path).parent().unwrap_or(Path::new("")).to_string_lossy().to_string())
+            Some(
+                Path::new(first_path)
+                    .parent()
+                    .unwrap_or(Path::new(""))
+                    .to_string_lossy()
+                    .to_string(),
+            )
         } else {
             state.current_dir.lock().ok().map(|d| d.clone())
         };
@@ -844,7 +969,8 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
         if let Some(dir_str) = target_dir {
             if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
                 for (label, viewer_list) in viewer_paths.iter_mut() {
-                    let v_dir = viewer_list.first()
+                    let v_dir = viewer_list
+                        .first()
                         .and_then(|p| Path::new(p).parent())
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_default();
@@ -888,7 +1014,11 @@ fn set_view_params(
 
 /// 仮想スクロール用: 指定範囲のImageFileをスライスして返す
 #[tauri::command]
-async fn get_items(state: tauri::State<'_, AppState>, offset: usize, limit: usize) -> Result<Vec<ImageFile>, String> {
+async fn get_items(
+    state: tauri::State<'_, AppState>,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<ImageFile>, String> {
     let lock = state.filtered_files.lock().unwrap();
     let end = std::cmp::min(offset + limit, lock.len());
     if offset >= lock.len() {
@@ -899,7 +1029,10 @@ async fn get_items(state: tauri::State<'_, AppState>, offset: usize, limit: usiz
 
 /// selectImage用: 単一のImageFileを取得
 #[tauri::command]
-async fn get_file_by_index(state: tauri::State<'_, AppState>, index: usize) -> Result<Option<ImageFile>, String> {
+async fn get_file_by_index(
+    state: tauri::State<'_, AppState>,
+    index: usize,
+) -> Result<Option<ImageFile>, String> {
     let lock = state.filtered_files.lock().unwrap();
     Ok(lock.get(index).cloned())
 }
@@ -937,7 +1070,11 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
 
 /// ファイルウォッチャーから通知されたファイル変更をRust側のSource of Truthに反映する
 #[tauri::command]
-fn notify_file_changed(app: tauri::AppHandle, state: tauri::State<'_, AppState>, file: ImageFile) -> usize {
+fn notify_file_changed(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    file: ImageFile,
+) -> usize {
     if let Ok(mut all_files) = state.all_files.lock() {
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
             *existing = file.clone();
@@ -950,7 +1087,11 @@ fn notify_file_changed(app: tauri::AppHandle, state: tauri::State<'_, AppState>,
 
 /// ファイルウォッチャーから通知されたファイル削除をRust側のSource of Truthに反映する
 #[tauri::command]
-fn notify_file_removed(app: tauri::AppHandle, state: tauri::State<'_, AppState>, path: String) -> usize {
+fn notify_file_removed(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> usize {
     if let Ok(mut all_files) = state.all_files.lock() {
         all_files.retain(|f| f.path != path);
     }
@@ -958,16 +1099,22 @@ fn notify_file_removed(app: tauri::AppHandle, state: tauri::State<'_, AppState>,
 }
 
 #[tauri::command]
-async fn get_full_metadata_batch(state: tauri::State<'_, AppState>, file_paths: Vec<String>) -> Result<Vec<FullMetadata>, String> {
+async fn get_full_metadata_batch(
+    state: tauri::State<'_, AppState>,
+    file_paths: Vec<String>,
+) -> Result<Vec<FullMetadata>, String> {
     // rayonによるスレッドプール占有を防ぐため、通常のイテレータを使用する。
     // I/Oバウンドな処理であり、フロントエンド側で既にチャンク化（100件ずつ等）
     // されているため、Rust側では直列処理でも十分に高速かつ安全に動作します。
     let db_conn_clone = state.db_conn.clone();
     Ok(tokio::task::spawn_blocking(move || {
-        file_paths.into_iter().map(|path| {
-            get_full_metadata_for_path(&path, &db_conn_clone)
-        }).collect()
-    }).await.unwrap_or_default())
+        file_paths
+            .into_iter()
+            .map(|path| get_full_metadata_for_path(&path, &db_conn_clone))
+            .collect()
+    })
+    .await
+    .unwrap_or_default())
 }
 
 // --- バイナリ解析パーサー群 (JSの実装をRustへ移植) ---
@@ -975,29 +1122,44 @@ async fn get_full_metadata_batch(state: tauri::State<'_, AppState>, file_paths: 
 fn decode_metadata_string(bytes: &[u8]) -> String {
     if bytes.len() >= 2 {
         if bytes[0] == 0xFF && bytes[1] == 0xFE {
-            let u16_data: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let u16_data: Vec<u16> = bytes[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
             return String::from_utf16_lossy(&u16_data);
         } else if bytes[0] == 0xFE && bytes[1] == 0xFF {
-            let u16_data: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+            let u16_data: Vec<u16> = bytes[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect();
             return String::from_utf16_lossy(&u16_data);
         }
     }
-    
+
     let le_zeros = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
     let be_zeros = bytes.iter().step_by(2).filter(|&&b| b == 0).count();
-    
+
     if bytes.len() > 4 && le_zeros > bytes.len() / 3 && bytes.len() % 2 == 0 {
-        let u16_data: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let u16_data: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         return String::from_utf16_lossy(&u16_data);
     } else if bytes.len() > 4 && be_zeros > bytes.len() / 3 && bytes.len() % 2 == 0 {
-        let u16_data: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let u16_data: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
         return String::from_utf16_lossy(&u16_data);
     }
 
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqlite::Connection>) -> FullMetadata {
+fn get_full_metadata_for_path(
+    file_path: &str,
+    db_conn: &std::sync::Mutex<rusqlite::Connection>,
+) -> FullMetadata {
     let mtime = std::fs::metadata(file_path)
         .and_then(|m| m.modified())
         .unwrap_or(std::time::UNIX_EPOCH)
@@ -1015,7 +1177,11 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
                     if let Ok(mut cached_meta) = serde_json::from_str::<FullMetadata>(&json_str) {
                         // A1111のプロンプトが空になるケースへの互換性を保持する
                         if cached_meta.prompt.is_empty() {
-                            if let Some(raw) = cached_meta.params.get("rawParameters").and_then(|v| v.as_str()) {
+                            if let Some(raw) = cached_meta
+                                .params
+                                .get("rawParameters")
+                                .and_then(|v| v.as_str())
+                            {
                                 cached_meta.prompt = raw.to_string();
                             }
                         }
@@ -1036,10 +1202,22 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
     let lower_path = file_path.to_lowercase();
     if lower_path.ends_with(".png") {
         let chunks = parse_png_chunks(file_path);
-        raw_description = chunks.get("Description").or(chunks.get("ImageDescription")).cloned().unwrap_or_default();
+        raw_description = chunks
+            .get("Description")
+            .or(chunks.get("ImageDescription"))
+            .cloned()
+            .unwrap_or_default();
         raw_comment = chunks.get("Comment").cloned().unwrap_or_default();
-        raw_parameters = chunks.get("parameters").or(chunks.get("Parameters")).cloned().unwrap_or_default();
-        source = chunks.get("Source").or(chunks.get("Software")).cloned().unwrap_or_default();
+        raw_parameters = chunks
+            .get("parameters")
+            .or(chunks.get("Parameters"))
+            .cloned()
+            .unwrap_or_default();
+        source = chunks
+            .get("Source")
+            .or(chunks.get("Software"))
+            .cloned()
+            .unwrap_or_default();
 
         // ComfyUI metadata fallback
         if let Some(workflow) = chunks.get("workflow") {
@@ -1056,20 +1234,31 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
             }
         }
     } else {
-        let exif_data = if lower_path.ends_with(".webp") { parse_webp_exif(file_path) } else { parse_jpeg_exif(file_path) };
+        let exif_data = if lower_path.ends_with(".webp") {
+            parse_webp_exif(file_path)
+        } else {
+            parse_jpeg_exif(file_path)
+        };
 
         if let Some(desc) = exif_data.get("ImageDescription") {
-            raw_description = decode_metadata_string(desc).trim_end_matches('\0').to_string();
+            raw_description = decode_metadata_string(desc)
+                .trim_end_matches('\0')
+                .to_string();
         }
         if let Some(comment) = exif_data.get("UserComment") {
             let mut content = comment.as_slice();
             if content.starts_with(b"UNICODE\0") || content.starts_with(b"ASCII\0\0\0") {
                 content = &content[8..];
             }
-            raw_comment = decode_metadata_string(content).trim_end_matches('\0').trim().to_string();
+            raw_comment = decode_metadata_string(content)
+                .trim_end_matches('\0')
+                .trim()
+                .to_string();
         }
         if let Some(sw) = exif_data.get("Software") {
-            source = decode_metadata_string(sw).trim_end_matches('\0').to_string();
+            source = decode_metadata_string(sw)
+                .trim_end_matches('\0')
+                .to_string();
         }
     }
 
@@ -1107,8 +1296,9 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
                 let mut brace_count = 0;
                 let mut valid_end = None;
                 for (i, c) in s[start..].char_indices() {
-                    if c == '{' { brace_count += 1; }
-                    else if c == '}' {
+                    if c == '{' {
+                        brace_count += 1;
+                    } else if c == '}' {
                         brace_count -= 1;
                         if brace_count == 0 {
                             valid_end = Some(start + i);
@@ -1129,88 +1319,125 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
 
     if let Some(json_text) = extracted_json_text {
         if let Ok(mut comment_obj) = serde_json::from_str::<serde_json::Value>(&json_text) {
-                let mut json_source = None;
+            let mut json_source = None;
 
-                // WebP等の二重エンコードJSON対応
-                if let Some(inner_str) = comment_obj.get("Comment").and_then(|v| v.as_str()) {
-                    if let Ok(inner_obj) = serde_json::from_str::<serde_json::Value>(inner_str) {
-                        if let Some(p) = comment_obj.get("Description").and_then(|v| v.as_str()) { prompt = p.to_string(); }
-                        else if let Some(p) = inner_obj.get("prompt").and_then(|v| v.as_str()) { prompt = p.to_string(); }
-                        if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) { json_source = Some(s.to_string()); }
-
-                        if let serde_json::Value::Object(ref mut map) = comment_obj {
-                            if let serde_json::Value::Object(inner_map) = inner_obj {
-                                for (k, v) in inner_map { map.insert(k, v); }
-                            }
-                            map.remove("Comment");
-                            map.remove("Description");
-                        }
+            // WebP等の二重エンコードJSON対応
+            if let Some(inner_str) = comment_obj.get("Comment").and_then(|v| v.as_str()) {
+                if let Ok(inner_obj) = serde_json::from_str::<serde_json::Value>(inner_str) {
+                    if let Some(p) = comment_obj.get("Description").and_then(|v| v.as_str()) {
+                        prompt = p.to_string();
+                    } else if let Some(p) = inner_obj.get("prompt").and_then(|v| v.as_str()) {
+                        prompt = p.to_string();
                     }
-                }
-
-                // 通常のJSON直下のSourceも取得
-                if json_source.is_none() {
                     if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) {
                         json_source = Some(s.to_string());
                     }
-                }
 
-                // 「NovelAI Diffusion V4.5 ...」のようなSoftwareの文字列を優先し、
-                // 空の場合のみJSON内のSourceをフォールバックとして使用する
-                if source.is_empty() {
-                    if let Some(s) = json_source {
-                        source = s;
+                    if let serde_json::Value::Object(ref mut map) = comment_obj {
+                        if let serde_json::Value::Object(inner_map) = inner_obj {
+                            for (k, v) in inner_map {
+                                map.insert(k, v);
+                            }
+                        }
+                        map.remove("Comment");
+                        map.remove("Description");
                     }
                 }
+            }
 
-                if let Some(uc) = comment_obj.get("uc").and_then(|v| v.as_str()) { negative_prompt = uc.to_string(); }
-                if prompt.is_empty() {
-                    if let Some(p) = comment_obj.get("prompt").and_then(|v| v.as_str()) {
-                        prompt = p.to_string();
-                        if let serde_json::Value::Object(ref mut map) = comment_obj { map.remove("prompt"); }
+            // 通常のJSON直下のSourceも取得
+            if json_source.is_none() {
+                if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) {
+                    json_source = Some(s.to_string());
+                }
+            }
+
+            // 「NovelAI Diffusion V4.5 ...」のようなSoftwareの文字列を優先し、
+            // 空の場合のみJSON内のSourceをフォールバックとして使用する
+            if source.is_empty() {
+                if let Some(s) = json_source {
+                    source = s;
+                }
+            }
+
+            if let Some(uc) = comment_obj.get("uc").and_then(|v| v.as_str()) {
+                negative_prompt = uc.to_string();
+            }
+            if prompt.is_empty() {
+                if let Some(p) = comment_obj.get("prompt").and_then(|v| v.as_str()) {
+                    prompt = p.to_string();
+                    if let serde_json::Value::Object(ref mut map) = comment_obj {
+                        map.remove("prompt");
                     }
                 }
+            }
 
-                // NovelAI V4プロンプト対応
-                if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
-                    if let Some(char_captions) = v4_prompt.pointer("/caption/char_captions").and_then(|v| v.as_array()) {
-                        let mut char_prompts_arr = Vec::new();
-                        let ucs = comment_obj.pointer("/v4_negative_prompt/caption/char_captions").and_then(|v| v.as_array());
+            // NovelAI V4プロンプト対応
+            if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
+                if let Some(char_captions) = v4_prompt
+                    .pointer("/caption/char_captions")
+                    .and_then(|v| v.as_array())
+                {
+                    let mut char_prompts_arr = Vec::new();
+                    let ucs = comment_obj
+                        .pointer("/v4_negative_prompt/caption/char_captions")
+                        .and_then(|v| v.as_array());
 
-                        for (i, p) in char_captions.iter().enumerate() {
-                            let mut char_obj = serde_json::Map::new();
-                            if let Some(cap) = p.get("char_caption").and_then(|v| v.as_str()) { char_obj.insert("prompt".to_string(), serde_json::Value::String(cap.to_string())); }
-                            if let Some(uc_arr) = ucs {
-                                if let Some(uc_item) = uc_arr.get(i) {
-                                    if let Some(uc_cap) = uc_item.get("char_caption").and_then(|v| v.as_str()) { char_obj.insert("uc".to_string(), serde_json::Value::String(uc_cap.to_string())); }
+                    for (i, p) in char_captions.iter().enumerate() {
+                        let mut char_obj = serde_json::Map::new();
+                        if let Some(cap) = p.get("char_caption").and_then(|v| v.as_str()) {
+                            char_obj.insert(
+                                "prompt".to_string(),
+                                serde_json::Value::String(cap.to_string()),
+                            );
+                        }
+                        if let Some(uc_arr) = ucs {
+                            if let Some(uc_item) = uc_arr.get(i) {
+                                if let Some(uc_cap) =
+                                    uc_item.get("char_caption").and_then(|v| v.as_str())
+                                {
+                                    char_obj.insert(
+                                        "uc".to_string(),
+                                        serde_json::Value::String(uc_cap.to_string()),
+                                    );
                                 }
                             }
-                            char_prompts_arr.push(serde_json::Value::Object(char_obj));
                         }
+                        char_prompts_arr.push(serde_json::Value::Object(char_obj));
+                    }
 
-                        if let serde_json::Value::Object(ref mut map) = comment_obj {
-                            map.insert("characterPrompts".to_string(), serde_json::Value::Array(char_prompts_arr));
-                            map.remove("v4_prompt");
-                            map.remove("v4_negative_prompt");
-                        }
+                    if let serde_json::Value::Object(ref mut map) = comment_obj {
+                        map.insert(
+                            "characterPrompts".to_string(),
+                            serde_json::Value::Array(char_prompts_arr),
+                        );
+                        map.remove("v4_prompt");
+                        map.remove("v4_negative_prompt");
                     }
                 }
-                params = comment_obj;
             }
+            params = comment_obj;
         }
+    }
 
     // フォールバック処理 (A1111形式など)
     if params.as_object().map_or(true, |m| m.is_empty()) {
         if !raw_parameters.is_empty() {
             let mut map = serde_json::Map::new();
-            map.insert("rawParameters".to_string(), serde_json::Value::String(raw_parameters.clone()));
+            map.insert(
+                "rawParameters".to_string(),
+                serde_json::Value::String(raw_parameters.clone()),
+            );
             params = serde_json::Value::Object(map);
             if prompt.is_empty() {
                 prompt = raw_parameters; // 検索用プロンプトとして代入
             }
         } else if comment_string.contains("Steps: ") {
             let mut map = serde_json::Map::new();
-            map.insert("rawParameters".to_string(), serde_json::Value::String(comment_string.to_string()));
+            map.insert(
+                "rawParameters".to_string(),
+                serde_json::Value::String(comment_string.to_string()),
+            );
             params = serde_json::Value::Object(map);
             if prompt.is_empty() {
                 prompt = comment_string.to_string(); // 検索用プロンプトとして代入
@@ -1222,10 +1449,21 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
         }
     }
 
-    let meta = FullMetadata { path: file_path.to_string(), prompt, negative_prompt, width, height, params, source };
+    let meta = FullMetadata {
+        path: file_path.to_string(),
+        prompt,
+        negative_prompt,
+        width,
+        height,
+        params,
+        source,
+    };
 
     if let Ok(json_str) = serde_json::to_string(&meta) {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         if let Ok(conn) = db_conn.lock() {
             let _ = conn.execute(
                 "INSERT INTO cache (hash_key, metadata, width, height, path, last_accessed) VALUES (?, ?, ?, ?, ?, ?)
@@ -1242,21 +1480,31 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
     let mut chunks = std::collections::HashMap::new();
     if let Ok(mut f) = std::fs::File::open(path) {
         let mut sig = [0; 8];
-        if f.read_exact(&mut sig).is_err() || sig != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        if f.read_exact(&mut sig).is_err()
+            || sig != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+        {
             return chunks;
         }
         loop {
             let mut len_bytes = [0; 4];
-            if f.read_exact(&mut len_bytes).is_err() { break; }
+            if f.read_exact(&mut len_bytes).is_err() {
+                break;
+            }
             let len = u32::from_be_bytes(len_bytes) as usize;
-            if len > 100_000_000 { break; } // 安全のための上限
+            if len > 100_000_000 {
+                break;
+            } // 安全のための上限
 
             let mut chunk_type = [0; 4];
-            if f.read_exact(&mut chunk_type).is_err() { break; }
+            if f.read_exact(&mut chunk_type).is_err() {
+                break;
+            }
 
             if &chunk_type == b"tEXt" {
                 let mut data = vec![0; len];
-                if f.read_exact(&mut data).is_err() { break; }
+                if f.read_exact(&mut data).is_err() {
+                    break;
+                }
                 if let Some(null_idx) = data.iter().position(|&b| b == 0) {
                     let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
                     let text = String::from_utf8_lossy(&data[null_idx + 1..]).to_string();
@@ -1264,7 +1512,9 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
                 }
             } else if &chunk_type == b"iTXt" {
                 let mut data = vec![0; len];
-                if f.read_exact(&mut data).is_err() { break; }
+                if f.read_exact(&mut data).is_err() {
+                    break;
+                }
                 if let Some(null_idx) = data.iter().position(|&b| b == 0) {
                     let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
                     let mut offset = null_idx + 1;
@@ -1294,12 +1544,16 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
             } else {
                 // Skip the data for non-text chunks to avoid massive memory allocation and I/O
                 use std::io::{Seek, SeekFrom};
-                if f.seek(SeekFrom::Current(len as i64)).is_err() { break; }
+                if f.seek(SeekFrom::Current(len as i64)).is_err() {
+                    break;
+                }
             }
-            
+
             // Read 4 bytes for CRC to advance the file pointer to the next chunk
             let mut crc = [0; 4];
-            if f.read_exact(&mut crc).is_err() { break; }
+            if f.read_exact(&mut crc).is_err() {
+                break;
+            }
         }
     }
     chunks
@@ -1307,7 +1561,9 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
 
 fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>> {
     let mut results = std::collections::HashMap::new();
-    if exif_data.len() < 8 { return results; }
+    if exif_data.len() < 8 {
+        return results;
+    }
 
     let is_little = match &exif_data[0..2] {
         b"II" => true,
@@ -1316,53 +1572,89 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
     };
 
     let read_u16 = |buf: &[u8], o: usize| -> u16 {
-        if o + 2 > buf.len() { return 0; }
-        let b: [u8; 2] = buf[o..o+2].try_into().unwrap_or_default();
-        if is_little { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+        if o + 2 > buf.len() {
+            return 0;
+        }
+        let b: [u8; 2] = buf[o..o + 2].try_into().unwrap_or_default();
+        if is_little {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
     };
     let read_u32 = |buf: &[u8], o: usize| -> u32 {
-        if o + 4 > buf.len() { return 0; }
-        let b: [u8; 4] = buf[o..o+4].try_into().unwrap_or_default();
-        if is_little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+        if o + 4 > buf.len() {
+            return 0;
+        }
+        let b: [u8; 4] = buf[o..o + 4].try_into().unwrap_or_default();
+        if is_little {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
     };
 
-    if read_u16(exif_data, 2) != 0x002A { return results; }
+    if read_u16(exif_data, 2) != 0x002A {
+        return results;
+    }
     let mut ifds_to_visit = vec![read_u32(exif_data, 4) as usize];
     let mut visited = 0;
 
     while let Some(ifd_offset) = ifds_to_visit.pop() {
-        if visited > 10 || ifd_offset + 2 > exif_data.len() { break; } // 無限ループ防止
+        if visited > 10 || ifd_offset + 2 > exif_data.len() {
+            break;
+        } // 無限ループ防止
         visited += 1;
 
         let entry_count = read_u16(exif_data, ifd_offset);
         let mut ptr = ifd_offset + 2;
 
         for _ in 0..entry_count {
-            if ptr + 12 > exif_data.len() { break; }
+            if ptr + 12 > exif_data.len() {
+                break;
+            }
             let tag = read_u16(exif_data, ptr);
             let typ = read_u16(exif_data, ptr + 2);
             let count = read_u32(exif_data, ptr + 4) as usize;
             let value_offset = ptr + 8;
 
-            let bytes_per_comp = match typ { 1|2|6|7 => 1, 3|8 => 2, 4|9|11 => 4, 5|10|12 => 8, _ => 0 };
+            let bytes_per_comp = match typ {
+                1 | 2 | 6 | 7 => 1,
+                3 | 8 => 2,
+                4 | 9 | 11 => 4,
+                5 | 10 | 12 => 8,
+                _ => 0,
+            };
             let byte_count = bytes_per_comp * count;
 
             let data = if byte_count <= 4 {
-                &exif_data[value_offset..value_offset+4]
+                &exif_data[value_offset..value_offset + 4]
             } else {
                 let off = read_u32(exif_data, value_offset) as usize;
-                if off + byte_count <= exif_data.len() { &exif_data[off..off+byte_count] } else { &[] }
+                if off + byte_count <= exif_data.len() {
+                    &exif_data[off..off + byte_count]
+                } else {
+                    &[]
+                }
             };
 
             if !data.is_empty() {
-                if tag == 0x010E && typ == 2 { // ImageDescription
+                if tag == 0x010E && typ == 2 {
+                    // ImageDescription
                     results.insert("ImageDescription".to_string(), data[..byte_count].to_vec());
-                } else if tag == 0x9286 && typ == 7 { // UserComment
+                } else if tag == 0x9286 && typ == 7 {
+                    // UserComment
                     results.insert("UserComment".to_string(), data[..byte_count].to_vec());
-                } else if tag == 0x0131 && typ == 2 { // Software
+                } else if tag == 0x0131 && typ == 2 {
+                    // Software
                     results.insert("Software".to_string(), data[..byte_count].to_vec());
-                } else if tag == 0x8769 && typ == 4 { // ExifOffset
-                    let sub_ifd = if byte_count <= 4 { read_u32(exif_data, value_offset) } else { read_u32(exif_data, read_u32(exif_data, value_offset) as usize) } as usize;
+                } else if tag == 0x8769 && typ == 4 {
+                    // ExifOffset
+                    let sub_ifd = if byte_count <= 4 {
+                        read_u32(exif_data, value_offset)
+                    } else {
+                        read_u32(exif_data, read_u32(exif_data, value_offset) as usize)
+                    } as usize;
                     ifds_to_visit.push(sub_ifd);
                 }
             }
@@ -1373,12 +1665,12 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
 }
 
 fn extract_stealth_pnginfo(path: &str) -> Option<String> {
-    use image::GenericImageView;
     use flate2::read::GzDecoder;
+    use image::GenericImageView;
     use std::io::Read;
 
     let img = image::open(path).ok()?;
-    
+
     // アルファチャンネルの最下位ビットを抽出（Column-Major Order: x -> y）
     let mut bits = Vec::new();
     for x in 0..img.width() {
@@ -1407,7 +1699,7 @@ fn extract_stealth_pnginfo(path: &str) -> Option<String> {
         // stealth_pngcomp の場合、15〜19バイト目にビッグエンディアンで長さが入る
         let len_bytes: [u8; 4] = bytes[15..19].try_into().ok()?;
         let length = u32::from_be_bytes(len_bytes) as usize;
-        
+
         if 19 + length <= bytes.len() {
             let payload = &bytes[19..19 + length];
             let mut decoder = GzDecoder::new(payload);
@@ -1420,7 +1712,7 @@ fn extract_stealth_pnginfo(path: &str) -> Option<String> {
         // 非圧縮のstealth_pnginfo（念のためのフォールバック）
         let len_bytes: [u8; 4] = bytes[15..19].try_into().ok()?;
         let length = u32::from_be_bytes(len_bytes) as usize;
-        
+
         if 19 + length <= bytes.len() {
             let payload = &bytes[19..19 + length];
             if let Ok(text) = String::from_utf8(payload.to_vec()) {
@@ -1440,16 +1732,24 @@ fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
             if buffer.len() >= 12 && &buffer[0..4] == b"RIFF" && &buffer[8..12] == b"WEBP" {
                 let mut offset = 12;
                 while offset + 8 <= buffer.len() {
-                    let chunk_id = &buffer[offset..offset+4];
-                    let chunk_size = u32::from_le_bytes(buffer[offset+4..offset+8].try_into().unwrap_or_default()) as usize;
+                    let chunk_id = &buffer[offset..offset + 4];
+                    let chunk_size = u32::from_le_bytes(
+                        buffer[offset + 4..offset + 8]
+                            .try_into()
+                            .unwrap_or_default(),
+                    ) as usize;
                     let data_offset = offset + 8;
                     if chunk_id == b"EXIF" && data_offset + chunk_size <= buffer.len() {
-                        let mut exif_data = &buffer[data_offset..data_offset+chunk_size];
-                        if exif_data.len() >= 6 && &exif_data[0..4] == b"Exif" { exif_data = &exif_data[6..]; }
+                        let mut exif_data = &buffer[data_offset..data_offset + chunk_size];
+                        if exif_data.len() >= 6 && &exif_data[0..4] == b"Exif" {
+                            exif_data = &exif_data[6..];
+                        }
                         results.extend(parse_tiff_ifd(exif_data));
                     }
                     offset = data_offset + chunk_size;
-                    if chunk_size % 2 != 0 { offset += 1; }
+                    if chunk_size % 2 != 0 {
+                        offset += 1;
+                    }
                 }
             }
         }
@@ -1465,11 +1765,17 @@ fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
             if buffer.len() >= 2 && buffer[0] == 0xFF && buffer[1] == 0xD8 {
                 let mut offset = 2;
                 while offset + 4 <= buffer.len() {
-                    if buffer[offset] != 0xFF { break; }
-                    let marker = buffer[offset+1];
-                    let length = u16::from_be_bytes(buffer[offset+2..offset+4].try_into().unwrap_or_default()) as usize;
+                    if buffer[offset] != 0xFF {
+                        break;
+                    }
+                    let marker = buffer[offset + 1];
+                    let length = u16::from_be_bytes(
+                        buffer[offset + 2..offset + 4]
+                            .try_into()
+                            .unwrap_or_default(),
+                    ) as usize;
                     if marker == 0xE1 && offset + 2 + length <= buffer.len() {
-                        let app1_data = &buffer[offset+4..offset+2+length];
+                        let app1_data = &buffer[offset + 4..offset + 2 + length];
                         if app1_data.len() >= 6 && &app1_data[0..4] == b"Exif" {
                             results.extend(parse_tiff_ifd(&app1_data[6..]));
                         }
@@ -1497,11 +1803,16 @@ async fn check_conflicts(paths: Vec<String>, dest_dir: String) -> Result<Vec<Str
             }
         }
         conflicts
-    }).await.unwrap_or_default())
+    })
+    .await
+    .unwrap_or_default())
 }
 
 #[tauri::command]
-async fn parse_metadata(state: tauri::State<'_, AppState>, file_path: String) -> Result<ParseMetadataResult, String> {
+async fn parse_metadata(
+    state: tauri::State<'_, AppState>,
+    file_path: String,
+) -> Result<ParseMetadataResult, String> {
     let db_conn_clone = state.db_conn.clone();
     Ok(tokio::task::spawn_blocking(move || {
         let full_meta = get_full_metadata_for_path(&file_path, &db_conn_clone);
@@ -1513,7 +1824,9 @@ async fn parse_metadata(state: tauri::State<'_, AppState>, file_path: String) ->
             params: full_meta.params,
             source: full_meta.source,
         }
-    }).await.unwrap_or_else(|_| ParseMetadataResult {
+    })
+    .await
+    .unwrap_or_else(|_| ParseMetadataResult {
         prompt: String::new(),
         negative_prompt: String::new(),
         width: 0,
@@ -1617,25 +1930,32 @@ async fn open_viewer(
 
     let data_dir = get_veloce_data_dir().unwrap_or_default();
 
-    tauri::WindowBuilder::new(&app, label, tauri::WindowUrl::App(format!("/viewer.html?index={}", current_index).into()))
-        .title("Veloce Viewer")
-        .inner_size(win_width as f64, win_height as f64)
-        .data_directory(data_dir)
-        .decorations(false)
-        .visible(false)
-        .build()
-        .map_err(|e| e.to_string())?;
+    tauri::WindowBuilder::new(
+        &app,
+        label,
+        tauri::WindowUrl::App(format!("/viewer.html?index={}", current_index).into()),
+    )
+    .title("Veloce Viewer")
+    .inner_size(win_width as f64, win_height as f64)
+    .data_directory(data_dir)
+    .decorations(false)
+    .visible(false)
+    .build()
+    .map_err(|e| e.to_string())?;
 
     Ok(())
 }
-
-
 
 #[tauri::command]
 fn update_smart_folders(rules: Vec<SmartFolderRule>, state: tauri::State<'_, AppState>) {
     println!("Received smart folders update: {} rules", rules.len());
     for rule in &rules {
-        println!("Rule ID: {}, match_type: {}, conditions: {}", rule.id, rule.match_type, rule.conditions.len());
+        println!(
+            "Rule ID: {}, match_type: {}, conditions: {}",
+            rule.id,
+            rule.match_type,
+            rule.conditions.len()
+        );
     }
     if let Ok(mut lock) = state.smart_folders.lock() {
         *lock = rules;
@@ -1651,7 +1971,10 @@ fn show_window(window: tauri::Window) {
 // --- サムネイル生成コマンド ---
 
 #[tauri::command]
-async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> Result<String, String> {
+async fn get_thumbnail(
+    state: tauri::State<'_, AppState>,
+    file_path: String,
+) -> Result<String, String> {
     // フォルダ移動済みの場合は無駄な処理（画像読み込み・リサイズ）をスキップする
     if let Ok(current_dir) = state.current_dir.lock() {
         if !current_dir.starts_with("smart://") {
@@ -1659,10 +1982,16 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
                 .parent()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
-            
+
             if !current_dir.is_empty() {
-                let current_trim = current_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
-                let parent_trim = parent_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
+                let current_trim = current_dir
+                    .replace("\\\\?\\", "")
+                    .trim_end_matches(&['/', '\\'][..])
+                    .to_lowercase();
+                let parent_trim = parent_dir
+                    .replace("\\\\?\\", "")
+                    .trim_end_matches(&['/', '\\'][..])
+                    .to_lowercase();
                 if current_trim != parent_trim {
                     return Err("Cancelled".to_string());
                 }
@@ -1670,11 +1999,12 @@ async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> 
         }
     }
 
-
-
     let semaphore = state.thumbnail_semaphore.clone();
     let db_conn_clone = state.db_conn.clone();
-    let _permit = semaphore.acquire_owned().await.map_err(|_| "Semaphore closed".to_string())?;
+    let _permit = semaphore
+        .acquire_owned()
+        .await
+        .map_err(|_| "Semaphore closed".to_string())?;
 
     tokio::task::spawn_blocking(move || {
         let mtime = std::fs::metadata(&file_path)
@@ -1885,7 +2215,9 @@ fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
         .collect();
 
     let count = viewers.len();
-    if count == 0 { return; }
+    if count == 0 {
+        return;
+    }
 
     viewers.sort_by_key(|w| w.label().to_string());
 
@@ -1903,9 +2235,13 @@ fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
                 let y = position.y;
 
                 let _ = window.unmaximize();
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: target_width, height: target_height }));
-                let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
-                
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                    width: target_width,
+                    height: target_height,
+                }));
+                let _ =
+                    window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+
                 let _ = window.set_always_on_top(false);
                 let _ = window.set_always_on_top(true);
                 let _ = window.set_focus();
@@ -1923,7 +2259,9 @@ fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 unsafe {
-                    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE};
+                    use windows::Win32::UI::WindowsAndMessaging::{
+                        SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,
+                    };
                     let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                     let _ = SetForegroundWindow(hwnd);
                 }
@@ -1944,7 +2282,10 @@ fn collect_cache_paths_to_remove(target_path: &std::path::Path) -> Vec<std::path
         if target_path.is_file() {
             collect_single_file_cache(target_path, &mut cache_dir, &mut cache_paths);
         } else if target_path.is_dir() {
-            for entry in walkdir::WalkDir::new(target_path).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(target_path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 if entry.path().is_file() {
                     collect_single_file_cache(entry.path(), &mut cache_dir, &mut cache_paths);
                 }
@@ -1954,9 +2295,14 @@ fn collect_cache_paths_to_remove(target_path: &std::path::Path) -> Vec<std::path
     cache_paths
 }
 
-fn collect_single_file_cache(path: &std::path::Path, cache_dir: &mut std::path::PathBuf, cache_paths: &mut Vec<std::path::PathBuf>) {
+fn collect_single_file_cache(
+    path: &std::path::Path,
+    cache_dir: &mut std::path::PathBuf,
+    cache_paths: &mut Vec<std::path::PathBuf>,
+) {
     if let Ok(metadata) = std::fs::metadata(path) {
-        let mtime = metadata.modified()
+        let mtime = metadata
+            .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64)
@@ -1969,7 +2315,7 @@ fn collect_single_file_cache(path: &std::path::Path, cache_dir: &mut std::path::
         cache_dir.push("Thumbnails");
         cache_paths.push(cache_dir.join(format!("{:016x}.jpg", digest)));
         cache_dir.pop();
-        
+
         cache_dir.push("Metadata");
         cache_paths.push(cache_dir.join(format!("{:016x}.json", digest)));
         cache_dir.pop();
@@ -1983,7 +2329,10 @@ fn remove_collected_caches(cache_paths: Vec<std::path::PathBuf>) {
 }
 
 #[tauri::command]
-fn get_files_by_indices(state: tauri::State<'_, AppState>, indices: Vec<usize>) -> Result<Vec<ImageFile>, String> {
+fn get_files_by_indices(
+    state: tauri::State<'_, AppState>,
+    indices: Vec<usize>,
+) -> Result<Vec<ImageFile>, String> {
     let lock = state.filtered_files.lock().unwrap();
     let mut files = Vec::with_capacity(indices.len());
     for idx in indices {
@@ -1995,12 +2344,15 @@ fn get_files_by_indices(state: tauri::State<'_, AppState>, indices: Vec<usize>) 
 }
 
 #[tauri::command]
-async fn clear_metadata_cache(state: tauri::State<'_, AppState>, file_paths: Vec<String>) -> Result<Vec<String>, String> {
+async fn clear_metadata_cache(
+    state: tauri::State<'_, AppState>,
+    file_paths: Vec<String>,
+) -> Result<Vec<String>, String> {
     let db_conn_clone = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
         let mut messages = Vec::new();
         let conn = db_conn_clone.lock().unwrap();
-        
+
         for file_path in file_paths {
             let mtime = std::fs::metadata(&file_path)
                 .and_then(|m| m.modified())
@@ -2008,19 +2360,26 @@ async fn clear_metadata_cache(state: tauri::State<'_, AppState>, file_paths: Vec
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
-            
+
             let clean_path = file_path.replace("\\\\?\\", "");
-            let digest_raw = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
-            let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-            
+            let digest_raw =
+                xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+            let digest_clean =
+                xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+
             let hash_key_raw = format!("{:016x}", digest_raw);
             let hash_key_clean = format!("{:016x}", digest_clean);
-            
-            let _ = conn.execute("DELETE FROM cache WHERE hash_key IN (?, ?)", rusqlite::params![&hash_key_raw, &hash_key_clean]);
+
+            let _ = conn.execute(
+                "DELETE FROM cache WHERE hash_key IN (?, ?)",
+                rusqlite::params![&hash_key_raw, &hash_key_clean],
+            );
             messages.push(format!("Cleared cache for {}", file_path));
         }
         Ok(messages)
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2035,7 +2394,9 @@ async fn trash_file(file_path: String) -> Result<bool, String> {
         } else {
             false
         }
-    }).await.unwrap_or(false))
+    })
+    .await
+    .unwrap_or(false))
 }
 
 #[tauri::command]
@@ -2047,11 +2408,25 @@ async fn trash_folder(folder_path: String) -> Result<FolderOperationResult, Stri
         match trash::delete(&folder_path) {
             Ok(_) => {
                 remove_collected_caches(cache_paths);
-                FolderOperationResult { success: true, path: None, error: None }
+                FolderOperationResult {
+                    success: true,
+                    path: None,
+                    error: None,
+                }
+            }
+            Err(e) => FolderOperationResult {
+                success: false,
+                path: None,
+                error: Some(e.to_string()),
             },
-            Err(e) => FolderOperationResult { success: false, path: None, error: Some(e.to_string()) },
         }
-    }).await.unwrap_or_else(|e| FolderOperationResult { success: false, path: None, error: Some(e.to_string()) }))
+    })
+    .await
+    .unwrap_or_else(|e| FolderOperationResult {
+        success: false,
+        path: None,
+        error: Some(e.to_string()),
+    }))
 }
 
 #[tauri::command]
@@ -2070,7 +2445,9 @@ async fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
                 let _ = clipboard.set_image(image_data);
             }
         }
-    }).await.unwrap_or(());
+    })
+    .await
+    .unwrap_or(());
     Ok(())
 }
 
@@ -2120,10 +2497,12 @@ async fn rename_file(old_path: String, new_name: String) -> Result<String, Strin
             Ok(_) => {
                 remove_collected_caches(cache_paths);
                 Ok(new_path.to_string_lossy().to_string())
-            },
+            }
             Err(e) => Err(e.to_string()),
         }
-    }).await.unwrap_or_else(|e| Err(e.to_string()))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2147,10 +2526,12 @@ async fn rename_folder(old_path: String, new_name: String) -> Result<String, Str
             Ok(_) => {
                 remove_collected_caches(cache_paths);
                 Ok(new_path.to_string_lossy().to_string())
-            },
+            }
             Err(e) => Err(e.to_string()),
         }
-    }).await.unwrap_or_else(|e| Err(e.to_string()))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2183,7 +2564,7 @@ async fn clear_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
         let conn = db_conn_clone.lock().unwrap();
         let _ = conn.execute("DELETE FROM cache", []);
         let _ = conn.execute("VACUUM", []); // ファイルサイズを切り詰める
-        
+
         // 既存の古いファイルベースのキャッシュも念のため削除
         if let Some(mut path) = get_veloce_data_dir() {
             // Clear Thumbnails
@@ -2195,7 +2576,7 @@ async fn clear_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
                     }
                 }
             }
-            
+
             // Clear Metadata
             path.pop();
             path.push("Metadata");
@@ -2210,7 +2591,9 @@ async fn clear_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
         } else {
             Err("Could not resolve local data directory".to_string())
         }
-    }).await.unwrap_or_else(|e| Err(e.to_string()))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2219,7 +2602,7 @@ fn open_in_explorer(path: String) -> Result<(), String> {
     if !path_obj.exists() {
         return Err("Path does not exist".to_string());
     }
-    
+
     #[cfg(target_os = "windows")]
     let _ = std::process::Command::new("explorer").arg(path).spawn();
 
@@ -2292,7 +2675,9 @@ async fn get_cache_info() -> CacheInfo {
             file_count,
             total_size_bytes,
         }
-    }).await.unwrap_or(CacheInfo {
+    })
+    .await
+    .unwrap_or(CacheInfo {
         path: String::new(),
         file_count: 0,
         total_size_bytes: 0,
@@ -2301,25 +2686,30 @@ async fn get_cache_info() -> CacheInfo {
 
 fn main() {
     let mut context = tauri::generate_context!();
-    
+
     // tauri.conf.json で定義されているメインウィンドウの設定を退避させて、自動生成をキャンセルする
     let window_configs = context.config_mut().tauri.windows.clone();
     context.config_mut().tauri.windows.clear();
 
     tauri::Builder::default()
-        .manage(AppState { 
+        .manage(AppState {
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
             all_files: Mutex::new(Vec::new()),
             filtered_files: Mutex::new(Vec::new()),
-            sort_config: Mutex::new(SortConfig { key: "name".to_string(), asc: true }),
+            sort_config: Mutex::new(SortConfig {
+                key: "name".to_string(),
+                asc: true,
+            }),
             search_query: Mutex::new(String::new()),
             ratings: Mutex::new(std::collections::HashMap::new()),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
             thumbnail_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-            db_conn: std::sync::Arc::new(Mutex::new(init_db().expect("Failed to initialize SQLite database"))),
+            db_conn: std::sync::Arc::new(Mutex::new(
+                init_db().expect("Failed to initialize SQLite database"),
+            )),
             smart_folders: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
@@ -2340,11 +2730,13 @@ fn main() {
                     if let Ok(entries) = std::fs::read_dir(&cache_dir) {
                         let thirty_days_in_secs = 30 * 24 * 60 * 60;
                         let now = std::time::SystemTime::now();
-                        
+
                         for entry in entries.filter_map(Result::ok) {
                             if let Ok(metadata) = entry.metadata() {
                                 // 最終アクセス日時（取得できなければ更新日時）が30日以上前のファイルを削除
-                                let target_time = metadata.accessed().unwrap_or_else(|_| metadata.modified().unwrap_or(now));
+                                let target_time = metadata
+                                    .accessed()
+                                    .unwrap_or_else(|_| metadata.modified().unwrap_or(now));
                                 if let Ok(duration) = now.duration_since(target_time) {
                                     if duration.as_secs() > thirty_days_in_secs {
                                         let _ = std::fs::remove_file(entry.path());
@@ -2361,12 +2753,14 @@ fn main() {
             let app_handle = app.handle();
             std::thread::spawn(move || {
                 let mut last_dir = String::new();
-                let mut known_files: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
-                let mut known_folders: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let mut known_files: std::collections::HashMap<String, (u64, u64)> =
+                    std::collections::HashMap::new();
+                let mut known_folders: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
 
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(1500));
-                    
+
                     let current_dir = {
                         let state = app_handle.state::<AppState>();
                         let dir = if let Ok(dir_lock) = state.current_dir.lock() {
@@ -2389,18 +2783,31 @@ fn main() {
                         last_dir = current_dir.clone();
                         known_files.clear();
                         known_folders.clear();
-                        
+
                         if let Ok(entries) = std::fs::read_dir(&current_dir) {
                             for entry in entries.filter_map(Result::ok) {
                                 let p = entry.path();
                                 if p.is_file() {
                                     if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                                         let ext_lower = ext.to_lowercase();
-                                        if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                                        if matches!(
+                                            ext_lower.as_str(),
+                                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+                                        ) {
                                             if let Ok(meta) = entry.metadata() {
                                                 let size = meta.len();
-                                                let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                                known_files.insert(p.to_string_lossy().to_string(), (size, mtime));
+                                                let mtime = meta
+                                                    .modified()
+                                                    .ok()
+                                                    .and_then(|t| {
+                                                        t.duration_since(std::time::UNIX_EPOCH).ok()
+                                                    })
+                                                    .map(|d| d.as_millis() as u64)
+                                                    .unwrap_or(0);
+                                                known_files.insert(
+                                                    p.to_string_lossy().to_string(),
+                                                    (size, mtime),
+                                                );
                                             }
                                         }
                                     }
@@ -2422,8 +2829,10 @@ fn main() {
                         continue;
                     }
 
-                    let mut current_files: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
-                    let mut current_folders: std::collections::HashSet<String> = std::collections::HashSet::new();
+                    let mut current_files: std::collections::HashMap<String, (u64, u64)> =
+                        std::collections::HashMap::new();
+                    let mut current_folders: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
                     let mut folder_changed = false;
 
                     if let Ok(entries) = std::fs::read_dir(&current_dir) {
@@ -2432,25 +2841,92 @@ fn main() {
                             if p.is_file() {
                                 if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                                     let ext_lower = ext.to_lowercase();
-                                    if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                                    if matches!(
+                                        ext_lower.as_str(),
+                                        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+                                    ) {
                                         if let Ok(meta) = entry.metadata() {
                                             let size = meta.len();
-                                            let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                            let mtime = meta
+                                                .modified()
+                                                .ok()
+                                                .and_then(|t| {
+                                                    t.duration_since(std::time::UNIX_EPOCH).ok()
+                                                })
+                                                .map(|d| d.as_millis() as u64)
+                                                .unwrap_or(0);
                                             let path_str = p.to_string_lossy().to_string();
                                             current_files.insert(path_str.clone(), (size, mtime));
 
-                                            if let Some(&(old_size, old_mtime)) = known_files.get(&path_str) {
+                                            if let Some(&(old_size, old_mtime)) =
+                                                known_files.get(&path_str)
+                                            {
                                                 if old_size != size || old_mtime != mtime {
-                                                    let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                                    let file_name = entry.file_name().to_string_lossy().into_owned();
-                                                    let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false, search_text: String::new() };
-                                                    let _ = app_handle.emit_all("file-changed", img_file);
+                                                    let ctime = meta
+                                                        .created()
+                                                        .ok()
+                                                        .and_then(|t| {
+                                                            t.duration_since(std::time::UNIX_EPOCH)
+                                                                .ok()
+                                                        })
+                                                        .map(|d| d.as_millis() as u64)
+                                                        .unwrap_or(0);
+                                                    let file_name = entry
+                                                        .file_name()
+                                                        .to_string_lossy()
+                                                        .into_owned();
+                                                    let img_file = ImageFile {
+                                                        name: file_name,
+                                                        ext: format!(".{}", ext_lower),
+                                                        path: path_str.clone(),
+                                                        size,
+                                                        mtime,
+                                                        ctime,
+                                                        has_thumbnail_cache: false,
+                                                        has_metadata_cache: false,
+                                                        width: 0,
+                                                        height: 0,
+                                                        prompt: String::new(),
+                                                        negative_prompt: String::new(),
+                                                        source: String::new(),
+                                                        meta_loaded: false,
+                                                        search_text: String::new(),
+                                                    };
+                                                    let _ = app_handle
+                                                        .emit_all("file-changed", img_file);
                                                 }
                                             } else {
-                                                let ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                                let file_name = entry.file_name().to_string_lossy().into_owned();
-                                                let img_file = ImageFile { name: file_name, ext: format!(".{}", ext_lower), path: path_str.clone(), size, mtime, ctime, has_thumbnail_cache: false, has_metadata_cache: false, width: 0, height: 0, prompt: String::new(), negative_prompt: String::new(), source: String::new(), meta_loaded: false, search_text: String::new() };
-                                                let _ = app_handle.emit_all("file-changed", img_file);
+                                                let ctime = meta
+                                                    .created()
+                                                    .ok()
+                                                    .and_then(|t| {
+                                                        t.duration_since(std::time::UNIX_EPOCH).ok()
+                                                    })
+                                                    .map(|d| d.as_millis() as u64)
+                                                    .unwrap_or(0);
+                                                let file_name = entry
+                                                    .file_name()
+                                                    .to_string_lossy()
+                                                    .into_owned();
+                                                let img_file = ImageFile {
+                                                    name: file_name,
+                                                    ext: format!(".{}", ext_lower),
+                                                    path: path_str.clone(),
+                                                    size,
+                                                    mtime,
+                                                    ctime,
+                                                    has_thumbnail_cache: false,
+                                                    has_metadata_cache: false,
+                                                    width: 0,
+                                                    height: 0,
+                                                    prompt: String::new(),
+                                                    negative_prompt: String::new(),
+                                                    source: String::new(),
+                                                    meta_loaded: false,
+                                                    search_text: String::new(),
+                                                };
+                                                let _ =
+                                                    app_handle.emit_all("file-changed", img_file);
                                             }
                                         }
                                     }
@@ -2500,8 +2976,12 @@ fn main() {
                                 let cache_file_name = format!("{}_{}", path_str, mtime);
                                 let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
 
-                                let thumb_path = data_dir.join("Thumbnails").join(format!("{:016x}.jpg", digest));
-                                let meta_path = data_dir.join("Metadata").join(format!("{:016x}.json", digest));
+                                let thumb_path = data_dir
+                                    .join("Thumbnails")
+                                    .join(format!("{:016x}.jpg", digest));
+                                let meta_path = data_dir
+                                    .join("Metadata")
+                                    .join(format!("{:016x}.json", digest));
 
                                 let _ = std::fs::remove_file(thumb_path);
                                 let _ = std::fs::remove_file(meta_path);
@@ -2596,17 +3076,23 @@ mod tests {
     #[test]
     fn test_decode_metadata_string() {
         use super::decode_metadata_string;
-        
+
         // 1. UTF-8 (ASCII)
         let utf8_bytes = b"hair and eyes";
         assert_eq!(decode_metadata_string(utf8_bytes), "hair and eyes");
 
         // 2. UTF-16LE without BOM
-        let utf16_le_bytes: Vec<u8> = "hair".encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        let utf16_le_bytes: Vec<u8> = "hair"
+            .encode_utf16()
+            .flat_map(|c| c.to_le_bytes())
+            .collect();
         assert_eq!(decode_metadata_string(&utf16_le_bytes), "hair");
 
         // 3. UTF-16BE without BOM
-        let utf16_be_bytes: Vec<u8> = "hair".encode_utf16().flat_map(|c| c.to_be_bytes()).collect();
+        let utf16_be_bytes: Vec<u8> = "hair"
+            .encode_utf16()
+            .flat_map(|c| c.to_be_bytes())
+            .collect();
         assert_eq!(decode_metadata_string(&utf16_be_bytes), "hair");
 
         // 4. UTF-16LE with BOM
@@ -2632,24 +3118,24 @@ mod tests {
         });
 
         let extracted = extract_searchable_text(&data);
-        
+
         // 抽出されるべきテキストが含まれているか
         assert!(extracted.contains("1girl, hair"));
         assert!(extracted.contains("takao"));
         assert!(extracted.contains("20")); // 数値も文字列化される
-        
+
         // 画像データ(キーが reference_image 等)はスキップされるべき
         assert!(!extracted.contains("HUGE_BASE64_STRING"));
-        
+
         // キー名は抽出されないべき
         assert!(!extracted.contains("characterPrompts"));
     }
 
     #[test]
     fn test_fast_image_resize_logic() {
-        use std::num::NonZeroU32;
         use fast_image_resize as fr;
         use image::RgbaImage;
+        use std::num::NonZeroU32;
 
         // 1920x1080 のダミー画像を生成
         let width = 1920;
@@ -2675,15 +3161,13 @@ mod tests {
             src_height.get(),
             rgba_img.into_raw(),
             fr::PixelType::U8x4,
-        ).unwrap();
+        )
+        .unwrap();
 
         let dst_w_nz = NonZeroU32::new(dst_width).unwrap();
         let dst_h_nz = NonZeroU32::new(dst_height).unwrap();
-        let mut dst_image = fr::images::Image::new(
-            dst_w_nz.get(),
-            dst_h_nz.get(),
-            fr::PixelType::U8x4,
-        );
+        let mut dst_image =
+            fr::images::Image::new(dst_w_nz.get(), dst_h_nz.get(), fr::PixelType::U8x4);
 
         let mut resizer = fr::Resizer::new();
         resizer.resize(&src_image, &mut dst_image, None).unwrap();
@@ -2698,12 +3182,12 @@ mod tests {
         let clean_path = "D:\\Images\\test.jpg";
         let mtime = 1700000000000u64;
         let cache_file_name = format!("{}_{}", clean_path, mtime);
-        
+
         let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
         let digest_hex = format!("{:016x}", digest);
-        
+
         assert_eq!(digest_hex.len(), 16);
-        
+
         let thumb_key = format!("{}.jpg", digest_hex);
         let meta_key = format!("{}.json", digest_hex);
         assert!(thumb_key.ends_with(".jpg"));
@@ -2728,7 +3212,8 @@ mod tests {
                 last_accessed INTEGER
             )",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         let hash_key = "dummy_hash_123";
         let dummy_thumb = vec![0u8, 1, 2, 3];
@@ -2742,20 +3227,32 @@ mod tests {
         ).unwrap();
 
         // Query
-        let mut stmt = conn.prepare("SELECT thumbnail, metadata FROM cache WHERE hash_key = ?").unwrap();
-        let (thumb, meta): (Vec<u8>, String) = stmt.query_row([hash_key], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
-        
+        let mut stmt = conn
+            .prepare("SELECT thumbnail, metadata FROM cache WHERE hash_key = ?")
+            .unwrap();
+        let (thumb, meta): (Vec<u8>, String) = stmt
+            .query_row([hash_key], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap();
+
         assert_eq!(thumb, dummy_thumb);
         assert_eq!(meta, dummy_meta);
 
         // Delete
-        conn.execute("DELETE FROM cache WHERE hash_key = ?", rusqlite::params![hash_key]).unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0)).unwrap();
+        conn.execute(
+            "DELETE FROM cache WHERE hash_key = ?",
+            rusqlite::params![hash_key],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
     #[test]
     fn test_smart_folder_paths() {
-        let db_conn = std::sync::Arc::new(std::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
+        let db_conn = std::sync::Arc::new(std::sync::Mutex::new(
+            rusqlite::Connection::open_in_memory().unwrap(),
+        ));
         {
             let conn = db_conn.lock().unwrap();
             conn.execute(
@@ -2769,11 +3266,28 @@ mod tests {
                     last_accessed INTEGER
                 )",
                 [],
-            ).unwrap();
-            
+            )
+            .unwrap();
+
             // Insert a fake metadata json
-            let meta1 = super::FullMetadata { path: "C:\\fake\\path1.png".to_string(), prompt: "".to_string(), negative_prompt: "".to_string(), width: 0, height: 0, params: serde_json::Value::Null, source: "".to_string() };
-            let meta2 = super::FullMetadata { path: "C:\\fake\\path2.png".to_string(), prompt: "".to_string(), negative_prompt: "".to_string(), width: 0, height: 0, params: serde_json::Value::Null, source: "".to_string() };
+            let meta1 = super::FullMetadata {
+                path: "C:\\fake\\path1.png".to_string(),
+                prompt: "".to_string(),
+                negative_prompt: "".to_string(),
+                width: 0,
+                height: 0,
+                params: serde_json::Value::Null,
+                source: "".to_string(),
+            };
+            let meta2 = super::FullMetadata {
+                path: "C:\\fake\\path2.png".to_string(),
+                prompt: "".to_string(),
+                negative_prompt: "".to_string(),
+                width: 0,
+                height: 0,
+                params: serde_json::Value::Null,
+                source: "".to_string(),
+            };
             conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
                 rusqlite::params!["hash1", vec![0u8], serde_json::to_string(&meta1).unwrap(), 0, 0, meta1.path, 0]).unwrap();
             conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
@@ -2791,7 +3305,7 @@ mod tests {
 
         let fav4 = super::get_smart_folder_paths("smart://fav_4_plus", &ratings, &db_conn, &[]);
         assert_eq!(fav4.len(), 2);
-        
+
         let history = super::get_smart_folder_paths("smart://history", &ratings, &db_conn, &[]);
         assert_eq!(history.len(), 2);
         let history_paths: Vec<_> = history.iter().map(|p| p.to_str().unwrap()).collect();
