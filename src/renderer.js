@@ -4217,18 +4217,27 @@ window.addEventListener('DOMContentLoaded', async () => {
         option.classList.add('active');
       }
 
-      const fav = appState.favorites.find(f => f.path === tab.path);
+      let itemData = null;
+      if (appState.favorites) {
+        itemData = appState.favorites.find(f => f.path === tab.path);
+      }
+      if (!itemData && tab.path && tab.path.startsWith('smart://')) {
+        const id = tab.path.replace('smart://', '');
+        if (appState.smartFolders) {
+          itemData = appState.smartFolders.find(f => f.id === id);
+        }
+      }
+
       let iconHtml = '';
       let iconColor = '';
-      if (fav) {
-        const c = COLORS.find(c => c.id === (fav.color || 'default'));
-        const favColorHex = c ? c.hex : 'var(--glow-gold)';
-        iconColor = favColorHex;
+      if (itemData) {
+        const c = COLORS.find(c => c.id === (itemData.color || 'default'));
+        iconColor = c ? c.hex : 'var(--glow-gold)';
         
-        if (fav.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[fav.icon]) {
-          iconHtml = ICON_SVGS[fav.icon];
-        } else if (fav.icon && fav.icon.startsWith('FAV_')) {
-          iconHtml = UIManager.ICONS[fav.icon] || UIManager.ICONS.FAV_STAR;
+        if (itemData.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[itemData.icon]) {
+          iconHtml = ICON_SVGS[itemData.icon];
+        } else if (itemData.icon && itemData.icon.startsWith('FAV_')) {
+          iconHtml = UIManager.ICONS[itemData.icon] || UIManager.ICONS.FAV_STAR;
         } else {
           iconHtml = UIManager.ICONS.FAV_STAR;
         }
