@@ -519,7 +519,7 @@ input:-webkit-autofill:focus {
   font-size: var(--font-size-xs);
   font-weight: normal;
   color: var(--text-color);
-  padding: 0 16px;
+  padding: 0 16px 5px 16px;
   height: var(--header-height);
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
@@ -530,6 +530,11 @@ input:-webkit-autofill:focus {
   flex-shrink: 0;
 }
 
+#smart-folders-section .pane-header {
+  height: 32px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
 
 .smart-folder-item {
   display: flex;
@@ -773,7 +778,7 @@ table#file-table {
   z-index: 2;
   font-weight: normal;
   font-size: var(--font-size-xs);
-  height: var(--header-height);
+  height: 32px;
   padding: 0 8px;
 }
 
@@ -808,7 +813,7 @@ table#file-table {
 /* Center Bottom: Thumbnails */
 #thumbnail-controls {
   background: var(--panel-bg);
-  padding: 0 10px;
+  padding: 0 10px 5px 10px;
   height: calc(var(--header-height) - 1px);
   display: flex;
   align-items: center;
