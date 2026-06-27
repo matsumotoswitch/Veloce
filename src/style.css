@@ -488,6 +488,7 @@ input:-webkit-autofill:focus {
   flex-direction: column;
   overflow: hidden;
   border-bottom: 1px solid var(--border-color);
+  transition: flex-basis 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 :root[data-left-top-collapsed="true"] #smart-folders-section {
