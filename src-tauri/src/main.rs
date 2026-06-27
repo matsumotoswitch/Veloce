@@ -296,19 +296,54 @@ fn get_smart_folder_paths(
                     let all_rows: Vec<(String, u32, u32, String)> = rows.flatten().collect();
                     
                     // 検索条件の事前計算
+                    enum CondType {
+                        Rating, AspectRatio, Path, Prompt, NegativePrompt, Source, Unknown
+                    }
+                    enum CondOp {
+                        Gte, Lte, Eq, Neq,
+                        Portrait, Landscape, Square,
+                        InFolder, UnderFolder,
+                        Contains, NotContains,
+                        Unknown
+                    }
                     struct PrecomputedCond {
-                        r#type: String,
-                        operator: String,
+                        cond_type: CondType,
+                        op: CondOp,
                         val_u8: u8,
                         val_lower: String,
                         val_path: std::path::PathBuf,
                     }
-                    let precomputed_conds: Vec<PrecomputedCond> = rule.conditions.iter().map(|c| PrecomputedCond {
-                        r#type: c.r#type.clone(),
-                        operator: c.operator.clone(),
-                        val_u8: c.value.parse::<u8>().unwrap_or(0),
-                        val_lower: c.value.to_lowercase(),
-                        val_path: std::path::PathBuf::from(&c.value),
+                    let precomputed_conds: Vec<PrecomputedCond> = rule.conditions.iter().map(|c| {
+                        let cond_type = match c.r#type.as_str() {
+                            "rating" => CondType::Rating,
+                            "aspect_ratio" => CondType::AspectRatio,
+                            "path" => CondType::Path,
+                            "prompt" => CondType::Prompt,
+                            "negative_prompt" => CondType::NegativePrompt,
+                            "source" => CondType::Source,
+                            _ => CondType::Unknown,
+                        };
+                        let op = match c.operator.as_str() {
+                            ">=" => CondOp::Gte,
+                            "<=" => CondOp::Lte,
+                            "==" => CondOp::Eq,
+                            "!=" => CondOp::Neq,
+                            "portrait" => CondOp::Portrait,
+                            "landscape" => CondOp::Landscape,
+                            "square" => CondOp::Square,
+                            "in_folder" => CondOp::InFolder,
+                            "under_folder" => CondOp::UnderFolder,
+                            "contains" => CondOp::Contains,
+                            "not_contains" => CondOp::NotContains,
+                            _ => CondOp::Unknown,
+                        };
+                        PrecomputedCond {
+                            cond_type,
+                            op,
+                            val_u8: c.value.parse::<u8>().unwrap_or(0),
+                            val_lower: c.value.to_lowercase(),
+                            val_path: std::path::PathBuf::from(&c.value),
+                        }
                     }).collect();
 
                     use rayon::prelude::*;
@@ -333,36 +368,35 @@ fn get_smart_folder_paths(
                         let mut all_match = true;
                         for cond in &precomputed_conds {
                             let mut matched = false;
-                            match cond.r#type.as_str() {
-                                "rating" => {
+                            match cond.cond_type {
+                                CondType::Rating => {
                                     let file_rating = *ratings_map.get(&path).unwrap_or(&0);
-                                    matched = match cond.operator.as_str() {
-                                        ">=" => file_rating >= cond.val_u8,
-                                        "<=" => file_rating <= cond.val_u8,
-                                        "==" => file_rating == cond.val_u8,
+                                    matched = match cond.op {
+                                        CondOp::Gte => file_rating >= cond.val_u8,
+                                        CondOp::Lte => file_rating <= cond.val_u8,
+                                        CondOp::Eq => file_rating == cond.val_u8,
                                         _ => false,
                                     };
                                 }
-                                "aspect_ratio" => {
+                                CondType::AspectRatio => {
                                     if width > 0 && height > 0 {
-                                        let ratio = width as f32 / height as f32;
-                                        matched = match cond.operator.as_str() {
-                                            "portrait" => ratio < 0.95,
-                                            "landscape" => ratio > 1.05,
-                                            "square" => ratio >= 0.95 && ratio <= 1.05,
+                                        matched = match cond.op {
+                                            CondOp::Portrait => width * 100 < height * 95,
+                                            CondOp::Landscape => width * 100 > height * 105,
+                                            CondOp::Square => width * 100 >= height * 95 && width * 100 <= height * 105,
                                             _ => false,
                                         };
                                     }
                                 }
-                                "path" => {
+                                CondType::Path => {
                                     let p = std::path::Path::new(&path);
-                                    matched = match cond.operator.as_str() {
-                                        "in_folder" => p.parent() == Some(&cond.val_path),
-                                        "under_folder" => p.starts_with(&cond.val_path),
+                                    matched = match cond.op {
+                                        CondOp::InFolder => p.parent() == Some(&cond.val_path),
+                                        CondOp::UnderFolder => p.starts_with(&cond.val_path),
                                         _ => false,
                                     };
                                 }
-                                "prompt" => {
+                                CondType::Prompt => {
                                     if let Some(meta) = &meta_opt {
                                         let mut p = meta.prompt.clone();
                                         if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
@@ -374,14 +408,14 @@ fn get_smart_folder_paths(
                                             }
                                         }
                                         let p_lower = p.to_lowercase();
-                                        matched = match cond.operator.as_str() {
-                                            "contains" => p_lower.contains(&cond.val_lower),
-                                            "not_contains" => !p_lower.contains(&cond.val_lower),
+                                        matched = match cond.op {
+                                            CondOp::Contains => p_lower.contains(&cond.val_lower),
+                                            CondOp::NotContains => !p_lower.contains(&cond.val_lower),
                                             _ => false,
                                         };
                                     }
                                 }
-                                "negative_prompt" => {
+                                CondType::NegativePrompt => {
                                     if let Some(meta) = &meta_opt {
                                         let mut p = meta.negative_prompt.clone();
                                         if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
@@ -393,24 +427,24 @@ fn get_smart_folder_paths(
                                             }
                                         }
                                         let p_lower = p.to_lowercase();
-                                        matched = match cond.operator.as_str() {
-                                            "contains" => p_lower.contains(&cond.val_lower),
-                                            "not_contains" => !p_lower.contains(&cond.val_lower),
+                                        matched = match cond.op {
+                                            CondOp::Contains => p_lower.contains(&cond.val_lower),
+                                            CondOp::NotContains => !p_lower.contains(&cond.val_lower),
                                             _ => false,
                                         };
                                     }
                                 }
-                                "source" => {
+                                CondType::Source => {
                                     if let Some(meta) = &meta_opt {
                                         let s = meta.source.to_lowercase();
-                                        matched = match cond.operator.as_str() {
-                                            "==" => s == cond.val_lower,
-                                            "!=" => s != cond.val_lower,
+                                        matched = match cond.op {
+                                            CondOp::Eq => s == cond.val_lower,
+                                            CondOp::Neq => s != cond.val_lower,
                                             _ => false,
                                         };
                                     }
                                 }
-                                _ => {}
+                                CondType::Unknown => {}
                             }
                             if !matched {
                                 all_match = false;
