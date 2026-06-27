@@ -160,11 +160,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
       const controlsEl = document.getElementById('window-controls');
       if (controlsEl) {
-        if (show) {
-          controlsEl.classList.add('has-gradient');
-        } else {
-          controlsEl.classList.remove('has-gradient');
-        }
+        controlsEl.classList.add('has-gradient');
       }
     };
     updateFilenameVisibility();
