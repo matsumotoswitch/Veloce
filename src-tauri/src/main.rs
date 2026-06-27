@@ -29,11 +29,11 @@ pub struct ImageFile {
     width: u32,
     #[serde(default)]
     height: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     prompt: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     negative_prompt: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     source: String,
     #[serde(default)]
     meta_loaded: bool,
@@ -265,7 +265,9 @@ fn get_smart_folder_paths(
         if let Ok(conn) = db_conn.lock() {
             if let Ok(mut stmt) = conn.prepare("SELECT metadata FROM cache") {
                 if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                    for meta_str in rows.flatten() {
+                    let all_meta_strs: Vec<String> = rows.flatten().collect();
+                    use rayon::prelude::*;
+                    target_paths = all_meta_strs.into_par_iter().filter_map(|meta_str| {
                         if let Ok(mut meta) = serde_json::from_str::<FullMetadata>(&meta_str) {
                             // 古いキャッシュの互換性対応 (A1111のプロンプトが空の場合のパッチ)
                             if meta.prompt.is_empty() {
@@ -363,10 +365,11 @@ fn get_smart_folder_paths(
                                 }
                             }
                             if all_match {
-                                target_paths.push(std::path::PathBuf::from(meta.path));
+                                return Some(std::path::PathBuf::from(meta.path));
                             }
                         }
-                    }
+                        None
+                    }).collect();
                 }
             }
         }

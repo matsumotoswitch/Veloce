@@ -1134,6 +1134,11 @@ class UIManager {
 
     const items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
 
+    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策）
+    if (this.lastListStartIndex !== safeStartRow) {
+      return;
+    }
+
     for (let i = safeStartRow; i <= endRow; i++) {
         const file = items[i - safeStartRow];
       if (!file) continue;
@@ -1266,6 +1271,11 @@ class UIManager {
     content.style.transform = `translate3d(0, ${offsetY}px, 0)`;
 
     const items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
+
+    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策）
+    if (this.lastGridStartIndex !== startIndex) {
+      return;
+    }
 
     // DOMの再構築（要素の再利用）
     const targetCount = endIndex - startIndex + 1;

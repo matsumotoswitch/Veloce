@@ -760,16 +760,16 @@ class ThumbnailQueueManager {
     this.isProcessing = true;
 
     try {
+      // 毎回DOMクエリを走らせると重いため、表示中のパス一覧をSet化する
+      const visiblePaths = new Set(Array.from(document.querySelectorAll('.thumbnail-item')).map(el => el.dataset.filepath).filter(Boolean));
+
       while (this.activeTasks.size < this.concurrency) {
         let targetFile = null;
 
         // 1. Priority Queue
         if (this.priorityQueue.length > 0) {
           appState.isPreloadRunning = false;
-          let targetIndex = this.priorityQueue.findIndex(req => {
-            const safePath = req.filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-            return document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`) !== null;
-          });
+          let targetIndex = this.priorityQueue.findIndex(req => visiblePaths.has(req.filePath));
           if (targetIndex === -1) targetIndex = 0;
 
           const req = this.priorityQueue.splice(targetIndex, 1)[0];
