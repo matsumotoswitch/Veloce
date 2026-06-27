@@ -592,8 +592,8 @@ class UIManager {
       okBtn.className = 'dialog-btn primary';
       okBtn.textContent = 'OK';
 
-      buttonsDiv.appendChild(cancelBtn);
       buttonsDiv.appendChild(okBtn);
+      buttonsDiv.appendChild(cancelBtn);
 
       dialog.appendChild(messageEl);
       dialog.appendChild(inputContainer);
@@ -714,11 +714,12 @@ class UIManager {
     pathEl.className = 'dialog-path';
     pathEl.textContent = path;
 
-    const buttons = [
-      { label: canCloseTab ? 'キャンセル' : 'OK', className: 'dialog-btn cancel', value: canCloseTab ? 'cancel' : 'ok' }
-    ];
+    const buttons = [];
     if (canCloseTab) {
       buttons.push({ label: 'タブを閉じる', className: 'dialog-btn danger', value: 'close' });
+      buttons.push({ label: 'キャンセル', className: 'dialog-btn cancel', value: 'cancel' });
+    } else {
+      buttons.push({ label: 'OK', className: 'dialog-btn cancel', value: 'ok' });
     }
 
     return showAppDialog({
@@ -739,8 +740,8 @@ class UIManager {
     return showAppDialog({
       message,
       buttons: [
-        { label: 'キャンセル', className: 'dialog-btn cancel', value: false },
-        { label: '削除', className: 'dialog-btn danger', value: true }
+        { label: '削除', className: 'dialog-btn danger', value: true },
+        { label: 'キャンセル', className: 'dialog-btn cancel', value: false }
       ],
       escapeValue: false,
       focusIndex: 0
