@@ -365,22 +365,41 @@ class UIManager {
       const iconSpan = tabEl.querySelector('.tab-icon');
       if (iconSpan) {
         iconSpan.style.color = ''; // 再利用時のためにリセット
-        const fav = this.state.favorites ? this.state.favorites.find(f => f.path === tab.path) : null;
-        if (fav) {
-          if (fav.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[fav.icon]) {
-            iconSpan.innerHTML = ICON_SVGS[fav.icon];
-            iconSpan.className = `tab-icon icon-color-${fav.color || 'default'}`;
-          } else if (fav.icon && fav.icon.startsWith('FAV_')) {
-            iconSpan.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS.FAV_STAR;
-            iconSpan.className = `tab-icon icon-color-${fav.color || 'default'}`;
+        
+        let itemData = null;
+        let isSmartFolder = false;
+        
+        if (this.state.favorites) {
+            itemData = this.state.favorites.find(f => f.path === tab.path);
+        }
+        
+        if (!itemData && tab.path && tab.path.startsWith('smart://')) {
+            const id = tab.path.replace('smart://', '');
+            if (this.state.smartFolders) {
+                itemData = this.state.smartFolders.find(f => f.id === id);
+                if (itemData) isSmartFolder = true;
+            }
+        }
+
+        if (itemData) {
+          if (itemData.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[itemData.icon]) {
+            iconSpan.innerHTML = ICON_SVGS[itemData.icon];
+          } else if (itemData.icon && itemData.icon.startsWith('FAV_')) {
+            iconSpan.innerHTML = UIManager.ICONS[itemData.icon] || UIManager.ICONS.FAV_STAR;
           } else {
             iconSpan.innerHTML = UIManager.ICONS.FAV_STAR;
-            iconSpan.className = `tab-icon icon-color-${fav.color || 'default'}`;
           }
+          iconSpan.className = `tab-icon icon-color-${itemData.color || 'default'}`;
         } else {
           iconSpan.innerHTML = UIManager.ICONS.FOLDER;
           iconSpan.className = 'tab-icon';
           iconSpan.style.color = '#4da8da';
+        }
+
+        if (isSmartFolder) {
+          tabEl.classList.add('is-smart-tab');
+        } else {
+          tabEl.classList.remove('is-smart-tab');
         }
         
         // アイコンのサイズを強制的に14pxに
