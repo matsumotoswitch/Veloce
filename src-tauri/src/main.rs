@@ -274,7 +274,17 @@ fn get_smart_folder_paths(
 
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.lock() {
-            if let Ok(mut stmt) = conn.prepare("SELECT metadata, width, height, path FROM cache WHERE path != '' AND path IS NOT NULL") {
+            let needs_metadata = rule.conditions.iter().any(|c| 
+                c.r#type == "prompt" || c.r#type == "negative_prompt" || c.r#type == "source"
+            );
+
+            let query = if needs_metadata {
+                "SELECT metadata, width, height, path FROM cache WHERE path != '' AND path IS NOT NULL"
+            } else {
+                "SELECT '', width, height, path FROM cache WHERE path != '' AND path IS NOT NULL"
+            };
+
+            if let Ok(mut stmt) = conn.prepare(query) {
                 if let Ok(rows) = stmt.query_map([], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -300,10 +310,6 @@ fn get_smart_folder_paths(
                         val_lower: c.value.to_lowercase(),
                         val_path: std::path::PathBuf::from(&c.value),
                     }).collect();
-
-                    let needs_metadata = rule.conditions.iter().any(|c| 
-                        c.r#type == "prompt" || c.r#type == "negative_prompt" || c.r#type == "source"
-                    );
 
                     use rayon::prelude::*;
                     target_paths = all_rows.into_par_iter().filter_map(|(meta_str, width, height, path)| {
