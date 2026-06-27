@@ -853,19 +853,22 @@ class ThumbnailQueueManager {
   }
 
   updateDOM(filePath, url) {
-    const safePath = filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const wrapper = document.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
-    if (wrapper) {
-      const img = wrapper.querySelector('.thumbnail-img');
-      if (img) {
-        img.src = url;
-        if (img.complete) {
-          img.classList.remove('loading');
-        } else {
-          img.onload = function() { this.classList.remove('loading'); };
-          img.onerror = function() { this.classList.remove('loading'); };
+    const content = document.querySelector('.virtual-content');
+    if (!content) return;
+    for (const wrapper of content.children) {
+        if (wrapper.dataset.filepath === filePath) {
+            const img = wrapper.querySelector('.thumbnail-img');
+            if (img) {
+                img.src = url;
+                if (img.complete) {
+                    img.classList.remove('loading');
+                } else {
+                    img.onload = function() { this.classList.remove('loading'); };
+                    img.onerror = function() { this.classList.remove('loading'); };
+                }
+            }
+            break;
         }
-      }
     }
   }
 }

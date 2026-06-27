@@ -1566,16 +1566,18 @@ fn show_window(window: tauri::Window) {
 async fn get_thumbnail(state: tauri::State<'_, AppState>, file_path: String) -> Result<String, String> {
     // フォルダ移動済みの場合は無駄な処理（画像読み込み・リサイズ）をスキップする
     if let Ok(current_dir) = state.current_dir.lock() {
-        let parent_dir = Path::new(&file_path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        
-        if !current_dir.is_empty() {
-            let current_trim = current_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
-            let parent_trim = parent_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
-            if current_trim != parent_trim {
-                return Err("Cancelled".to_string());
+        if !current_dir.starts_with("smart://") {
+            let parent_dir = Path::new(&file_path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            
+            if !current_dir.is_empty() {
+                let current_trim = current_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
+                let parent_trim = parent_dir.replace("\\\\?\\", "").trim_end_matches(&['/', '\\'][..]).to_lowercase();
+                if current_trim != parent_trim {
+                    return Err("Cancelled".to_string());
+                }
             }
         }
     }

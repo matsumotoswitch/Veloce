@@ -1183,7 +1183,13 @@ class UIManager {
   }
 
   async updateVirtualGrid(force = false) {
-    if (!this.elements.thumbnailGrid) return;
+    if (this._gridUpdating) {
+        this._gridUpdatePending = true;
+        return;
+    }
+    this._gridUpdating = true;
+    try {
+      if (!this.elements.thumbnailGrid) return;
     const container = this.elements.thumbnailGrid;
 
     // 仮想スクロール用の初期化
@@ -1377,6 +1383,13 @@ class UIManager {
 
     // 画像読み込みタスクをキック
     if (typeof window.processNextTask === 'function') window.processNextTask();
+    } finally {
+        this._gridUpdating = false;
+        if (this._gridUpdatePending) {
+            this._gridUpdatePending = false;
+            this.updateVirtualGrid(true);
+        }
+    }
   }
 }
 
