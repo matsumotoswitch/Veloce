@@ -198,10 +198,21 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
             hash_key TEXT PRIMARY KEY,
             thumbnail BLOB,
             metadata TEXT,
+            width INTEGER DEFAULT 0,
+            height INTEGER DEFAULT 0,
+            path TEXT DEFAULT '',
             last_accessed INTEGER
         )",
         [],
     )?;
+
+    // マイグレーション（カラムが存在しない場合は無視される）
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN height INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN path TEXT DEFAULT ''", []);
+    
+    // 既存データのバックフィル
+    let _ = conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
     Ok(conn)
 }
 
@@ -263,36 +274,91 @@ fn get_smart_folder_paths(
 
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.lock() {
-            if let Ok(mut stmt) = conn.prepare("SELECT metadata FROM cache") {
-                if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                    let all_meta_strs: Vec<String> = rows.flatten().collect();
+            if let Ok(mut stmt) = conn.prepare("SELECT metadata, width, height, path FROM cache WHERE path != '' AND path IS NOT NULL") {
+                if let Ok(rows) = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, u32>(2)?,
+                        row.get::<_, String>(3)?
+                    ))
+                }) {
+                    let all_rows: Vec<(String, u32, u32, String)> = rows.flatten().collect();
+                    
+                    // 検索条件の事前計算
+                    struct PrecomputedCond {
+                        r#type: String,
+                        operator: String,
+                        val_u8: u8,
+                        val_lower: String,
+                        val_path: std::path::PathBuf,
+                    }
+                    let precomputed_conds: Vec<PrecomputedCond> = rule.conditions.iter().map(|c| PrecomputedCond {
+                        r#type: c.r#type.clone(),
+                        operator: c.operator.clone(),
+                        val_u8: c.value.parse::<u8>().unwrap_or(0),
+                        val_lower: c.value.to_lowercase(),
+                        val_path: std::path::PathBuf::from(&c.value),
+                    }).collect();
+
+                    let needs_metadata = rule.conditions.iter().any(|c| 
+                        c.r#type == "prompt" || c.r#type == "negative_prompt" || c.r#type == "source"
+                    );
+
                     use rayon::prelude::*;
-                    target_paths = all_meta_strs.into_par_iter().filter_map(|meta_str| {
-                        if let Ok(mut meta) = serde_json::from_str::<FullMetadata>(&meta_str) {
-                            // 古いキャッシュの互換性対応 (A1111のプロンプトが空の場合のパッチ)
-                            if meta.prompt.is_empty() {
-                                if let Some(raw) = meta.params.get("rawParameters").and_then(|v| v.as_str()) {
-                                    meta.prompt = raw.to_string();
-                                }
+                    target_paths = all_rows.into_par_iter().filter_map(|(meta_str, width, height, path)| {
+                        let mut meta_opt: Option<FullMetadata> = None;
+                        
+                        if needs_metadata {
+                            meta_opt = serde_json::from_str::<FullMetadata>(&meta_str).ok();
+                            if meta_opt.is_none() {
+                                return None; // failed to parse metadata which is required
                             }
-                            let mut all_match = true;
-                            for cond in &rule.conditions {
-                                let mut matched = false;
-                                match cond.r#type.as_str() {
-                                    "rating" => {
-                                        let file_rating = *ratings_map.get(&meta.path).unwrap_or(&0);
-                                        if let Ok(val) = cond.value.parse::<u8>() {
-                                            matched = match cond.operator.as_str() {
-                                                ">=" => file_rating >= val,
-                                                "<=" => file_rating <= val,
-                                                "==" => file_rating == val,
-                                                _ => false,
-                                            };
-                                        }
+                            if let Some(mut m) = meta_opt.take() {
+                                if m.prompt.is_empty() {
+                                    if let Some(raw) = m.params.get("rawParameters").and_then(|v| v.as_str()) {
+                                        m.prompt = raw.to_string();
                                     }
-                                    "prompt" => {
+                                }
+                                meta_opt = Some(m);
+                            }
+                        }
+
+                        let mut all_match = true;
+                        for cond in &precomputed_conds {
+                            let mut matched = false;
+                            match cond.r#type.as_str() {
+                                "rating" => {
+                                    let file_rating = *ratings_map.get(&path).unwrap_or(&0);
+                                    matched = match cond.operator.as_str() {
+                                        ">=" => file_rating >= cond.val_u8,
+                                        "<=" => file_rating <= cond.val_u8,
+                                        "==" => file_rating == cond.val_u8,
+                                        _ => false,
+                                    };
+                                }
+                                "aspect_ratio" => {
+                                    if width > 0 && height > 0 {
+                                        let ratio = width as f32 / height as f32;
+                                        matched = match cond.operator.as_str() {
+                                            "portrait" => ratio < 0.95,
+                                            "landscape" => ratio > 1.05,
+                                            "square" => ratio >= 0.95 && ratio <= 1.05,
+                                            _ => false,
+                                        };
+                                    }
+                                }
+                                "path" => {
+                                    let p = std::path::Path::new(&path);
+                                    matched = match cond.operator.as_str() {
+                                        "in_folder" => p.parent() == Some(&cond.val_path),
+                                        "under_folder" => p.starts_with(&cond.val_path),
+                                        _ => false,
+                                    };
+                                }
+                                "prompt" => {
+                                    if let Some(meta) = &meta_opt {
                                         let mut p = meta.prompt.clone();
-                                        // NovelAI V4 characterPrompts 対応
                                         if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
                                             for c in chars {
                                                 if let Some(cp) = c.get("prompt").and_then(|v| v.as_str()) {
@@ -302,16 +368,16 @@ fn get_smart_folder_paths(
                                             }
                                         }
                                         let p_lower = p.to_lowercase();
-                                        let v = cond.value.to_lowercase();
                                         matched = match cond.operator.as_str() {
-                                            "contains" => p_lower.contains(&v),
-                                            "not_contains" => !p_lower.contains(&v),
+                                            "contains" => p_lower.contains(&cond.val_lower),
+                                            "not_contains" => !p_lower.contains(&cond.val_lower),
                                             _ => false,
                                         };
                                     }
-                                    "negative_prompt" => {
+                                }
+                                "negative_prompt" => {
+                                    if let Some(meta) = &meta_opt {
                                         let mut p = meta.negative_prompt.clone();
-                                        // NovelAI V4 characterPrompts 対応
                                         if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
                                             for c in chars {
                                                 if let Some(ucp) = c.get("uc").and_then(|v| v.as_str()) {
@@ -321,54 +387,35 @@ fn get_smart_folder_paths(
                                             }
                                         }
                                         let p_lower = p.to_lowercase();
-                                        let v = cond.value.to_lowercase();
                                         matched = match cond.operator.as_str() {
-                                            "contains" => p_lower.contains(&v),
-                                            "not_contains" => !p_lower.contains(&v),
+                                            "contains" => p_lower.contains(&cond.val_lower),
+                                            "not_contains" => !p_lower.contains(&cond.val_lower),
                                             _ => false,
                                         };
                                     }
-                                    "source" => {
+                                }
+                                "source" => {
+                                    if let Some(meta) = &meta_opt {
                                         let s = meta.source.to_lowercase();
-                                        let v = cond.value.to_lowercase();
                                         matched = match cond.operator.as_str() {
-                                            "==" => s == v,
-                                            "!=" => s != v,
+                                            "==" => s == cond.val_lower,
+                                            "!=" => s != cond.val_lower,
                                             _ => false,
                                         };
                                     }
-                                    "aspect_ratio" => {
-                                        if meta.width > 0 && meta.height > 0 {
-                                            let ratio = meta.width as f32 / meta.height as f32;
-                                            matched = match cond.operator.as_str() {
-                                                "portrait" => ratio < 0.95,
-                                                "landscape" => ratio > 1.05,
-                                                "square" => ratio >= 0.95 && ratio <= 1.05,
-                                                _ => false,
-                                            };
-                                        }
-                                    }
-                                    "path" => {
-                                        let p = std::path::Path::new(&meta.path);
-                                        let target = std::path::Path::new(&cond.value);
-                                        matched = match cond.operator.as_str() {
-                                            "in_folder" => p.parent() == Some(target),
-                                            "under_folder" => p.starts_with(target),
-                                            _ => false,
-                                        };
-                                    }
-                                    _ => {}
                                 }
-                                if !matched {
-                                    all_match = false;
-                                    break; // rule.match_type == "all"
-                                }
+                                _ => {}
                             }
-                            if all_match {
-                                return Some(std::path::PathBuf::from(meta.path));
+                            if !matched {
+                                all_match = false;
+                                break;
                             }
                         }
-                        None
+                        if all_match {
+                            Some(std::path::PathBuf::from(path))
+                        } else {
+                            None
+                        }
                     }).collect();
                 }
             }
@@ -381,13 +428,9 @@ fn get_smart_folder_paths(
             target_paths = ratings_map.iter().filter(|(_, &r)| r >= 4).map(|(p, _)| std::path::PathBuf::from(p)).collect();
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.lock() {
-                if let Ok(mut stmt) = conn.prepare("SELECT metadata FROM cache") {
+                if let Ok(mut stmt) = conn.prepare("SELECT path FROM cache WHERE path != '' AND path IS NOT NULL") {
                     if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                        for meta_str in rows.flatten() {
-                            if let Ok(meta) = serde_json::from_str::<FullMetadata>(&meta_str) {
-                                target_paths.push(std::path::PathBuf::from(meta.path));
-                            }
-                        }
+                        target_paths = rows.flatten().map(|p| std::path::PathBuf::from(p)).collect();
                     }
                 }
             }
@@ -1140,9 +1183,9 @@ fn get_full_metadata_for_path(file_path: &str, db_conn: &std::sync::Mutex<rusqli
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         if let Ok(conn) = db_conn.lock() {
             let _ = conn.execute(
-                "INSERT INTO cache (hash_key, metadata, last_accessed) VALUES (?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, last_accessed=excluded.last_accessed",
-                rusqlite::params![&hash_key, &json_str, now]
+                "INSERT INTO cache (hash_key, metadata, width, height, path, last_accessed) VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, last_accessed=excluded.last_accessed",
+                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, now]
             );
         }
     }
@@ -2634,6 +2677,9 @@ mod tests {
                 hash_key TEXT PRIMARY KEY,
                 thumbnail BLOB,
                 metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
                 last_accessed INTEGER
             )",
             [],
@@ -2645,9 +2691,9 @@ mod tests {
 
         // Insert
         conn.execute(
-            "INSERT INTO cache (hash_key, thumbnail, metadata, last_accessed) VALUES (?, ?, ?, ?)
-             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, metadata=excluded.metadata, last_accessed=excluded.last_accessed",
-            rusqlite::params![hash_key, &dummy_thumb, dummy_meta, 12345],
+            "INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, last_accessed=excluded.last_accessed",
+            rusqlite::params![hash_key, &dummy_thumb, dummy_meta, 0, 0, "", 12345],
         ).unwrap();
 
         // Query
@@ -2672,6 +2718,9 @@ mod tests {
                     hash_key TEXT PRIMARY KEY,
                     thumbnail BLOB,
                     metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
                     last_accessed INTEGER
                 )",
                 [],
@@ -2680,10 +2729,10 @@ mod tests {
             // Insert a fake metadata json
             let meta1 = super::FullMetadata { path: "C:\\fake\\path1.png".to_string(), prompt: "".to_string(), negative_prompt: "".to_string(), width: 0, height: 0, params: serde_json::Value::Null, source: "".to_string() };
             let meta2 = super::FullMetadata { path: "C:\\fake\\path2.png".to_string(), prompt: "".to_string(), negative_prompt: "".to_string(), width: 0, height: 0, params: serde_json::Value::Null, source: "".to_string() };
-            conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, last_accessed) VALUES (?1, ?2, ?3, ?4)", 
-                rusqlite::params!["hash1", vec![0u8], serde_json::to_string(&meta1).unwrap(), 0]).unwrap();
-            conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, last_accessed) VALUES (?1, ?2, ?3, ?4)", 
-                rusqlite::params!["hash2", vec![0u8], serde_json::to_string(&meta2).unwrap(), 0]).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
+                rusqlite::params!["hash1", vec![0u8], serde_json::to_string(&meta1).unwrap(), 0, 0, meta1.path, 0]).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
+                rusqlite::params!["hash2", vec![0u8], serde_json::to_string(&meta2).unwrap(), 0, 0, meta2.path, 0]).unwrap();
         }
 
         let mut ratings = std::collections::HashMap::new();
