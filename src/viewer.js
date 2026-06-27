@@ -818,10 +818,33 @@ window.addEventListener('wheel', (e) => {
     debouncedFocusWindow();   // フォーカスの維持
   } else {
     e.preventDefault(); // 親ウィンドウのスクロールを防止
-    if (e.deltaY > 0) {
-      showNext(); // 下スクロールで次へ
-    } else if (e.deltaY < 0) {
-      showPrev(); // 上スクロールで前へ
+    
+    // トラックパッドの連続イベントやマウスの「カチッ」を吸収するため、移動量を累積する
+    window._wheelDeltaAccumulator = (window._wheelDeltaAccumulator || 0) + e.deltaY;
+    const WHEEL_THRESHOLD = 80; // この値（移動量）ごとに1枚送る
+    
+    let steps = 0;
+    if (window._wheelDeltaAccumulator >= WHEEL_THRESHOLD) {
+      steps = Math.floor(window._wheelDeltaAccumulator / WHEEL_THRESHOLD);
+      window._wheelDeltaAccumulator %= WHEEL_THRESHOLD;
+    } else if (window._wheelDeltaAccumulator <= -WHEEL_THRESHOLD) {
+      steps = Math.ceil(window._wheelDeltaAccumulator / WHEEL_THRESHOLD); // マイナスの値
+      window._wheelDeltaAccumulator %= WHEEL_THRESHOLD;
+    }
+
+    if (steps > 0) {
+      // 下スクロール（次へ）をsteps回分進める
+      for (let i = 0; i < steps; i++) {
+        viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
+      }
+      loadImage();
+    } else if (steps < 0) {
+      // 上スクロール（前へ）をsteps回分戻す
+      const absSteps = Math.abs(steps);
+      for (let i = 0; i < absSteps; i++) {
+        viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
+      }
+      loadImage();
     }
   }
 }, { passive: false });
