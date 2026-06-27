@@ -2343,12 +2343,22 @@ function showEditSmartFolderModal(sf, isNew = false) {
     if (isNew) {
       sf.id = 'smart_' + Date.now();
       appState.smartFolders.push(sf);
+      const container = document.getElementById('smart-folders-list');
+      if (container) container.appendChild(createSmartFolderNode(sf));
+    } else {
+      const oldNode = document.querySelector(`.smart-folder-item[data-id="${sf.id}"]`);
+      if (oldNode) {
+        const newNode = createSmartFolderNode(sf);
+        if (oldNode.classList.contains('selected')) {
+          newNode.classList.add('selected');
+        }
+        oldNode.replaceWith(newNode);
+      }
     }
 
     localStorage.setItem('smartFolders', JSON.stringify(appState.smartFolders));
     modal.style.display = 'none';
     
-    initSmartFolders();
     if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
       await window.veloceAPI.updateSmartFolders(appState.smartFolders);
     }
@@ -2379,7 +2389,9 @@ const menuDeleteSmartFolder = createMenuItem('スマートフォルダを削除'
   if (index !== -1) {
     appState.smartFolders.splice(index, 1);
     localStorage.setItem('smartFolders', JSON.stringify(appState.smartFolders));
-    initSmartFolders();
+    const node = document.querySelector(`.smart-folder-item[data-id="${contextMenu.targetSmartFolderId}"]`);
+    if (node) node.remove();
+    
     if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
       await window.veloceAPI.updateSmartFolders(appState.smartFolders);
     }
@@ -5044,6 +5056,32 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+let smartFoldersDelegated = false;
+
+function createSmartFolderNode(f) {
+  const template = document.getElementById('smart-folder-template');
+  const clone = template.content.cloneNode(true);
+  const item = clone.querySelector('.smart-folder-item');
+  item.dataset.id = f.id;
+  
+  const iconSpan = clone.querySelector('.smart-folder-icon');
+  if (f.icon && ICON_SVGS && ICON_SVGS[f.icon]) {
+    iconSpan.innerHTML = ICON_SVGS[f.icon];
+    iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
+  } else if (f.icon && f.icon.startsWith('FAV_')) {
+    iconSpan.innerHTML = UIManager.ICONS[f.icon] || UIManager.ICONS['FAV_STAR'];
+    iconSpan.className = `smart-folder-icon color-${f.color || 'default'}`;
+  } else {
+    iconSpan.className = 'smart-folder-icon';
+    iconSpan.innerHTML = f.icon || '⭐';
+  }
+  
+  const nameSpan = clone.querySelector('.folder-name');
+  nameSpan.textContent = f.name;
+  
+  return item;
+}
+
 /**
  * スマートフォルダのUI初期化とイベント設定を行います
  */
@@ -5051,34 +5089,24 @@ function initSmartFolders() {
   const container = document.getElementById('smart-folders-list');
   if (!container) return;
 
-  container.innerHTML = '';
-
+  const fragment = document.createDocumentFragment();
   const folders = appState.smartFolders || [];
 
   folders.forEach(f => {
-    const item = document.createElement('div');
-    item.className = 'smart-folder-item';
-    item.dataset.id = f.id;
-    
-    const iconSpan = document.createElement('span');
-    if (f.icon && ICON_SVGS && ICON_SVGS[f.icon]) {
-      iconSpan.innerHTML = ICON_SVGS[f.icon];
-      iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
-    } else if (f.icon && f.icon.startsWith('FAV_')) {
-      iconSpan.innerHTML = UIManager.ICONS[f.icon] || UIManager.ICONS['FAV_STAR'];
-      iconSpan.className = `smart-folder-icon color-${f.color || 'default'}`;
-    } else {
-      iconSpan.className = 'smart-folder-icon';
-      iconSpan.innerHTML = f.icon || '⭐';
-    }
-    
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = f.name;
-    
-    item.appendChild(iconSpan);
-    item.appendChild(nameSpan);
-    
-    item.addEventListener('click', async () => {
+    fragment.appendChild(createSmartFolderNode(f));
+  });
+
+  // 1回のReflowでDOMツリーを更新
+  container.replaceChildren(fragment);
+
+  // イベント委譲 (Event Delegation) は1回だけ設定
+  if (!smartFoldersDelegated) {
+    smartFoldersDelegated = true;
+
+    container.addEventListener('click', async (e) => {
+      const item = e.target.closest('.smart-folder-item');
+      if (!item) return;
+
       // 選択状態の更新
       document.querySelectorAll('.smart-folder-item').forEach(el => el.classList.remove('selected'));
       item.classList.add('selected');
@@ -5086,6 +5114,10 @@ function initSmartFolders() {
       // ツリー側の選択状態を解除
       document.querySelectorAll('.tree-node-content').forEach(el => el.classList.remove('selected'));
       
+      const fId = item.dataset.id;
+      const f = appState.smartFolders.find(x => x.id === fId);
+      if(!f) return;
+
       const path = `smart://${f.id}`;
       appState.selection.clear();
       appState.selectedIndex = -1;
@@ -5107,48 +5139,50 @@ function initSmartFolders() {
       }
     });
 
-    item.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const section = document.getElementById('smart-folders-section');
+    if (section) {
+      section.addEventListener('contextmenu', (e) => {
+        const item = e.target.closest('.smart-folder-item');
+        if (item) {
+          // アイテム上での右クリック
+          e.preventDefault();
+          e.stopPropagation();
 
-      contextMenu.targetFavoriteId = null;
-      contextMenu.targetFavoritePath = null;
-      contextMenu.targetFolder = { path: `smart://${f.id}`, name: f.name };
-      contextMenu.targetSmartFolderId = f.id;
+          const fId = item.dataset.id;
+          const f = appState.smartFolders.find(x => x.id === fId);
+          if(!f) return;
 
-      Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+          contextMenu.targetFavoriteId = null;
+          contextMenu.targetFavoritePath = null;
+          contextMenu.targetFolder = { path: `smart://${f.id}`, name: f.name };
+          contextMenu.targetSmartFolderId = f.id;
 
-      menuOpenInNewTab.style.display = '';
-      menuSeparator1.style.display = '';
-      menuEditSmartFolder.style.display = '';
-      menuDeleteSmartFolder.style.display = '';
+          Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-      showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
-    });
+          menuOpenInNewTab.style.display = '';
+          menuSeparator1.style.display = '';
+          menuEditSmartFolder.style.display = '';
+          menuDeleteSmartFolder.style.display = '';
 
-    container.appendChild(item);
-  });
+          showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
+        } else {
+          // セクション余白での右クリック
+          e.preventDefault();
+          e.stopPropagation();
 
-  const section = document.getElementById('smart-folders-section');
-  if (section) {
-    section.addEventListener('contextmenu', (e) => {
-      // アイテム上での右クリックはアイテム側のイベントで処理されるため除外
-      if (e.target.closest('.smart-folder-item')) return;
-      
-      e.preventDefault();
-      e.stopPropagation();
+          contextMenu.targetFavoriteId = null;
+          contextMenu.targetFavoritePath = null;
+          contextMenu.targetFolder = null;
+          contextMenu.targetSmartFolderId = null;
 
-      contextMenu.targetFavoriteId = null;
-      contextMenu.targetFavoritePath = null;
-      contextMenu.targetFolder = null;
-      contextMenu.targetSmartFolderId = null;
+          Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
 
-      Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+          menuAddSmartFolder.style.display = '';
 
-      menuAddSmartFolder.style.display = '';
-
-      showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
-    });
+          showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
+        }
+      });
+    }
   }
 }
 
