@@ -496,13 +496,6 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
     
     tauri::async_runtime::spawn(async move {
         // Veloceのキャッシュディレクトリ構造に合わせる
-        let cache_dir_path = get_veloce_data_dir()
-            .map(|p| p.join("Thumbnails"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
-        let meta_cache_dir_path = get_veloce_data_dir()
-            .map(|p| p.join("Metadata"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
-
         let path_for_spawn = path_clone.clone();
         // 非同期ランタイムのワーカースレッドをブロックしないよう、spawn_blockingでラップする
         let files_result = tokio::task::spawn_blocking(move || {
@@ -520,6 +513,23 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
                     .collect();
+            }
+
+            let mut cache_map = std::collections::HashMap::new();
+            if let Ok(conn) = db_conn_clone.lock() {
+                if let Ok(mut stmt) = conn.prepare("SELECT hash_key, thumbnail IS NOT NULL, metadata IS NOT NULL AND metadata != '' FROM cache") {
+                    if let Ok(rows) = stmt.query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, bool>(2)?
+                        ))
+                    }) {
+                        for row in rows.flatten() {
+                            cache_map.insert(row.0, (row.1, row.2));
+                        }
+                    }
+                }
             }
 
             // rayon によるマルチスレッド処理
@@ -543,12 +553,7 @@ fn load_directory(window: tauri::Window, target_path: String, state: tauri::Stat
                                     let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
                                     let digest_hex = format!("{:016x}", digest);
                                     
-                                    // ディスクアクセスは発生するが、rayonの並列処理で高速化
-                                    let cache_path = cache_dir_path.join(format!("{}.jpg", digest_hex));
-                                    let has_thumbnail_cache = cache_path.exists();
-                                    
-                                    let meta_cache_path = meta_cache_dir_path.join(format!("{}.json", digest_hex));
-                                    let has_metadata_cache = meta_cache_path.exists();
+                                    let (has_thumbnail_cache, has_metadata_cache) = cache_map.get(&digest_hex).copied().unwrap_or((false, false));
 
                                     return Some(ImageFile {
                                         name: file_name,
