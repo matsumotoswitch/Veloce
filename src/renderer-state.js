@@ -17,6 +17,62 @@
  * @property {boolean} [hasMetadataCache] - メタデータキャッシュが存在するかどうか
  */
 
+const DEFAULT_SMART_FOLDERS = [
+  { id: 'fav_5', name: 'お気に入り (★5)', icon: 'FAV_STAR', color: 'orange', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '5' }] },
+  { id: 'fav_4_plus', name: '高評価 (★4以上)', icon: 'FAV_STAR', color: 'yellow', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '4' }] }
+];
+
+export const SmartFolderStore = {
+  _cache: null,
+  _storageKey: 'smartFolders',
+
+  load() {
+    if (this._cache) return this._cache;
+    try {
+      const raw = localStorage.getItem(this._storageKey);
+      this._cache = raw ? JSON.parse(raw) : DEFAULT_SMART_FOLDERS;
+    } catch (e) {
+      console.error("Smart Folder Parse Error:", e);
+      this._cache = DEFAULT_SMART_FOLDERS;
+    }
+    if (!localStorage.getItem(this._storageKey)) {
+      localStorage.setItem(this._storageKey, JSON.stringify(this._cache));
+    }
+    return this._cache;
+  },
+
+  async save(foldersArray) {
+    this._cache = foldersArray;
+    localStorage.setItem(this._storageKey, JSON.stringify(foldersArray));
+    try {
+      if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
+        await window.veloceAPI.updateSmartFolders(foldersArray);
+      }
+    } catch (e) {
+      console.error("Rust Sync Failed:", e);
+    }
+  },
+
+  async upsertFolder(newFolder) {
+    const folders = this.load();
+    const index = folders.findIndex(f => f.id === newFolder.id);
+    if (index >= 0) {
+      folders[index] = newFolder;
+    } else {
+      folders.push(newFolder);
+    }
+    await this.save(folders);
+    return folders;
+  },
+
+  async deleteFolder(id) {
+    let folders = this.load();
+    folders = folders.filter(f => f.id !== id);
+    await this.save(folders);
+    return folders;
+  }
+};
+
 /**
  * メイン画面のアプリケーション全体の状態とデータを管理するクラス
  */
@@ -39,15 +95,7 @@ class AppState {
     this.favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
 
     /** @type {Array<{id: string, name: string, icon: string, color: string, matchType: string, conditions: Array<any>}>} スマートフォルダリスト */
-    const defaultSmartFolders = [
-      { id: 'fav_5', name: 'お気に入り (★5)', icon: 'FAV_STAR', color: 'orange', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '5' }] },
-      { id: 'fav_4_plus', name: '高評価 (★4以上)', icon: 'FAV_STAR', color: 'yellow', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '4' }] }
-    ];
-    this.smartFolders = JSON.parse(localStorage.getItem('smartFolders')) || defaultSmartFolders;
-    // 初回起動時などに localStorage に保存されていない場合は保存しておく
-    if (!localStorage.getItem('smartFolders')) {
-      localStorage.setItem('smartFolders', JSON.stringify(this.smartFolders));
-    }
+    this.smartFolders = SmartFolderStore.load();
     
     /** @type {Object<string, number>} レーティング一覧 (path -> rating) */
     this.ratings = JSON.parse(localStorage.getItem('ratings') || '{}');

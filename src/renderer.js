@@ -2,7 +2,7 @@
 // Veloce - Main Controller (renderer.js)
 // ============================================================================
 
-import { appState } from './renderer-state.js';
+import { appState, SmartFolderStore } from './renderer-state.js';
 import { UIManager, uiManager, formatSize, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
 import { debounce, blockDevtoolsShortcuts } from './utils.js';
 import { validateFilename } from './path-utils.js';
@@ -2313,7 +2313,12 @@ function showEditSmartFolderModal(sf, isNew = false) {
 
     if (isNew) {
       sf.id = 'smart_' + Date.now();
-      appState.smartFolders.push(sf);
+    }
+    // 2. データの保存とRustへの同期（バックグラウンドで完了する）
+    appState.smartFolders = await SmartFolderStore.upsertFolder(sf);
+
+    // 3. UIの差分更新
+    if (isNew) {
       const listContainer = document.getElementById('smart-folders-list');
       if (listContainer) listContainer.appendChild(createSmartFolderNode(sf));
     } else {
@@ -2327,12 +2332,8 @@ function showEditSmartFolderModal(sf, isNew = false) {
       }
     }
 
-    localStorage.setItem('smartFolders', JSON.stringify(appState.smartFolders));
+    // 4. ダイアログを閉じる
     modal.style.display = 'none';
-    
-    if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
-      await window.veloceAPI.updateSmartFolders(appState.smartFolders);
-    }
     
     if (appState.currentDirectory === 'smart://' + sf.id) {
       refreshFileList(true);
@@ -2356,16 +2357,13 @@ const menuEditSmartFolder = createMenuItem('スマートフォルダを編集...
 
 const menuDeleteSmartFolder = createMenuItem('スマートフォルダを削除', UIManager.ICONS.TRASH, async () => {
   if (!contextMenu.targetSmartFolderId) return;
-  const index = appState.smartFolders.findIndex(f => f.id === contextMenu.targetSmartFolderId);
+  const id = contextMenu.targetSmartFolderId;
+  const index = appState.smartFolders.findIndex(f => f.id === id);
   if (index !== -1) {
-    appState.smartFolders.splice(index, 1);
-    localStorage.setItem('smartFolders', JSON.stringify(appState.smartFolders));
-    const node = document.querySelector(`.smart-folder-item[data-id="${contextMenu.targetSmartFolderId}"]`);
-    if (node) node.remove();
+    appState.smartFolders = await SmartFolderStore.deleteFolder(id);
     
-    if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
-      await window.veloceAPI.updateSmartFolders(appState.smartFolders);
-    }
+    const node = document.querySelector(`.smart-folder-item[data-id="${id}"]`);
+    if (node) node.remove();
   }
 }, true);
 
@@ -4865,7 +4863,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await refreshTree();
   initSmartFolders();
   if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
-    window.veloceAPI.updateSmartFolders(appState.smartFolders).catch(err => console.error("Failed to sync smart folders on init:", err));
+    window.veloceAPI.updateSmartFolders(SmartFolderStore.load()).catch(err => console.error("Failed to sync smart folders on init:", err));
   }
 
   // --- 初期タブの生成と読み込み ---
