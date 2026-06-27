@@ -385,7 +385,7 @@ input:-webkit-autofill:focus {
 #bookmark-bar {
   display: flex;
   align-items: center;
-  height: var(--header-height);
+  height: 32px;
   background-color: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
   padding: 0 8px;
