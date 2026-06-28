@@ -41,3 +41,6 @@ Thumbs.db
 
 # Tools
 upx.exe
+
+# AI Assistant Customizations
+.agents/
