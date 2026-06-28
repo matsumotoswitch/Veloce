@@ -2185,20 +2185,23 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
       { value: 'contains', label: 'を含む' },
       { value: 'not_contains', label: 'を含まない' }
     ]);
-    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="キーワード" value="${valVal}">`;
+    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="キーワード">`;
+    valueContainer.querySelector('input').value = valVal;
   } else if (type === 'source') {
     operatorSelect.innerHTML = makeOptions([
       { value: '==', label: 'と一致' },
       { value: '!=', label: 'と一致しない' }
     ]);
-    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="生成元" value="${valVal}">`;
+    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="生成元">`;
+    valueContainer.querySelector('input').value = valVal;
   } else if (type === 'rating') {
     operatorSelect.innerHTML = makeOptions([
       { value: '>=', label: '以上' },
       { value: '<=', label: '以下' },
       { value: '==', label: 'と一致' }
     ]);
-    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0" max="5" value="${valVal || 0}">`;
+    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0" max="5">`;
+    valueContainer.querySelector('input').value = valVal || 0;
   } else if (type === 'aspect_ratio') {
     operatorSelect.innerHTML = makeOptions([
       { value: 'portrait', label: '縦長' },
@@ -2212,9 +2215,10 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
       { value: 'under_folder', label: 'サブフォルダ含む' }
     ]);
     valueContainer.innerHTML = `
-      <input type="text" class="cond-value-input dialog-input" style="flex:1" value="${valVal}">
+      <input type="text" class="cond-value-input dialog-input" style="flex:1">
       <button type="button" class="btn-browse-path dialog-btn" style="padding: 4px 8px;">参照...</button>
     `;
+    valueContainer.querySelector('input').value = valVal;
   }
 }
 
@@ -2301,6 +2305,11 @@ function showEditSmartFolderModal(sf, isNew = false) {
       const operator = row.querySelector('.cond-operator').value;
       const valInput = row.querySelector('.cond-value-input');
       const value = valInput ? valInput.value.trim() : '';
+
+      if (value === '' && type !== 'aspect_ratio' && type !== 'rating') {
+        continue;
+      }
+
       rules.push({ type, operator, value });
     }
 
