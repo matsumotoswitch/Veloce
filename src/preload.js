@@ -253,6 +253,10 @@ window.veloceAPI = {
    */
   onDirectoryChanged: (callback) => listen('directory-changed', () => callback()),
   /**
+   * レーティングが変更されたときの通知を受け取ります。
+   */
+  onRatingChanged: (callback) => listen('rating-changed', (event) => callback(event.payload)),
+  /**
    * フォルダを作成するようメインプロセスに要求します。
    * @param {string} parentDir - 親ディレクトリのパス。
    * @param {string} folderName - 新しいフォルダ名。

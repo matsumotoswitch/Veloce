@@ -747,7 +747,8 @@ body.is-resizing #center-top {
 }
 
 #center-top::-webkit-scrollbar-track {
-  margin-top: 32px; /* Prevent overlapping the sticky header */
+  margin-top: 32px;
+  /* Prevent overlapping the sticky header */
 }
 
 table#file-table {
@@ -884,12 +885,12 @@ table#file-table {
   background-color: transparent;
 }
 
-.custom-checkbox-wrapper input[type="checkbox"]:checked + .custom-checkbox {
+.custom-checkbox-wrapper input[type="checkbox"]:checked+.custom-checkbox {
   background-color: var(--accent-color);
   border-color: var(--accent-color);
 }
 
-.custom-checkbox-wrapper input[type="checkbox"]:checked + .custom-checkbox::after {
+.custom-checkbox-wrapper input[type="checkbox"]:checked+.custom-checkbox::after {
   content: '';
   width: 4px;
   height: 8px;
@@ -1051,23 +1052,30 @@ input[type="range"]:focus {
 
 .thumbnail-label {
   position: absolute;
-  bottom: 0; /* 余白をなくして下端にピッタリつける */
+  bottom: 0;
+  /* 余白をなくして下端にピッタリつける */
   left: 50%;
   transform: translateX(-50%);
   max-width: calc(100% - 12px);
-  background: rgba(0, 0, 0, 0.8); /* 非ホバー時でも背景を暗くして読みやすく */
-  border-radius: 10px; /* やや小さめのピル */
+  background: rgba(0, 0, 0, 0.8);
+  /* 非ホバー時でも背景を暗くして読みやすく */
+  border-radius: 10px;
+  /* やや小さめのピル */
   color: #fff;
-  font-size: 10.5px; /* 少し小さく */
-  padding: 2px 8px; /* 余白を削ってスリムに */
+  font-size: 10.5px;
+  /* 少し小さく */
+  padding: 2px 8px;
+  /* 余白を削ってスリムに */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
   pointer-events: none;
-  opacity: 0.75; /* 透過度を少し上げて視認性を確保 */
+  opacity: 0.75;
+  /* 透過度を少し上げて視認性を確保 */
   transition: opacity 0.2s ease, background 0.2s ease;
-  display: none; /* Default hidden */
+  display: none;
+  /* Default hidden */
 }
 
 body.show-thumbnail-names .thumbnail-label {
@@ -2201,7 +2209,8 @@ html.viewer-html,
   right: 0;
   left: 0;
   display: flex;
-  justify-content: flex-end; /* Keep buttons on right even if filename is hidden */
+  justify-content: flex-end;
+  /* Keep buttons on right even if filename is hidden */
   z-index: 9999;
   visibility: visible;
   transition: opacity 0.2s, background 0.3s;
@@ -2278,7 +2287,7 @@ html.viewer-html,
   pointer-events: none;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 .viewer-body #window-controls:not(.has-gradient).showing-scale .window-scale-display {
@@ -2301,6 +2310,7 @@ html.viewer-html,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:hover {
   background-color: rgba(var(--accent-rgb), 0.6);
 }
+
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:hover {
   background-color: #e05263;
 }
@@ -2662,7 +2672,8 @@ kbd {
 }
 
 .rating-badge svg {
-  fill: #ffd700; /* Gold/Yellow star */
+  fill: #ffd700;
+  /* Gold/Yellow star */
   width: 12px;
   height: 12px;
 }

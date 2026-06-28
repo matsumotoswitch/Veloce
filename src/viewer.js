@@ -8,6 +8,8 @@ import { debounce, blockDevtoolsShortcuts } from './utils.js';
 
 blockDevtoolsShortcuts();
 
+let viewerRatings = {};
+
 const CONFIG = {
   ZOOM_STEP: 1.1,         // マウスホイールでのズーム倍率
   MIN_ZOOM: 0.1,          // 最小ズーム倍率 (10%)
@@ -71,6 +73,13 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }).catch(() => {});
 
+    const ratingsJson = localStorage.getItem('ratings');
+    if (ratingsJson) {
+      try {
+        viewerRatings = JSON.parse(ratingsJson);
+      } catch (e) {}
+    }
+
     const pathsJson = localStorage.getItem('viewerPaths');
     let initialTotal = 0;
     if (pathsJson) {
@@ -124,6 +133,19 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const listen = (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen) || (window.__TAURI__ && window.__TAURI__.tauri && window.__TAURI__.tauri.listen) || (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.listen);
     if (listen) {
+      listen('rating-changed', (event) => {
+        const { path, rating } = event.payload || {};
+        if (!path) return;
+        if (rating === 0 || viewerRatings[path] === rating) {
+          delete viewerRatings[path];
+        } else {
+          viewerRatings[path] = rating;
+        }
+        localStorage.setItem('ratings', JSON.stringify(viewerRatings));
+        if (viewerState.currentImagePath === path) {
+          if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
+        }
+      });
       listen('viewers-arranged', () => {
         viewerState.isImmersiveArranged = true;
         resetZoomAndFit();
@@ -513,6 +535,7 @@ async function loadImage() {
 
     swapImageElement(targetImg, currentSeq);
     preloadAdjacentImages();
+    if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
 
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
     const filenameEl = document.getElementById('window-filename-display');
@@ -658,11 +681,36 @@ function createWindowControls() {
   filenameDisplay.className = 'window-filename';
 
   controlsContainer.appendChild(filenameDisplay);
+  const infoContainer = document.createElement('div');
+  infoContainer.id = 'window-info-container';
+  infoContainer.style.display = 'none';
+  infoContainer.style.alignItems = 'center';
+  infoContainer.style.justifyContent = 'center';
+  infoContainer.style.height = '30px';
+  infoContainer.style.padding = '0 12px';
+
+  const ratingDisplay = document.createElement('div');
+  ratingDisplay.id = 'viewer-rating-display';
+  ratingDisplay.style.display = 'none';
+  ratingDisplay.style.alignItems = 'center';
+  ratingDisplay.style.marginRight = '8px';
+  ratingDisplay.style.color = 'rgba(255, 255, 255, 0.9)';
+  ratingDisplay.style.fontSize = 'var(--font-size-xs)';
+  ratingDisplay.style.fontWeight = '600';
+  ratingDisplay.style.fontVariantNumeric = 'tabular-nums';
+  ratingDisplay.style.textShadow = '0 1px 2px rgba(0,0,0,0.8)';
+
   const scaleDisplay = document.createElement('div');
   scaleDisplay.id = 'window-scale-display';
   scaleDisplay.className = 'window-scale-display';
   scaleDisplay.style.display = 'none';
-  controlsContainer.appendChild(scaleDisplay);
+  // padding をリセット（親で持つため）
+  scaleDisplay.style.padding = '0';
+
+  infoContainer.appendChild(ratingDisplay);
+  infoContainer.appendChild(scaleDisplay);
+  controlsContainer.appendChild(infoContainer);
+
   controlsContainer.appendChild(minBtn);
   controlsContainer.appendChild(maxBtn);
   controlsContainer.appendChild(closeBtn);
@@ -926,6 +974,31 @@ window.addEventListener('keydown', async (e) => {
       resetZoomAndFit();
       break;
     }
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5': {
+      e.preventDefault();
+      let rating = parseInt(e.key.replace('Numpad', ''), 10);
+      const filePath = viewerState.currentImagePath;
+      if (filePath && window.veloceAPI.setRating) {
+        const currentRating = viewerRatings[filePath] || 0;
+        if (currentRating === rating) {
+          rating = 0;
+        }
+
+        window.veloceAPI.setRating(filePath, rating);
+        if (rating === 0) {
+          showToast('レーティングを解除しました');
+        } else {
+          const starSvg = '<svg viewBox="0 0 24 24" width="16" height="16" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 2px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+          showToast(starSvg + rating);
+        }
+      }
+      break;
+    }
     case 'Escape':
       if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
       break;
@@ -1067,9 +1140,58 @@ function updateScaleDisplay() {
   if (percent !== 100) {
     scaleDisplay.textContent = `${percent}%`;
     scaleDisplay.style.display = 'flex';
-    controls.classList.add('showing-scale');
   } else {
     scaleDisplay.style.display = 'none';
-    controls.classList.remove('showing-scale');
   }
+  if (typeof updateInfoContainerVisibility === 'function') updateInfoContainerVisibility();
 };
+
+// --- レーティングの表示更新 ---
+function updateRatingDisplay() {
+  const display = document.getElementById('viewer-rating-display');
+  if (!display) return;
+
+  const filePath = viewerState.currentImagePath;
+  if (!filePath) {
+    display.style.display = 'none';
+    if (typeof updateInfoContainerVisibility === 'function') updateInfoContainerVisibility();
+    return;
+  }
+
+  const rating = viewerRatings[filePath] || 0;
+  if (rating > 0) {
+    const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+    display.innerHTML = starSvg + '<span style="margin-left: 2px;">' + rating + '</span>';
+    display.style.display = 'flex';
+  } else {
+    display.style.display = 'none';
+  }
+  if (typeof updateInfoContainerVisibility === 'function') updateInfoContainerVisibility();
+}
+
+function updateInfoContainerVisibility() {
+  const infoContainer = document.getElementById('window-info-container');
+  const scaleDisplay = document.getElementById('window-scale-display');
+  const ratingDisplay = document.getElementById('viewer-rating-display');
+  const controls = document.getElementById('window-controls');
+  if (!infoContainer || !controls) return;
+
+  const hasScale = scaleDisplay && scaleDisplay.style.display !== 'none';
+  const hasRating = ratingDisplay && ratingDisplay.style.display !== 'none';
+
+  if (hasScale || hasRating) {
+    infoContainer.style.display = 'flex';
+    controls.classList.add('showing-scale');
+    // CSS の代わり
+    if (!controls.classList.contains('has-gradient')) {
+      infoContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
+      infoContainer.style.borderBottomLeftRadius = 'var(--radius-sm)';
+    }
+  } else {
+    infoContainer.style.display = 'none';
+    controls.classList.remove('showing-scale');
+    infoContainer.style.backgroundColor = '';
+  }
+}
+
+window.updateScaleDisplay = updateScaleDisplay;

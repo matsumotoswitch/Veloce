@@ -139,6 +139,13 @@ pub struct ViewerImageResult {
     total: usize,
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RatingPayload {
+    pub path: String,
+    pub rating: u8,
+}
+
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartFolderCondition {
@@ -841,15 +848,27 @@ fn sync_ratings(
 }
 
 #[tauri::command]
-fn set_rating(state: tauri::State<'_, AppState>, path: String, rating: u8) -> usize {
+fn set_rating(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    path: String,
+    rating: u8,
+) -> usize {
     if let Ok(mut lock) = state.ratings.lock() {
         if rating == 0 {
             lock.remove(&path);
         } else {
-            lock.insert(path, rating);
+            lock.insert(path.clone(), rating);
         }
     }
-    apply_filters_and_sort(None, &state)
+    let _ = app.emit_all(
+        "rating-changed",
+        RatingPayload {
+            path: path.clone(),
+            rating,
+        },
+    );
+    apply_filters_and_sort(Some(&app), &state)
 }
 
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {

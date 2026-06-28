@@ -3615,58 +3615,10 @@ window.addEventListener('keydown', async (e) => {
         const allHaveSameRating = files.every(f => (appState.ratings[f.path] || 0) === rating);
         const newRating = allHaveSameRating ? 0 : rating;
 
-        let thumbs = [];
-        if (uiManager.elements.thumbnailGrid) {
-          thumbs = Array.from(uiManager.elements.thumbnailGrid.querySelectorAll('.thumbnail-item'));
-        }
-
         for (const file of files) {
-          if (newRating === 0) {
-            delete appState.ratings[file.path];
-          } else {
-            appState.ratings[file.path] = newRating;
-          }
-
           if (window.veloceAPI.setRating) {
             await window.veloceAPI.setRating(file.path, newRating);
-
-            if (thumbs.length > 0) {
-              const thumb = thumbs.find(t => t.dataset.filepath === file.path);
-              if (thumb) {
-                let badge = thumb.querySelector('.rating-badge');
-                if (badge) {
-                  if (newRating > 0) {
-                    badge.querySelector('.rating-value').textContent = newRating;
-                    badge.style.display = 'flex';
-                  } else {
-                    badge.style.display = 'none';
-                  }
-                }
-              }
-            }
-
-            if (uiManager.elements.fileListBody) {
-              const trs = Array.from(uiManager.elements.fileListBody.querySelectorAll('tr'));
-              const tr = trs.find(r => r.dataset.filepath === file.path);
-              if (tr) {
-                const td = tr.querySelectorAll('td')[7];
-                if (td) {
-                  if (newRating > 0) {
-                    const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-                    td.innerHTML = starSvg.repeat(newRating);
-                  } else {
-                    td.innerHTML = '-';
-                  }
-                }
-              }
-            }
           }
-        }
-        
-        localStorage.setItem('ratings', JSON.stringify(appState.ratings));
-        
-        if (appState.ratingFilterVal > 0 || appState.sortConfig.key === 'rating') {
-          scheduleRefresh();
         }
       }
       return;
@@ -5045,6 +4997,55 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     await expandTreeToPath(appState.currentDirectory);
     saveTabsState();
+  }
+
+  if (window.veloceAPI.onRatingChanged) {
+    window.veloceAPI.onRatingChanged((payload) => {
+      const { path, rating } = payload;
+      if (rating === 0) {
+        delete appState.ratings[path];
+      } else {
+        appState.ratings[path] = rating;
+      }
+      localStorage.setItem('ratings', JSON.stringify(appState.ratings));
+
+      if (uiManager.elements.thumbnailGrid) {
+        // Use double backslashes in querySelector attribute selector for file paths
+        const safePath = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const thumb = uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
+        if (thumb) {
+          let badge = thumb.querySelector('.rating-badge');
+          if (badge) {
+            if (rating > 0) {
+              badge.querySelector('.rating-value').textContent = rating;
+              badge.style.display = 'flex';
+            } else {
+              badge.style.display = 'none';
+            }
+          }
+        }
+      }
+
+      if (uiManager.elements.fileListBody) {
+        const safePath = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const tr = uiManager.elements.fileListBody.querySelector(`tr[data-filepath="${safePath}"]`);
+        if (tr) {
+          const td = tr.querySelectorAll('td')[7];
+          if (td) {
+            if (rating > 0) {
+              const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+              td.innerHTML = starSvg + rating;
+            } else {
+              td.innerHTML = '-';
+            }
+          }
+        }
+      }
+
+      if (appState.ratingFilterVal > 0 || appState.sortConfig.key === 'rating') {
+        scheduleRefresh();
+      }
+    });
   }
 
   if (window.veloceAPI.onFileChanged) {
