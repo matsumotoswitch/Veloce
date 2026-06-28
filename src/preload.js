@@ -12,6 +12,9 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(path: string) => Promise<void>} loadDirectory
  * @property {(callback: (payload: {path: string, totalCount: number}) => void) => void} onDirectoryLoaded
  * @property {(sortKey: string, asc: boolean, searchQuery: string) => Promise<number>} setViewParams
+ * @property {() => Promise<Object<string, number>>} getAllRatings
+ * @property {(ratings: Object<string, number>) => Promise<void>} migrateRatings
+ * @property {() => Promise<Object<string, number>>} getSmartFolderCounts
  * @property {(offset: number, limit: number) => Promise<Array<import('./renderer-state.js').ImageFile>>} getItems
  * @property {(index: number) => Promise<import('./renderer-state.js').ImageFile|null>} getFileByIndex
  * @property {(updates: any[]) => Promise<void>} updateMetadataInState
@@ -37,6 +40,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(callback: (payload: any) => void) => void} onFileChanged
  * @property {(callback: (payload: string) => void) => void} onFileRemoved
  * @property {(callback: () => void) => void} onDirectoryChanged
+ * @property {(callback: (payload: {path: string, rating: number}) => void) => void} onRatingChanged
  * @property {(parentDir: string, folderName: string) => Promise<{success: boolean, path?: string, error?: string}>} createFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
@@ -89,6 +93,9 @@ window.veloceAPI = {
    */
   setViewParams: (sortKey, asc, searchQuery, ratingFilterVal = 0, ratingFilterOp = 'gte') => invoke('set_view_params', { sortKey, asc, searchQuery, ratingFilterVal, ratingFilterOp }),
   syncRatings: (ratings) => invoke('sync_ratings', { ratings }),
+  getAllRatings: () => invoke('get_all_ratings'),
+  migrateRatings: (ratings) => invoke('migrate_ratings', { ratings }),
+  getSmartFolderCounts: () => invoke('get_smart_folder_counts'),
   setRating: (path, rating) => invoke('set_rating', { path, rating }),
   /**
    * 仮想スクロール用: 指定範囲のImageFileをRustから取得する

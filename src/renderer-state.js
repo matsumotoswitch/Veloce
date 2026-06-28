@@ -98,7 +98,7 @@ class AppState {
     this.smartFolders = SmartFolderStore.load();
     
     /** @type {Object<string, number>} レーティング一覧 (path -> rating) */
-    this.ratings = JSON.parse(localStorage.getItem('ratings') || '{}');
+    this.ratings = {};
     this.ratingFilterVal = 0;
     this.ratingFilterOp = 'gte';
 

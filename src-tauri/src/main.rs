@@ -214,6 +214,14 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ratings (
+            path TEXT PRIMARY KEY,
+            rating INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
     // マイグレーション（カラムが存在しない場合は無視される）
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN height INTEGER DEFAULT 0", []);
@@ -848,12 +856,78 @@ fn sync_ratings(
 }
 
 #[tauri::command]
+fn get_all_ratings(state: tauri::State<'_, AppState>) -> std::collections::HashMap<String, u8> {
+    if let Ok(lock) = state.ratings.lock() {
+        lock.clone()
+    } else {
+        std::collections::HashMap::new()
+    }
+}
+
+#[tauri::command]
+fn migrate_ratings(
+    state: tauri::State<'_, AppState>,
+    ratings: std::collections::HashMap<String, u8>,
+) -> Result<(), String> {
+    if let Ok(mut conn) = state.db_conn.lock() {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        for (path, rating) in &ratings {
+            let _ = tx.execute(
+                "INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)",
+                rusqlite::params![path, rating],
+            );
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    if let Ok(mut lock) = state.ratings.lock() {
+        for (path, rating) in ratings {
+            lock.insert(path, rating);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_smart_folder_counts(
+    state: tauri::State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, usize>, String> {
+    let mut result = std::collections::HashMap::new();
+    let rules = if let Ok(lock) = state.smart_folders.lock() {
+        lock.clone()
+    } else {
+        return Ok(result);
+    };
+    
+    let ratings_map = if let Ok(lock) = state.ratings.lock() {
+        lock.clone()
+    } else {
+        std::collections::HashMap::new()
+    };
+    
+    let db_conn = std::sync::Arc::clone(&state.db_conn);
+    
+    for rule in rules {
+        let paths = get_smart_folder_paths(&format!("smart://{}", rule.id), &ratings_map, &db_conn, &[rule.clone()]);
+        result.insert(rule.id, paths.len());
+    }
+    Ok(result)
+}
+
+#[tauri::command]
 fn set_rating(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     path: String,
     rating: u8,
 ) -> usize {
+    if let Ok(conn) = state.db_conn.lock() {
+        if rating == 0 {
+            let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&path]);
+        } else {
+            let _ = conn.execute("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![&path, rating]);
+        }
+    }
+
     if let Ok(mut lock) = state.ratings.lock() {
         if rating == 0 {
             lock.remove(&path);
@@ -2508,8 +2582,9 @@ fn get_license_text() -> String {
 }
 
 #[tauri::command]
-async fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_name: String) -> Result<String, String> {
+    let old_path_clone = old_path.clone();
+    let new_path_str = tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&old_path);
         let parent = path.parent().unwrap_or(std::path::Path::new(""));
 
@@ -2541,12 +2616,28 @@ async fn rename_file(old_path: String, new_name: String) -> Result<String, Strin
         }
     })
     .await
-    .unwrap_or_else(|e| Err(e.to_string()))
+    .unwrap_or_else(|e| Err(e.to_string()))?;
+
+    // DBとメモリのレーティングのパスを更新
+    if let Ok(conn) = state.db_conn.lock() {
+        let _ = conn.execute(
+            "UPDATE ratings SET path = ?1 WHERE path = ?2",
+            rusqlite::params![&new_path_str, &old_path_clone],
+        );
+    }
+    if let Ok(mut lock) = state.ratings.lock() {
+        if let Some(rating) = lock.remove(&old_path_clone) {
+            lock.insert(new_path_str.clone(), rating);
+        }
+    }
+
+    Ok(new_path_str)
 }
 
 #[tauri::command]
-async fn rename_folder(old_path: String, new_name: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_name: String) -> Result<String, String> {
+    let old_path_clone = old_path.clone();
+    let new_path_str = tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&old_path);
         let parent = path.parent().unwrap_or(std::path::Path::new(""));
         let new_path = parent.join(new_name);
@@ -2570,7 +2661,48 @@ async fn rename_folder(old_path: String, new_name: String) -> Result<String, Str
         }
     })
     .await
-    .unwrap_or_else(|e| Err(e.to_string()))
+    .unwrap_or_else(|e| Err(e.to_string()))?;
+
+    // フォルダのリネームに合わせてレーティングのパスも更新する
+    let old_prefix = format!("{}\\*", old_path_clone);
+    let old_prefix_slash = format!("{}\\*", old_path_clone.replace("\\", "/"));
+    let old_path_exact = old_path_clone.clone();
+    let new_path_exact = new_path_str.clone();
+    
+    let old_base = if old_path_clone.ends_with('\\') || old_path_clone.ends_with('/') {
+        old_path_clone.clone()
+    } else {
+        format!("{}\\*", old_path_clone) // 末尾にセパレータがない場合のprefix用
+    };
+    // 厳密な前方一致置換は面倒なので、Rustのメモリ側で計算したペアでDBも更新する
+    let mut updates = Vec::new();
+    if let Ok(mut lock) = state.ratings.lock() {
+        let mut keys_to_remove = Vec::new();
+        for (p, rating) in lock.iter() {
+            if p == &old_path_exact {
+                keys_to_remove.push(p.clone());
+                updates.push((new_path_exact.clone(), *rating));
+            } else if p.starts_with(&format!("{}\\*", old_path_exact).replace("*", "")) || p.starts_with(&format!("{}/", old_path_exact)) {
+                keys_to_remove.push(p.clone());
+                let new_p = p.replacen(&old_path_exact, &new_path_exact, 1);
+                updates.push((new_p, *rating));
+            }
+        }
+        for k in keys_to_remove {
+            lock.remove(&k);
+            if let Ok(conn) = state.db_conn.lock() {
+                let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&k]);
+            }
+        }
+        for (new_p, rating) in updates {
+            lock.insert(new_p.clone(), rating);
+            if let Ok(conn) = state.db_conn.lock() {
+                let _ = conn.execute("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![&new_p, rating]);
+            }
+        }
+    }
+
+    Ok(new_path_str)
 }
 
 #[tauri::command]
@@ -2752,6 +2884,22 @@ fn main() {
             smart_folders: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
+            // SQLite からレーティング情報をメモリにロード
+            let state = app.state::<AppState>();
+            if let Ok(conn) = state.db_conn.lock() {
+                if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
+                    if let Ok(rows) = stmt.query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
+                    }) {
+                        if let Ok(mut lock) = state.ratings.lock() {
+                            for r in rows.flatten() {
+                                lock.insert(r.0, r.1);
+                            }
+                        }
+                    }
+                }
+            }
+
             let data_dir = get_veloce_data_dir().unwrap_or_default();
 
             // 退避させた設定と、指定したデータディレクトリを使って自分でウィンドウを作成する
@@ -3090,7 +3238,10 @@ fn main() {
             open_in_explorer,
             check_conflicts,
             clear_metadata_cache,
-            get_files_by_indices
+            get_files_by_indices,
+            get_all_ratings,
+            migrate_ratings,
+            get_smart_folder_counts
         ])
         .run(context)
         .expect("error while running tauri application");

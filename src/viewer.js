@@ -73,11 +73,11 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }).catch(() => {});
 
-    const ratingsJson = localStorage.getItem('ratings');
-    if (ratingsJson) {
-      try {
-        viewerRatings = JSON.parse(ratingsJson);
-      } catch (e) {}
+    if (window.veloceAPI && window.veloceAPI.getAllRatings) {
+      window.veloceAPI.getAllRatings().then(ratings => {
+        viewerRatings = ratings || {};
+        if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
+      }).catch(() => {});
     }
 
     const pathsJson = localStorage.getItem('viewerPaths');
@@ -141,7 +141,6 @@ window.addEventListener('DOMContentLoaded', () => {
         } else {
           viewerRatings[path] = rating;
         }
-        localStorage.setItem('ratings', JSON.stringify(viewerRatings));
         if (viewerState.currentImagePath === path) {
           if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
         }

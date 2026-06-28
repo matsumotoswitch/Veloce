@@ -594,6 +594,23 @@ input:-webkit-autofill:focus {
   height: 100%;
 }
 
+.smart-folder-count {
+  margin-left: auto;
+  font-size: 10px;
+  background-color: rgba(255, 255, 255, 0.1);
+  padding: 1px 5px;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  display: none;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.smart-folder-item.selected .smart-folder-count {
+  background-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
 #directories-section {
   flex: 1;
   display: flex;

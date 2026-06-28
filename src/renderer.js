@@ -4926,8 +4926,22 @@ window.addEventListener('DOMContentLoaded', async () => {
     uiManager.elements.searchBar.value = appState.searchQuery;
   }
   
-  if (window.veloceAPI.syncRatings) {
-    window.veloceAPI.syncRatings(appState.ratings);
+  if (window.veloceAPI.getAllRatings) {
+    const oldRatingsJson = localStorage.getItem('ratings');
+    if (oldRatingsJson) {
+      try {
+        const oldRatings = JSON.parse(oldRatingsJson);
+        if (Object.keys(oldRatings).length > 0 && window.veloceAPI.migrateRatings) {
+          await window.veloceAPI.migrateRatings(oldRatings);
+        }
+      } catch (e) {
+        console.error('Failed to migrate ratings:', e);
+      }
+      localStorage.removeItem('ratings');
+    }
+    
+    const dbRatings = await window.veloceAPI.getAllRatings();
+    appState.ratings = dbRatings || {};
   }
   
   const setupCustomSelect = (containerId, valueKey) => {
@@ -5007,7 +5021,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       } else {
         appState.ratings[path] = rating;
       }
-      localStorage.setItem('ratings', JSON.stringify(appState.ratings));
 
       if (uiManager.elements.thumbnailGrid) {
         // Use double backslashes in querySelector attribute selector for file paths
@@ -5045,6 +5058,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (appState.ratingFilterVal > 0 || appState.sortConfig.key === 'rating') {
         scheduleRefresh();
       }
+      updateSmartFolderCountsUI();
     });
   }
 
@@ -5118,6 +5132,33 @@ function createSmartFolderNode(f) {
 }
 
 /**
+ * スマートフォルダの件数を取得してUIに反映する非同期関数
+ */
+async function updateSmartFolderCountsUI() {
+  if (!window.veloceAPI.getSmartFolderCounts) return;
+  try {
+    const counts = await window.veloceAPI.getSmartFolderCounts();
+    const list = document.getElementById('smart-folders-list');
+    if (!list) return;
+    const items = list.querySelectorAll('.smart-folder-item');
+    items.forEach(item => {
+      const id = item.dataset.id;
+      const countSpan = item.querySelector('.smart-folder-count');
+      if (id && countSpan) {
+        if (counts[id] !== undefined) {
+          countSpan.textContent = counts[id];
+          countSpan.style.display = 'block';
+        } else {
+          countSpan.style.display = 'none';
+        }
+      }
+    });
+  } catch (e) {
+    console.error('Failed to update smart folder counts:', e);
+  }
+}
+
+/**
  * スマートフォルダのUI初期化とイベント設定を行います
  */
 function initSmartFolders() {
@@ -5133,6 +5174,7 @@ function initSmartFolders() {
 
   // 1回のReflowでDOMツリーを更新
   container.replaceChildren(fragment);
+  updateSmartFolderCountsUI();
 
   // イベント委譲 (Event Delegation) は1回だけ設定
   if (!smartFoldersDelegated) {
