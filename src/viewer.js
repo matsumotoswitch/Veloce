@@ -888,7 +888,8 @@ window.addEventListener('keydown', async (e) => {
       applyFitState();
       updateFullscreenStyles();
       break;
-    case '0': {
+    case 'f':
+    case 'F': {
       e.preventDefault();
       viewerState.isImmersiveArranged = false;
       const { width: natW, height: natH } = getNaturalDimensions();
@@ -913,7 +914,7 @@ window.addEventListener('keydown', async (e) => {
       resetZoomAndFit();
       break;
     }
-    case '1': {
+    case ' ': {
       e.preventDefault();
       viewerState.isImmersiveArranged = false;
       const { width: natW, height: natH } = getNaturalDimensions();

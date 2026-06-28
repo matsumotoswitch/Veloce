@@ -1447,8 +1447,8 @@ function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>Ctrl</kbd> + ホイール</td><td>画像のズームイン / ズームアウト</td></tr>
         <tr><td>左ドラッグ</td><td>ウィンドウの移動 / スクロール（ズーム時）</td></tr>
         <tr><td><kbd>Ctrl</kbd> + 左ドラッグ</td><td>ズームイン時、画像内を自由にパン移動</td></tr>
-        <tr><td><kbd>0</kbd></td><td>100%表示（モニターより大きい画像はリサイズ）</td></tr>
-        <tr><td><kbd>1</kbd></td><td>完全な100%等倍ウィンドウ表示（画面外許可）</td></tr>
+        <tr><td><kbd>F</kbd></td><td>100%表示（モニターより大きい画像はリサイズ）</td></tr>
+        <tr><td><kbd>Space</kbd></td><td>完全な100%等倍ウィンドウ表示（画面外許可）</td></tr>
       </table>
 
       <h3 class="help-group-title">変形・フィルター</h3>
