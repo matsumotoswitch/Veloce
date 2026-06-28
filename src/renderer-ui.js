@@ -1129,7 +1129,7 @@ class UIManager {
     if (topSpacerHeight > 0) {
       const tr = document.createElement('tr');
       tr.style.height = `${topSpacerHeight}px`;
-      tr.innerHTML = `<td colspan="7" style="padding: 0; border: none;"></td>`;
+      tr.innerHTML = `<td colspan="8" style="padding: 0; border: none;"></td>`;
       fragment.appendChild(tr);
     }
 
@@ -1159,6 +1159,13 @@ class UIManager {
         ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
       }
 
+      let ratingStr = '-';
+      const rating = appState.ratings[file.path] || 0;
+      if (rating > 0) {
+        const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+        ratingStr = starSvg.repeat(rating);
+      }
+
       tr.innerHTML = `
         <td>${file.name}</td>
         <td>${file.ext}</td>
@@ -1167,6 +1174,7 @@ class UIManager {
         <td style="text-align: right;">${ratioStr}</td>
         <td style="text-align: right;">${formatSize(file.size)}</td>
         <td>${formatDate(file.mtime)}</td>
+        <td>${ratingStr}</td>
       `;
       tr.draggable = true;
       fragment.appendChild(tr);
@@ -1175,7 +1183,7 @@ class UIManager {
     if (bottomSpacerHeight > 0) {
       const tr = document.createElement('tr');
       tr.style.height = `${bottomSpacerHeight}px`;
-      tr.innerHTML = `<td colspan="7" style="padding: 0; border: none;"></td>`;
+      tr.innerHTML = `<td colspan="8" style="padding: 0; border: none;"></td>`;
       fragment.appendChild(tr);
     }
 

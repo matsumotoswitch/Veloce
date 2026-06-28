@@ -905,6 +905,13 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     // ソート
     let key = sort_config.key.as_str();
     let asc = sort_config.asc;
+    
+    let ratings_map_for_sort = if key == "rating" {
+        state.ratings.lock().ok().map(|guard| guard.clone())
+    } else {
+        None
+    };
+
     filtered.sort_by(|a, b| {
         let cmp = match key {
             "name" => natural_cmp(&a.name, &b.name),
@@ -926,6 +933,19 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
                     0.0
                 };
                 r_a.partial_cmp(&r_b).unwrap_or(std::cmp::Ordering::Equal)
+            }
+            "rating" => {
+                let r_a = if let Some(ref map) = ratings_map_for_sort {
+                    map.get(&a.path).copied().unwrap_or(0)
+                } else {
+                    0
+                };
+                let r_b = if let Some(ref map) = ratings_map_for_sort {
+                    map.get(&b.path).copied().unwrap_or(0)
+                } else {
+                    0
+                };
+                r_a.cmp(&r_b)
             }
             _ => natural_cmp(&a.name, &b.name),
         };

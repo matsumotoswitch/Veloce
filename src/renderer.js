@@ -1090,6 +1090,7 @@ const TABLE_HEADERS = {
   ratio: '比率',
   size: 'サイズ',
   mtime: '更新日時',
+  rating: 'レーティング',
 };
 
 function updateSortIndicators() {
@@ -2084,7 +2085,8 @@ const sortOptions = [
   { key: 'height', label: '高さ' },
   { key: 'ratio', label: '比率' },
   { key: 'size', label: 'サイズ' },
-  { key: 'mtime', label: '更新日時' }
+  { key: 'mtime', label: '更新日時' },
+  { key: 'rating', label: 'レーティング' }
 ];
 
 const updateSortCheckmarks = () => {
@@ -3642,12 +3644,28 @@ window.addEventListener('keydown', async (e) => {
                 }
               }
             }
+
+            if (uiManager.elements.fileListBody) {
+              const trs = Array.from(uiManager.elements.fileListBody.querySelectorAll('tr'));
+              const tr = trs.find(r => r.dataset.filepath === file.path);
+              if (tr) {
+                const td = tr.querySelectorAll('td')[7];
+                if (td) {
+                  if (newRating > 0) {
+                    const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+                    td.innerHTML = starSvg.repeat(newRating);
+                  } else {
+                    td.innerHTML = '-';
+                  }
+                }
+              }
+            }
           }
         }
         
         localStorage.setItem('ratings', JSON.stringify(appState.ratings));
         
-        if (appState.ratingFilterVal > 0) {
+        if (appState.ratingFilterVal > 0 || appState.sortConfig.key === 'rating') {
           scheduleRefresh();
         }
       }

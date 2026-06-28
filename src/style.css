@@ -783,6 +783,10 @@ table#file-table {
   width: 160px;
 }
 
+#file-table th:nth-child(8) {
+  width: 100px;
+}
+
 #file-table th,
 #file-table td {
   padding: 4px 8px;
