@@ -194,7 +194,14 @@ window.veloceAPI = {
   /**
    * ビューアウィンドウを最大化するようメインプロセスに要求します。
    */
-  maximizeViewer: () => appWindow.toggleMaximize(),
+  maximizeViewer: async () => {
+    const isMax = await appWindow.isMaximized();
+    if (isMax) {
+      await appWindow.unmaximize();
+    } else {
+      await appWindow.maximize();
+    }
+  },
   /**
    * ビューアウィンドウのサイズを変更するようメインプロセスに要求します。
    * @param {number} width - 変更後の幅。

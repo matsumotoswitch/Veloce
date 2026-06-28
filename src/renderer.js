@@ -3489,14 +3489,17 @@ uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
 
 // リサイズイベント発生時にディレイなしで枠線の表示・非表示を切り替える
 window.addEventListener('resize', () => {
-  const isMax = window.innerWidth >= window.screen.availWidth - 10 && window.innerHeight >= window.screen.availHeight - 10;
-  const borderOverlay = document.getElementById('border-overlay');
-  if (borderOverlay) {
-    borderOverlay.style.display = isMax ? 'none' : 'block';
-  }
-  const maxBtn = document.getElementById('titlebar-maximize');
-  if (maxBtn) {
-    maxBtn.innerHTML = isMax ? UIManager.ICONS.WINDOW_RESTORE : UIManager.ICONS.WINDOW_MAXIMIZE;
+  if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
+    window.veloceAPI.isViewerMaximized().then(isMax => {
+      const borderOverlay = document.getElementById('border-overlay');
+      if (borderOverlay) {
+        borderOverlay.style.display = isMax ? 'none' : 'block';
+      }
+      const maxBtn = document.getElementById('titlebar-maximize');
+      if (maxBtn) {
+        maxBtn.innerHTML = isMax ? UIManager.ICONS.WINDOW_RESTORE : UIManager.ICONS.WINDOW_MAXIMIZE;
+      }
+    });
   }
 });
 
@@ -5100,9 +5103,8 @@ function initSmartFolders() {
       const item = e.target.closest('.smart-folder-item');
       if (!item) return;
 
-      // 選択状態の更新
+      // 選択状態の更新（スマートフォルダはタブと状態が合わなくなるため選択状態を付与しない）
       document.querySelectorAll('.smart-folder-item').forEach(el => el.classList.remove('selected'));
-      item.classList.add('selected');
       
       // ツリー側の選択状態を解除
       document.querySelectorAll('.tree-node-content').forEach(el => el.classList.remove('selected'));
