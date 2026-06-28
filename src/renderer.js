@@ -3592,28 +3592,45 @@ window.addEventListener('keydown', async (e) => {
   }
 
   if (['0', '1', '2', '3', '4', '5'].includes(e.key) && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-    if (appState.selectedIndex !== -1) {
+    let targetIndices = [];
+    if (appState.selection.size > 0) {
+      targetIndices = Array.from(appState.selection);
+    } else if (appState.selectedIndex !== -1) {
+      targetIndices = [appState.selectedIndex];
+    }
+
+    if (targetIndices.length > 0) {
       e.preventDefault();
       const rating = parseInt(e.key, 10);
-      const file = await window.veloceAPI.getFileByIndex(appState.selectedIndex);
-      if (file) {
-        const currentRating = appState.ratings[file.path] || 0;
-        const newRating = (rating === currentRating) ? 0 : rating;
-        
-        if (newRating === 0) {
-          delete appState.ratings[file.path];
-        } else {
-          appState.ratings[file.path] = newRating;
+      
+      const files = [];
+      for (const idx of targetIndices) {
+        const file = await window.veloceAPI.getFileByIndex(idx);
+        if (file) files.push(file);
+      }
+
+      if (files.length > 0) {
+        const allHaveSameRating = files.every(f => (appState.ratings[f.path] || 0) === rating);
+        const newRating = allHaveSameRating ? 0 : rating;
+
+        let thumbs = [];
+        if (uiManager.elements.thumbnailGrid) {
+          thumbs = Array.from(uiManager.elements.thumbnailGrid.querySelectorAll('.thumbnail-item'));
         }
-        localStorage.setItem('ratings', JSON.stringify(appState.ratings));
-        
-        if (window.veloceAPI.setRating) {
-          await window.veloceAPI.setRating(file.path, newRating);
-          
-          if (uiManager.elements.thumbnailGrid) {
-            const thumbs = uiManager.elements.thumbnailGrid.querySelectorAll('.thumbnail-item');
-            for (const thumb of thumbs) {
-              if (thumb.dataset.filepath === file.path) {
+
+        for (const file of files) {
+          if (newRating === 0) {
+            delete appState.ratings[file.path];
+          } else {
+            appState.ratings[file.path] = newRating;
+          }
+
+          if (window.veloceAPI.setRating) {
+            await window.veloceAPI.setRating(file.path, newRating);
+
+            if (thumbs.length > 0) {
+              const thumb = thumbs.find(t => t.dataset.filepath === file.path);
+              if (thumb) {
                 let badge = thumb.querySelector('.rating-badge');
                 if (badge) {
                   if (newRating > 0) {
@@ -3623,13 +3640,15 @@ window.addEventListener('keydown', async (e) => {
                     badge.style.display = 'none';
                   }
                 }
-                break;
               }
             }
           }
-          if (appState.ratingFilterVal > 0) {
-            scheduleRefresh();
-          }
+        }
+        
+        localStorage.setItem('ratings', JSON.stringify(appState.ratings));
+        
+        if (appState.ratingFilterVal > 0) {
+          scheduleRefresh();
         }
       }
       return;
