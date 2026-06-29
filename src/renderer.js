@@ -1658,7 +1658,9 @@ function getInspectorSection() {
   section.style.marginBottom = '15px';
 
   const h3 = document.createElement('h3');
-  h3.style.fontSize = 'var(--font-size-sm)';
+  h3.style.fontSize = 'var(--font-size-xs)';
+  h3.style.fontWeight = 'normal';
+  h3.style.marginTop = '0';
   h3.style.marginBottom = '4px';
   h3.style.display = 'flex';
   h3.style.justifyContent = 'space-between';
