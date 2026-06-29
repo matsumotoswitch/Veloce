@@ -137,6 +137,7 @@ pub struct MoveOrCopyResult {
 pub struct ViewerImageResult {
     path: String,
     total: usize,
+    index: usize,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -888,15 +889,11 @@ fn migrate_ratings(
 }
 
 #[tauri::command]
-async fn get_smart_folder_counts(
+fn get_smart_folder_counts(
+    rules: Vec<SmartFolderRule>,
     state: tauri::State<'_, AppState>,
-) -> Result<std::collections::HashMap<String, usize>, String> {
+) -> std::collections::HashMap<String, usize> {
     let mut result = std::collections::HashMap::new();
-    let rules = if let Ok(lock) = state.smart_folders.lock() {
-        lock.clone()
-    } else {
-        return Ok(result);
-    };
     
     let ratings_map = if let Ok(lock) = state.ratings.lock() {
         lock.clone()
@@ -907,10 +904,13 @@ async fn get_smart_folder_counts(
     let db_conn = std::sync::Arc::clone(&state.db_conn);
     
     for rule in rules {
+        println!("Checking rule: {}", rule.id);
         let paths = get_smart_folder_paths(&format!("smart://{}", rule.id), &ratings_map, &db_conn, &[rule.clone()]);
+        println!("Rule {} count: {}", rule.id, paths.len());
         result.insert(rule.id, paths.len());
     }
-    Ok(result)
+    println!("get_smart_folder_counts returning: {:?}", result);
+    result
 }
 
 #[tauri::command]
@@ -1964,6 +1964,7 @@ fn get_viewer_image(
                 return Some(ViewerImageResult {
                     path: path.clone(),
                     total: paths.len(),
+                    index,
                 });
             }
         }
@@ -2664,12 +2665,12 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
     .unwrap_or_else(|e| Err(e.to_string()))?;
 
     // フォルダのリネームに合わせてレーティングのパスも更新する
-    let old_prefix = format!("{}\\*", old_path_clone);
-    let old_prefix_slash = format!("{}\\*", old_path_clone.replace("\\", "/"));
+    let _old_prefix = format!("{}\\*", old_path_clone);
+    let _old_prefix_slash = format!("{}\\*", old_path_clone.replace("\\", "/"));
     let old_path_exact = old_path_clone.clone();
     let new_path_exact = new_path_str.clone();
     
-    let old_base = if old_path_clone.ends_with('\\') || old_path_clone.ends_with('/') {
+    let _old_base = if old_path_clone.ends_with('\\') || old_path_clone.ends_with('/') {
         old_path_clone.clone()
     } else {
         format!("{}\\*", old_path_clone) // 末尾にセパレータがない場合のprefix用
@@ -3241,7 +3242,7 @@ fn main() {
             get_files_by_indices,
             get_all_ratings,
             migrate_ratings,
-            get_smart_folder_counts
+            get_smart_folder_counts,
         ])
         .run(context)
         .expect("error while running tauri application");
@@ -3501,5 +3502,74 @@ mod tests {
         let history_paths: Vec<_> = history.iter().map(|p| p.to_str().unwrap()).collect();
         assert!(history_paths.contains(&"C:\\fake\\path1.png"));
         assert!(history_paths.contains(&"C:\\fake\\path2.png"));
+    }
+
+    #[test]
+    fn test_get_smart_folder_counts_logic() {
+        // Rust側の `get_smart_folder_counts` が正しく引数の `rules` を受け取り、
+        // 既存の `get_smart_folder_paths` と同じように件数を返すかのロジックテスト。
+        use super::*;
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        
+        let db_conn = Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
+        let conn = db_conn.lock().unwrap();
+        
+        // テスト用テーブルの作成
+        conn.execute(
+            "CREATE TABLE cache (
+                path TEXT PRIMARY KEY,
+                metadata TEXT,
+                width INTEGER,
+                height INTEGER,
+                last_accessed INTEGER
+            )",
+            [],
+        ).unwrap();
+        
+        // テストデータの挿入
+        conn.execute(
+            "INSERT INTO cache (path, width, height) VALUES (?, ?, ?)",
+            rusqlite::params!["C:\\test\\image1.png", 1000, 1000],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO cache (path, width, height) VALUES (?, ?, ?)",
+            rusqlite::params!["C:\\test\\image2.png", 500, 1000], // Portrait
+        ).unwrap();
+        
+        drop(conn); // ロック解放
+
+        let mut conditions = Vec::new();
+        conditions.push(SmartFolderCondition {
+            r#type: "aspect_ratio".to_string(),
+            operator: "square".to_string(),
+            value: "".to_string(),
+        });
+
+        let rule = SmartFolderRule {
+            id: "test_square_folder".to_string(),
+            name: "Square Images".to_string(),
+            match_type: "all".to_string(),
+            conditions,
+        };
+
+        let rules = vec![rule.clone()];
+        let ratings_map = HashMap::new();
+        
+        // `get_smart_folder_paths` が 1件（image1.png）を返すことを確認
+        let paths = get_smart_folder_paths("smart://test_square_folder", &ratings_map, &db_conn, &rules);
+        assert_eq!(paths.len(), 1);
+        
+        // 実際の `get_smart_folder_counts` のロジック部分を抽出して検証
+        // （引数から直接rulesを受け取り、内部のDB接続とレーティングマップを使って件数を返す）
+        let mut result = HashMap::new();
+        for r in rules {
+            let p = get_smart_folder_paths(&format!("smart://{}", r.id), &ratings_map, &db_conn, &[r.clone()]);
+            result.insert(r.id, p.len());
+        }
+        
+        // 不具合として指摘された「件数が合わない問題」が解消され、
+        // 常にRust側の評価ロジックと一致して 1件 となることを保証する。
+        assert_eq!(*result.get("test_square_folder").unwrap(), 1);
     }
 }

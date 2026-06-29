@@ -94,8 +94,10 @@ window.veloceAPI = {
   setViewParams: (sortKey, asc, searchQuery, ratingFilterVal = 0, ratingFilterOp = 'gte') => invoke('set_view_params', { sortKey, asc, searchQuery, ratingFilterVal, ratingFilterOp }),
   syncRatings: (ratings) => invoke('sync_ratings', { ratings }),
   getAllRatings: () => invoke('get_all_ratings'),
+  updateSmartFolder: (rule) => invoke('update_smart_folder', { rule }),
+  deleteSmartFolder: (id) => invoke('delete_smart_folder', { id }),
+  getSmartFolderCounts: (rules) => invoke('get_smart_folder_counts', { rules }),
   migrateRatings: (ratings) => invoke('migrate_ratings', { ratings }),
-  getSmartFolderCounts: () => invoke('get_smart_folder_counts'),
   setRating: (path, rating) => invoke('set_rating', { path, rating }),
   /**
    * 仮想スクロール用: 指定範囲のImageFileをRustから取得する

@@ -5137,7 +5137,8 @@ function createSmartFolderNode(f) {
 async function updateSmartFolderCountsUI() {
   if (!window.veloceAPI.getSmartFolderCounts) return;
   try {
-    const counts = await window.veloceAPI.getSmartFolderCounts();
+    const rules = appState.smartFolders || [];
+    const counts = await window.veloceAPI.getSmartFolderCounts(rules);
     const list = document.getElementById('smart-folders-list');
     if (!list) return;
     const items = list.querySelectorAll('.smart-folder-item');
@@ -5146,7 +5147,7 @@ async function updateSmartFolderCountsUI() {
       const countSpan = item.querySelector('.smart-folder-count');
       if (id && countSpan) {
         if (counts[id] !== undefined) {
-          countSpan.textContent = counts[id];
+          countSpan.textContent = Number(counts[id]).toLocaleString();
           countSpan.style.display = 'block';
         } else {
           countSpan.style.display = 'none';
