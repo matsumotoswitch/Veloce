@@ -210,6 +210,9 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
             width INTEGER DEFAULT 0,
             height INTEGER DEFAULT 0,
             path TEXT DEFAULT '',
+            size INTEGER DEFAULT 0,
+            mtime INTEGER DEFAULT 0,
+            ctime INTEGER DEFAULT 0,
             last_accessed INTEGER
         )",
         [],
@@ -227,6 +230,9 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN height INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN path TEXT DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN size INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN mtime INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN ctime INTEGER DEFAULT 0", []);
 
     // 既存データのバックフィル
     let _ = conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
@@ -280,12 +286,23 @@ fn path_exists(path: String) -> bool {
     path_obj.exists() && path_obj.is_dir()
 }
 
+#[derive(Clone, Debug)]
+pub struct SmartFolderItem {
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    pub size: u64,
+    pub mtime: u64,
+    pub ctime: u64,
+    pub hash_key: String,
+}
+
 fn get_smart_folder_paths(
     folder_type: &str,
     ratings_map: &std::collections::HashMap<String, u8>,
     db_conn: &std::sync::Arc<Mutex<rusqlite::Connection>>,
     rules: &[SmartFolderRule],
-) -> Vec<std::path::PathBuf> {
+) -> Vec<SmartFolderItem> {
     let mut target_paths = Vec::new();
     let folder_id = folder_type.replace("smart://", "");
 
@@ -296,9 +313,9 @@ fn get_smart_folder_paths(
             });
 
             let query = if needs_metadata {
-                "SELECT metadata, width, height, path FROM cache WHERE path != '' AND path IS NOT NULL"
+                "SELECT metadata, width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL"
             } else {
-                "SELECT '', width, height, path FROM cache WHERE path != '' AND path IS NOT NULL"
+                "SELECT '', width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL"
             };
 
             if let Ok(mut stmt) = conn.prepare(query) {
@@ -308,9 +325,13 @@ fn get_smart_folder_paths(
                         row.get::<_, u32>(1)?,
                         row.get::<_, u32>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, u64>(4)?,
+                        row.get::<_, u64>(5)?,
+                        row.get::<_, u64>(6)?,
+                        row.get::<_, String>(7)?,
                     ))
                 }) {
-                    let all_rows: Vec<(String, u32, u32, String)> = rows.flatten().collect();
+                    let all_rows: Vec<(String, u32, u32, String, u64, u64, u64, String)> = rows.flatten().collect();
 
                     // 検索条件の事前計算
                     enum CondType {
@@ -383,7 +404,7 @@ fn get_smart_folder_paths(
                     use rayon::prelude::*;
                     target_paths = all_rows
                         .into_par_iter()
-                        .filter_map(|(meta_str, width, height, path)| {
+                        .filter_map(|(meta_str, width, height, path, size, mtime, ctime, hash_key)| {
                             let mut meta_opt: Option<FullMetadata> = None;
 
                             if needs_metadata {
@@ -513,7 +534,15 @@ fn get_smart_folder_paths(
                                 }
                             }
                             if all_match {
-                                Some(std::path::PathBuf::from(path))
+                                Some(SmartFolderItem {
+                                    path,
+                                    width,
+                                    height,
+                                    size,
+                                    mtime,
+                                    ctime,
+                                    hash_key,
+                                })
                             } else {
                                 None
                             }
@@ -524,28 +553,53 @@ fn get_smart_folder_paths(
         }
     } else {
         // Fallback for old default ids if rules are empty/missing
-        if folder_id == "fav_5" {
-            target_paths = ratings_map
+        if folder_id == "fav_5" || folder_id == "fav_4_plus" {
+            let threshold = if folder_id == "fav_5" { 5 } else { 4 };
+            let paths: Vec<String> = ratings_map
                 .iter()
-                .filter(|(_, &r)| r == 5)
-                .map(|(p, _)| std::path::PathBuf::from(p))
+                .filter(|(_, &r)| r >= threshold)
+                .map(|(p, _)| p.clone())
                 .collect();
-        } else if folder_id == "fav_4_plus" {
-            target_paths = ratings_map
-                .iter()
-                .filter(|(_, &r)| r >= 4)
-                .map(|(p, _)| std::path::PathBuf::from(p))
-                .collect();
+            
+            if !paths.is_empty() {
+                if let Ok(conn) = db_conn.lock() {
+                    let placeholders = vec!["?"; paths.len()].join(",");
+                    let query = format!("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path IN ({})", placeholders);
+                    if let Ok(mut stmt) = conn.prepare(&query) {
+                        let params: Vec<&dyn rusqlite::ToSql> = paths.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+                        if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                            Ok(SmartFolderItem {
+                                width: row.get(0)?,
+                                height: row.get(1)?,
+                                path: row.get(2)?,
+                                size: row.get(3)?,
+                                mtime: row.get(4)?,
+                                ctime: row.get(5)?,
+                                hash_key: row.get(6)?,
+                            })
+                        }) {
+                            target_paths = rows.flatten().collect();
+                        }
+                    }
+                }
+            }
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.lock() {
                 if let Ok(mut stmt) =
-                    conn.prepare("SELECT path FROM cache WHERE path != '' AND path IS NOT NULL")
+                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL")
                 {
-                    if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                        target_paths = rows
-                            .flatten()
-                            .map(|p| std::path::PathBuf::from(p))
-                            .collect();
+                    if let Ok(rows) = stmt.query_map([], |row| {
+                        Ok(SmartFolderItem {
+                            width: row.get(0)?,
+                            height: row.get(1)?,
+                            path: row.get(2)?,
+                            size: row.get(3)?,
+                            mtime: row.get(4)?,
+                            ctime: row.get(5)?,
+                            hash_key: row.get(6)?,
+                        })
+                    }) {
+                        target_paths = rows.flatten().collect();
                     }
                 }
             }
@@ -596,20 +650,6 @@ fn load_directory(
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
 
-            let target_paths: Vec<std::path::PathBuf>;
-
-            if path_for_spawn.starts_with("smart://") {
-                target_paths = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
-            } else {
-                // max_depth(1) なので std::fs::read_dir の方が軽量。
-                target_paths = std::fs::read_dir(&path_for_spawn)
-                    .into_iter()
-                    .flat_map(|d| d)
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.path())
-                    .collect();
-            }
-
             let mut cache_map = std::collections::HashMap::new();
             if let Ok(conn) = db_conn_clone.lock() {
                 if let Ok(mut stmt) = conn.prepare("SELECT hash_key, thumbnail IS NOT NULL, metadata IS NOT NULL AND metadata != '' FROM cache") {
@@ -627,53 +667,88 @@ fn load_directory(
                 }
             }
 
-            // rayon によるマルチスレッド処理
-            let mut files: Vec<ImageFile> = target_paths
-                .into_par_iter()
-                .filter_map(|p| {
-                    if p.is_file() {
-                        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                            let ext_lower = ext.to_lowercase();
-                            if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
-                                if let Ok(metadata) = std::fs::metadata(&p) {
-                                    let size = metadata.len();
-                                    let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                    let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                    
-                                    let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                                    let full_path = p.to_string_lossy().into_owned();
-                                    let clean_path = full_path.replace("\\\\?\\", "");
+            let mut files: Vec<ImageFile> = if path_for_spawn.starts_with("smart://") {
+                let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
+                smart_items.into_par_iter().map(|item| {
+                    let p = std::path::Path::new(&item.path);
+                    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    let clean_path = item.path.replace("\\\\?\\", "");
+                    let (has_thumbnail_cache, has_metadata_cache) = cache_map.get(&item.hash_key).copied().unwrap_or((false, false));
 
-                                    let cache_file_name = format!("{}_{}", clean_path, mtime);
-                                    let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
-                                    let digest_hex = format!("{:016x}", digest);
-                                    
-                                    let (has_thumbnail_cache, has_metadata_cache) = cache_map.get(&digest_hex).copied().unwrap_or((false, false));
+                    ImageFile {
+                        name: file_name,
+                        ext: if ext.is_empty() { String::new() } else { format!(".{}", ext) },
+                        path: clean_path,
+                        size: item.size,
+                        mtime: item.mtime,
+                        ctime: item.ctime,
+                        has_thumbnail_cache,
+                        has_metadata_cache,
+                        width: item.width,
+                        height: item.height,
+                        prompt: String::new(),
+                        negative_prompt: String::new(),
+                        source: String::new(),
+                        meta_loaded: false,
+                        search_text: String::new(),
+                    }
+                }).collect()
+            } else {
+                let target_paths: Vec<std::path::PathBuf> = std::fs::read_dir(&path_for_spawn)
+                    .into_iter()
+                    .flat_map(|d| d)
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .collect();
 
-                                    return Some(ImageFile {
-                                        name: file_name,
-                                        ext: format!(".{}", ext_lower),
-                                        path: clean_path,
-                                        size,
-                                        mtime,
-                                        ctime,
-                                        has_thumbnail_cache,
-                                        has_metadata_cache,
-                                        width: 0,
-                                        height: 0,
-                                        prompt: String::new(),
-                                        negative_prompt: String::new(),
-                                        source: String::new(),
-                                        meta_loaded: false,
-                                        search_text: String::new(),
-                                    });
+                target_paths
+                    .into_par_iter()
+                    .filter_map(|p| {
+                        if p.is_file() {
+                            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                                let ext_lower = ext.to_lowercase();
+                                if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                                    if let Ok(metadata) = std::fs::metadata(&p) {
+                                        let size = metadata.len();
+                                        let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                        let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                                        
+                                        let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                                        let full_path = p.to_string_lossy().into_owned();
+                                        let clean_path = full_path.replace("\\\\?\\", "");
+
+                                        let cache_file_name = format!("{}_{}", clean_path, mtime);
+                                        let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
+                                        let digest_hex = format!("{:016x}", digest);
+                                        
+                                        let (has_thumbnail_cache, has_metadata_cache) = cache_map.get(&digest_hex).copied().unwrap_or((false, false));
+
+                                        return Some(ImageFile {
+                                            name: file_name,
+                                            ext: format!(".{}", ext_lower),
+                                            path: clean_path,
+                                            size,
+                                            mtime,
+                                            ctime,
+                                            has_thumbnail_cache,
+                                            has_metadata_cache,
+                                            width: 0,
+                                            height: 0,
+                                            prompt: String::new(),
+                                            negative_prompt: String::new(),
+                                            source: String::new(),
+                                            meta_loaded: false,
+                                            search_text: String::new(),
+                                        });
+                                    }
                                 }
                             }
                         }
-                    }
-                    None
-                })
-                .collect();
+                        None
+                    })
+                    .collect()
+            };
             
             // デフォルトソート（名前順昇順）も並列処理で適用
             files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
@@ -1273,14 +1348,16 @@ fn get_full_metadata_for_path(
     file_path: &str,
     db_conn: &std::sync::Mutex<rusqlite::Connection>,
 ) -> FullMetadata {
-    let mtime = std::fs::metadata(file_path)
-        .and_then(|m| m.modified())
-        .unwrap_or(std::time::UNIX_EPOCH)
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let (mtime_millis, ctime_millis, file_size) = std::fs::metadata(file_path)
+        .map(|m| {
+            let mt = m.modified().unwrap_or(std::time::UNIX_EPOCH).duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            let ct = m.created().unwrap_or(std::time::UNIX_EPOCH).duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            let s = m.len();
+            (mt, ct, s)
+        })
+        .unwrap_or((0, 0, 0));
 
-    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime_millis).as_bytes());
     let hash_key = format!("{:016x}", digest);
 
     if let Ok(conn) = db_conn.lock() {
@@ -1579,9 +1656,9 @@ fn get_full_metadata_for_path(
             .as_secs() as i64;
         if let Ok(conn) = db_conn.lock() {
             let _ = conn.execute(
-                "INSERT INTO cache (hash_key, metadata, width, height, path, last_accessed) VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, last_accessed=excluded.last_accessed",
-                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, now]
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed",
+                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, file_size, mtime_millis, ctime_millis, now]
             );
         }
     }
@@ -3400,6 +3477,9 @@ mod tests {
                 width INTEGER DEFAULT 0,
                 height INTEGER DEFAULT 0,
                 path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
                 last_accessed INTEGER
             )",
             [],
@@ -3454,13 +3534,15 @@ mod tests {
                     width INTEGER DEFAULT 0,
                     height INTEGER DEFAULT 0,
                     path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
                     last_accessed INTEGER
                 )",
                 [],
             )
             .unwrap();
 
-            // Insert a fake metadata json
             let meta1 = super::FullMetadata {
                 path: "C:\\fake\\path1.png".to_string(),
                 prompt: "".to_string(),
@@ -3479,10 +3561,21 @@ mod tests {
                 params: serde_json::Value::Null,
                 source: "".to_string(),
             };
+            let meta3 = super::FullMetadata {
+                path: "C:\\fake\\path3.png".to_string(),
+                prompt: "".to_string(),
+                negative_prompt: "".to_string(),
+                width: 0,
+                height: 0,
+                params: serde_json::Value::Null,
+                source: "".to_string(),
+            };
             conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
                 rusqlite::params!["hash1", vec![0u8], serde_json::to_string(&meta1).unwrap(), 0, 0, meta1.path, 0]).unwrap();
             conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
                 rusqlite::params!["hash2", vec![0u8], serde_json::to_string(&meta2).unwrap(), 0, 0, meta2.path, 0]).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
+                rusqlite::params!["hash3", vec![0u8], serde_json::to_string(&meta3).unwrap(), 0, 0, meta3.path, 0]).unwrap();
         }
 
         let mut ratings = std::collections::HashMap::new();
@@ -3492,16 +3585,17 @@ mod tests {
 
         let fav5 = super::get_smart_folder_paths("smart://fav_5", &ratings, &db_conn, &[]);
         assert_eq!(fav5.len(), 1);
-        assert_eq!(fav5[0].to_str().unwrap(), "C:\\fake\\path1.png");
+        assert_eq!(fav5[0].path, "C:\\fake\\path1.png");
 
         let fav4 = super::get_smart_folder_paths("smart://fav_4_plus", &ratings, &db_conn, &[]);
         assert_eq!(fav4.len(), 2);
 
         let history = super::get_smart_folder_paths("smart://history", &ratings, &db_conn, &[]);
-        assert_eq!(history.len(), 2);
-        let history_paths: Vec<_> = history.iter().map(|p| p.to_str().unwrap()).collect();
+        assert_eq!(history.len(), 3);
+        let history_paths: Vec<_> = history.iter().map(|p| p.path.as_str()).collect();
         assert!(history_paths.contains(&"C:\\fake\\path1.png"));
         assert!(history_paths.contains(&"C:\\fake\\path2.png"));
+        assert!(history_paths.contains(&"C:\\fake\\path3.png"));
     }
 
     #[test]
@@ -3518,10 +3612,14 @@ mod tests {
         // テスト用テーブルの作成
         conn.execute(
             "CREATE TABLE cache (
-                path TEXT PRIMARY KEY,
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
                 metadata TEXT,
                 width INTEGER,
                 height INTEGER,
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
                 last_accessed INTEGER
             )",
             [],
@@ -3529,12 +3627,12 @@ mod tests {
         
         // テストデータの挿入
         conn.execute(
-            "INSERT INTO cache (path, width, height) VALUES (?, ?, ?)",
-            rusqlite::params!["C:\\test\\image1.png", 1000, 1000],
+            "INSERT INTO cache (hash_key, path, width, height) VALUES (?, ?, ?, ?)",
+            rusqlite::params!["hash1", "C:\\test\\image1.png", 1000, 1000],
         ).unwrap();
         conn.execute(
-            "INSERT INTO cache (path, width, height) VALUES (?, ?, ?)",
-            rusqlite::params!["C:\\test\\image2.png", 500, 1000], // Portrait
+            "INSERT INTO cache (hash_key, path, width, height) VALUES (?, ?, ?, ?)",
+            rusqlite::params!["hash2", "C:\\test\\image2.png", 500, 1000], // Portrait
         ).unwrap();
         
         drop(conn); // ロック解放
@@ -3571,5 +3669,111 @@ mod tests {
         // 不具合として指摘された「件数が合わない問題」が解消され、
         // 常にRust側の評価ロジックと一致して 1件 となることを保証する。
         assert_eq!(*result.get("test_square_folder").unwrap(), 1);
+    }
+
+    #[test]
+    fn test_get_full_metadata_saves_file_stats() {
+        use super::*;
+        use std::sync::{Arc, Mutex};
+        
+        let db_conn = Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
+        {
+            let conn = db_conn.lock().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        // テスト用のファイルを作成
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test_metadata_save.txt");
+        let test_data = "dummy test data";
+        std::fs::write(&file_path, test_data).unwrap();
+
+        let file_path_str = file_path.to_str().unwrap().to_string();
+        
+        // 初回呼び出し：ここで実ファイルのsize等がDBに保存されるはず
+        let _ = get_full_metadata_for_path(&file_path_str, &db_conn);
+
+        // DBにちゃんと保存されたか確認
+        let conn = db_conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT size, mtime, ctime FROM cache WHERE path = ?").unwrap();
+        let mut rows = stmt.query([&file_path_str]).unwrap();
+        let row = rows.next().unwrap().expect("Row should exist");
+        
+        let size: u64 = row.get(0).unwrap();
+        let mtime: u64 = row.get(1).unwrap();
+        let ctime: u64 = row.get(2).unwrap();
+        
+        assert_eq!(size, test_data.len() as u64); // "dummy test data".len() = 15
+        assert!(mtime > 0);
+        assert!(ctime > 0);
+
+        // クリーンアップ
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_smart_folder_bypasses_is_file() {
+        // このテストは、実ファイルが存在しなくても、キャッシュDBに情報があれば
+        // スマートフォルダの戻り値 (SmartFolderItem) として正しく返却され、
+        // かつキャッシュにある size, mtime 等の情報がそのまま使われることを保証する。
+        use super::*;
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        
+        let db_conn = Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
+        let conn = db_conn.lock().unwrap();
+        
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
+                metadata TEXT,
+                width INTEGER,
+                height INTEGER,
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER
+            )",
+            [],
+        ).unwrap();
+        
+        // 実在しないパスだが、DBには存在する状態を作る
+        let fake_path = "C:\\does_not_exist\\fake_image.png";
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, mtime, ctime) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params!["fake_hash", fake_path, 1920, 1080, 123456, 1700000000, 1700000000],
+        ).unwrap();
+        
+        drop(conn);
+
+        let mut ratings_map = HashMap::new();
+        ratings_map.insert(fake_path.to_string(), 5);
+
+        // "smart://fav_5" はレーティング5以上の画像を検索する
+        let paths = get_smart_folder_paths("smart://fav_5", &ratings_map, &db_conn, &[]);
+        
+        // 実在しなくても1件返ってくること
+        assert_eq!(paths.len(), 1);
+        
+        let item = &paths[0];
+        assert_eq!(item.path, fake_path);
+        assert_eq!(item.width, 1920);
+        assert_eq!(item.size, 123456);
+        assert_eq!(item.mtime, 1700000000);
     }
 }

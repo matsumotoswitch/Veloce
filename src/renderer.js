@@ -4139,7 +4139,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onDirectoryLoaded(async (payload) => {
       if (payload.path !== appState.currentDirectory) return;
       appState.totalCount = payload.totalCount;
-      appState.thumbnailTotalRequested = appState.totalCount;
+      if (payload.path.startsWith("smart://")) {
+        appState.thumbnailTotalRequested = 0;
+      } else {
+        appState.thumbnailTotalRequested = appState.totalCount;
+      }
       appState.thumbnailCompleted = 0;
       appState.thumbnailCounted.clear();
       await scheduleRefresh();
