@@ -1869,6 +1869,26 @@ th[data-sort] svg path {
   height: 31px !important;
 }
 
+#tab-container .tab-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--accent-color);
+  border-radius: 8px 8px 0 0;
+  pointer-events: none;
+}
+
+#tab-container .tab-item.active::before {
+  border-radius: 6px 6px 0 0;
+}
+
+#tab-container .tab-item.is-smart-tab::before {
+  background-color: var(--glow-gold);
+}
+
 #tab-container .tab-item:not(.active):hover {
   background-color: rgba(var(--accent-rgb), 0.35) !important;
   color: #ffffff !important;
