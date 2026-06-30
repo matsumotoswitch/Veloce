@@ -431,7 +431,7 @@ fn build_smart_folder_query(
     for (i, cond) in rule.conditions.iter().enumerate() {
         if i > 0 { query.push_str(logical_op); }
 
-        let mut clause = String::new();
+        let clause;
         let val_lower = cond.value.to_lowercase();
         let val_like = format!("%{}%", val_lower);
         
