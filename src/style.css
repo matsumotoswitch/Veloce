@@ -1929,12 +1929,7 @@ th[data-sort] svg path {
   z-index: 11;
 }
 
-/* --- スマートフォルダタブの特別装飾 --- */
-/* テキストをイタリックにして動的であることを示唆する */
-#tab-container .tab-item.is-smart-tab .tab-label {
-  font-style: italic;
-  opacity: 1;
-}
+
 
 /* ドラッグ＆ドロップ時のインジケーター（角丸の影響を受けない直線） */
 .tab-item.drag-over-left::after,
