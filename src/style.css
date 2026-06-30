@@ -562,6 +562,7 @@ input:-webkit-autofill:focus {
   text-overflow: ellipsis;
   color: var(--text-color);
   position: relative;
+  flex-shrink: 0;
 }
 
 .smart-folder-item:active {
