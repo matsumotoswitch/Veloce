@@ -2352,6 +2352,9 @@ function showEditSmartFolderModal(sf, isNew = false) {
     if (appState.currentDirectory === 'smart://' + sf.id) {
       refreshFileList(true);
     }
+    
+    // 作成・更新後に件数を再計算して表示
+    updateSmartFolderCountsUI();
   });
 
   modal.style.display = 'flex';

@@ -112,4 +112,35 @@ describe('Smart Folder Feature', () => {
     
     expect(folder3.style.display).toBe('none');
   });
+
+  it('should update counts UI when a new smart folder is saved', async () => {
+    // 1. 新しいスマートフォルダのDOM要素を追加 (save処理のシミュレート)
+    const list = document.getElementById('smart-folders-list');
+    const newItem = document.createElement('div');
+    newItem.className = 'smart-folder-item';
+    newItem.dataset.id = 'folder4';
+    const count = document.createElement('span');
+    count.className = 'smart-folder-count';
+    count.style.display = 'none';
+    newItem.appendChild(count);
+    list.appendChild(newItem);
+
+    // 2. appState を更新
+    appState.smartFolders.push({ id: 'folder4', name: 'Folder 4', match_type: 'all', conditions: [] });
+    
+    // 3. getSmartFolderCounts が返すモック値を更新
+    window.veloceAPI.getSmartFolderCounts.mockResolvedValueOnce({
+      'folder1': 1234,
+      'folder2': 5,
+      'folder4': 42
+    });
+
+    // 4. 保存後に呼ばれる updateSmartFolderCountsUI を実行
+    await updateSmartFolderCountsUI();
+
+    // 5. 新規追加されたフォルダの件数が表示されていることを確認
+    const folder4 = list.querySelector('.smart-folder-item[data-id="folder4"] .smart-folder-count');
+    expect(folder4.textContent).toBe('42');
+    expect(folder4.style.display).toBe('block');
+  });
 });

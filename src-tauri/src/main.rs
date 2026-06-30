@@ -297,6 +297,48 @@ pub struct SmartFolderItem {
     pub hash_key: String,
 }
 
+fn create_image_file_from_smart_item(
+    item: SmartFolderItem,
+    has_thumbnail_cache: bool,
+    has_metadata_cache: bool,
+) -> ImageFile {
+    let p = std::path::Path::new(&item.path);
+    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let clean_path = item.path.replace("\\\\?\\", "");
+
+    let mut size = item.size;
+    let mut mtime = item.mtime;
+    let mut ctime = item.ctime;
+
+    // キャッシュ上のサイズ等が0（未取得）の場合はファイルシステムから取得する
+    if size == 0 || mtime == 0 {
+        if let Ok(meta) = std::fs::metadata(&p) {
+            size = meta.len();
+            mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+            ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+        }
+    }
+
+    ImageFile {
+        name: file_name,
+        ext: if ext.is_empty() { String::new() } else { format!(".{}", ext) },
+        path: clean_path,
+        size,
+        mtime,
+        ctime,
+        has_thumbnail_cache,
+        has_metadata_cache,
+        width: item.width,
+        height: item.height,
+        prompt: String::new(),
+        negative_prompt: String::new(),
+        source: String::new(),
+        meta_loaded: false,
+        search_text: String::new(),
+    }
+}
+
 fn get_smart_folder_paths(
     folder_type: &str,
     ratings_map: &std::collections::HashMap<String, u8>,
@@ -670,29 +712,8 @@ fn load_directory(
             let mut files: Vec<ImageFile> = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
                 smart_items.into_par_iter().map(|item| {
-                    let p = std::path::Path::new(&item.path);
-                    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-                    let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                    let clean_path = item.path.replace("\\\\?\\", "");
                     let (has_thumbnail_cache, has_metadata_cache) = cache_map.get(&item.hash_key).copied().unwrap_or((false, false));
-
-                    ImageFile {
-                        name: file_name,
-                        ext: if ext.is_empty() { String::new() } else { format!(".{}", ext) },
-                        path: clean_path,
-                        size: item.size,
-                        mtime: item.mtime,
-                        ctime: item.ctime,
-                        has_thumbnail_cache,
-                        has_metadata_cache,
-                        width: item.width,
-                        height: item.height,
-                        prompt: String::new(),
-                        negative_prompt: String::new(),
-                        source: String::new(),
-                        meta_loaded: false,
-                        search_text: String::new(),
-                    }
+                    create_image_file_from_smart_item(item, has_thumbnail_cache, has_metadata_cache)
                 }).collect()
             } else {
                 let target_paths: Vec<std::path::PathBuf> = std::fs::read_dir(&path_for_spawn)
@@ -3775,5 +3796,37 @@ mod tests {
         assert_eq!(item.width, 1920);
         assert_eq!(item.size, 123456);
         assert_eq!(item.mtime, 1700000000);
+    }
+
+    #[test]
+    fn test_create_image_file_from_smart_item_fallback() {
+        use std::fs::File;
+        use std::io::Write;
+
+        // 一時ファイルを作成
+        let mut file_path = std::env::temp_dir();
+        file_path.push("test_image_smart_fallback.png");
+        let mut file = File::create(&file_path).unwrap();
+        file.write_all(b"test data").unwrap(); // 9 bytes
+
+        // DBにはサイズ0, mtime0で保存されていたと仮定
+        let item = super::SmartFolderItem {
+            path: file_path.to_string_lossy().to_string(),
+            width: 100,
+            height: 100,
+            size: 0,
+            mtime: 0,
+            ctime: 0,
+            hash_key: "dummy_hash".to_string(),
+        };
+
+        let img = super::create_image_file_from_smart_item(item, false, false);
+
+        // size や mtime が 0 でなく、ファイルシステムから取得された値に補完されていること
+        assert_eq!(img.size, 9);
+        assert!(img.mtime > 0);
+        assert_eq!(img.width, 100);
+
+        let _ = std::fs::remove_file(file_path);
     }
 }
