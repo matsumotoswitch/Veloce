@@ -3546,7 +3546,19 @@ mod tests {
                     size INTEGER DEFAULT 0,
                     mtime INTEGER DEFAULT 0,
                     ctime INTEGER DEFAULT 0,
-                    last_accessed INTEGER
+                    last_accessed INTEGER,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT ''
+                )",
+                [],
+            )
+            .unwrap();
+
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS ratings (
+                    path TEXT PRIMARY KEY,
+                    rating INTEGER NOT NULL
                 )",
                 [],
             )
@@ -3622,14 +3634,25 @@ mod tests {
         conn.execute(
             "CREATE TABLE cache (
                 hash_key TEXT PRIMARY KEY,
-                path TEXT,
+                thumbnail BLOB,
                 metadata TEXT,
-                width INTEGER,
-                height INTEGER,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
                 size INTEGER DEFAULT 0,
                 mtime INTEGER DEFAULT 0,
                 ctime INTEGER DEFAULT 0,
-                last_accessed INTEGER
+                last_accessed INTEGER,
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+        conn.execute(
+            "CREATE TABLE ratings (
+                path TEXT PRIMARY KEY,
+                rating INTEGER NOT NULL
             )",
             [],
         ).unwrap();
@@ -3699,7 +3722,17 @@ mod tests {
                     size INTEGER DEFAULT 0,
                     mtime INTEGER DEFAULT 0,
                     ctime INTEGER DEFAULT 0,
-                    last_accessed INTEGER
+                    last_accessed INTEGER,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT ''
+                )",
+                [],
+            ).unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS ratings (
+                    path TEXT PRIMARY KEY,
+                    rating INTEGER NOT NULL
                 )",
                 [],
             ).unwrap();
