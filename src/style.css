@@ -1538,7 +1538,7 @@ img.thumbnail-item.loading {
 }
 
 /* Diffモーダル内のコピーボタン */
-.diff-copy-btn {
+.diff-copy-btn, .open-folder-btn {
   cursor: pointer;
   color: var(--text-color);
   opacity: 0.6;
@@ -1550,13 +1550,13 @@ img.thumbnail-item.loading {
   transition: color 0.2s, filter 0.2s, background-color 0.2s, opacity 0.2s;
 }
 
-.diff-copy-btn:hover {
+.diff-copy-btn:hover, .open-folder-btn:hover {
   color: #fff;
   opacity: 1;
 }
 
 /* --- Diff Copy Button Glow Effect --- */
-.diff-copy-btn svg {
+.diff-copy-btn svg, .open-folder-btn svg {
   transition: stroke 0.2s, filter 0.2s;
 }
 

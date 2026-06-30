@@ -2835,7 +2835,17 @@ fn open_in_explorer(path: String) -> Result<(), String> {
     }
 
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("explorer").arg(path).spawn();
+    {
+        if path_obj.is_file() {
+            let _ = std::process::Command::new("explorer")
+                .arg(format!("/select,{}", path.replace("/", "\\")))
+                .spawn();
+        } else {
+            let _ = std::process::Command::new("explorer")
+                .arg(path.replace("/", "\\"))
+                .spawn();
+        }
+    }
 
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(path).spawn();

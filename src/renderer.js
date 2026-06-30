@@ -569,7 +569,7 @@ window.addEventListener('click', (e) => {
     bookmarkOverflowMenu.style.display = 'none';
   }
 });
-      
+
 
 
 function renderFavorites() {
@@ -585,7 +585,7 @@ function renderFavorites() {
       <span>フォルダをここにドラッグしてお気に入りに追加</span>
     `;
     container.appendChild(emptyMsg);
-    
+
     const btn = document.getElementById('bookmark-overflow-btn');
     if (btn) btn.style.display = 'none';
     return;
@@ -619,7 +619,7 @@ function renderFavorites() {
     itemDiv.appendChild(label);
     container.appendChild(itemDiv);
   });
-  
+
   if (typeof checkBookmarkOverflow === 'function') {
     checkBookmarkOverflow();
   }
@@ -856,19 +856,19 @@ class ThumbnailQueueManager {
     const content = document.querySelector('.virtual-content');
     if (!content) return;
     for (const wrapper of content.children) {
-        if (wrapper.dataset.filepath === filePath) {
-            const img = wrapper.querySelector('.thumbnail-img');
-            if (img) {
-                img.src = url;
-                if (img.complete) {
-                    img.classList.remove('loading');
-                } else {
-                    img.onload = function() { this.classList.remove('loading'); };
-                    img.onerror = function() { this.classList.remove('loading'); };
-                }
-            }
-            break;
+      if (wrapper.dataset.filepath === filePath) {
+        const img = wrapper.querySelector('.thumbnail-img');
+        if (img) {
+          img.src = url;
+          if (img.complete) {
+            img.classList.remove('loading');
+          } else {
+            img.onload = function () { this.classList.remove('loading'); };
+            img.onerror = function () { this.classList.remove('loading'); };
+          }
         }
+        break;
+      }
     }
   }
 }
@@ -1169,7 +1169,7 @@ async function selectImage(index, event = null) {
     const rowHeight = 28;
     const theadHeight = document.querySelector('#file-table thead')?.getBoundingClientRect().height || 28;
     const targetY = theadHeight + (index * rowHeight);
-    
+
     // ヘッダーが position: sticky; top: 0; であるため、表示領域の上端は scrollTop + theadHeight
     if (targetY < listContainer.scrollTop + theadHeight) {
       listContainer.scrollTop = targetY - theadHeight;
@@ -1479,7 +1479,7 @@ function toggleHelpOverlay(forceShow) {
       e.stopPropagation();
       tabs.forEach(t => t.classList.remove('active'));
       tabContents.forEach(c => c.classList.remove('active'));
-      
+
       tab.classList.add('active');
       const targetId = tab.dataset.target;
       content.querySelector('#' + targetId).classList.add('active');
@@ -1752,13 +1752,23 @@ async function renderMetadata(file) {
     if (emptyInspectorMsg) emptyInspectorMsg.style.display = 'none';
 
     let hasContent = false;
-    for (const section of buildInspectorSections(d)) {
+    const sections = buildInspectorSections(d);
+    sections.unshift({ title: '場所', value: file.path, isParam: true });
+
+    for (const section of sections) {
       if (!section.value || section.value === '-') continue;
       hasContent = true;
 
       const secEl = getInspectorSection();
       secEl.title.textContent = section.title;
-      secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
+
+      let copyHtml = UIManager.createCopyButtonHTML(section.value);
+      if (section.title === '場所') {
+        const folderSvg = '<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+        const escaped = String(section.value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        copyHtml = `<span class="open-folder-btn" data-path="${escaped}">${folderSvg}</span>`;
+      }
+      secEl.copyWrapper.innerHTML = copyHtml;
 
       let sectionHasMatch = false;
 
@@ -1772,14 +1782,14 @@ async function renderMetadata(file) {
         secEl.box.style.overflowY = 'auto';
         const rawText = String(section.value);
         if (terms.length > 0) {
-            sectionHasMatch = terms.some(term => rawText.toLowerCase().includes(term));
-            if (sectionHasMatch) {
-                secEl.box.innerHTML = highlightSearchTerms(rawText, terms);
-            } else {
-                secEl.box.textContent = rawText;
-            }
-        } else {
+          sectionHasMatch = terms.some(term => rawText.toLowerCase().includes(term));
+          if (sectionHasMatch) {
+            secEl.box.innerHTML = highlightSearchTerms(rawText, terms);
+          } else {
             secEl.box.textContent = rawText;
+          }
+        } else {
+          secEl.box.textContent = rawText;
         }
       } else {
         secEl.box.className = section.isParam ? 'prompt-look param-box' : 'prompt-look';
@@ -1891,10 +1901,20 @@ async function renderMetadata(file) {
             uiManager.hideCustomTooltip();
           }
         }
+        const openBtn = e.target.closest('.open-folder-btn');
+        if (openBtn) {
+          const path = openBtn.getAttribute('data-path');
+          if (path && window.veloceAPI.openInExplorer) {
+            await window.veloceAPI.openInExplorer(path);
+            uiManager.hideCustomTooltip();
+          }
+        }
       });
       container.addEventListener('mousemove', (e) => {
         const copyBtn = e.target.closest('.diff-copy-btn');
         if (copyBtn) uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
+        const openBtn = e.target.closest('.open-folder-btn');
+        if (openBtn) uiManager.showCustomTooltip('エクスプローラで開く', e.clientX, e.clientY);
       });
       container.addEventListener('mouseleave', () => {
         uiManager.hideCustomTooltip();
@@ -2053,7 +2073,7 @@ menuSortRoot.onmouseenter = () => {
   // We need to temporarily force display block if not already to measure it
   // But CSS :hover handles display:block immediately.
   const rect = sortSubmenu.getBoundingClientRect();
-  
+
   let originX = 'left';
   let originY = 'top';
 
@@ -2070,7 +2090,7 @@ menuSortRoot.onmouseenter = () => {
   }
 
   sortSubmenu.style.transformOrigin = `${originY} ${originX}`;
-  
+
   sortSubmenu.animate([
     { opacity: 0, transform: 'scale(0.95)' },
     { opacity: 1, transform: 'scale(1)' }
@@ -2119,7 +2139,7 @@ const createSubOption = (label, onClick, dataKey, dataVal) => {
   opt.className = 'context-menu-item';
   if (dataKey === 'sortKey') opt.dataset.sortKey = dataVal;
   if (dataKey === 'sortOrder') opt.dataset.sortOrder = dataVal;
-  
+
   opt.innerHTML = `
     <span class="menu-check" style="display:inline-flex;justify-content:center;align-items:center;width:16px;height:16px;"></span>
     <span style="text-align: left; white-space: nowrap;">${label}</span>
@@ -2231,16 +2251,16 @@ function showEditSmartFolderModal(sf, isNew = false) {
   const modal = document.getElementById('edit-smart-folder-modal');
   const container = document.getElementById('smart-icon-selector');
   const getIconData = createFavoriteEditorUI(container, sf.icon || 'FAV_STAR', sf.color || 'orange');
-  
+
   const nameInput = document.getElementById('smart-name-input');
   nameInput.value = sf.name || '';
-  
+
   const conditionsList = document.getElementById('smart-conditions-list');
-  
+
   const template = document.getElementById('sf-condition-template');
   const fragment = document.createDocumentFragment();
   const conds = Array.isArray(sf.conditions) ? sf.conditions : [];
-  
+
   conds.forEach(cond => {
     const clone = template.content.cloneNode(true);
     const row = clone.querySelector('.sf-condition-row');
@@ -2253,13 +2273,13 @@ function showEditSmartFolderModal(sf, isNew = false) {
 
   if (!sfModalDelegated) {
     sfModalDelegated = true;
-    
+
     modal.addEventListener('click', async (e) => {
       if (e.target.closest('.btn-remove-cond')) {
         const row = e.target.closest('.sf-condition-row');
         if (row) row.remove();
       }
-      
+
       if (e.target.closest('#smart-add-condition-btn')) {
         const clone = template.content.cloneNode(true);
         const row = clone.querySelector('.sf-condition-row');
@@ -2348,11 +2368,11 @@ function showEditSmartFolderModal(sf, isNew = false) {
 
     // 4. ダイアログを閉じる
     modal.style.display = 'none';
-    
+
     if (appState.currentDirectory === 'smart://' + sf.id) {
       refreshFileList(true);
     }
-    
+
     // 作成・更新後に件数を再計算して表示
     updateSmartFolderCountsUI();
   });
@@ -2378,7 +2398,7 @@ const menuDeleteSmartFolder = createMenuItem('スマートフォルダを削除'
   const index = appState.smartFolders.findIndex(f => f.id === id);
   if (index !== -1) {
     appState.smartFolders = await SmartFolderStore.deleteFolder(id);
-    
+
     const node = document.querySelector(`.smart-folder-item[data-id="${id}"]`);
     if (node) node.remove();
   }
@@ -2518,7 +2538,7 @@ const menuOpenInNewTab = createMenuItem('新しいタブで開く', UIManager.IC
 const menuReloadFolder = createMenuItem('フォルダを再読み込み', UIManager.ICONS.RELOAD, async () => {
   if (contextMenu.targetFolderElement && contextMenu.targetFolderElement.reloadFolder) {
     await contextMenu.targetFolderElement.reloadFolder();
-    
+
     // 現在アクティブなタブで開いているフォルダ（またはその親）なら、メインビューも再読込する
     const currentTab = appState.tabs[appState.activeTabIndex];
     if (currentTab && contextMenu.targetFolder && currentTab.path === contextMenu.targetFolder.path) {
@@ -3609,7 +3629,7 @@ window.addEventListener('keydown', async (e) => {
     if (targetIndices.length > 0) {
       e.preventDefault();
       const rating = parseInt(e.key, 10);
-      
+
       const files = [];
       for (const idx of targetIndices) {
         const file = await window.veloceAPI.getFileByIndex(idx);
@@ -3896,7 +3916,7 @@ async function handleTreeNavigation(key) {
     if (item) {
       item.scrollIntoView({ behavior: 'instant', block: 'nearest' });
     }
-    
+
     appState.selection.clear();
     appState.selectedIndex = -1;
     uiManager.updateSelectionUI();
@@ -3963,7 +3983,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const bar = document.getElementById('bookmark-list');
   if (bar) bookmarkResizeObserver.observe(bar);
-  
+
   const overflowBtn = document.getElementById('bookmark-overflow-btn');
   if (overflowBtn) {
     overflowBtn.addEventListener('click', (e) => {
@@ -3972,7 +3992,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         bookmarkOverflowMenu.style.display = 'none';
         return;
       }
-      
+
       const list = document.getElementById('bookmark-list');
       const items = Array.from(list.children);
       const listRect = list.getBoundingClientRect();
@@ -3980,9 +4000,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         const itemRect = item.getBoundingClientRect();
         return itemRect.right > listRect.right;
       });
-      
+
       if (hiddenItems.length === 0) return;
-      
+
       bookmarkOverflowMenu = document.getElementById('bookmark-overflow-menu');
       if (!bookmarkOverflowMenu) {
         bookmarkOverflowMenu = document.createElement('div');
@@ -3992,22 +4012,22 @@ window.addEventListener('DOMContentLoaded', async () => {
       bookmarkOverflowMenu.innerHTML = '';
       bookmarkOverflowMenu.style.display = 'block';
       bookmarkOverflowMenu.style.zIndex = '10001';
-      
+
       hiddenItems.forEach(domItem => {
         const path = domItem.dataset.path;
         const fav = appState.favorites.find(f => f.path === path);
         if (!fav) return;
-        
+
         let iconSvg = '';
         if (fav.icon && ICON_SVGS[fav.icon]) {
           iconSvg = ICON_SVGS[fav.icon];
         } else if (fav.icon && fav.icon.startsWith('FAV_')) {
           iconSvg = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
         }
-        
+
         const menuItem = createMenuItem(fav.name, iconSvg, async () => {
           bookmarkOverflowMenu.style.display = 'none';
-          
+
           if (window.veloceAPI.loadDirectory) {
             const activeTab = appState.tabs[appState.activeTabIndex];
             if (activeTab) {
@@ -4017,14 +4037,14 @@ window.addEventListener('DOMContentLoaded', async () => {
               appState.currentDirectory = fav.path;
               localStorage.setItem('currentDirectory', appState.currentDirectory);
               if (window.uiManager) window.uiManager.renderTabs();
-              
+
               if (typeof saveTabsState === 'function') saveTabsState();
               if (typeof refreshFileList === 'function') refreshFileList(true);
               if (typeof expandTreeToPath === 'function') await expandTreeToPath(fav.path);
             }
           }
         });
-        
+
         const iconSpan = menuItem.querySelector('svg, div');
         if (iconSpan && iconSpan.tagName.toLowerCase() === 'svg') {
           if (fav.icon && fav.icon.startsWith('FAV_')) {
@@ -4033,17 +4053,17 @@ window.addEventListener('DOMContentLoaded', async () => {
             iconSpan.classList.add(`icon-color-${fav.color || 'default'}`);
           }
         }
-        
+
         bookmarkOverflowMenu.appendChild(menuItem);
       });
-      
+
       const rect = e.currentTarget.getBoundingClientRect();
       bookmarkOverflowMenu.style.top = `${rect.bottom + 4}px`;
       bookmarkOverflowMenu.style.left = 'auto';
       bookmarkOverflowMenu.style.right = `${window.innerWidth - rect.right}px`;
       bookmarkOverflowMenu.style.transform = 'scale(0.95)';
       bookmarkOverflowMenu.style.opacity = '0';
-      
+
       // animation
       requestAnimationFrame(() => {
         bookmarkOverflowMenu.style.transition = 'opacity 0.15s ease, transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1)';
@@ -4244,7 +4264,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (itemData) {
         const c = COLORS.find(c => c.id === (itemData.color || 'default'));
         iconColor = c ? c.hex : 'var(--glow-gold)';
-        
+
         if (itemData.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[itemData.icon]) {
           iconHtml = ICON_SVGS[itemData.icon];
         } else if (itemData.icon && itemData.icon.startsWith('FAV_')) {
@@ -4532,7 +4552,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         appState.searchQuery = '';
         changed = true;
       }
-      
+
       const resetCustomSelectUI = (containerId, val) => {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -4562,7 +4582,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         appState.searchQuery = '';
         scheduleRefresh();
       }
-      
+
       uiManager.applyGlowEffect(uiManager.elements.searchClearBtn);
       uiManager.hideCustomTooltip();
     });
@@ -4934,7 +4954,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (uiManager.elements.searchBar) {
     uiManager.elements.searchBar.value = appState.searchQuery;
   }
-  
+
   if (window.veloceAPI.getAllRatings) {
     const oldRatingsJson = localStorage.getItem('ratings');
     if (oldRatingsJson) {
@@ -4948,17 +4968,17 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
       localStorage.removeItem('ratings');
     }
-    
+
     const dbRatings = await window.veloceAPI.getAllRatings();
     appState.ratings = dbRatings || {};
   }
-  
+
   const setupCustomSelect = (containerId, valueKey) => {
     const container = document.getElementById(containerId);
     if (!container) return;
     const label = container.querySelector('.custom-select-label');
     const items = container.querySelectorAll('.custom-select-item');
-    
+
     const initialVal = appState[valueKey];
     const initialItem = Array.from(items).find(i => i.dataset.value == initialVal);
     if (initialItem && label) {
@@ -4980,7 +5000,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         e.stopPropagation();
         const val = item.dataset.value;
         const parsedVal = valueKey === 'ratingFilterVal' ? parseInt(val, 10) : val;
-        
+
         if (appState[valueKey] !== parsedVal) {
           appState[valueKey] = parsedVal;
           if (label) label.textContent = item.textContent;
@@ -5121,7 +5141,7 @@ function createSmartFolderNode(f) {
   const clone = template.content.cloneNode(true);
   const item = clone.querySelector('.smart-folder-item');
   item.dataset.id = f.id;
-  
+
   const iconSpan = clone.querySelector('.smart-folder-icon');
   if (f.icon && ICON_SVGS && ICON_SVGS[f.icon]) {
     iconSpan.innerHTML = ICON_SVGS[f.icon];
@@ -5133,10 +5153,10 @@ function createSmartFolderNode(f) {
     iconSpan.className = 'smart-folder-icon';
     iconSpan.innerHTML = f.icon || '⭐';
   }
-  
+
   const nameSpan = clone.querySelector('.folder-name');
   nameSpan.textContent = f.name;
-  
+
   return item;
 }
 
@@ -5196,13 +5216,13 @@ function initSmartFolders() {
 
       // 選択状態の更新（スマートフォルダはタブと状態が合わなくなるため選択状態を付与しない）
       document.querySelectorAll('.smart-folder-item').forEach(el => el.classList.remove('selected'));
-      
+
       // ツリー側の選択状態を解除
       document.querySelectorAll('.tree-node-content').forEach(el => el.classList.remove('selected'));
-      
+
       const fId = item.dataset.id;
       const f = appState.smartFolders.find(x => x.id === fId);
-      if(!f) return;
+      if (!f) return;
 
       const path = `smart://${f.id}`;
       appState.selection.clear();
@@ -5219,7 +5239,7 @@ function initSmartFolders() {
           localStorage.setItem('currentDirectory', appState.currentDirectory);
           uiManager.renderTabs();
           saveTabsState(appState, uiManager);
-          
+
           refreshFileList(true);
         }
       }
@@ -5236,7 +5256,7 @@ function initSmartFolders() {
 
           const fId = item.dataset.id;
           const f = appState.smartFolders.find(x => x.id === fId);
-          if(!f) return;
+          if (!f) return;
 
           contextMenu.targetFavoriteId = null;
           contextMenu.targetFavoritePath = null;
@@ -5284,7 +5304,7 @@ async function performUndo() {
   const action = appState.undoStack.pop();
   try {
     const { fs, path } = window.__TAURI__;
-    
+
     if (action.type === 'RENAME_FOLDER') {
       const oldName = await path.basename(action.oldPath);
       const result = await window.veloceAPI.renameFolder(action.newPath, oldName);
