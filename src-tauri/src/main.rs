@@ -184,6 +184,34 @@ pub struct AppState {
 
 // --- ユーティリティ ---
 
+fn extract_searchable_strings(meta: &FullMetadata) -> (String, String, String) {
+    let mut p = meta.prompt.clone();
+    let mut np = meta.negative_prompt.clone();
+
+    if p.is_empty() {
+        if let Some(raw) = meta.params.get("rawParameters").and_then(|v| v.as_str()) {
+            p = raw.to_string();
+        }
+    }
+
+    if let Some(chars) = meta.params.get("characterPrompts").and_then(|v| v.as_array()) {
+        for c in chars {
+            if let Some(cp) = c.get("prompt").and_then(|v| v.as_str()) {
+                p.push_str(" ");
+                p.push_str(cp);
+            }
+            if let Some(ucp) = c.get("uc").and_then(|v| v.as_str()) {
+                np.push_str(" ");
+                np.push_str(ucp);
+            }
+        }
+    }
+
+    (p.to_lowercase(), np.to_lowercase(), meta.source.to_lowercase())
+}
+
+
+
 fn init_db() -> rusqlite::Result<rusqlite::Connection> {
     let mut db_path =
         get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
@@ -192,7 +220,7 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
     }
     db_path.push("veloce_cache.db");
 
-    let conn = rusqlite::Connection::open(&db_path)?;
+    let mut conn = rusqlite::Connection::open(&db_path)?;
 
     // パフォーマンスチューニング
     conn.execute_batch(
@@ -233,9 +261,49 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN size INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN mtime INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN ctime INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_prompt TEXT DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_negative_prompt TEXT DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT ''", []);
 
     // 既存データのバックフィル
     let _ = conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
+
+    // 検索用カラムのマイグレーション
+    let has_unmigrated = conn.query_row(
+        "SELECT 1 FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != '' LIMIT 1",
+        [],
+        |_| Ok(()),
+    ).is_ok();
+
+    if has_unmigrated {
+        let mut rows_to_update = Vec::new();
+        {
+            let mut stmt = conn.prepare("SELECT hash_key, metadata FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != ''").unwrap();
+            let mut rows = stmt.query([]).unwrap();
+            while let Ok(Some(row)) = rows.next() {
+                let hash_key: String = row.get(0).unwrap_or_default();
+                let metadata_str: String = row.get(1).unwrap_or_default();
+                if let Ok(meta) = serde_json::from_str::<FullMetadata>(&metadata_str) {
+                    let (sp, snp, ss) = extract_searchable_strings(&meta);
+                    rows_to_update.push((hash_key, sp, snp, ss));
+                }
+            }
+        }
+        
+        if !rows_to_update.is_empty() {
+            println!("Migrating {} records for searchable columns...", rows_to_update.len());
+            let tx = conn.transaction()?;
+            {
+                let mut update_stmt = tx.prepare("UPDATE cache SET searchable_prompt = ?, searchable_negative_prompt = ?, searchable_source = ? WHERE hash_key = ?")?;
+                for (hk, sp, snp, ss) in rows_to_update {
+                    let _ = update_stmt.execute(rusqlite::params![sp, snp, ss, hk]);
+                }
+            }
+            tx.commit()?;
+            println!("Migration completed.");
+        }
+    }
+
     Ok(conn)
 }
 
@@ -339,6 +407,109 @@ fn create_image_file_from_smart_item(
     }
 }
 
+fn build_smart_folder_query(
+    rule: &SmartFolderRule,
+    is_count: bool,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let select_clause = if is_count {
+        "SELECT COUNT(*)"
+    } else {
+        "SELECT c.path, c.width, c.height, c.size, c.mtime, c.ctime, c.hash_key, c.thumbnail IS NOT NULL as has_thumbnail, c.metadata IS NOT NULL as has_metadata"
+    };
+
+    let mut query = format!("{} FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause);
+    let mut params = Vec::new();
+
+    if rule.conditions.is_empty() {
+        if !is_count { query.push_str(" ORDER BY c.mtime DESC"); }
+        return (query, params);
+    }
+
+    let logical_op = if rule.match_type == "all" { " AND " } else { " OR " };
+    query.push_str(" AND (");
+
+    for (i, cond) in rule.conditions.iter().enumerate() {
+        if i > 0 { query.push_str(logical_op); }
+
+        let mut clause = String::new();
+        let val_lower = cond.value.to_lowercase();
+        let val_like = format!("%{}%", val_lower);
+        
+        match cond.r#type.as_str() {
+            "prompt" => {
+                if cond.operator == "contains" {
+                    clause = "c.searchable_prompt LIKE ?".to_string();
+                    params.push(rusqlite::types::Value::Text(val_like));
+                } else if cond.operator == "not_contains" {
+                    clause = "c.searchable_prompt NOT LIKE ?".to_string();
+                    params.push(rusqlite::types::Value::Text(val_like));
+                } else { clause = "1=1".to_string(); }
+            }
+            "negative_prompt" => {
+                if cond.operator == "contains" {
+                    clause = "c.searchable_negative_prompt LIKE ?".to_string();
+                    params.push(rusqlite::types::Value::Text(val_like));
+                } else if cond.operator == "not_contains" {
+                    clause = "c.searchable_negative_prompt NOT LIKE ?".to_string();
+                    params.push(rusqlite::types::Value::Text(val_like));
+                } else { clause = "1=1".to_string(); }
+            }
+            "source" => {
+                if cond.operator == "contains" {
+                    clause = "c.searchable_source LIKE ?".to_string();
+                    params.push(rusqlite::types::Value::Text(val_like));
+                } else if cond.operator == "not_contains" {
+                    clause = "c.searchable_source NOT LIKE ?".to_string();
+                    params.push(rusqlite::types::Value::Text(val_like));
+                } else { clause = "1=1".to_string(); }
+            }
+            "rating" => {
+                let rating_val: i64 = cond.value.parse().unwrap_or(0);
+                let op = match cond.operator.as_str() {
+                    ">=" => ">=", "<=" => "<=", "==" => "=", "!=" => "!=", _ => "=",
+                };
+                clause = format!("coalesce(r.rating, 0) {} ?", op);
+                params.push(rusqlite::types::Value::Integer(rating_val));
+            }
+            "aspect_ratio" => {
+                match cond.operator.as_str() {
+                    "portrait" => clause = "(c.width * 100 < c.height * 95)".to_string(),
+                    "landscape" => clause = "(c.width * 100 > c.height * 105)".to_string(),
+                    "square" => clause = "(c.width * 100 >= c.height * 95 AND c.width * 100 <= c.height * 105)".to_string(),
+                    _ => clause = "1=1".to_string(),
+                }
+            }
+            "path" => {
+                let mut base_path = cond.value.clone();
+                if !base_path.ends_with('\\') && !base_path.ends_with('/') {
+                    base_path.push('\\');
+                }
+                
+                if cond.operator == "under_folder" {
+                    clause = "c.path LIKE ?".to_string();
+                    params.push(rusqlite::types::Value::Text(format!("{}%", base_path)));
+                } else if cond.operator == "in_folder" {
+                    let base_like = format!("{}%", base_path);
+                    let not_like_slash = format!("{}%/%", base_path);
+                    let not_like_bslash = format!("{}%\\%", base_path);
+                    
+                    clause = "(c.path LIKE ? AND c.path NOT LIKE ? AND c.path NOT LIKE ?)".to_string();
+                    params.push(rusqlite::types::Value::Text(base_like));
+                    params.push(rusqlite::types::Value::Text(not_like_slash));
+                    params.push(rusqlite::types::Value::Text(not_like_bslash));
+                } else { clause = "1=1".to_string(); }
+            }
+            _ => { clause = "1=1".to_string(); }
+        }
+        query.push_str(&clause);
+    }
+
+    query.push(')');
+    if !is_count { query.push_str(" ORDER BY c.mtime DESC"); }
+
+    (query, params)
+}
+
 fn get_smart_folder_paths(
     folder_type: &str,
     ratings_map: &std::collections::HashMap<String, u8>,
@@ -350,246 +521,20 @@ fn get_smart_folder_paths(
 
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.lock() {
-            let needs_metadata = rule.conditions.iter().any(|c| {
-                c.r#type == "prompt" || c.r#type == "negative_prompt" || c.r#type == "source"
-            });
-
-            let query = if needs_metadata {
-                "SELECT metadata, width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL"
-            } else {
-                "SELECT '', width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL"
-            };
-
-            if let Ok(mut stmt) = conn.prepare(query) {
-                if let Ok(rows) = stmt.query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u32>(1)?,
-                        row.get::<_, u32>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, u64>(4)?,
-                        row.get::<_, u64>(5)?,
-                        row.get::<_, u64>(6)?,
-                        row.get::<_, String>(7)?,
-                    ))
+            let (query_str, params) = build_smart_folder_query(rule, false);
+            if let Ok(mut stmt) = conn.prepare(&query_str) {
+                if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                    Ok(SmartFolderItem {
+                        path: row.get(0)?,
+                        width: row.get(1)?,
+                        height: row.get(2)?,
+                        size: row.get(3)?,
+                        mtime: row.get(4)?,
+                        ctime: row.get(5)?,
+                        hash_key: row.get(6)?,
+                    })
                 }) {
-                    let all_rows: Vec<(String, u32, u32, String, u64, u64, u64, String)> = rows.flatten().collect();
-
-                    // 検索条件の事前計算
-                    enum CondType {
-                        Rating,
-                        AspectRatio,
-                        Path,
-                        Prompt,
-                        NegativePrompt,
-                        Source,
-                        Unknown,
-                    }
-                    enum CondOp {
-                        Gte,
-                        Lte,
-                        Eq,
-                        Neq,
-                        Portrait,
-                        Landscape,
-                        Square,
-                        InFolder,
-                        UnderFolder,
-                        Contains,
-                        NotContains,
-                        Unknown,
-                    }
-                    struct PrecomputedCond {
-                        cond_type: CondType,
-                        op: CondOp,
-                        val_u8: u8,
-                        val_lower: String,
-                        val_path: std::path::PathBuf,
-                    }
-                    let precomputed_conds: Vec<PrecomputedCond> = rule
-                        .conditions
-                        .iter()
-                        .map(|c| {
-                            let cond_type = match c.r#type.as_str() {
-                                "rating" => CondType::Rating,
-                                "aspect_ratio" => CondType::AspectRatio,
-                                "path" => CondType::Path,
-                                "prompt" => CondType::Prompt,
-                                "negative_prompt" => CondType::NegativePrompt,
-                                "source" => CondType::Source,
-                                _ => CondType::Unknown,
-                            };
-                            let op = match c.operator.as_str() {
-                                ">=" => CondOp::Gte,
-                                "<=" => CondOp::Lte,
-                                "==" => CondOp::Eq,
-                                "!=" => CondOp::Neq,
-                                "portrait" => CondOp::Portrait,
-                                "landscape" => CondOp::Landscape,
-                                "square" => CondOp::Square,
-                                "in_folder" => CondOp::InFolder,
-                                "under_folder" => CondOp::UnderFolder,
-                                "contains" => CondOp::Contains,
-                                "not_contains" => CondOp::NotContains,
-                                _ => CondOp::Unknown,
-                            };
-                            PrecomputedCond {
-                                cond_type,
-                                op,
-                                val_u8: c.value.parse::<u8>().unwrap_or(0),
-                                val_lower: c.value.to_lowercase(),
-                                val_path: std::path::PathBuf::from(&c.value),
-                            }
-                        })
-                        .collect();
-
-                    use rayon::prelude::*;
-                    target_paths = all_rows
-                        .into_par_iter()
-                        .filter_map(|(meta_str, width, height, path, size, mtime, ctime, hash_key)| {
-                            let mut meta_opt: Option<FullMetadata> = None;
-
-                            if needs_metadata {
-                                meta_opt = serde_json::from_str::<FullMetadata>(&meta_str).ok();
-                                if meta_opt.is_none() {
-                                    return None; // failed to parse metadata which is required
-                                }
-                                if let Some(mut m) = meta_opt.take() {
-                                    if m.prompt.is_empty() {
-                                        if let Some(raw) =
-                                            m.params.get("rawParameters").and_then(|v| v.as_str())
-                                        {
-                                            m.prompt = raw.to_string();
-                                        }
-                                    }
-                                    meta_opt = Some(m);
-                                }
-                            }
-
-                            let mut all_match = true;
-                            for cond in &precomputed_conds {
-                                let mut matched = false;
-                                match cond.cond_type {
-                                    CondType::Rating => {
-                                        let file_rating = *ratings_map.get(&path).unwrap_or(&0);
-                                        matched = match cond.op {
-                                            CondOp::Gte => file_rating >= cond.val_u8,
-                                            CondOp::Lte => file_rating <= cond.val_u8,
-                                            CondOp::Eq => file_rating == cond.val_u8,
-                                            _ => false,
-                                        };
-                                    }
-                                    CondType::AspectRatio => {
-                                        if width > 0 && height > 0 {
-                                            matched = match cond.op {
-                                                CondOp::Portrait => width * 100 < height * 95,
-                                                CondOp::Landscape => width * 100 > height * 105,
-                                                CondOp::Square => {
-                                                    width * 100 >= height * 95
-                                                        && width * 100 <= height * 105
-                                                }
-                                                _ => false,
-                                            };
-                                        }
-                                    }
-                                    CondType::Path => {
-                                        let p = std::path::Path::new(&path);
-                                        matched = match cond.op {
-                                            CondOp::InFolder => p.parent() == Some(&cond.val_path),
-                                            CondOp::UnderFolder => p.starts_with(&cond.val_path),
-                                            _ => false,
-                                        };
-                                    }
-                                    CondType::Prompt => {
-                                        if let Some(meta) = &meta_opt {
-                                            let mut p = meta.prompt.clone();
-                                            if let Some(chars) = meta
-                                                .params
-                                                .get("characterPrompts")
-                                                .and_then(|v| v.as_array())
-                                            {
-                                                for c in chars {
-                                                    if let Some(cp) =
-                                                        c.get("prompt").and_then(|v| v.as_str())
-                                                    {
-                                                        p.push_str(" ");
-                                                        p.push_str(cp);
-                                                    }
-                                                }
-                                            }
-                                            let p_lower = p.to_lowercase();
-                                            matched = match cond.op {
-                                                CondOp::Contains => {
-                                                    p_lower.contains(&cond.val_lower)
-                                                }
-                                                CondOp::NotContains => {
-                                                    !p_lower.contains(&cond.val_lower)
-                                                }
-                                                _ => false,
-                                            };
-                                        }
-                                    }
-                                    CondType::NegativePrompt => {
-                                        if let Some(meta) = &meta_opt {
-                                            let mut p = meta.negative_prompt.clone();
-                                            if let Some(chars) = meta
-                                                .params
-                                                .get("characterPrompts")
-                                                .and_then(|v| v.as_array())
-                                            {
-                                                for c in chars {
-                                                    if let Some(ucp) =
-                                                        c.get("uc").and_then(|v| v.as_str())
-                                                    {
-                                                        p.push_str(" ");
-                                                        p.push_str(ucp);
-                                                    }
-                                                }
-                                            }
-                                            let p_lower = p.to_lowercase();
-                                            matched = match cond.op {
-                                                CondOp::Contains => {
-                                                    p_lower.contains(&cond.val_lower)
-                                                }
-                                                CondOp::NotContains => {
-                                                    !p_lower.contains(&cond.val_lower)
-                                                }
-                                                _ => false,
-                                            };
-                                        }
-                                    }
-                                    CondType::Source => {
-                                        if let Some(meta) = &meta_opt {
-                                            let s = meta.source.to_lowercase();
-                                            matched = match cond.op {
-                                                CondOp::Eq => s == cond.val_lower,
-                                                CondOp::Neq => s != cond.val_lower,
-                                                _ => false,
-                                            };
-                                        }
-                                    }
-                                    CondType::Unknown => {}
-                                }
-                                if !matched {
-                                    all_match = false;
-                                    break;
-                                }
-                            }
-                            if all_match {
-                                Some(SmartFolderItem {
-                                    path,
-                                    width,
-                                    height,
-                                    size,
-                                    mtime,
-                                    ctime,
-                                    hash_key,
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+                    target_paths = rows.flatten().collect();
                 }
             }
         }
@@ -628,7 +573,7 @@ fn get_smart_folder_paths(
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.lock() {
                 if let Ok(mut stmt) =
-                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL")
+                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100")
                 {
                     if let Ok(rows) = stmt.query_map([], |row| {
                         Ok(SmartFolderItem {
@@ -999,13 +944,28 @@ fn get_smart_folder_counts(
     
     let db_conn = std::sync::Arc::clone(&state.db_conn);
     
-    for rule in rules {
-        println!("Checking rule: {}", rule.id);
-        let paths = get_smart_folder_paths(&format!("smart://{}", rule.id), &ratings_map, &db_conn, &[rule.clone()]);
-        println!("Rule {} count: {}", rule.id, paths.len());
-        result.insert(rule.id, paths.len());
+    if let Ok(conn) = db_conn.lock() {
+        for rule in rules {
+            let mut count = 0;
+            if rule.conditions.is_empty() && (rule.id == "fav_5" || rule.id == "fav_4_plus" || rule.id == "history") {
+                if rule.id == "fav_5" {
+                    count = ratings_map.values().filter(|&&r| r >= 5).count();
+                } else if rule.id == "fav_4_plus" {
+                    count = ratings_map.values().filter(|&&r| r >= 4).count();
+                } else if rule.id == "history" {
+                    count = conn.query_row("SELECT COUNT(*) FROM cache WHERE path != '' AND path IS NOT NULL", [], |row| row.get(0)).unwrap_or(0);
+                    if count > 100 { count = 100; }
+                }
+            } else {
+                let (query_str, params) = build_smart_folder_query(&rule, true);
+                if let Ok(mut stmt) = conn.prepare(&query_str) {
+                    count = stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, usize>(0)).unwrap_or(0);
+                }
+            }
+            result.insert(rule.id, count);
+        }
     }
-    println!("get_smart_folder_counts returning: {:?}", result);
+    
     result
 }
 
@@ -1671,15 +1631,16 @@ fn get_full_metadata_for_path(
     };
 
     if let Ok(json_str) = serde_json::to_string(&meta) {
+        let (sp, snp, ss) = extract_searchable_strings(&meta);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         if let Ok(conn) = db_conn.lock() {
             let _ = conn.execute(
-                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed",
-                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, file_size, mtime_millis, ctime_millis, now]
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source",
+                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, file_size, mtime_millis, ctime_millis, now, sp, snp, ss]
             );
         }
     }
@@ -3350,6 +3311,33 @@ fn main() {
 mod tests {
     use super::natural_cmp;
     use std::cmp::Ordering;
+
+    #[test]
+    fn test_build_smart_folder_query() {
+        use super::{SmartFolderRule, SmartFolderCondition};
+        let rule = SmartFolderRule {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "prompt".to_string(),
+                    operator: "contains".to_string(),
+                    value: "girl".to_string(),
+                },
+                SmartFolderCondition {
+                    r#type: "negative_prompt".to_string(),
+                    operator: "not_contains".to_string(),
+                    value: "bad".to_string(),
+                },
+            ],
+        };
+        
+        let (query, params) = super::build_smart_folder_query(&rule, false);
+        assert!(query.contains("c.searchable_prompt LIKE ?"));
+        assert!(query.contains("c.searchable_negative_prompt NOT LIKE ?"));
+        assert_eq!(params.len(), 2);
+    }
 
     #[test]
     fn test_natural_cmp() {
