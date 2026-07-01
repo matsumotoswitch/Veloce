@@ -755,6 +755,15 @@ input:-webkit-autofill:focus {
   border-bottom: none !important;
 }
 
+:root[data-center-collapsed="true"] #resizer-center {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  /* Instead of display: none, remove it from flow so thumbnail-controls moves up to 0 */
+}
+
 :root[data-center-collapsed="true"] #center-pane::before,
 :root[data-center-collapsed="true"] #center-pane::after {
   display: none !important;
@@ -931,12 +940,6 @@ table#file-table {
 .checkbox-label {
   font-size: var(--font-size-xs);
   color: var(--text-color);
-  opacity: 0.8;
-  transition: opacity 0.15s;
-}
-
-.custom-checkbox-wrapper:hover .checkbox-label {
-  opacity: 1;
 }
 
 #thumbnail-controls input {
@@ -1538,7 +1541,7 @@ img.thumbnail-item.loading {
 }
 
 /* Diffモーダル内のコピーボタン */
-.diff-copy-btn, .open-folder-btn {
+.diff-copy-btn {
   cursor: pointer;
   color: var(--text-color);
   opacity: 0.6;
@@ -1550,13 +1553,26 @@ img.thumbnail-item.loading {
   transition: color 0.2s, filter 0.2s, background-color 0.2s, opacity 0.2s;
 }
 
-.diff-copy-btn:hover, .open-folder-btn:hover {
+.open-folder-btn {
+  cursor: pointer;
+  color: var(--text-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: var(--radius-xs);
+  transition: color 0.2s, filter 0.2s, background-color 0.2s;
+}
+
+.diff-copy-btn:hover,
+.open-folder-btn:hover {
   color: #fff;
   opacity: 1;
 }
 
 /* --- Diff Copy Button Glow Effect --- */
-.diff-copy-btn svg, .open-folder-btn svg {
+.diff-copy-btn svg,
+.open-folder-btn svg {
   transition: stroke 0.2s, filter 0.2s;
 }
 
@@ -2504,6 +2520,51 @@ html.viewer-html,
   backdrop-filter: none !important;
   /* 重いぼかし処理を完全にカット */
   -webkit-backdrop-filter: none !important;
+}
+
+/* --- Inspector Location Badge (Smart Folder Only) --- */
+.inspector-location-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.inspector-location-badge:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.inspector-location-badge svg {
+  color: var(--accent-color);
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.inspector-location-badge .folder-name {
+  font-family: Consolas, monospace;
+  font-weight: 400;
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.4;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.inspector-location-badge:hover .folder-name {
+  opacity: 1;
 }
 
 /* ツールチップのぼかし処理もカット（Win8.1等での描画負荷軽減） */

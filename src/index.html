@@ -151,9 +151,11 @@
   <div class="resizer" id="resizer-right"></div>
 
   <!-- 右ペイン: インスペクター -->
-  <div id="right-pane">
-
-    <div id="inspector-section" tabindex="-1">
+  <div id="right-pane" style="border-left: none;">
+    <div id="inspector-header" class="pane-header" style="height: 32px; padding: 0 10px 5px 8px; border-bottom: 1px solid var(--border-color); display: flex; align-items: flex-end; justify-content: flex-start;">
+      <div id="inspector-header-path" class="open-folder-btn" style="display: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; direction: rtl; text-align: left;"></div>
+    </div>
+    <div id="inspector-section" tabindex="-1" style="border-left: 1px solid var(--border-color);">
       <div id="inspector-content" class="inspector-data">
         <div id="inspector-empty" class="empty-state-msg">
           <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:12px;"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>

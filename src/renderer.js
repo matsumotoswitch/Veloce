@@ -1751,9 +1751,28 @@ async function renderMetadata(file) {
     resetInspectorPools();
     if (emptyInspectorMsg) emptyInspectorMsg.style.display = 'none';
 
+    let badge = container.querySelector('.inspector-location-badge');
+    if (badge) badge.remove();
+
+    const headerPath = document.getElementById('inspector-header-path');
+    if (headerPath) {
+      if (appState.currentDirectory.startsWith('smart://') && file.path) {
+        const filePathStr = String(file.path);
+        const lastSlash = Math.max(filePathStr.lastIndexOf('\\'), filePathStr.lastIndexOf('/'));
+        const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
+        const escapedPath = dirPath.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        headerPath.innerHTML = `<bdi dir="ltr" style="opacity: 0.9;">${escapedPath}</bdi>`;
+        headerPath.setAttribute('data-path', file.path);
+        headerPath.title = dirPath;
+        headerPath.style.display = 'block';
+      } else {
+        headerPath.style.display = 'none';
+      }
+    }
+
     let hasContent = false;
     const sections = buildInspectorSections(d);
-    sections.unshift({ title: '場所', value: file.path, isParam: true });
 
     for (const section of sections) {
       if (!section.value || section.value === '-') continue;
@@ -1763,11 +1782,6 @@ async function renderMetadata(file) {
       secEl.title.textContent = section.title;
 
       let copyHtml = UIManager.createCopyButtonHTML(section.value);
-      if (section.title === '場所') {
-        const folderSvg = '<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-        const escaped = String(section.value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        copyHtml = `<span class="open-folder-btn" data-path="${escaped}">${folderSvg}</span>`;
-      }
       secEl.copyWrapper.innerHTML = copyHtml;
 
       let sectionHasMatch = false;
@@ -1889,7 +1903,8 @@ async function renderMetadata(file) {
 
     if (!_inspectorDelegationInit) {
       _inspectorDelegationInit = true;
-      container.addEventListener('click', async (e) => {
+      const delegationRoot = document.getElementById('right-pane') || container;
+      delegationRoot.addEventListener('click', async (e) => {
         const copyBtn = e.target.closest('.diff-copy-btn');
         if (copyBtn) {
           const text = copyBtn.getAttribute('data-copy-text');
@@ -1910,17 +1925,17 @@ async function renderMetadata(file) {
           }
         }
       });
-      container.addEventListener('mousemove', (e) => {
+      delegationRoot.addEventListener('mousemove', (e) => {
         const copyBtn = e.target.closest('.diff-copy-btn');
         if (copyBtn) uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
         const openBtn = e.target.closest('.open-folder-btn');
         if (openBtn) uiManager.showCustomTooltip('エクスプローラで開く', e.clientX, e.clientY);
       });
-      container.addEventListener('mouseleave', () => {
+      delegationRoot.addEventListener('mouseleave', () => {
         uiManager.hideCustomTooltip();
       }, true);
 
-      container.addEventListener('copy', (e) => {
+      delegationRoot.addEventListener('copy', (e) => {
         const selection = window.getSelection();
         if (selection.isCollapsed) return;
         const promptLook = e.target.closest('.prompt-look');
