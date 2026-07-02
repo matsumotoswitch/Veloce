@@ -28,7 +28,7 @@
   --font-size-sm: 13px;
   --font-size-xs: 12px;
   --font-size-lg: 16px;
-  --header-height: 27px;
+  --header-height: 28px;
   --titlebar-bg: #000000;
   --input-bg: #000000;
   --dialog-bg: #1a2327;
@@ -62,7 +62,7 @@ textarea {
 /* --- Titlebar & Inline Toolbar --- */
 .titlebar {
   position: relative;
-  height: 38px;
+  height: 40px;
   background: var(--titlebar-bg) !important;
   /* 強制的に真っ黒にする */
   user-select: none;
@@ -87,7 +87,7 @@ textarea {
   display: flex;
   justify-content: center;
   align-items: center;
-  width: 46px;
+  width: 48px;
   height: 100%;
   color: var(--text-color);
   cursor: default;
@@ -105,8 +105,8 @@ textarea {
 }
 
 .titlebar-button svg {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 .titlebar-button:hover {
@@ -131,7 +131,7 @@ body {
 
 .app-content {
   display: grid;
-  grid-template-columns: var(--left-width, 200px) 5px 1fr 5px var(--right-width, 300px);
+  grid-template-columns: var(--left-width, 200px) 4px 1fr 4px var(--right-width, 300px);
   grid-template-rows: minmax(0, 1fr);
   height: calc(100vh - 108px);
   box-sizing: border-box;
@@ -173,7 +173,7 @@ body.is-resizing .app-content {
 }
 
 .dialog-message.has-input {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .dialog-path {
@@ -187,13 +187,13 @@ body.is-resizing .app-content {
 .dialog-input-group {
   display: flex;
   flex-direction: column;
-  margin-bottom: 25px;
+  margin-bottom: 24px;
 }
 
 .dialog-buttons {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
 }
 
 .dialog-buttons--wrap {
@@ -201,7 +201,7 @@ body.is-resizing .app-content {
 }
 
 .dialog-btn {
-  padding: 6px 16px;
+  padding: 8px 16px;
   cursor: pointer;
   border: none;
   border-radius: var(--radius-sm);
@@ -242,7 +242,7 @@ body.is-resizing .app-content {
 .dialog-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 6px;
+  padding: 8px;
   background-color: rgba(0, 0, 0, 0.2);
   color: var(--text-color);
   border: 1px solid var(--border-color);
@@ -272,8 +272,8 @@ select.dialog-input option {
 .dialog-warning {
   color: var(--danger-red);
   font-size: var(--font-size-xs);
-  min-height: 14px;
-  margin-bottom: 10px;
+  min-height: 16px;
+  margin-bottom: 8px;
   display: none;
 }
 
@@ -335,7 +335,7 @@ input:-webkit-autofill:focus {
   background-color: var(--panel-bg);
   box-shadow: none;
   cursor: row-resize;
-  height: 5px;
+  height: 4px;
   flex: none;
   z-index: 10;
   transition: background-color 0.2s ease;
@@ -380,7 +380,6 @@ input:-webkit-autofill:focus {
   padding: 0;
   min-height: 0;
   overflow: hidden;
-  border-left: 1px solid var(--border-color);
 }
 
 #bookmark-bar {
@@ -404,7 +403,7 @@ input:-webkit-autofill:focus {
 .bookmark-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 4px 8px;
   border-radius: var(--radius-xs);
   cursor: pointer;
@@ -520,7 +519,7 @@ input:-webkit-autofill:focus {
   display: flex;
   flex-direction: column;
   gap: 0px;
-  padding: 8px 8px 10px 12px;
+  padding: 8px 8px 8px 12px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   flex: 1;
@@ -531,7 +530,7 @@ input:-webkit-autofill:focus {
   font-size: var(--font-size-xs);
   font-weight: normal;
   color: var(--text-color);
-  padding: 0 16px 5px 16px;
+  padding: 0 16px 4px 16px;
   height: var(--header-height);
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
@@ -581,13 +580,13 @@ input:-webkit-autofill:focus {
 }
 
 .smart-folder-icon {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   opacity: 0.8;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 6px;
+  margin-right: 4px;
 }
 
 .smart-folder-icon svg {
@@ -599,7 +598,7 @@ input:-webkit-autofill:focus {
   margin-left: auto;
   font-size: 10px;
   background-color: rgba(255, 255, 255, 0.1);
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: 8px;
   color: rgba(255, 255, 255, 0.7);
   display: none;
@@ -669,12 +668,12 @@ input:-webkit-autofill:focus {
   overflow-x: hidden;
   scrollbar-gutter: stable;
   min-height: 0;
-  padding: 5px 10px 10px 10px;
+  padding: 4px 8px 8px 8px;
 }
 
 /* --- Toolbar --- */
 .toolbar {
-  height: 38px;
+  height: 40px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -692,7 +691,7 @@ input:-webkit-autofill:focus {
   display: flex;
   align-items: center;
   width: 100%;
-  height: 26px;
+  height: 28px;
   background: rgba(0, 0, 0, 0.25);
   /* タイトルバーより少し暗く凹ませる */
   border: 1px solid var(--border-color);
@@ -868,7 +867,7 @@ table#file-table {
 /* Center Bottom: Thumbnails */
 #thumbnail-controls {
   background: var(--panel-bg);
-  padding: 0 10px 5px 10px;
+  padding: 0 8px 4px 8px;
   height: calc(var(--header-height) - 1px);
   display: flex;
   align-items: center;
@@ -911,11 +910,11 @@ table#file-table {
 }
 
 .custom-checkbox {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  margin-right: 6px;
+  margin-right: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1150,7 +1149,7 @@ body.show-thumbnail-names .thumbnail-label {
 
 .inspector-data label {
   font-size: var(--font-size-xs);
-  margin: 10px 0 5px 0;
+  margin: 8px 0 4px 0;
   color: var(--text-color);
   opacity: 0.7;
 }
@@ -1160,7 +1159,7 @@ body.show-thumbnail-names .thumbnail-label {
   background: var(--input-bg);
   color: var(--text-color);
   border: 1px solid var(--border-color);
-  padding: 5px;
+  padding: 4px;
   resize: none;
   font-family: inherit;
   font-size: 1.1em;
@@ -1174,7 +1173,7 @@ body.show-thumbnail-names .thumbnail-label {
   flex: 1;
   font-size: var(--font-size-base);
   min-height: 0;
-  padding: 8px 8px 10px 12px;
+  padding: 8px 8px 8px 12px;
   border-right: 1px solid var(--border-color);
 }
 
@@ -1242,7 +1241,7 @@ body.show-thumbnail-names .thumbnail-label {
 }
 
 #dir-tree .tree-icon {
-  margin-right: 6px;
+  margin-right: 4px;
   font-size: var(--font-size-base);
 }
 
@@ -1283,7 +1282,7 @@ body.show-thumbnail-names .thumbnail-label {
   display: flex;
   flex-direction: column-reverse;
   /* 新しい通知が一番下に表示される */
-  gap: 10px;
+  gap: 8px;
   z-index: 10010;
   /* モーダル(10005)よりもさらに手前の、アプリ最前面に表示 */
   pointer-events: none;
@@ -1301,7 +1300,7 @@ body.show-thumbnail-names .thumbnail-label {
   font-size: var(--font-size-sm);
   box-shadow: var(--popup-shadow);
   opacity: 0;
-  transform: translateY(5px);
+  transform: translateY(4px);
   transition: opacity 0.2s ease, transform 0.2s ease;
   white-space: nowrap;
   overflow: hidden;
@@ -1467,7 +1466,7 @@ img.thumbnail-item.loading {
 .dialog-box h2 {
   margin-top: 0;
   margin-bottom: 20px;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   font-size: 1.25em;
   color: var(--glow-gold);
   border-bottom: 1px solid var(--modal-border);
@@ -1485,7 +1484,7 @@ img.thumbnail-item.loading {
 /* 左右分割レイアウト用 */
 .diff-columns {
   display: flex;
-  gap: 15px;
+  gap: 16px;
   margin-bottom: 20px;
 }
 
@@ -1504,10 +1503,10 @@ img.thumbnail-item.loading {
 .prompt-look {
   background-color: var(--input-bg);
   border: 1px solid var(--border-color);
-  padding: 10px;
+  padding: 8px;
   border-radius: var(--radius-xs);
   min-height: 120px;
-  max-height: 250px;
+  max-height: 252px;
   overflow-y: auto;
   font-size: var(--font-size-sm);
   /* ここを1.1emから0.9emに修正 */
@@ -1517,7 +1516,7 @@ img.thumbnail-item.loading {
 
 /* パラメータ表示用の高さ調整 */
 .prompt-look.param-box {
-  min-height: 34px;
+  min-height: 36px;
   /* 1行分程度の高さ */
   max-height: 60px;
   display: flex;
@@ -1612,13 +1611,13 @@ img.thumbnail-item.loading {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 250px;
+  height: 252px;
   /* サムネイルの最大高さ */
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xs);
   overflow: hidden;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .diff-thumbnail {
@@ -1632,7 +1631,7 @@ img.thumbnail-item.loading {
   position: fixed;
   pointer-events: none;
   z-index: 10005;
-  padding: 6px 10px;
+  padding: 4px 8px;
   background-color: var(--modal-bg);
   color: var(--text-color);
   border: 1px solid var(--modal-border);
@@ -1643,7 +1642,7 @@ img.thumbnail-item.loading {
   white-space: pre-wrap;
   opacity: 0;
   visibility: hidden;
-  transform: translateY(5px);
+  transform: translateY(4px);
   transition: opacity 0.15s ease-in-out, transform 0.15s ease-in-out, visibility 0.15s;
 }
 
@@ -1673,7 +1672,7 @@ img.thumbnail-item.loading {
 #bookmark-overflow-menu {
   position: fixed;
   z-index: 10001;
-  padding: 6px 0;
+  padding: 4px 0;
   display: none;
   font-size: var(--font-size-sm);
   transform-origin: top left;
@@ -1701,16 +1700,16 @@ img.thumbnail-item.loading {
 .menu-separator {
   height: 1px;
   background-color: var(--modal-border);
-  margin: 6px 0;
+  margin: 4px 0;
 }
 
 /* --- コンテキストメニュー サブメニュー対応 --- */
 .context-menu-item {
   position: relative;
-  padding: 6px 14px;
+  padding: 4px 12px;
   display: grid;
   grid-template-columns: 16px auto minmax(50px, 1fr) 16px;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   color: var(--text-color);
   font-size: var(--font-size-sm);
@@ -1756,7 +1755,7 @@ img.thumbnail-item.loading {
   left: calc(100% + 2px);
   min-width: 150px;
   z-index: 10002;
-  padding: 6px 0;
+  padding: 4px 0;
 }
 
 .context-menu-item:hover>.submenu {
@@ -1799,8 +1798,8 @@ img.thumbnail-item.loading {
   position: static !important;
   top: auto !important;
   left: auto !important;
-  width: 7px !important;
-  height: 7px !important;
+  width: 8px !important;
+  height: 8px !important;
   margin: 0 !important;
 }
 
@@ -1833,7 +1832,7 @@ th[data-sort] svg path {
   top: 0;
   bottom: 0;
   left: 8px;
-  right: 190px;
+  right: 192px;
   -webkit-app-region: no-drag;
   background-color: transparent !important;
   /* タイトルバーの背景を透過させて右上ボタンと統一 */
@@ -1843,7 +1842,7 @@ th[data-sort] svg path {
   border-bottom: none !important;
   /* 個別の下線を消去 */
   height: 40px;
-  max-height: 38px;
+  max-height: 40px;
   /* 高さを微調整 */
   align-items: flex-end;
   overflow-x: auto;
@@ -1882,7 +1881,7 @@ th[data-sort] svg path {
   padding: 7px 25px 6px 17px !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
   transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease !important;
-  height: 31px !important;
+  height: 32px !important;
 }
 
 #tab-container .tab-item::before {
@@ -1977,7 +1976,7 @@ th[data-sort] svg path {
 @keyframes tabFadeIn {
   from {
     opacity: 0;
-    transform: translateX(-15px);
+    transform: translateX(-16px);
   }
 
   to {
@@ -2009,10 +2008,10 @@ th[data-sort] svg path {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  min-width: 26px;
-  max-width: 26px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  max-width: 28px;
   padding: 0;
   margin-left: 8px;
   margin-right: 12px;
@@ -2046,16 +2045,16 @@ th[data-sort] svg path {
 
 /* 内部のプラスアイコン（SVG）のサイズが崩れないように固定 */
 .titlebar #new-tab-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 
 .tab-close-btn {
   position: absolute;
-  right: 6px;
-  width: 18px;
-  height: 18px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2101,8 +2100,8 @@ th[data-sort] svg path {
 }
 
 #titlebar-tab-list svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
 .empty-state-msg {
@@ -2130,7 +2129,7 @@ th[data-sort] svg path {
 @keyframes staggeredFadeIn {
   from {
     opacity: 0;
-    transform: translateY(5px);
+    transform: translateY(4px);
   }
 
   to {
@@ -2156,16 +2155,16 @@ th[data-sort] svg path {
 }
 
 .form-group {
-  margin-bottom: 15px;
+  margin-bottom: 16px;
 }
 
 .form-group.last {
-  margin-bottom: 25px;
+  margin-bottom: 24px;
 }
 
 .form-label {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
   color: var(--text-color);
   opacity: 0.8;
 }
@@ -2301,7 +2300,7 @@ html.viewer-html,
 
 .window-filename {
   flex: 1;
-  height: 30px;
+  height: 32px;
   background-color: transparent;
   /* ベタ塗りを廃止 */
   color: rgba(255, 255, 255, 0.9);
@@ -2322,8 +2321,8 @@ html.viewer-html,
 }
 
 .window-ctrl-btn {
-  width: 46px;
-  height: 30px;
+  width: 48px;
+  height: 32px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -2343,7 +2342,7 @@ html.viewer-html,
 /* 一番左の最小化ボタンの左下だけ丸くして、自然なコーナーブロック感を出す */
 
 .window-scale-display {
-  height: 30px;
+  height: 32px;
   color: rgba(255, 255, 255, 0.9);
   font-size: var(--font-size-xs);
   padding: 0 12px;
@@ -2547,8 +2546,8 @@ html.viewer-html,
 
 .inspector-location-badge svg {
   color: var(--accent-color);
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
   margin-top: 1px;
 }
@@ -2595,14 +2594,14 @@ html.viewer-html,
 .help-tabs {
   display: flex;
   border-bottom: 1px solid var(--border-color);
-  margin-bottom: 15px;
+  margin-bottom: 16px;
   flex-shrink: 0;
 }
 
 .help-tab {
   flex: 1;
   text-align: left;
-  padding: 10px 0;
+  padding: 8px 0;
   cursor: pointer;
   color: var(--text-color);
   opacity: 0.6;
@@ -2625,7 +2624,7 @@ html.viewer-html,
 .help-tab-content {
   display: none;
   overflow-y: auto;
-  padding-right: 10px;
+  padding-right: 8px;
   flex: 1;
   min-height: 0;
 }
@@ -2652,8 +2651,8 @@ kbd {
 .help-group-title {
   color: var(--accent-color);
   font-size: 0.95em;
-  margin-top: 15px;
-  margin-bottom: 5px;
+  margin-top: 16px;
+  margin-bottom: 4px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border-color);
 }
@@ -2675,7 +2674,7 @@ kbd {
 }
 
 .help-table td:first-child {
-  padding-right: 15px;
+  padding-right: 16px;
   width: 45%;
   min-width: 280px;
   white-space: nowrap;
@@ -2688,7 +2687,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 86px;
+  width: 88px;
   background-color: rgba(0, 0, 0, 0.25);
   color: var(--text-color);
   border: 1px solid var(--border-color);
@@ -2698,7 +2697,7 @@ kbd {
   outline: none;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
-  height: 26px;
+  height: 28px;
   box-sizing: border-box;
   font-family: inherit;
   user-select: none;
@@ -2749,7 +2748,7 @@ kbd {
 }
 
 .custom-select-item {
-  padding: 6px 12px;
+  padding: 4px 12px;
   color: var(--text-color);
   cursor: pointer;
   white-space: nowrap;
