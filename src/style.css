@@ -301,10 +301,10 @@ input:-webkit-autofill:focus {
 
 ::-webkit-scrollbar-thumb {
   background-color: #3a454a;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   border: 3px solid transparent;
   background-clip: padding-box;
-  /* 透明なフチとpadding-boxを使って、どんな背景色の上でも細く見せる */
+  /* 角を丸め、padding-boxを使って、どんな背景色の上でも浮くように */
 }
 
 ::-webkit-scrollbar-thumb:hover {
