@@ -47,6 +47,8 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 memmap2 = "0.9"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 base64 = "0.22.1"
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.24.0"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.52"

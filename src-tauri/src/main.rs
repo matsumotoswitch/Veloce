@@ -178,7 +178,7 @@ pub struct AppState {
     rating_filter_val: Mutex<u8>,
     rating_filter_op: Mutex<String>,
     thumbnail_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
-    db_conn: std::sync::Arc<Mutex<rusqlite::Connection>>,
+    db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     smart_folders: Mutex<Vec<SmartFolderRule>>,
 }
 
@@ -212,23 +212,31 @@ fn extract_searchable_strings(meta: &FullMetadata) -> (String, String, String) {
 
 
 
-fn init_db() -> rusqlite::Result<rusqlite::Connection> {
+fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String> {
     let mut db_path =
         get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
     if !db_path.exists() {
-        let _ = std::fs::create_dir_all(&db_path);
+        let _ = std::fs::create_dir_all(db_path.parent().unwrap());
     }
     db_path.push("veloce_cache.db");
 
-    let mut conn = rusqlite::Connection::open(&db_path)?;
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path)
+        .with_init(|conn| {
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;
+                 PRAGMA cache_size = -64000;
+                 PRAGMA temp_store = MEMORY;
+                 PRAGMA busy_timeout = 5000;"
+            )
+        });
 
-    // パフォーマンスチューニング
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA synchronous = NORMAL;
-         PRAGMA cache_size = -64000;
-         PRAGMA temp_store = MEMORY;",
-    )?;
+    let pool = r2d2::Pool::builder()
+        .max_size(16)
+        .build(manager)
+        .map_err(|e| e.to_string())?;
+
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS cache (
@@ -244,7 +252,7 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
             last_accessed INTEGER
         )",
         [],
-    )?;
+    ).map_err(|e| e.to_string())?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS ratings (
@@ -252,7 +260,7 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
             rating INTEGER NOT NULL
         )",
         [],
-    )?;
+    ).map_err(|e| e.to_string())?;
 
     // マイグレーション（カラムが存在しない場合は無視される）
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
@@ -292,19 +300,19 @@ fn init_db() -> rusqlite::Result<rusqlite::Connection> {
         
         if !rows_to_update.is_empty() {
             println!("Migrating {} records for searchable columns...", rows_to_update.len());
-            let tx = conn.transaction()?;
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
             {
-                let mut update_stmt = tx.prepare("UPDATE cache SET searchable_prompt = ?, searchable_negative_prompt = ?, searchable_source = ? WHERE hash_key = ?")?;
+                let mut update_stmt = tx.prepare("UPDATE cache SET searchable_prompt = ?, searchable_negative_prompt = ?, searchable_source = ? WHERE hash_key = ?").map_err(|e| e.to_string())?;
                 for (hk, sp, snp, ss) in rows_to_update {
                     let _ = update_stmt.execute(rusqlite::params![sp, snp, ss, hk]);
                 }
             }
-            tx.commit()?;
+            tx.commit().map_err(|e| e.to_string())?;
             println!("Migration completed.");
         }
     }
 
-    Ok(conn)
+    Ok(pool)
 }
 
 /// アプリケーション専用のローカルデータディレクトリを取得する (`AppData/Local/Veloce`)
@@ -513,14 +521,14 @@ fn build_smart_folder_query(
 fn get_smart_folder_paths(
     folder_type: &str,
     ratings_map: &std::collections::HashMap<String, u8>,
-    db_conn: &std::sync::Arc<Mutex<rusqlite::Connection>>,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     rules: &[SmartFolderRule],
 ) -> Vec<SmartFolderItem> {
     let mut target_paths = Vec::new();
     let folder_id = folder_type.replace("smart://", "");
 
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
-        if let Ok(conn) = db_conn.lock() {
+        if let Ok(conn) = db_conn.get() {
             let (query_str, params) = build_smart_folder_query(rule, false);
             if let Ok(mut stmt) = conn.prepare(&query_str) {
                 if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
@@ -549,7 +557,7 @@ fn get_smart_folder_paths(
                 .collect();
             
             if !paths.is_empty() {
-                if let Ok(conn) = db_conn.lock() {
+                if let Ok(conn) = db_conn.get() {
                     let placeholders = vec!["?"; paths.len()].join(",");
                     let query = format!("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path IN ({})", placeholders);
                     if let Ok(mut stmt) = conn.prepare(&query) {
@@ -571,7 +579,7 @@ fn get_smart_folder_paths(
                 }
             }
         } else if folder_id == "history" {
-            if let Ok(conn) = db_conn.lock() {
+            if let Ok(conn) = db_conn.get() {
                 if let Ok(mut stmt) =
                     conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100")
                 {
@@ -638,7 +646,7 @@ fn load_directory(
             use rayon::prelude::*;
 
             let mut cache_map = std::collections::HashMap::new();
-            if let Ok(conn) = db_conn_clone.lock() {
+            if let Ok(conn) = db_conn_clone.get() {
                 if let Ok(mut stmt) = conn.prepare("SELECT hash_key, thumbnail IS NOT NULL, metadata IS NOT NULL AND metadata != '' FROM cache") {
                     if let Ok(rows) = stmt.query_map([], |row| {
                         Ok((
@@ -911,7 +919,7 @@ fn migrate_ratings(
     state: tauri::State<'_, AppState>,
     ratings: std::collections::HashMap<String, u8>,
 ) -> Result<(), String> {
-    if let Ok(mut conn) = state.db_conn.lock() {
+    if let Ok(mut conn) = state.db_conn.get() {
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         for (path, rating) in &ratings {
             let _ = tx.execute(
@@ -942,9 +950,9 @@ fn get_smart_folder_counts(
         std::collections::HashMap::new()
     };
     
-    let db_conn = std::sync::Arc::clone(&state.db_conn);
+    let db_conn = state.db_conn.clone();
     
-    if let Ok(conn) = db_conn.lock() {
+    if let Ok(conn) = db_conn.get() {
         for rule in rules {
             let mut count = 0;
             if rule.conditions.is_empty() && (rule.id == "fav_5" || rule.id == "fav_4_plus" || rule.id == "history") {
@@ -953,7 +961,7 @@ fn get_smart_folder_counts(
                 } else if rule.id == "fav_4_plus" {
                     count = ratings_map.values().filter(|&&r| r >= 4).count();
                 } else if rule.id == "history" {
-                    count = conn.query_row("SELECT COUNT(*) FROM cache WHERE path != '' AND path IS NOT NULL", [], |row| row.get(0)).unwrap_or(0);
+                    count = conn.query_row("SELECT COUNT(*) FROM cache WHERE path != '' AND path IS NOT NULL", [], |row| row.get::<_, usize>(0)).unwrap_or(0);
                     if count > 100 { count = 100; }
                 }
             } else {
@@ -976,7 +984,7 @@ fn set_rating(
     path: String,
     rating: u8,
 ) -> usize {
-    if let Ok(conn) = state.db_conn.lock() {
+    if let Ok(conn) = state.db_conn.get() {
         if rating == 0 {
             let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&path]);
         } else {
@@ -1327,7 +1335,7 @@ fn decode_metadata_string(bytes: &[u8]) -> String {
 
 fn get_full_metadata_for_path(
     file_path: &str,
-    db_conn: &std::sync::Mutex<rusqlite::Connection>,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) -> FullMetadata {
     let (mtime_millis, ctime_millis, file_size) = std::fs::metadata(file_path)
         .map(|m| {
@@ -1341,7 +1349,7 @@ fn get_full_metadata_for_path(
     let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime_millis).as_bytes());
     let hash_key = format!("{:016x}", digest);
 
-    if let Ok(conn) = db_conn.lock() {
+    if let Ok(conn) = db_conn.get() {
         if let Ok(mut stmt) = conn.prepare_cached("SELECT metadata FROM cache WHERE hash_key = ?") {
             if let Ok(json_str) = stmt.query_row([&hash_key], |row| row.get::<_, String>(0)) {
                 if !json_str.is_empty() {
@@ -1636,7 +1644,7 @@ fn get_full_metadata_for_path(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        if let Ok(conn) = db_conn.lock() {
+        if let Ok(conn) = db_conn.get() {
             let _ = conn.execute(
                 "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source",
@@ -2193,7 +2201,7 @@ async fn get_thumbnail(
         // SQLite キャッシュの確認
         let cached_b64: Option<String> = {
             let mut result = None;
-            let conn = db_conn_clone.lock().unwrap();
+            let conn = db_conn_clone.get().unwrap();
             if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ?") {
                 if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
                     if !bytes.is_empty() {
@@ -2208,7 +2216,7 @@ async fn get_thumbnail(
 
         if let Some(b64) = cached_b64 {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-            let _ = db_conn_clone.lock().unwrap().execute(
+            let _ = db_conn_clone.get().unwrap().execute(
                 "UPDATE cache SET last_accessed = ? WHERE hash_key = ?",
                 rusqlite::params![now, &hash_key]
             );
@@ -2306,7 +2314,7 @@ async fn get_thumbnail(
                 // WindowsAPIでの取得が成功した場合はそのまま返す
                 if let Some(bytes) = result {
                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                    let _ = db_conn_clone.lock().unwrap().execute(
+                    let _ = db_conn_clone.get().unwrap().execute(
                         "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
                          ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
                         rusqlite::params![&hash_key, &bytes, now],
@@ -2368,7 +2376,7 @@ async fn get_thumbnail(
         
         let bytes = buf.into_inner();
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-        let _ = db_conn_clone.lock().unwrap().execute(
+        let _ = db_conn_clone.get().unwrap().execute(
             "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
              ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
             rusqlite::params![&hash_key, &bytes, now],
@@ -2524,7 +2532,7 @@ async fn clear_metadata_cache(
     let db_conn_clone = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
         let mut messages = Vec::new();
-        let conn = db_conn_clone.lock().unwrap();
+        let conn = db_conn_clone.get().unwrap();
 
         for file_path in file_paths {
             let mtime = std::fs::metadata(&file_path)
@@ -2679,7 +2687,7 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
     .unwrap_or_else(|e| Err(e.to_string()))?;
 
     // DBとメモリのレーティングのパスを更新
-    if let Ok(conn) = state.db_conn.lock() {
+    if let Ok(conn) = state.db_conn.get() {
         let _ = conn.execute(
             "UPDATE ratings SET path = ?1 WHERE path = ?2",
             rusqlite::params![&new_path_str, &old_path_clone],
@@ -2750,13 +2758,13 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
         }
         for k in keys_to_remove {
             lock.remove(&k);
-            if let Ok(conn) = state.db_conn.lock() {
+            if let Ok(conn) = state.db_conn.get() {
                 let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&k]);
             }
         }
         for (new_p, rating) in updates {
             lock.insert(new_p.clone(), rating);
-            if let Ok(conn) = state.db_conn.lock() {
+            if let Ok(conn) = state.db_conn.get() {
                 let _ = conn.execute("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![&new_p, rating]);
             }
         }
@@ -2792,7 +2800,7 @@ async fn clear_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let db_conn_clone = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
         // SQLite のキャッシュをクリア
-        let conn = db_conn_clone.lock().unwrap();
+        let conn = db_conn_clone.get().unwrap();
         let _ = conn.execute("DELETE FROM cache", []);
         let _ = conn.execute("VACUUM", []); // ファイルサイズを切り詰める
 
@@ -2948,15 +2956,13 @@ fn main() {
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
             thumbnail_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-            db_conn: std::sync::Arc::new(Mutex::new(
-                init_db().expect("Failed to initialize SQLite database"),
-            )),
+            db_conn: init_db().expect("Failed to initialize SQLite database"),
             smart_folders: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
             // SQLite からレーティング情報をメモリにロード
             let state = app.state::<AppState>();
-            if let Ok(conn) = state.db_conn.lock() {
+            if let Ok(conn) = state.db_conn.get() {
                 if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
                     if let Ok(rows) = stmt.query_map([], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
@@ -3540,11 +3546,10 @@ mod tests {
     }
     #[test]
     fn test_smart_folder_paths() {
-        let db_conn = std::sync::Arc::new(std::sync::Mutex::new(
-            rusqlite::Connection::open_in_memory().unwrap(),
-        ));
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
         {
-            let conn = db_conn.lock().unwrap();
+            let conn = db_conn.get().unwrap();
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS cache (
                     hash_key TEXT PRIMARY KEY,
@@ -3637,8 +3642,9 @@ mod tests {
         use std::collections::HashMap;
         use std::sync::{Arc, Mutex};
         
-        let db_conn = Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
-        let conn = db_conn.lock().unwrap();
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        let conn = db_conn.get().unwrap();
         
         // テスト用テーブルの作成
         conn.execute(
@@ -3718,9 +3724,10 @@ mod tests {
         use super::*;
         use std::sync::{Arc, Mutex};
         
-        let db_conn = Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
         {
-            let conn = db_conn.lock().unwrap();
+            let conn = db_conn.get().unwrap();
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS cache (
                     hash_key TEXT PRIMARY KEY,
@@ -3760,7 +3767,7 @@ mod tests {
         let _ = get_full_metadata_for_path(&file_path_str, &db_conn);
 
         // DBにちゃんと保存されたか確認
-        let conn = db_conn.lock().unwrap();
+        let conn = db_conn.get().unwrap();
         let mut stmt = conn.prepare("SELECT size, mtime, ctime FROM cache WHERE path = ?").unwrap();
         let mut rows = stmt.query([&file_path_str]).unwrap();
         let row = rows.next().unwrap().expect("Row should exist");
@@ -3786,8 +3793,9 @@ mod tests {
         use std::collections::HashMap;
         use std::sync::{Arc, Mutex};
         
-        let db_conn = Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap()));
-        let conn = db_conn.lock().unwrap();
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        let conn = db_conn.get().unwrap();
         
         conn.execute(
             "CREATE TABLE cache (
