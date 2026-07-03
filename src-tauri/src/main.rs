@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Read; // flate2のread_to_stringやバイナリ解析用
-use std::path::Path;
+
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 use tauri::Manager;
@@ -177,7 +177,6 @@ pub struct AppState {
     ratings: Mutex<std::collections::HashMap<String, u8>>,
     rating_filter_val: Mutex<u8>,
     rating_filter_op: Mutex<String>,
-    thumbnail_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
     db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     smart_folders: Mutex<Vec<SmartFolderRule>>,
 }
@@ -2149,243 +2148,7 @@ fn show_window(window: tauri::Window) {
     let _ = window.set_focus();
 }
 
-// --- サムネイル生成コマンド ---
 
-#[tauri::command]
-async fn get_thumbnail(
-    state: tauri::State<'_, AppState>,
-    file_path: String,
-) -> Result<String, String> {
-    // フォルダ移動済みの場合は無駄な処理（画像読み込み・リサイズ）をスキップする
-    if let Ok(current_dir) = state.current_dir.lock() {
-        if !current_dir.starts_with("smart://") {
-            let parent_dir = Path::new(&file_path)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            if !current_dir.is_empty() {
-                let current_trim = current_dir
-                    .replace("\\\\?\\", "")
-                    .trim_end_matches(&['/', '\\'][..])
-                    .to_lowercase();
-                let parent_trim = parent_dir
-                    .replace("\\\\?\\", "")
-                    .trim_end_matches(&['/', '\\'][..])
-                    .to_lowercase();
-                if current_trim != parent_trim {
-                    return Err("Cancelled".to_string());
-                }
-            }
-        }
-    }
-
-    let semaphore = state.thumbnail_semaphore.clone();
-    let db_conn_clone = state.db_conn.clone();
-    let _permit = semaphore
-        .acquire_owned()
-        .await
-        .map_err(|_| "Semaphore closed".to_string())?;
-
-    tokio::task::spawn_blocking(move || {
-        let mtime = std::fs::metadata(&file_path)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::UNIX_EPOCH)
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-
-        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
-        let hash_key = format!("{:016x}", digest);
-
-        // SQLite キャッシュの確認
-        let cached_b64: Option<String> = {
-            let mut result = None;
-            let conn = db_conn_clone.get().unwrap();
-            if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ?") {
-                if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
-                    if !bytes.is_empty() {
-                        use base64::{Engine as _, engine::general_purpose};
-                        let b64 = general_purpose::STANDARD.encode(&bytes);
-                        result = Some(format!("data:image/jpeg;base64,{}", b64));
-                    }
-                }
-            }
-            result
-        };
-
-        if let Some(b64) = cached_b64 {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-            let _ = db_conn_clone.get().unwrap().execute(
-                "UPDATE cache SET last_accessed = ? WHERE hash_key = ?",
-                rusqlite::params![now, &hash_key]
-            );
-            return Ok(b64);
-        }
-
-        // Windows環境ではOS標準のAPIを使用してサムネイルを高速に取得する
-        #[cfg(windows)]
-        {
-            use windows::core::HSTRING;
-            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
-            use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT, SIIGBF_THUMBNAILONLY};
-            use windows::Win32::Graphics::Gdi::{
-                DeleteObject, GetObjectW, GetDIBits, CreateCompatibleDC, DeleteDC,
-                BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB, RGBQUAD
-            };
-            use windows::Win32::Foundation::SIZE;
-
-            unsafe {
-                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-                
-                let result: Option<Vec<u8>> = (|| -> windows::core::Result<Vec<u8>> {
-                    let path_hstring = HSTRING::from(&file_path);
-                    let item: IShellItemImageFactory = SHCreateItemFromParsingName(&path_hstring, None)?;
-                    
-                    let size = SIZE { cx: 512, cy: 512 };
-                    let hbitmap = item.GetImage(size, SIIGBF_RESIZETOFIT | SIIGBF_THUMBNAILONLY)?;
-
-                    let mut bitmap = BITMAP::default();
-                    if GetObjectW(
-                        hbitmap,
-                        std::mem::size_of::<BITMAP>() as i32,
-                        Some(&mut bitmap as *mut _ as *mut std::ffi::c_void),
-                    ) == 0 {
-                        let _ = DeleteObject(hbitmap);
-                        return Err(windows::core::Error::from_win32());
-                    }
-
-                    let width = bitmap.bmWidth;
-                    let height = bitmap.bmHeight;
-                    let mut info = BITMAPINFO {
-                        bmiHeader: BITMAPINFOHEADER {
-                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                            biWidth: width,
-                            biHeight: -height, // top-down
-                            biPlanes: 1,
-                            biBitCount: 32,
-                            biCompression: BI_RGB.0 as u32,
-                            biSizeImage: 0,
-                            biXPelsPerMeter: 0,
-                            biYPelsPerMeter: 0,
-                            biClrUsed: 0,
-                            biClrImportant: 0,
-                        },
-                        bmiColors: [RGBQUAD::default(); 1],
-                    };
-
-                    let hdc = CreateCompatibleDC(None);
-                    let mut pixels = vec![0u8; (width * height * 4) as usize];
-                    let res = GetDIBits(
-                        hdc,
-                        hbitmap,
-                        0,
-                        height as u32,
-                        Some(pixels.as_mut_ptr() as *mut _),
-                        &mut info,
-                        DIB_RGB_COLORS,
-                    );
-
-                    let _ = DeleteDC(hdc);
-                    let _ = DeleteObject(hbitmap);
-
-                    if res == 0 {
-                        return Err(windows::core::Error::from_win32());
-                    }
-
-                    // BGRA -> RGBA のバイトスワップ
-                    for chunk in pixels.chunks_exact_mut(4) {
-                        chunk.swap(0, 2);
-                    }
-
-                    if let Some(img) = image::RgbaImage::from_raw(width as u32, height as u32, pixels) {
-                        let dyn_img = image::DynamicImage::ImageRgba8(img);
-                        let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
-                        if dyn_img.write_to(&mut buf, image::ImageFormat::Jpeg).is_ok() {
-                            return Ok(buf.into_inner());
-                        }
-                    }
-
-                    Err(windows::core::Error::from_win32())
-                })().ok();
-
-                CoUninitialize();
-
-                // WindowsAPIでの取得が成功した場合はそのまま返す
-                if let Some(bytes) = result {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                    let _ = db_conn_clone.get().unwrap().execute(
-                        "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                         ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                        rusqlite::params![&hash_key, &bytes, now],
-                    );
-                    use base64::{Engine as _, engine::general_purpose};
-                    let b64 = general_purpose::STANDARD.encode(&bytes);
-                    return Ok(format!("data:image/jpeg;base64,{}", b64));
-                }
-            }
-        }
-
-        // --- フォールバック: 既存の image::open 処理 ---
-        // 以前はOOMを防ぐためにロックしていましたが、現在全体の同時実行数がsemaphore(16)とJS側(8)で制限されているため、
-        // ロックを外して並列処理させ、生成速度を向上させます。
-        
-        let img = image::open(&file_path).map_err(|e| format!("image::open failed: {}", e))?;
-        let rgba_img = img.to_rgba8();
-        let width = rgba_img.width();
-        let height = rgba_img.height();
-        
-        let mut dst_width = width;
-        let mut dst_height = height;
-        if width > 512 || height > 512 {
-            let ratio = f32::min(512.0 / width as f32, 512.0 / height as f32);
-            dst_width = (width as f32 * ratio).round() as u32;
-            dst_height = (height as f32 * ratio).round() as u32;
-        }
-
-        use std::num::NonZeroU32;
-        use fast_image_resize as fr;
-
-        let src_width = NonZeroU32::new(width).ok_or("Invalid width")?;
-        let src_height = NonZeroU32::new(height).ok_or("Invalid height")?;
-        let src_image = fr::images::Image::from_vec_u8(
-            src_width.get(),
-            src_height.get(),
-            rgba_img.into_raw(),
-            fr::PixelType::U8x4,
-        ).map_err(|e| format!("src_image creation failed: {:?}", e))?;
-
-        let dst_w_nz = NonZeroU32::new(dst_width).ok_or("Invalid dst width")?;
-        let dst_h_nz = NonZeroU32::new(dst_height).ok_or("Invalid dst height")?;
-        let mut dst_image = fr::images::Image::new(
-            dst_w_nz.get(),
-            dst_h_nz.get(),
-            fr::PixelType::U8x4,
-        );
-
-        let mut resizer = fr::Resizer::new();
-        resizer.resize(&src_image, &mut dst_image, None)
-            .map_err(|e| format!("resize failed: {:?}", e))?;
-
-        let result_img = image::RgbaImage::from_raw(dst_width, dst_height, dst_image.into_vec())
-            .ok_or("Failed to create RgbaImage from resized buffer")?;
-        let thumbnail = image::DynamicImage::ImageRgba8(result_img);
-        
-        let mut buf = std::io::Cursor::new(Vec::with_capacity(65_536));
-        thumbnail.write_to(&mut buf, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
-        
-        let bytes = buf.into_inner();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-        let _ = db_conn_clone.get().unwrap().execute(
-            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-            rusqlite::params![&hash_key, &bytes, now],
-        );
-        use base64::{Engine as _, engine::general_purpose};
-        let b64 = general_purpose::STANDARD.encode(&bytes);
-        Ok(format!("data:image/jpeg;base64,{}", b64))
-    }).await.unwrap_or_else(|e| Err(e.to_string()))
-}
 
 #[tauri::command]
 fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
@@ -2941,6 +2704,127 @@ fn main() {
     context.config_mut().tauri.windows.clear();
 
     tauri::Builder::default()
+        .register_uri_scheme_protocol("veloce", move |app_handle, request| {
+            let uri = request.uri();
+            let mut path_str = String::new();
+            if let Some(query) = uri.split('?').nth(1) {
+                for pair in query.split('&') {
+                    if pair.starts_with("path=") {
+                        path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                    }
+                }
+            }
+
+            if path_str.is_empty() {
+                return tauri::http::ResponseBuilder::new().status(400).body(Vec::new());
+            }
+
+            use tauri::Manager;
+            let state = app_handle.state::<AppState>();
+            let mtime = std::fs::metadata(&path_str)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH)
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+
+            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", path_str, mtime).as_bytes());
+            let hash_key = format!("{:016x}", digest);
+
+            let cached_bytes: Option<Vec<u8>> = {
+                let mut result = None;
+                if let Ok(conn) = state.db_conn.get() {
+                    if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ?") {
+                        if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                            if !bytes.is_empty() {
+                                result = Some(bytes);
+                            }
+                        }
+                    }
+                }
+                result
+            };
+
+            if let Some(bytes) = cached_bytes {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                if let Ok(conn) = state.db_conn.get() {
+                    let _ = conn.execute(
+                        "UPDATE cache SET last_accessed = ? WHERE hash_key = ?",
+                        rusqlite::params![now, &hash_key]
+                    );
+                }
+                return tauri::http::ResponseBuilder::new()
+                    .mimetype("image/jpeg")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .status(200)
+                    .body(bytes);
+            }
+
+            if let Ok(img) = image::open(&path_str) {
+                let rgba_img = img.to_rgba8();
+                let width = rgba_img.width();
+                let height = rgba_img.height();
+                
+                let mut dst_width = width;
+                let mut dst_height = height;
+                if width > 512 || height > 512 {
+                    let ratio = f32::min(512.0 / width as f32, 512.0 / height as f32);
+                    dst_width = (width as f32 * ratio).round() as u32;
+                    dst_height = (height as f32 * ratio).round() as u32;
+                }
+
+                use std::num::NonZeroU32;
+                use fast_image_resize as fr;
+
+                if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
+                    if let Ok(src_image) = fr::images::Image::from_vec_u8(
+                        src_width.get(),
+                        src_height.get(),
+                        rgba_img.into_raw(),
+                        fr::PixelType::U8x4,
+                    ) {
+                        if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
+                            let mut dst_image = fr::images::Image::new(
+                                dst_w_nz.get(),
+                                dst_h_nz.get(),
+                                fr::PixelType::U8x4,
+                            );
+                            let mut resizer = fr::Resizer::new();
+                            if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
+                                let mut bytes: Vec<u8> = Vec::new();
+                                let mut cursor = std::io::Cursor::new(&mut bytes);
+                                if image::write_buffer_with_format(
+                                    &mut cursor,
+                                    dst_image.buffer(),
+                                    dst_width,
+                                    dst_height,
+                                    image::ColorType::Rgba8,
+                                    image::ImageFormat::Jpeg,
+                                ).is_ok() {
+                                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                                    if let Ok(conn) = state.db_conn.get() {
+                                        let _ = conn.execute(
+                                            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                                            rusqlite::params![&hash_key, &bytes, now],
+                                        );
+                                    }
+                                    return tauri::http::ResponseBuilder::new()
+                                        .mimetype("image/jpeg")
+                                        .header("Access-Control-Allow-Origin", "*")
+                                        .status(200)
+                                        .body(bytes);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let err_msg = format!("URI: {}, path_str: {}", uri, path_str);
+            let _ = std::fs::write("veloce_debug.txt", err_msg);
+            tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
+        })
         .manage(AppState {
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
@@ -2955,7 +2839,6 @@ fn main() {
             ratings: Mutex::new(std::collections::HashMap::new()),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
-            thumbnail_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
             db_conn: init_db().expect("Failed to initialize SQLite database"),
             smart_folders: Mutex::new(Vec::new()),
         })
@@ -3299,7 +3182,6 @@ fn main() {
             get_viewer_image,
             open_viewer,
             show_window,
-            get_thumbnail,
             arrange_viewers,
             trash_file,
             trash_folder,
@@ -3640,7 +3522,7 @@ mod tests {
         // 既存の `get_smart_folder_paths` と同じように件数を返すかのロジックテスト。
         use super::*;
         use std::collections::HashMap;
-        use std::sync::{Arc, Mutex};
+
         
         let manager = r2d2_sqlite::SqliteConnectionManager::memory();
         let db_conn = r2d2::Pool::new(manager).unwrap();
@@ -3722,7 +3604,7 @@ mod tests {
     #[test]
     fn test_get_full_metadata_saves_file_stats() {
         use super::*;
-        use std::sync::{Arc, Mutex};
+
         
         let manager = r2d2_sqlite::SqliteConnectionManager::memory();
         let db_conn = r2d2::Pool::new(manager).unwrap();
@@ -3791,7 +3673,7 @@ mod tests {
         // かつキャッシュにある size, mtime 等の情報がそのまま使われることを保証する。
         use super::*;
         use std::collections::HashMap;
-        use std::sync::{Arc, Mutex};
+
         
         let manager = r2d2_sqlite::SqliteConnectionManager::memory();
         let db_conn = r2d2::Pool::new(manager).unwrap();

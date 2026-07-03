@@ -153,16 +153,7 @@ window.veloceAPI = {
    * @returns {Promise<string>} サムネイル画像（またはフォールバック画像）のローカルAsset URL。
    */
   getThumbnail: async (filePath) => {
-    try {
-      const thumbnailPath = await invoke('get_thumbnail', { filePath });
-      if (thumbnailPath && thumbnailPath.startsWith('data:')) {
-          return thumbnailPath;
-      }
-      return convertFileSrc(thumbnailPath);
-    } catch (error) {
-      console.warn("Failed to generate thumbnail:", error);
-      return convertFileSrc(filePath);
-    }
+    return `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(filePath)}`;
   },
   /**
    * 画像ファイルからプロンプトなどのメタデータを解析します。
