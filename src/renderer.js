@@ -1764,7 +1764,7 @@ async function renderMetadata(file) {
         
         headerPath.innerHTML = `<bdi dir="ltr" style="opacity: 0.9;">${escapedPath}</bdi>`;
         headerPath.setAttribute('data-path', file.path);
-        headerPath.title = dirPath;
+        headerPath.removeAttribute('title');
         headerPath.style.display = 'block';
       } else {
         headerPath.style.display = 'none';
@@ -1927,13 +1927,44 @@ async function renderMetadata(file) {
       });
       delegationRoot.addEventListener('mousemove', (e) => {
         const copyBtn = e.target.closest('.diff-copy-btn');
-        if (copyBtn) uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
-        const openBtn = e.target.closest('.open-folder-btn');
-        if (openBtn) uiManager.showCustomTooltip('エクスプローラで開く', e.clientX, e.clientY);
+        if (copyBtn) {
+          uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
+        } else {
+          uiManager.hideCustomTooltip();
+        }
       });
       delegationRoot.addEventListener('mouseleave', () => {
         uiManager.hideCustomTooltip();
       }, true);
+
+      delegationRoot.addEventListener('contextmenu', (e) => {
+        const openBtn = e.target.closest('.open-folder-btn');
+        if (openBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const filePathStr = openBtn.getAttribute('data-path');
+          if (!filePathStr) return;
+
+          const lastSlash = Math.max(filePathStr.lastIndexOf('\\'), filePathStr.lastIndexOf('/'));
+          const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
+          const folderName = dirPath.split(/[\\/]/).pop() || dirPath;
+
+          contextMenu.targetFavoriteId = null;
+          contextMenu.targetFavoritePath = null;
+          contextMenu.targetSmartFolderId = null;
+          contextMenu.targetFolderElement = null;
+          contextMenu.targetFolder = { path: dirPath, name: folderName };
+          contextMenu.isRoot = false;
+
+          Array.from(contextMenu.children).forEach(child => child.style.display = 'none');
+
+          menuOpenInNewTab.style.display = '';
+          menuOpenInExplorer.style.display = '';
+
+          showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
+        }
+      });
 
       delegationRoot.addEventListener('copy', (e) => {
         const selection = window.getSelection();
