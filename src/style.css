@@ -19,7 +19,7 @@
   --glow-gold: #e6c762;
   --radius-lg: 12px;
   --radius-md: 8px;
-  --radius-sm: 4px;
+  --radius-sm: 6px;
   --radius-xs: 4px;
 
   --modal-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
@@ -158,7 +158,7 @@ body.is-resizing .app-content {
 
 .dialog-box {
   background-color: var(--dialog-bg) !important;
-  border: 1px solid #0d1315 !important;
+  border: 1px solid var(--modal-border) !important;
   border-radius: var(--radius-lg) !important;
   padding: 24px;
   min-width: 300px;
@@ -1770,7 +1770,7 @@ img.thumbnail-item.loading {
 }
 
 .tab-list-item.active:hover {
-  background-color: rgba(var(--accent-rgb), 0.35);
+  background-color: rgba(var(--accent-rgb), 0.3);
   /* アクティブかつホバー時は少し明るく */
 }
 
@@ -1838,7 +1838,7 @@ th[data-sort] svg path {
   /* タイトルバーの背景を透過させて右上ボタンと統一 */
   padding: 8px 12px 0 12px !important;
   display: flex !important;
-  gap: 4px !important;
+  gap: 2px !important;
   border-bottom: none !important;
   /* 個別の下線を消去 */
   height: 40px;
@@ -1874,8 +1874,7 @@ th[data-sort] svg path {
   /* #2b3d41: 通常時は下側にインスペクターとの境界線を持たせる */
   border-radius: 8px 8px 0 0 !important;
   opacity: 0.8 !important;
-  margin-right: 2px !important;
-  /* タブ間の微細な隙間 */
+  /* タブ間の隙間は gap で管理 */
   margin-bottom: 0 !important;
   /* 枠外へのめり込みを無くし、下線を確実に表示させる */
   padding: 7px 25px 6px 17px !important;
@@ -2735,8 +2734,8 @@ kbd {
   left: 0;
   min-width: 100%;
   background-color: var(--modal-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-lg);
   box-shadow: var(--popup-shadow);
   z-index: 1000;
   overflow: hidden;
@@ -2756,7 +2755,7 @@ kbd {
 }
 
 .custom-select-item:hover {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(var(--accent-rgb), 0.3);
 }
 
 .custom-select-item.selected {
