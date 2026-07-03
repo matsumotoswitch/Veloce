@@ -2821,8 +2821,6 @@ fn main() {
                 }
             }
 
-            let err_msg = format!("URI: {}, path_str: {}", uri, path_str);
-            let _ = std::fs::write("veloce_debug.txt", err_msg);
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
         })
         .manage(AppState {

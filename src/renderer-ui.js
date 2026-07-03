@@ -1375,7 +1375,16 @@ class UIManager {
             } else {
                 img.classList.add('loading');
                 img.onload = function() { this.classList.remove('loading'); };
-                img.onerror = function() { this.classList.remove('loading'); };
+                img.onerror = function() {
+                  this.classList.remove('loading');
+                  const fallback = window.veloceAPI.convertFileSrc(file.path);
+                  if (this.src !== fallback && !this.src.startsWith('asset://')) {
+                    if (window.appState && window.appState.thumbnailUrls) {
+                      window.appState.thumbnailUrls.set(file.path, fallback);
+                    }
+                    this.src = fallback;
+                  }
+                };
             }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
         } else {

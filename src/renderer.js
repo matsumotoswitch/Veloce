@@ -445,7 +445,8 @@ async function rebuildSelectedCache() {
       for (const file of files) {
         pathsToRebuild.push(file.path);
         if (appState.thumbnailUrls.has(file.path)) {
-          URL.revokeObjectURL(appState.thumbnailUrls.get(file.path));
+          const oldUrl = appState.thumbnailUrls.get(file.path);
+          if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
           appState.thumbnailUrls.delete(file.path);
         }
       }
@@ -455,7 +456,8 @@ async function rebuildSelectedCache() {
         if (file) {
           pathsToRebuild.push(file.path);
           if (appState.thumbnailUrls.has(file.path)) {
-            URL.revokeObjectURL(appState.thumbnailUrls.get(file.path));
+            const oldUrl = appState.thumbnailUrls.get(file.path);
+            if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
             appState.thumbnailUrls.delete(file.path);
           }
         }
@@ -838,7 +840,10 @@ class ThumbnailQueueManager {
   async runTask(filePath) {
     try {
       const url = await fetchThumbnailWithTimeout(filePath);
-      const finalUrl = url || window.veloceAPI.convertFileSrc(filePath);
+      let finalUrl = url || window.veloceAPI.convertFileSrc(filePath);
+      if (finalUrl && finalUrl.startsWith('https://veloce.localhost/thumbnail/')) {
+        finalUrl += `&t=${Date.now()}`;
+      }
       appState.thumbnailUrls.set(filePath, finalUrl);
       this.updateDOM(filePath, finalUrl);
     } catch (err) {
@@ -864,7 +869,16 @@ class ThumbnailQueueManager {
             img.classList.remove('loading');
           } else {
             img.onload = function () { this.classList.remove('loading'); };
-            img.onerror = function () { this.classList.remove('loading'); };
+            img.onerror = function () {
+              this.classList.remove('loading');
+              const fallback = window.veloceAPI.convertFileSrc(filePath);
+              if (this.src !== fallback && !this.src.startsWith('asset://')) {
+                if (window.appState && window.appState.thumbnailUrls) {
+                  window.appState.thumbnailUrls.set(filePath, fallback);
+                }
+                this.src = fallback;
+              }
+            };
           }
         }
         break;
@@ -2086,7 +2100,9 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
 
     if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
       await window.veloceAPI.clearMetadataCache(pathsToRebuild);
-      appState.thumbnailUrls.forEach(url => URL.revokeObjectURL(url));
+      appState.thumbnailUrls.forEach(url => {
+        if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
       appState.thumbnailUrls.clear();
       appState.thumbnailTotalRequested = 0;
       appState.thumbnailCompleted = 0;
