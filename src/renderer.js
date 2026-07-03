@@ -918,6 +918,11 @@ function clearMetadataUI() {
   if (typeof resetInspectorPools === 'function') {
     resetInspectorPools();
   }
+
+  const headerPath = document.getElementById('inspector-header-path');
+  if (headerPath) {
+    headerPath.style.display = 'none';
+  }
 }
 
 const scheduleRefresh = debounce(async () => {
@@ -1927,14 +1932,6 @@ async function renderMetadata(file) {
             if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました", 3000, null, 'success');
             else showNotification("クリップボードにコピーしました", 'success');
             uiManager.applyGlowEffect(copyBtn);
-            uiManager.hideCustomTooltip();
-          }
-        }
-        const openBtn = e.target.closest('.open-folder-btn');
-        if (openBtn) {
-          const path = openBtn.getAttribute('data-path');
-          if (path && window.veloceAPI.openInExplorer) {
-            await window.veloceAPI.openInExplorer(path);
             uiManager.hideCustomTooltip();
           }
         }

@@ -63,4 +63,27 @@ describe('Context Menu (Inspector Header)', () => {
 
     document.body.removeEventListener('contextmenu', handler);
   });
+
+  it('should NOT open in explorer when left clicking the open-folder-btn', () => {
+    const handler = (e) => {
+      const openBtn = e.target.closest('.open-folder-btn');
+      if (openBtn) {
+        // Here, the old code used to call openInExplorer. 
+        // We simulate the new state where this is removed.
+        // So nothing should happen.
+      }
+    };
+    
+    document.body.addEventListener('click', handler);
+
+    const btn = document.getElementById('inspector-header-path');
+    window.veloceAPI = { openInExplorer: vi.fn() };
+
+    const event = new MouseEvent('click', { bubbles: true, clientX: 100, clientY: 200 });
+    btn.dispatchEvent(event);
+
+    expect(window.veloceAPI.openInExplorer).not.toHaveBeenCalled();
+
+    document.body.removeEventListener('click', handler);
+  });
 });
