@@ -1343,33 +1343,54 @@ class UIManager {
       wrapper.style.height = `${itemSize}px`;
       img.style.height = `${itemSize}px`;
 
-      // パスが変わった場合のみ画像ソースとイベントを更新する
-      if (file.name) {
-        label.textContent = file.name;
-        label.title = file.name;
-      } else {
-        label.textContent = '';
-        label.title = '';
-      }
-
-      const rating = appState.ratings[file.path];
-      let badge = wrapper.querySelector('.rating-badge');
-      if (badge) {
-        if (rating && rating > 0) {
-          badge.querySelector('.rating-value').textContent = rating;
-          badge.style.display = 'flex';
-        } else {
-          badge.style.display = 'none';
-        }
-      }
-
+      // パスが変わった場合のみ内容を更新する
       if (wrapper.dataset.filepath !== file.path || wrapper.dataset.index != i) {
         wrapper.dataset.filepath = file.path;
         wrapper.dataset.index = i;
         img.dataset.currentSrc = file.path;
 
+        if (file.name) {
+          label.textContent = file.name;
+          label.title = file.name;
+        } else {
+          label.textContent = '';
+          label.title = '';
+        }
+
+        const rating = appState.ratings[file.path];
+        let badge = wrapper.querySelector('.rating-badge');
+        if (badge) {
+          if (rating && rating > 0) {
+            badge.querySelector('.rating-value').textContent = rating;
+            badge.style.display = 'flex';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+
         if (appState.thumbnailUrls.has(file.path)) {
             img.src = appState.thumbnailUrls.get(file.path);
+            if (img.complete) {
+                img.classList.remove('loading');
+            } else {
+                img.classList.add('loading');
+                img.onload = function() { this.classList.remove('loading'); };
+                img.onerror = function() {
+                  this.classList.remove('loading');
+                  const fallback = window.veloceAPI.convertFileSrc(file.path);
+                  if (this.src !== fallback && !this.src.startsWith('asset://')) {
+                    if (window.appState && window.appState.thumbnailUrls) {
+                      window.appState.thumbnailUrls.set(file.path, fallback);
+                    }
+                    this.src = fallback;
+                  }
+                };
+            }
+            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+        } else if (file.hasThumbnailCache && file.hashKey) {
+            const url = `https://veloce.localhost/thumbnail/?hash=${file.hashKey}&path=${encodeURIComponent(file.path)}`;
+            appState.thumbnailUrls.set(file.path, url);
+            img.src = url;
             if (img.complete) {
                 img.classList.remove('loading');
             } else {
@@ -1405,7 +1426,7 @@ class UIManager {
         this._gridUpdating = false;
         if (this._gridUpdatePending) {
             this._gridUpdatePending = false;
-            this.updateVirtualGrid(true);
+            this.updateVirtualGrid();
         }
     }
   }

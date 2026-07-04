@@ -374,6 +374,7 @@ pub struct SmartFolderItem {
     pub ctime: u64,
     pub hash_key: String,
     pub search_text: String,
+    pub has_thumbnail: bool,
 }
 
 fn create_image_file_from_smart_item(
@@ -539,6 +540,7 @@ fn get_smart_folder_paths(
                         ctime: row.get(5)?,
                         hash_key: row.get(6)?,
                         search_text,
+                        has_thumbnail: row.get(10).unwrap_or(false),
                     })
                 }) {
                     target_paths = rows.flatten().collect();
@@ -558,7 +560,7 @@ fn get_smart_folder_paths(
             if !paths.is_empty() {
                 if let Ok(conn) = db_conn.get() {
                     let placeholders = vec!["?"; paths.len()].join(",");
-                    let query = format!("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache WHERE path IN ({})", placeholders);
+                    let query = format!("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source, (thumbnail IS NOT NULL) FROM cache WHERE path IN ({})", placeholders);
                     if let Ok(mut stmt) = conn.prepare(&query) {
                         let params: Vec<&dyn rusqlite::ToSql> = paths.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
                         if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
@@ -575,6 +577,7 @@ fn get_smart_folder_paths(
                                 ctime: row.get(5)?,
                                 hash_key: row.get(6)?,
                                 search_text,
+                                has_thumbnail: row.get(10).unwrap_or(false),
                             })
                         }) {
                             target_paths = rows.flatten().collect();
@@ -585,7 +588,7 @@ fn get_smart_folder_paths(
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
                 if let Ok(mut stmt) =
-                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100")
+                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source, (thumbnail IS NOT NULL) FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100")
                 {
                     if let Ok(rows) = stmt.query_map([], |row| {
                         let prompt: String = row.get(7).unwrap_or_default();
@@ -601,6 +604,7 @@ fn get_smart_folder_paths(
                             ctime: row.get(5)?,
                             hash_key: row.get(6)?,
                             search_text,
+                            has_thumbnail: row.get(10).unwrap_or(false),
                         })
                     }) {
                         target_paths = rows.flatten().collect();
@@ -2048,14 +2052,29 @@ async fn generate_thumbnail(
     file_path: String,
 ) -> Result<String, String> {
     let db_conn = state.db_conn.clone();
+    
+    // Fast path: get mtime from memory to avoid disk I/O
+    let (mem_mtime, is_valid) = if let Ok(lock) = state.filtered_files.lock() {
+        let found = lock.iter().find(|f| f.path == file_path);
+        (found.map(|f| f.mtime), found.is_some())
+    } else {
+        (None, false)
+    };
+
+    if !is_valid {
+        return Ok(String::new());
+    }
+
     let url = tokio::task::spawn_blocking(move || {
-        let start_time = std::time::Instant::now();
-        let mtime = std::fs::metadata(&file_path)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::UNIX_EPOCH)
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
+
+        let mtime = mem_mtime.unwrap_or_else(|| {
+            std::fs::metadata(&file_path)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH)
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+        });
 
         let clean_path = file_path.replace("\\\\?\\", "");
         let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
@@ -2070,13 +2089,13 @@ async fn generate_thumbnail(
                 }
             }
         }
-        let cache_check_time = start_time.elapsed();
+
 
         if !has_cache {
             if let Ok(img) = image::open(&file_path) {
-                let rgba_img = img.to_rgba8();
-                let width = rgba_img.width();
-                let height = rgba_img.height();
+                let rgb_img = img.to_rgb8();
+                let width = rgb_img.width();
+                let height = rgb_img.height();
                 
                 let mut dst_width = width;
                 let mut dst_height = height;
@@ -2093,14 +2112,14 @@ async fn generate_thumbnail(
                     if let Ok(src_image) = fr::images::Image::from_vec_u8(
                         src_width.get(),
                         src_height.get(),
-                        rgba_img.into_raw(),
-                        fr::PixelType::U8x4,
+                        rgb_img.into_raw(),
+                        fr::PixelType::U8x3,
                     ) {
                         if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
                             let mut dst_image = fr::images::Image::new(
                                 dst_w_nz.get(),
                                 dst_h_nz.get(),
-                                fr::PixelType::U8x4,
+                                fr::PixelType::U8x3,
                             );
                             let mut resizer = fr::Resizer::new();
                             if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
@@ -2111,7 +2130,7 @@ async fn generate_thumbnail(
                                     dst_image.buffer(),
                                     dst_width,
                                     dst_height,
-                                    image::ColorType::Rgba8,
+                                    image::ColorType::Rgb8,
                                     image::ImageFormat::Jpeg,
                                 ).is_ok() {
                                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
@@ -2129,8 +2148,7 @@ async fn generate_thumbnail(
                 }
             }
         }
-        let end_time = start_time.elapsed();
-        println!("generate_thumbnail for {} took {:?}, cache_check: {:?}", file_path, end_time, cache_check_time);
+
         
         let encoded_path = urlencoding::encode(&file_path);
         format!("https://veloce.localhost/thumbnail/?path={}", encoded_path)
@@ -2885,9 +2903,9 @@ fn main() {
             }
 
             if let Ok(img) = image::open(&path_str) {
-                let rgba_img = img.to_rgba8();
-                let width = rgba_img.width();
-                let height = rgba_img.height();
+                let rgb_img = img.to_rgb8();
+                let width = rgb_img.width();
+                let height = rgb_img.height();
                 
                 let mut dst_width = width;
                 let mut dst_height = height;
@@ -2904,14 +2922,14 @@ fn main() {
                     if let Ok(src_image) = fr::images::Image::from_vec_u8(
                         src_width.get(),
                         src_height.get(),
-                        rgba_img.into_raw(),
-                        fr::PixelType::U8x4,
+                        rgb_img.into_raw(),
+                        fr::PixelType::U8x3,
                     ) {
                         if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
                             let mut dst_image = fr::images::Image::new(
                                 dst_w_nz.get(),
                                 dst_h_nz.get(),
-                                fr::PixelType::U8x4,
+                                fr::PixelType::U8x3,
                             );
                             let mut resizer = fr::Resizer::new();
                             if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
@@ -2922,7 +2940,7 @@ fn main() {
                                     dst_image.buffer(),
                                     dst_width,
                                     dst_height,
-                                    image::ColorType::Rgba8,
+                                    image::ColorType::Rgb8,
                                     image::ImageFormat::Jpeg,
                                 ).is_ok() {
                                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
@@ -3862,6 +3880,8 @@ mod tests {
             mtime: 0,
             ctime: 0,
             hash_key: "dummy_hash".to_string(),
+            search_text: String::new(),
+            has_thumbnail: false,
         };
 
         let img = super::create_image_file_from_smart_item(item, false, false);
