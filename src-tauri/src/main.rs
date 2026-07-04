@@ -644,45 +644,27 @@ fn load_directory(
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
 
-            let mut cache_map = std::collections::HashMap::new();
-            if let Ok(conn) = db_conn_clone.get() {
-                if let Ok(mut stmt) = conn.prepare("SELECT hash_key, thumbnail IS NOT NULL, metadata IS NOT NULL AND metadata != '' FROM cache") {
-                    if let Ok(rows) = stmt.query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, bool>(1)?,
-                            row.get::<_, bool>(2)?
-                        ))
-                    }) {
-                        for row in rows.flatten() {
-                            cache_map.insert(row.0, (row.1, row.2));
-                        }
-                    }
-                }
-            }
-
             let mut files: Vec<ImageFile> = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
                 smart_items.into_par_iter().map(|item| {
-                    let (has_thumbnail_cache, has_metadata_cache) = cache_map.get(&item.hash_key).copied().unwrap_or((false, false));
-                    create_image_file_from_smart_item(item, has_thumbnail_cache, has_metadata_cache)
+                    create_image_file_from_smart_item(item, false, false)
                 }).collect()
             } else {
-                let target_paths: Vec<std::path::PathBuf> = std::fs::read_dir(&path_for_spawn)
+                let target_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&path_for_spawn)
                     .into_iter()
                     .flat_map(|d| d)
                     .filter_map(|e| e.ok())
-                    .map(|e| e.path())
                     .collect();
 
-                target_paths
+                target_entries
                     .into_par_iter()
-                    .filter_map(|p| {
+                    .filter_map(|entry| {
+                        let p = entry.path();
                         if p.is_file() {
                             if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                                 let ext_lower = ext.to_lowercase();
                                 if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
-                                    if let Ok(metadata) = std::fs::metadata(&p) {
+                                    if let Ok(metadata) = entry.metadata() {
                                         let size = metadata.len();
                                         let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                                         let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
@@ -691,12 +673,6 @@ fn load_directory(
                                         let full_path = p.to_string_lossy().into_owned();
                                         let clean_path = full_path.replace("\\\\?\\", "");
 
-                                        let cache_file_name = format!("{}_{}", clean_path, mtime);
-                                        let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
-                                        let digest_hex = format!("{:016x}", digest);
-                                        
-                                        let (has_thumbnail_cache, has_metadata_cache) = cache_map.get(&digest_hex).copied().unwrap_or((false, false));
-
                                         return Some(ImageFile {
                                             name: file_name,
                                             ext: format!(".{}", ext_lower),
@@ -704,8 +680,8 @@ fn load_directory(
                                             size,
                                             mtime,
                                             ctime,
-                                            has_thumbnail_cache,
-                                            has_metadata_cache,
+                                            has_thumbnail_cache: false,
+                                            has_metadata_cache: false,
                                             width: 0,
                                             height: 0,
                                             prompt: String::new(),
