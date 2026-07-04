@@ -261,6 +261,9 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
         [],
     ).map_err(|e| e.to_string())?;
 
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path ON cache (path)", []).map_err(|e| e.to_string())?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_mtime ON cache (mtime)", []).map_err(|e| e.to_string())?;
+
     // マイグレーション（カラムが存在しない場合は無視される）
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN height INTEGER DEFAULT 0", []);
@@ -370,6 +373,7 @@ pub struct SmartFolderItem {
     pub mtime: u64,
     pub ctime: u64,
     pub hash_key: String,
+    pub search_text: String,
 }
 
 fn create_image_file_from_smart_item(
@@ -382,18 +386,9 @@ fn create_image_file_from_smart_item(
     let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let clean_path = item.path.replace("\\\\?\\", "");
 
-    let mut size = item.size;
-    let mut mtime = item.mtime;
-    let mut ctime = item.ctime;
-
-    // キャッシュ上のサイズ等が0（未取得）の場合はファイルシステムから取得する
-    if size == 0 || mtime == 0 {
-        if let Ok(meta) = std::fs::metadata(&p) {
-            size = meta.len();
-            mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-            ctime = meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-        }
-    }
+    let size = item.size;
+    let mtime = item.mtime;
+    let ctime = item.ctime;
 
     ImageFile {
         name: file_name,
@@ -409,8 +404,8 @@ fn create_image_file_from_smart_item(
         prompt: String::new(),
         negative_prompt: String::new(),
         source: String::new(),
-        meta_loaded: false,
-        search_text: String::new(),
+        meta_loaded: true,
+        search_text: item.search_text.clone(),
     }
 }
 
@@ -421,7 +416,7 @@ fn build_smart_folder_query(
     let select_clause = if is_count {
         "SELECT COUNT(*)"
     } else {
-        "SELECT c.path, c.width, c.height, c.size, c.mtime, c.ctime, c.hash_key, c.thumbnail IS NOT NULL as has_thumbnail, c.metadata IS NOT NULL as has_metadata"
+        "SELECT c.path, c.width, c.height, c.size, c.mtime, c.ctime, c.hash_key, c.searchable_prompt, c.searchable_negative_prompt, c.searchable_source"
     };
 
     let mut query = format!("{} FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause);
@@ -531,6 +526,10 @@ fn get_smart_folder_paths(
             let (query_str, params) = build_smart_folder_query(rule, false);
             if let Ok(mut stmt) = conn.prepare(&query_str) {
                 if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                    let prompt: String = row.get(7).unwrap_or_default();
+                    let n_prompt: String = row.get(8).unwrap_or_default();
+                    let source: String = row.get(9).unwrap_or_default();
+                    let search_text = format!("{}\n{}\n{}", prompt, n_prompt, source).to_lowercase();
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
                         width: row.get(1)?,
@@ -539,6 +538,7 @@ fn get_smart_folder_paths(
                         mtime: row.get(4)?,
                         ctime: row.get(5)?,
                         hash_key: row.get(6)?,
+                        search_text,
                     })
                 }) {
                     target_paths = rows.flatten().collect();
@@ -558,10 +558,14 @@ fn get_smart_folder_paths(
             if !paths.is_empty() {
                 if let Ok(conn) = db_conn.get() {
                     let placeholders = vec!["?"; paths.len()].join(",");
-                    let query = format!("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path IN ({})", placeholders);
+                    let query = format!("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache WHERE path IN ({})", placeholders);
                     if let Ok(mut stmt) = conn.prepare(&query) {
                         let params: Vec<&dyn rusqlite::ToSql> = paths.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
                         if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                            let prompt: String = row.get(7).unwrap_or_default();
+                            let n_prompt: String = row.get(8).unwrap_or_default();
+                            let source: String = row.get(9).unwrap_or_default();
+                            let search_text = format!("{}\n{}\n{}", prompt, n_prompt, source).to_lowercase();
                             Ok(SmartFolderItem {
                                 width: row.get(0)?,
                                 height: row.get(1)?,
@@ -570,6 +574,7 @@ fn get_smart_folder_paths(
                                 mtime: row.get(4)?,
                                 ctime: row.get(5)?,
                                 hash_key: row.get(6)?,
+                                search_text,
                             })
                         }) {
                             target_paths = rows.flatten().collect();
@@ -580,9 +585,13 @@ fn get_smart_folder_paths(
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
                 if let Ok(mut stmt) =
-                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100")
+                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100")
                 {
                     if let Ok(rows) = stmt.query_map([], |row| {
+                        let prompt: String = row.get(7).unwrap_or_default();
+                        let n_prompt: String = row.get(8).unwrap_or_default();
+                        let source: String = row.get(9).unwrap_or_default();
+                        let search_text = format!("{}\n{}\n{}", prompt, n_prompt, source).to_lowercase();
                         Ok(SmartFolderItem {
                             width: row.get(0)?,
                             height: row.get(1)?,
@@ -591,6 +600,7 @@ fn get_smart_folder_paths(
                             mtime: row.get(4)?,
                             ctime: row.get(5)?,
                             hash_key: row.get(6)?,
+                            search_text,
                         })
                     }) {
                         target_paths = rows.flatten().collect();
@@ -772,7 +782,7 @@ fn load_directory(
                     if needs_parsing {
                         let path_clone_for_blocking = path.clone();
                         let db_conn_clone = state.db_conn.clone();
-                        let full_meta = match tokio::task::spawn_blocking(move || {
+                        let (full_meta, meta_mtime, meta_size) = match tokio::task::spawn_blocking(move || {
                             get_full_metadata_for_path(&path_clone_for_blocking, &db_conn_clone)
                         })
                         .await
@@ -789,6 +799,8 @@ fn load_directory(
                                 f.negative_prompt = full_meta.negative_prompt.clone();
                                 f.source = full_meta.source.clone();
                                 f.search_text = extract_searchable_text(&full_meta.params);
+                                if f.size == 0 { f.size = meta_size; }
+                                if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
                                 f.meta_loaded = true;
                             }
                         }
@@ -800,6 +812,8 @@ fn load_directory(
                                 f.negative_prompt = full_meta.negative_prompt.clone();
                                 f.source = full_meta.source.clone();
                                 f.search_text = extract_searchable_text(&full_meta.params);
+                                if f.size == 0 { f.size = meta_size; }
+                                if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
                                 f.meta_loaded = true;
                             }
                         }
@@ -1262,7 +1276,7 @@ async fn get_full_metadata_batch(
     Ok(tokio::task::spawn_blocking(move || {
         file_paths
             .into_iter()
-            .map(|path| get_full_metadata_for_path(&path, &db_conn_clone))
+            .map(|path| get_full_metadata_for_path(&path, &db_conn_clone).0)
             .collect()
     })
     .await
@@ -1311,7 +1325,7 @@ fn decode_metadata_string(bytes: &[u8]) -> String {
 fn get_full_metadata_for_path(
     file_path: &str,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-) -> FullMetadata {
+) -> (FullMetadata, u64, u64) {
     let (mtime_millis, ctime_millis, file_size) = std::fs::metadata(file_path)
         .map(|m| {
             let mt = m.modified().unwrap_or(std::time::UNIX_EPOCH).duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
@@ -1339,7 +1353,7 @@ fn get_full_metadata_for_path(
                                 cached_meta.prompt = raw.to_string();
                             }
                         }
-                        return cached_meta;
+                        return (cached_meta, mtime_millis, file_size);
                     }
                 }
             }
@@ -1584,7 +1598,7 @@ fn get_full_metadata_for_path(
             );
             params = serde_json::Value::Object(map);
             if prompt.is_empty() {
-                prompt = raw_parameters; // 検索用プロンプトとして代入
+                prompt = raw_parameters.clone(); // 検索用プロンプトとして代入
             }
         } else if comment_string.contains("Steps: ") {
             let mut map = serde_json::Map::new();
@@ -1603,32 +1617,61 @@ fn get_full_metadata_for_path(
         }
     }
 
-    let meta = FullMetadata {
+    let mut meta = FullMetadata {
         path: file_path.to_string(),
         prompt,
         negative_prompt,
         width,
         height,
         params,
-        source,
+        source: source.clone(),
     };
 
+    update_metadata_cache(
+        file_path,
+        file_size,
+        mtime_millis,
+        ctime_millis,
+        db_conn,
+        &raw_description,
+        &raw_comment,
+        &raw_parameters,
+        &source,
+        &mut meta,
+    );
+
+    (meta, mtime_millis, file_size)
+}
+
+fn update_metadata_cache(
+    file_path: &str,
+    file_size: u64,
+    mtime: u64,
+    ctime: u64,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    _raw_desc: &str,
+    _raw_comment: &str,
+    _raw_params: &str,
+    _source: &str,
+    meta: &mut FullMetadata,
+) {
     if let Ok(json_str) = serde_json::to_string(&meta) {
         let (sp, snp, ss) = extract_searchable_strings(&meta);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
+        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+        let hash_key = format!("{:016x}", digest);
+
         if let Ok(conn) = db_conn.get() {
             let _ = conn.execute(
                 "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source",
-                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, file_size, mtime_millis, ctime_millis, now, sp, snp, ss]
+                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, file_size, mtime, ctime, now, sp, snp, ss]
             );
         }
     }
-
-    meta
 }
 
 fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
@@ -1820,18 +1863,26 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
 }
 
 fn extract_stealth_pnginfo(path: &str) -> Option<String> {
+    if !path.to_lowercase().ends_with(".png") {
+        return None;
+    }
+
     use flate2::read::GzDecoder;
-    use image::GenericImageView;
     use std::io::Read;
 
-    let img = image::open(path).ok()?;
+    let img = image::open(path).ok()?.into_rgba8();
+    let width = img.width() as usize;
+    let height = img.height() as usize;
+    let raw = img.into_raw();
 
     // アルファチャンネルの最下位ビットを抽出（Column-Major Order: x -> y）
-    let mut bits = Vec::new();
-    for x in 0..img.width() {
-        for y in 0..img.height() {
-            let pixel = img.get_pixel(x, y);
-            bits.push(pixel.0[3] & 1);
+    let mut bits = Vec::with_capacity(width * height);
+    for x in 0..width {
+        for y in 0..height {
+            let idx = (y * width + x) * 4 + 3;
+            if idx < raw.len() {
+                bits.push(raw[idx] & 1);
+            }
         }
     }
 
@@ -1970,7 +2021,7 @@ async fn parse_metadata(
 ) -> Result<ParseMetadataResult, String> {
     let db_conn_clone = state.db_conn.clone();
     Ok(tokio::task::spawn_blocking(move || {
-        let full_meta = get_full_metadata_for_path(&file_path, &db_conn_clone);
+        let full_meta = get_full_metadata_for_path(&file_path, &db_conn_clone).0;
         ParseMetadataResult {
             prompt: full_meta.prompt,
             negative_prompt: full_meta.negative_prompt,
@@ -1989,6 +2040,103 @@ async fn parse_metadata(
         params: serde_json::Value::Object(serde_json::Map::new()),
         source: String::new(),
     }))
+}
+
+#[tauri::command]
+async fn generate_thumbnail(
+    state: tauri::State<'_, AppState>,
+    file_path: String,
+) -> Result<String, String> {
+    let db_conn = state.db_conn.clone();
+    let url = tokio::task::spawn_blocking(move || {
+        let start_time = std::time::Instant::now();
+        let mtime = std::fs::metadata(&file_path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH)
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let clean_path = file_path.replace("\\\\?\\", "");
+        let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+        let hash_key = format!("{:016x}", digest_clean);
+
+        // Check cache first
+        let mut has_cache = false;
+        if let Ok(conn) = db_conn.get() {
+            if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+                if stmt.exists([&hash_key]).unwrap_or(false) {
+                    has_cache = true;
+                }
+            }
+        }
+        let cache_check_time = start_time.elapsed();
+
+        if !has_cache {
+            if let Ok(img) = image::open(&file_path) {
+                let rgba_img = img.to_rgba8();
+                let width = rgba_img.width();
+                let height = rgba_img.height();
+                
+                let mut dst_width = width;
+                let mut dst_height = height;
+                if width > 512 || height > 512 {
+                    let ratio = f32::min(512.0 / width as f32, 512.0 / height as f32);
+                    dst_width = (width as f32 * ratio).round() as u32;
+                    dst_height = (height as f32 * ratio).round() as u32;
+                }
+
+                use std::num::NonZeroU32;
+                use fast_image_resize as fr;
+
+                if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
+                    if let Ok(src_image) = fr::images::Image::from_vec_u8(
+                        src_width.get(),
+                        src_height.get(),
+                        rgba_img.into_raw(),
+                        fr::PixelType::U8x4,
+                    ) {
+                        if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
+                            let mut dst_image = fr::images::Image::new(
+                                dst_w_nz.get(),
+                                dst_h_nz.get(),
+                                fr::PixelType::U8x4,
+                            );
+                            let mut resizer = fr::Resizer::new();
+                            if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
+                                let mut bytes: Vec<u8> = Vec::new();
+                                let mut cursor = std::io::Cursor::new(&mut bytes);
+                                if image::write_buffer_with_format(
+                                    &mut cursor,
+                                    dst_image.buffer(),
+                                    dst_width,
+                                    dst_height,
+                                    image::ColorType::Rgba8,
+                                    image::ImageFormat::Jpeg,
+                                ).is_ok() {
+                                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                                    if let Ok(conn) = db_conn.get() {
+                                        let _ = conn.execute(
+                                            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                                            rusqlite::params![&hash_key, &bytes, now],
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let end_time = start_time.elapsed();
+        println!("generate_thumbnail for {} took {:?}, cache_check: {:?}", file_path, end_time, cache_check_time);
+        
+        let encoded_path = urlencoding::encode(&file_path);
+        format!("https://veloce.localhost/thumbnail/?path={}", encoded_path)
+    }).await.map_err(|e| e.to_string())?;
+
+    Ok(url)
 }
 
 // --- ウィンドウ管理コマンド (ビューア用) ---
@@ -3153,6 +3301,7 @@ fn main() {
             notify_file_removed,
             get_full_metadata_batch,
             parse_metadata,
+            generate_thumbnail,
             get_viewer_image,
             open_viewer,
             show_window,
@@ -3694,13 +3843,13 @@ mod tests {
     }
 
     #[test]
-    fn test_create_image_file_from_smart_item_fallback() {
+    fn test_create_image_file_from_smart_item_no_fallback() {
         use std::fs::File;
         use std::io::Write;
 
         // 一時ファイルを作成
         let mut file_path = std::env::temp_dir();
-        file_path.push("test_image_smart_fallback.png");
+        file_path.push("test_image_smart_no_fallback.png");
         let mut file = File::create(&file_path).unwrap();
         file.write_all(b"test data").unwrap(); // 9 bytes
 
@@ -3717,9 +3866,9 @@ mod tests {
 
         let img = super::create_image_file_from_smart_item(item, false, false);
 
-        // size や mtime が 0 でなく、ファイルシステムから取得された値に補完されていること
-        assert_eq!(img.size, 9);
-        assert!(img.mtime > 0);
+        // パフォーマンス上の理由から、size や mtime が 0 の場合でも同期的にはファイルシステムから補完されないこと（遅延読み込みで対応）
+        assert_eq!(img.size, 0);
+        assert_eq!(img.mtime, 0);
         assert_eq!(img.width, 100);
 
         let _ = std::fs::remove_file(file_path);

@@ -844,13 +844,45 @@ class ThumbnailQueueManager {
       if (finalUrl && finalUrl.startsWith('https://veloce.localhost/thumbnail/')) {
         finalUrl += `&t=${Date.now()}`;
       }
-      appState.thumbnailUrls.set(filePath, finalUrl);
-      this.updateDOM(filePath, finalUrl);
+      
+      const img = new Image();
+      let isSettled = false;
+      let fallbackTimer = null;
+
+      const settle = (isError) => {
+        if (isSettled) return;
+        isSettled = true;
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        
+        if (isError) {
+          const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
+          appState.thumbnailUrls.set(filePath, fallbackUrl);
+          this.updateDOM(filePath, fallbackUrl);
+        } else {
+          appState.thumbnailUrls.set(filePath, finalUrl);
+          this.updateDOM(filePath, finalUrl);
+        }
+        
+        this.activeTasks.delete(filePath);
+        if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(filePath);
+        this.processNext();
+      };
+
+      img.onload = () => settle(false);
+      img.onerror = () => {
+        console.warn('Failed to load thumbnail for:', filePath);
+        settle(true);
+      };
+      fallbackTimer = setTimeout(() => {
+        console.warn('Image load timed out for:', filePath);
+        settle(true);
+      }, 15000); // 15s absolute timeout for Image loading
+
+      img.src = finalUrl;
     } catch (err) {
       const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
       appState.thumbnailUrls.set(filePath, fallbackUrl);
       this.updateDOM(filePath, fallbackUrl);
-    } finally {
       this.activeTasks.delete(filePath);
       if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(filePath);
       this.processNext();
