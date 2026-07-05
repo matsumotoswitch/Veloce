@@ -2491,6 +2491,22 @@ const menuEditSmartFolder = createMenuItem('スマートフォルダを編集...
   }
 });
 
+const menuDuplicateSmartFolder = createMenuItem('スマートフォルダを複製...', UIManager.ICONS.COPY || '📋', () => {
+  if (!contextMenu.targetSmartFolderId) return;
+  const sf = appState.smartFolders.find(f => f.id === contextMenu.targetSmartFolderId);
+  if (sf) {
+    const newName = `${sf.name} (1)`;
+    const newSf = {
+      name: newName,
+      icon: sf.icon,
+      color: sf.color,
+      conditions: JSON.parse(JSON.stringify(sf.conditions))
+    };
+    showEditSmartFolderModal(newSf, true);
+  }
+});
+
+
 const menuDeleteSmartFolder = createMenuItem('スマートフォルダを削除', UIManager.ICONS.TRASH, async () => {
   if (!contextMenu.targetSmartFolderId) return;
   const id = contextMenu.targetSmartFolderId;
@@ -2805,6 +2821,7 @@ contextMenu.appendChild(menuDiffFiles);
 contextMenu.appendChild(menuEditFavorite);
 contextMenu.appendChild(menuAddSmartFolder);
 contextMenu.appendChild(menuEditSmartFolder);
+contextMenu.appendChild(menuDuplicateSmartFolder);
 
 // 5. 削除系
 contextMenu.appendChild(menuDeleteFolder);
@@ -5380,6 +5397,7 @@ function initSmartFolders() {
           menuOpenInNewTab.style.display = '';
           menuSeparator1.style.display = '';
           menuEditSmartFolder.style.display = '';
+            menuDuplicateSmartFolder.style.display = '';
           menuDeleteSmartFolder.style.display = '';
 
           showMenuWithAnimation(contextMenu, e.clientX, e.clientY);

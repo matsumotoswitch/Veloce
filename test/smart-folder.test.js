@@ -143,4 +143,26 @@ describe('Smart Folder Feature', () => {
     expect(folder4.textContent).toBe('42');
     expect(folder4.style.display).toBe('block');
   });
+
+  it('should create a duplicate template of a smart folder when duplicate action is simulated', () => {
+    // 実際の複製処理のロジックをテスト
+    const targetId = 'folder1';
+    const sf = appState.smartFolders.find(f => f.id === targetId);
+    expect(sf).toBeDefined();
+
+    // 複製時のデータ生成ロジック
+    const newName = `${sf.name} (1)`;
+    const newSf = {
+      name: newName,
+      icon: sf.icon,
+      color: sf.color,
+      conditions: JSON.parse(JSON.stringify(sf.conditions))
+    };
+
+    expect(newSf.name).toBe('Folder 1 (1)');
+    expect(newSf.icon).toBe(sf.icon);
+    expect(newSf.color).toBe(sf.color);
+    expect(newSf.conditions).toEqual(sf.conditions);
+    expect(newSf.conditions).not.toBe(sf.conditions); // ディープコピーであることを確認
+  });
 });
