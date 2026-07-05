@@ -263,6 +263,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path ON cache (path)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_mtime ON cache (mtime)", []).map_err(|e| e.to_string())?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings (rating)", []).map_err(|e| e.to_string())?;
 
     // マイグレーション（カラムが存在しない場合は無視される）
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
@@ -420,11 +421,27 @@ fn build_smart_folder_query(
         "SELECT c.path, c.width, c.height, c.size, c.mtime, c.ctime, c.hash_key, c.searchable_prompt, c.searchable_negative_prompt, c.searchable_source"
     };
 
-    let mut query = format!("{} FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause);
+    let mut is_inner_join = false;
+    if rule.match_type == "all" {
+        is_inner_join = rule.conditions.iter().any(|c| {
+            if c.r#type == "rating" {
+                let rating_val: i64 = c.value.parse().unwrap_or(0);
+                match c.operator.as_str() {
+                    ">=" | ">" | "==" => rating_val > 0,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        });
+    }
+
+    let join_type = if is_inner_join { "INNER JOIN" } else { "LEFT JOIN" };
+    let mut query = format!("{} FROM cache c {} ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause, join_type);
     let mut params = Vec::new();
 
     if rule.conditions.is_empty() {
-        if !is_count { query.push_str(" ORDER BY c.mtime DESC"); }
+        if !is_count { query.push_str(" ORDER BY +c.mtime DESC"); }
         return (query, params);
     }
 
@@ -471,7 +488,11 @@ fn build_smart_folder_query(
                 let op = match cond.operator.as_str() {
                     ">=" => ">=", "<=" => "<=", "==" => "=", "!=" => "!=", _ => "=",
                 };
-                clause = format!("coalesce(r.rating, 0) {} ?", op);
+                if is_inner_join && rating_val > 0 && (op == ">=" || op == ">" || op == "=") {
+                    clause = format!("r.rating {} ?", op);
+                } else {
+                    clause = format!("coalesce(r.rating, 0) {} ?", op);
+                }
                 params.push(rusqlite::types::Value::Integer(rating_val));
             }
             "aspect_ratio" => {
@@ -507,8 +528,11 @@ fn build_smart_folder_query(
         query.push_str(&clause);
     }
 
-    query.push(')');
-    if !is_count { query.push_str(" ORDER BY c.mtime DESC"); }
+    query.push_str(")");
+
+    if !is_count {
+        query.push_str(" ORDER BY +c.mtime DESC");
+    }
 
     (query, params)
 }
