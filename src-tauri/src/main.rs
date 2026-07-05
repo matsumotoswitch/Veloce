@@ -2117,7 +2117,8 @@ async fn generate_thumbnail(
 
         generate_thumbnail_inner(&file_path, mtime, &db_conn);
 
-        format!("veloce://thumbnail/?path={}", urlencoding::encode(&file_path))
+        let encoded_path = urlencoding::encode(&file_path);
+        format!("https://veloce.localhost/thumbnail/?path={}", encoded_path)
     }).await.map_err(|e| e.to_string())?;
 
     Ok(url)

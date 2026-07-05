@@ -631,8 +631,12 @@ function renderFavorites() {
 // 3. Core Business Logic & Helpers
 // ============================================================================
 
-function showNotification(message, type = 'info') {
-  uiManager.showToast(message, 3000, null, type);
+function showNotification(message, type = 'info', duration = null) {
+  let finalDuration = duration;
+  if (finalDuration === null) {
+    finalDuration = (type === 'info') ? 1500 : 3000;
+  }
+  uiManager.showToast(message, finalDuration, null, type);
 }
 
 // アイコン付きメニュー項目の生成ヘルパー
