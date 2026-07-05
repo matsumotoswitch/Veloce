@@ -969,6 +969,7 @@ table#file-table {
 
 /* --- Slider (Range Input) --- */
 input[type="range"] {
+  appearance: none;
   -webkit-appearance: none;
   background: transparent;
 }
