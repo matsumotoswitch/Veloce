@@ -2520,6 +2520,19 @@ const menuDeleteSmartFolder = createMenuItem('スマートフォルダを削除'
   }
 }, true);
 
+const menuPrecacheFolder = createMenuItem('これ以下のファイル情報をすべて取得', UIManager.ICONS.REFRESH, async () => {
+  if (contextMenu.targetFolder && contextMenu.targetFolder.path) {
+    const path = contextMenu.targetFolder.path;
+    showNotification('キャッシュの作成を開始しました。処理中はアプリを閉じないでください。', 'info');
+    try {
+      await window.__TAURI__.invoke('precache_directory_recursively', { targetPath: path });
+      showNotification('キャッシュの作成が完了しました', 'success');
+    } catch (e) {
+      showNotification(`エラーが発生しました: ${e}`, 'error');
+    }
+  }
+});
+
 const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager.ICONS.EDIT, () => {
   if (!contextMenu.targetFavoriteId) return;
   const fav = appState.favorites.find(f => f.id === contextMenu.targetFavoriteId);
@@ -2819,6 +2832,7 @@ contextMenu.appendChild(menuTabOpenExplorer);
 contextMenu.appendChild(menuTabCopyPath);
 contextMenu.appendChild(menuCopyPath);
 contextMenu.appendChild(menuReloadFolder);
+contextMenu.appendChild(menuPrecacheFolder);
 contextMenu.appendChild(menuSeparator1);
 
 // 2. タブ操作 (タブ管理)
@@ -3198,8 +3212,9 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
 
   menuOpenInNewTab.style.display = '';
   menuOpenInExplorer.style.display = '';
-          menuCopyPath.style.display = '';
+  menuCopyPath.style.display = '';
   menuReloadFolder.style.display = '';
+  menuPrecacheFolder.style.display = '';
   menuSeparator1.style.display = '';
   menuNewFolder.style.display = '';
 
@@ -4120,6 +4135,11 @@ async function handleTreeNavigation(key) {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+  window.__TAURI__.event.listen('precache-progress', (event) => {
+    const [current, total] = event.payload;
+    showNotification(`${current} / ${total} 件のキャッシュを作成中...`, 'info', 1000);
+  });
+
   initTabHandlers({
     appState,
     uiManager,
@@ -5031,7 +5051,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       menuOpenInNewTab.style.display = '';
       menuOpenInExplorer.style.display = '';
-          menuCopyPath.style.display = '';
+      menuCopyPath.style.display = '';
       menuSeparator1.style.display = '';
       menuEditFavorite.style.display = '';
       menuDeleteFavorite.style.display = '';

@@ -2106,7 +2106,6 @@ async fn generate_thumbnail(
     }
 
     let url = tokio::task::spawn_blocking(move || {
-
         let mtime = mem_mtime.unwrap_or_else(|| {
             std::fs::metadata(&file_path)
                 .and_then(|m| m.modified())
@@ -2116,71 +2115,81 @@ async fn generate_thumbnail(
                 .as_millis() as u64
         });
 
-        let clean_path = file_path.replace("\\\\?\\", "");
-        let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-        let hash_key = format!("{:016x}", digest_clean);
+        generate_thumbnail_inner(&file_path, mtime, &db_conn);
 
-        // Check cache first
-        let mut has_cache = false;
-        if let Ok(conn) = db_conn.get() {
-            if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-                if stmt.exists([&hash_key]).unwrap_or(false) {
-                    has_cache = true;
-                }
+        format!("veloce://thumbnail/?path={}", urlencoding::encode(&file_path))
+    }).await.map_err(|e| e.to_string())?;
+
+    Ok(url)
+}
+
+fn generate_thumbnail_inner(
+    file_path: &str,
+    mtime: u64,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) {
+    let clean_path = file_path.replace("\\\\?\\", "");
+    let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+    let hash_key = format!("{:016x}", digest_clean);
+
+    let mut has_cache = false;
+    if let Ok(conn) = db_conn.get() {
+        if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+            if stmt.exists([&hash_key]).unwrap_or(false) {
+                has_cache = true;
             }
         }
+    }
 
+    if !has_cache {
+        if let Ok(img) = image::open(&file_path) {
+            let rgb_img = img.to_rgb8();
+            let width = rgb_img.width();
+            let height = rgb_img.height();
+            
+            let mut dst_width = width;
+            let mut dst_height = height;
+            if width > 384 || height > 384 {
+                let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
+                dst_width = (width as f32 * ratio).round() as u32;
+                dst_height = (height as f32 * ratio).round() as u32;
+            }
 
-        if !has_cache {
-            if let Ok(img) = image::open(&file_path) {
-                let rgb_img = img.to_rgb8();
-                let width = rgb_img.width();
-                let height = rgb_img.height();
-                
-                let mut dst_width = width;
-                let mut dst_height = height;
-                if width > 384 || height > 384 {
-                    let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
-                    dst_width = (width as f32 * ratio).round() as u32;
-                    dst_height = (height as f32 * ratio).round() as u32;
-                }
+            use std::num::NonZeroU32;
+            use fast_image_resize as fr;
 
-                use std::num::NonZeroU32;
-                use fast_image_resize as fr;
-
-                if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
-                    if let Ok(src_image) = fr::images::Image::from_vec_u8(
-                        src_width.get(),
-                        src_height.get(),
-                        rgb_img.into_raw(),
-                        fr::PixelType::U8x3,
-                    ) {
-                        if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
-                            let mut dst_image = fr::images::Image::new(
-                                dst_w_nz.get(),
-                                dst_h_nz.get(),
-                                fr::PixelType::U8x3,
-                            );
-                            let mut resizer = fr::Resizer::new();
-                            if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
-                                let mut bytes: Vec<u8> = Vec::new();
-                                let mut cursor = std::io::Cursor::new(&mut bytes);
-                                if image::write_buffer_with_format(
-                                    &mut cursor,
-                                    dst_image.buffer(),
-                                    dst_width,
-                                    dst_height,
-                                    image::ColorType::Rgb8,
-                                    image::ImageFormat::Jpeg,
-                                ).is_ok() {
-                                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                                    if let Ok(conn) = db_conn.get() {
-                                        let _ = conn.execute(
-                                            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                                            rusqlite::params![&hash_key, &bytes, now],
-                                        );
-                                    }
+            if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
+                if let Ok(src_image) = fr::images::Image::from_vec_u8(
+                    src_width.get(),
+                    src_height.get(),
+                    rgb_img.into_raw(),
+                    fr::PixelType::U8x3,
+                ) {
+                    if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
+                        let mut dst_image = fr::images::Image::new(
+                            dst_w_nz.get(),
+                            dst_h_nz.get(),
+                            fr::PixelType::U8x3,
+                        );
+                        let mut resizer = fr::Resizer::new();
+                        if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
+                            let mut bytes: Vec<u8> = Vec::new();
+                            let mut cursor = std::io::Cursor::new(&mut bytes);
+                            if image::write_buffer_with_format(
+                                &mut cursor,
+                                dst_image.buffer(),
+                                dst_width,
+                                dst_height,
+                                image::ColorType::Rgb8,
+                                image::ImageFormat::Jpeg,
+                            ).is_ok() {
+                                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                                if let Ok(conn) = db_conn.get() {
+                                    let _ = conn.execute(
+                                        "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                                         ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                                        rusqlite::params![&hash_key, &bytes, now],
+                                    );
                                 }
                             }
                         }
@@ -2188,13 +2197,45 @@ async fn generate_thumbnail(
                 }
             }
         }
+    }
+}
 
+#[tauri::command]
+async fn precache_directory_recursively(
+    window: tauri::Window,
+    target_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db_conn = state.db_conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let entries: Vec<_> = walkdir::WalkDir::new(&target_path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let path = e.path().to_string_lossy().to_lowercase();
+                path.ends_with(".png") || path.ends_with(".jpg") || path.ends_with(".jpeg") || path.ends_with(".webp")
+            })
+            .collect();
         
-        let encoded_path = urlencoding::encode(&file_path);
-        format!("https://veloce.localhost/thumbnail/?path={}", encoded_path)
-    }).await.map_err(|e| e.to_string())?;
-
-    Ok(url)
+        let total = entries.len();
+        for (i, entry) in entries.iter().enumerate() {
+            let path = entry.path().to_string_lossy().to_string();
+            let metadata = std::fs::metadata(&path).ok();
+            let mtime = metadata
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            
+            get_full_metadata_for_path(&path, &db_conn);
+            generate_thumbnail_inner(&path, mtime, &db_conn);
+            
+            let _ = window.emit("precache-progress", (i + 1, total));
+        }
+        Ok(())
+    })
+    .await
+    .unwrap_or(Ok(()))
 }
 
 // --- ウィンドウ管理コマンド (ビューア用) ---
@@ -3360,6 +3401,7 @@ fn main() {
             get_full_metadata_batch,
             parse_metadata,
             generate_thumbnail,
+            precache_directory_recursively,
             get_viewer_image,
             open_viewer,
             show_window,
