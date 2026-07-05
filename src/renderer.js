@@ -2310,6 +2310,14 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
     ]);
     valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="生成元">`;
     valueContainer.querySelector('input').value = valVal;
+  } else if (type === 'width' || type === 'height') {
+    operatorSelect.innerHTML = makeOptions([
+      { value: '<=', label: '以下' },
+      { value: '==', label: 'ちょうど' },
+      { value: '>=', label: '以上' }
+    ]);
+    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0">`;
+    valueContainer.querySelector('input').value = valVal || 0;
   } else if (type === 'rating') {
     operatorSelect.innerHTML = makeOptions([
       { value: '>=', label: '以上' },
@@ -5448,3 +5456,4 @@ async function performUndo() {
     uiManager.showToast(`元に戻す操作に失敗しました`, 3000, 'undo', 'warning');
   }
 }
+

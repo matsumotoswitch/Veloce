@@ -503,6 +503,22 @@ fn build_smart_folder_query(
                     _ => clause = "1=1".to_string(),
                 }
             }
+            "width" => {
+                let w_val: i64 = cond.value.parse().unwrap_or(0);
+                let op = match cond.operator.as_str() {
+                    ">=" => ">=", "<=" => "<=", "==" => "=", _ => "=",
+                };
+                clause = format!("c.width {} ?", op);
+                params.push(rusqlite::types::Value::Integer(w_val));
+            }
+            "height" => {
+                let h_val: i64 = cond.value.parse().unwrap_or(0);
+                let op = match cond.operator.as_str() {
+                    ">=" => ">=", "<=" => "<=", "==" => "=", _ => "=",
+                };
+                clause = format!("c.height {} ?", op);
+                params.push(rusqlite::types::Value::Integer(h_val));
+            }
             "path" => {
                 let mut base_path = cond.value.clone();
                 if !base_path.ends_with('\\') && !base_path.ends_with('/') {
