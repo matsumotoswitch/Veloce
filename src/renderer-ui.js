@@ -766,22 +766,37 @@ class UIManager {
       if (!this.elements.fileListBody || !this.elements.thumbnailGrid) return;
     }
 
-    // 全要素をループするのではなく、既に選択されている要素のクラスを外す
-    const currentSelectedRows = this.elements.fileListBody.querySelectorAll('.selected');
-    for (let i = 0; i < currentSelectedRows.length; i++) currentSelectedRows[i].classList.remove('selected');
-    
-    const currentSelectedThumbs = this.elements.thumbnailGrid.querySelectorAll('.selected');
-    for (let i = 0; i < currentSelectedThumbs.length; i++) currentSelectedThumbs[i].classList.remove('selected');
-
-    // 新たに選択された要素のみにクラスを付与する
-    for (const i of this.state.selection) {
-      const row = this.elements.fileListBody.querySelector(`tr[data-index="${i}"]`);
-      if (row) row.classList.add('selected');
-      
-      // 仮想スクロール対応: DOMの順番ではなく、data-index属性を使って対象の画像を探す
-      const thumb = this.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${i}"]`);
-      if (thumb) thumb.classList.add('selected');
+    if (!this._lastRenderedSelection) {
+      this._lastRenderedSelection = new Set();
     }
+
+    const currentSelection = this.state.selection;
+    const oldSelection = this._lastRenderedSelection;
+
+    // 前回の選択状態から外れた要素のクラスを削除
+    for (const i of oldSelection) {
+      if (!currentSelection.has(i)) {
+        const row = this.elements.fileListBody.querySelector(`tr[data-index="${i}"]`);
+        if (row) row.classList.remove('selected');
+        
+        const thumb = this.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${i}"]`);
+        if (thumb) thumb.classList.remove('selected');
+      }
+    }
+
+    // 新たに選択された要素にクラスを付与
+    for (const i of currentSelection) {
+      if (!oldSelection.has(i)) {
+        const row = this.elements.fileListBody.querySelector(`tr[data-index="${i}"]`);
+        if (row) row.classList.add('selected');
+        
+        const thumb = this.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${i}"]`);
+        if (thumb) thumb.classList.add('selected');
+      }
+    }
+
+    // 現在の選択状態をキャッシュ
+    this._lastRenderedSelection = new Set(currentSelection);
   }
 
   /**
