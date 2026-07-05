@@ -9,8 +9,10 @@ describe('Context Menu (Inspector Header)', () => {
     window.contextMenu.id = 'context-menu';
     window.menuOpenInNewTab = document.createElement('div');
     window.menuOpenInExplorer = document.createElement('div');
+    window.menuCopyPath = document.createElement('div');
     window.contextMenu.appendChild(window.menuOpenInNewTab);
     window.contextMenu.appendChild(window.menuOpenInExplorer);
+    window.contextMenu.appendChild(window.menuCopyPath);
     document.body.appendChild(window.contextMenu);
 
     window.showMenuWithAnimation = vi.fn();
@@ -39,6 +41,7 @@ describe('Context Menu (Inspector Header)', () => {
         
         window.menuOpenInNewTab.style.display = '';
         window.menuOpenInExplorer.style.display = '';
+          window.menuCopyPath.style.display = '';
 
         window.showMenuWithAnimation(window.contextMenu, e.clientX, e.clientY);
       }

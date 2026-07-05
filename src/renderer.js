@@ -1807,7 +1807,7 @@ async function renderMetadata(file) {
 
     const headerPath = document.getElementById('inspector-header-path');
     if (headerPath) {
-      if (appState.currentDirectory.startsWith('smart://') && file.path) {
+      if (file.path) {
         const filePathStr = String(file.path);
         const lastSlash = Math.max(filePathStr.lastIndexOf('\\'), filePathStr.lastIndexOf('/'));
         const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
@@ -2004,6 +2004,7 @@ async function renderMetadata(file) {
 
           menuOpenInNewTab.style.display = '';
           menuOpenInExplorer.style.display = '';
+          menuCopyPath.style.display = '';
 
           showMenuWithAnimation(contextMenu, e.clientX, e.clientY);
         }
@@ -2766,6 +2767,22 @@ const menuTabCopyPath = createMenuItem('パスをコピー', UIManager.ICONS.CLI
   }
 });
 
+const menuCopyPath = createMenuItem('パスをコピー', UIManager.ICONS.CLIPBOARD, async () => {
+  let textToCopy = null;
+  if (contextMenu.targetFolder && contextMenu.targetFolder.path) {
+    textToCopy = contextMenu.targetFolder.path;
+  }
+  if (textToCopy && !textToCopy.startsWith('smart://')) {
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      showNotification('パスをコピーしました', 'success');
+    } catch (e) {
+      showNotification('コピーに失敗しました', 'error');
+    }
+  }
+});
+
+
 const menuTabAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICONS.STAR, () => {
   if (contextMenu.targetTabIndex !== undefined) {
     if (menuTabAddFavorite.disabled) return;
@@ -2800,6 +2817,7 @@ contextMenu.appendChild(menuOpenInNewTab);
 contextMenu.appendChild(menuOpenInExplorer);
 contextMenu.appendChild(menuTabOpenExplorer);
 contextMenu.appendChild(menuTabCopyPath);
+contextMenu.appendChild(menuCopyPath);
 contextMenu.appendChild(menuReloadFolder);
 contextMenu.appendChild(menuSeparator1);
 
@@ -3180,6 +3198,7 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
 
   menuOpenInNewTab.style.display = '';
   menuOpenInExplorer.style.display = '';
+          menuCopyPath.style.display = '';
   menuReloadFolder.style.display = '';
   menuSeparator1.style.display = '';
   menuNewFolder.style.display = '';
@@ -5012,6 +5031,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       menuOpenInNewTab.style.display = '';
       menuOpenInExplorer.style.display = '';
+          menuCopyPath.style.display = '';
       menuSeparator1.style.display = '';
       menuEditFavorite.style.display = '';
       menuDeleteFavorite.style.display = '';
