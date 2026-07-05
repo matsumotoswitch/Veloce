@@ -2418,23 +2418,31 @@ html.viewer-html,
 
 /* --- お気に入り: アイコン選択グリッド --- */
 .icon-grid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px !important;
+  justify-content: flex-start !important;
   margin-bottom: 16px;
 }
 
 .icon-grid .icon-btn {
-  background: transparent;
-  border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 2px solid transparent !important;
   border-radius: var(--radius-sm);
-  padding: 8px;
+  padding: 0 !important;
+  margin: 0 !important;
   cursor: pointer;
   color: var(--text-color, #ececec);
   transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  max-width: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  flex: 0 0 auto !important;
 }
 
 .icon-grid .icon-btn:hover {
@@ -2442,9 +2450,9 @@ html.viewer-html,
 }
 
 .icon-grid .icon-btn.active {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.2);
-}
+    border-color: #3b82f6 !important;
+    background: rgba(59, 130, 246, 0.2) !important;
+  }
 
 /* --- お気に入り: カラー選択パレット --- */
 .color-grid {
