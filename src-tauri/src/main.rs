@@ -2123,8 +2123,8 @@ async fn generate_thumbnail(
                 
                 let mut dst_width = width;
                 let mut dst_height = height;
-                if width > 256 || height > 256 {
-                    let ratio = f32::min(256.0 / width as f32, 256.0 / height as f32);
+                if width > 384 || height > 384 {
+                    let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
                     dst_width = (width as f32 * ratio).round() as u32;
                     dst_height = (height as f32 * ratio).round() as u32;
                 }
@@ -2933,8 +2933,8 @@ fn main() {
                 
                 let mut dst_width = width;
                 let mut dst_height = height;
-                if width > 256 || height > 256 {
-                    let ratio = f32::min(256.0 / width as f32, 256.0 / height as f32);
+                if width > 384 || height > 384 {
+                    let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
                     dst_width = (width as f32 * ratio).round() as u32;
                     dst_height = (height as f32 * ratio).round() as u32;
                 }
@@ -3485,14 +3485,14 @@ mod tests {
 
         let mut dst_width = width;
         let mut dst_height = height;
-        if width > 256 || height > 256 {
-            let ratio = f32::min(256.0 / width as f32, 256.0 / height as f32);
+        if width > 384 || height > 384 {
+            let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
             dst_width = (width as f32 * ratio).round() as u32;
             dst_height = (height as f32 * ratio).round() as u32;
         }
 
-        assert_eq!(dst_width, 256);
-        assert_eq!(dst_height, 144);
+        assert_eq!(dst_width, 384);
+        assert_eq!(dst_height, 216);
 
         let src_width = NonZeroU32::new(width).unwrap();
         let src_height = NonZeroU32::new(height).unwrap();
@@ -3513,8 +3513,8 @@ mod tests {
         resizer.resize(&src_image, &mut dst_image, None).unwrap();
 
         let result_img = RgbaImage::from_raw(dst_width, dst_height, dst_image.into_vec()).unwrap();
-        assert_eq!(result_img.width(), 256);
-        assert_eq!(result_img.height(), 144);
+        assert_eq!(result_img.width(), 384);
+        assert_eq!(result_img.height(), 216);
     }
 
     #[test]
