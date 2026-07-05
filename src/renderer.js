@@ -2341,7 +2341,7 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
     ]);
     valueContainer.innerHTML = `
       <input type="text" class="cond-value-input dialog-input" style="flex:1">
-      <button type="button" class="btn-browse-path dialog-btn" style="padding: 4px 8px;">参照...</button>
+      <button type="button" class="btn-browse-path dialog-btn" style="padding: 8px 12px;">参照...</button>
     `;
     valueContainer.querySelector('input').value = valVal;
   }

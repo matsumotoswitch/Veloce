@@ -254,6 +254,10 @@ body.is-resizing .app-content {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
+.sf-condition-row .dialog-input {
+  margin-bottom: 0;
+}
+
 .dialog-input:focus {
   outline: none;
   border-color: var(--accent-color);

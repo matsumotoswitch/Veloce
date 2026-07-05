@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
@@ -179,7 +179,7 @@
 
   <template id="sf-condition-template">
     <div class="sf-condition-row" style="display: flex; gap: 8px; align-items: center;">
-      <select class="cond-type dialog-input" style="width: 120px;">
+      <select class="cond-type dialog-input" style="width: 160px;">
         <option value="rating">レーティング</option>
         <option value="prompt">プロンプト</option>
         <option value="negative_prompt">ネガティブプロンプト</option>
@@ -189,8 +189,8 @@
           <option value="height">高さ (px)</option>
         <option value="path">フォルダ (パス)</option>
       </select>
-      <select class="cond-operator dialog-input" style="width: 100px;"></select>
-      <div class="cond-value-container" style="display: flex; flex: 1; gap: 4px;"></div>
+      <select class="cond-operator dialog-input" style="width: 130px;"></select>
+      <div class="cond-value-container" style="display: flex; flex: 1; gap: 4px; align-items: center;"></div>
       <button type="button" class="btn-remove-cond dialog-btn" style="padding: 4px 8px;">✕</button>
     </div>
   </template>
@@ -249,7 +249,7 @@
       <div class="form-group">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <label class="form-label" style="margin-bottom: 0;">条件 (すべての条件に一致)</label>
-          <button id="smart-add-condition-btn" class="dialog-btn" style="padding: 4px 8px; font-size: 11px;">+ 条件を追加</button>
+          <button id="smart-add-condition-btn" class="dialog-btn" style="padding: 8px 12px;">+ 条件を追加</button>
         </div>
         <div id="smart-conditions-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;">
           <!-- JSで動的に追加 -->
