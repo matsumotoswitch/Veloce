@@ -129,7 +129,10 @@
 		</label>
 	  </div>
 	  <label for="thumbnail-size-slider">サムネイル:</label>
-	  <input type="range" id="thumbnail-size-slider" min="100" max="500" value="120">
+	  <div class="slider-wrapper" style="position: relative; display: flex; align-items: center;">
+	    <input type="range" id="thumbnail-size-slider" min="100" max="500" value="120">
+		<div id="thumbnail-slider-tooltip" class="slider-tooltip">120px</div>
+	  </div>
 	  <div class="control-divider"></div>
 	  <button id="open-cache-btn" class="icon-btn" title="キャッシュフォルダを開く">
 	    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">

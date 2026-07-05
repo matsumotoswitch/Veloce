@@ -3593,8 +3593,21 @@ window.addEventListener('mouseup', () => {
 });
 
 function updateThumbnailSize() {
-  const size = parseFloat(uiManager.elements.thumbnailSizeSlider.value) || 120;
+  const slider = uiManager.elements.thumbnailSizeSlider;
+  const size = parseFloat(slider.value) || 120;
   document.body.style.setProperty('--thumbnail-size', `${size}px`);
+
+  const tooltip = document.getElementById('thumbnail-slider-tooltip');
+  if (tooltip && slider) {
+    const min = parseFloat(slider.min) || 100;
+    const max = parseFloat(slider.max) || 500;
+    const percent = (size - min) / (max - min);
+    const thumbWidth = 12;
+    // thumb is offset by percent across the track width
+    const offset = percent * (slider.offsetWidth - thumbWidth) + (thumbWidth / 2);
+    tooltip.textContent = `${Math.round(size)}px`;
+    tooltip.style.left = `${offset}px`;
+  }
 }
 
 uiManager.elements.thumbnailSizeSlider.addEventListener('input', () => {
