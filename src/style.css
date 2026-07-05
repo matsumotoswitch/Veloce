@@ -600,19 +600,15 @@ input:-webkit-autofill:focus {
 
 .smart-folder-count {
   margin-left: auto;
-  font-size: 10px;
-  background-color: rgba(255, 255, 255, 0.1);
-  padding: 1px 4px;
-  border-radius: 8px;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
   display: none;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
 .smart-folder-item.selected .smart-folder-count {
-  background-color: rgba(255, 255, 255, 0.25);
-  color: #fff;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 #directories-section {
@@ -890,16 +886,7 @@ table#file-table {
   color: var(--text-color);
 }
 
-.smart-folder-count {
-  background-color: var(--surface-2);
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 8px;
-  margin-left: auto;
-  font-weight: 500;
-  display: none;
-}
+
 
 /* Custom Checkbox Styles */
 .custom-checkbox-wrapper {
