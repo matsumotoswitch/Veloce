@@ -2148,9 +2148,10 @@ th[data-sort] svg path {
   display: none;
 }
 
-#edit-favorite-modal .dialog-box {
-  max-width: 400px;
-  width: 90%;
+#edit-favorite-modal .dialog-box,
+#edit-smart-folder-modal .dialog-box {
+  width: 640px;
+  max-width: 95%;
 }
 
 .form-group {
@@ -2449,7 +2450,7 @@ html.viewer-html,
 .color-grid {
   display: flex;
   gap: 12px;
-  justify-content: center;
+  justify-content: flex-start;
   margin-bottom: 24px;
 }
 
