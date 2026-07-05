@@ -24,12 +24,12 @@ describe('Precache Folder Context Menu', () => {
     const menuClickAction = async () => {
       if (window.contextMenu.targetFolder && window.contextMenu.targetFolder.path) {
         const path = window.contextMenu.targetFolder.path;
-        window.showNotification('キャッシュの作成を開始しました。処理中はアプリを閉じないでください。', 'info');
+        window.showNotification('キャッシュの作成を開始しました。処理中はアプリを閉じないでください。', 'info', null, 'precache');
         try {
           await window.__TAURI__.invoke('precache_directory_recursively', { targetPath: path });
-          window.showNotification('キャッシュの作成が完了しました', 'success');
+          window.showNotification('キャッシュの作成が完了しました', 'success', null, 'precache');
         } catch (e) {
-          window.showNotification(`エラーが発生しました: ${e}`, 'error');
+          window.showNotification(`エラーが発生しました: ${e}`, 'error', null, 'precache');
         }
       }
     };
@@ -40,7 +40,7 @@ describe('Precache Folder Context Menu', () => {
 
     expect(window.showNotification).toHaveBeenCalledWith(
       'キャッシュの作成を開始しました。処理中はアプリを閉じないでください。',
-      'info'
+      'info', null, 'precache'
     );
     expect(window.__TAURI__.invoke).toHaveBeenCalledWith(
       'precache_directory_recursively',
@@ -48,7 +48,7 @@ describe('Precache Folder Context Menu', () => {
     );
     expect(window.showNotification).toHaveBeenCalledWith(
       'キャッシュの作成が完了しました',
-      'success'
+      'success', null, 'precache'
     );
   });
 
@@ -59,7 +59,7 @@ describe('Precache Folder Context Menu', () => {
         try {
           await window.__TAURI__.invoke('precache_directory_recursively', { targetPath: path });
         } catch (e) {
-          window.showNotification(`エラーが発生しました: ${e}`, 'error');
+          window.showNotification(`エラーが発生しました: ${e}`, 'error', null, 'precache');
         }
       }
     };
@@ -74,7 +74,7 @@ describe('Precache Folder Context Menu', () => {
     );
     expect(window.showNotification).toHaveBeenCalledWith(
       'エラーが発生しました: Something went wrong',
-      'error'
+      'error', null, 'precache'
     );
   });
 });

@@ -631,12 +631,12 @@ function renderFavorites() {
 // 3. Core Business Logic & Helpers
 // ============================================================================
 
-function showNotification(message, type = 'info', duration = null) {
+function showNotification(message, type = 'info', duration = null, id = null) {
   let finalDuration = duration;
   if (finalDuration === null) {
     finalDuration = (type === 'info') ? 1500 : 3000;
   }
-  uiManager.showToast(message, finalDuration, null, type);
+  uiManager.showToast(message, finalDuration, id, type);
 }
 
 // アイコン付きメニュー項目の生成ヘルパー
@@ -2527,12 +2527,12 @@ const menuDeleteSmartFolder = createMenuItem('スマートフォルダを削除'
 const menuPrecacheFolder = createMenuItem('これ以下のファイル情報をすべて取得', UIManager.ICONS.REFRESH, async () => {
   if (contextMenu.targetFolder && contextMenu.targetFolder.path) {
     const path = contextMenu.targetFolder.path;
-    showNotification('キャッシュの作成を開始しました。処理中はアプリを閉じないでください。', 'info');
+    showNotification('キャッシュの作成を開始しました。処理中はアプリを閉じないでください。', 'info', null, 'precache');
     try {
       await window.__TAURI__.invoke('precache_directory_recursively', { targetPath: path });
-      showNotification('キャッシュの作成が完了しました', 'success');
+      showNotification('キャッシュの作成が完了しました', 'success', null, 'precache');
     } catch (e) {
-      showNotification(`エラーが発生しました: ${e}`, 'error');
+      showNotification(`エラーが発生しました: ${e}`, 'error', null, 'precache');
     }
   }
 });
@@ -4141,7 +4141,7 @@ async function handleTreeNavigation(key) {
 window.addEventListener('DOMContentLoaded', async () => {
   window.__TAURI__.event.listen('precache-progress', (event) => {
     const [current, total] = event.payload;
-    showNotification(`${current} / ${total} 件のキャッシュを作成中...`, 'info', 1000);
+    showNotification(`${current} / ${total} 件のキャッシュを作成中...`, 'info', 1000, 'precache');
   });
 
   initTabHandlers({
