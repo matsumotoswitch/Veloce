@@ -1838,7 +1838,7 @@ th[data-sort] svg path {
   /* タイトルバーの背景を透過させて右上ボタンと統一 */
   padding: 8px 12px 0 12px !important;
   display: flex !important;
-  gap: 2px !important;
+  gap: 0px !important;
   border-bottom: none !important;
   /* 個別の下線を消去 */
   height: 40px;
