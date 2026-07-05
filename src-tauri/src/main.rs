@@ -2118,7 +2118,7 @@ async fn generate_thumbnail(
         generate_thumbnail_inner(&file_path, mtime, &db_conn);
 
         let encoded_path = urlencoding::encode(&file_path);
-        format!("https://veloce.localhost/thumbnail/?path={}", encoded_path)
+        format!("https://veloce.localhost/thumbnail/?path={}&mtime={}", encoded_path, mtime)
     }).await.map_err(|e| e.to_string())?;
 
     Ok(url)
@@ -2221,17 +2221,35 @@ async fn precache_directory_recursively(
         let total = entries.len();
         for (i, entry) in entries.iter().enumerate() {
             let path = entry.path().to_string_lossy().to_string();
-            let metadata = std::fs::metadata(&path).ok();
+            let metadata = entry.metadata().ok();
             let mtime = metadata
+                .as_ref()
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
+
+            let clean_path = path.replace("\\\\?\\", "");
+            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+            let hash_key = format!("{:016x}", digest);
+
+            let mut has_both = false;
+            if let Ok(conn) = db_conn.get() {
+                if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND metadata IS NOT NULL AND metadata != ''") {
+                    if stmt.exists([&hash_key]).unwrap_or(false) {
+                        has_both = true;
+                    }
+                }
+            }
+
+            if !has_both {
+                get_full_metadata_for_path(&path, &db_conn);
+                generate_thumbnail_inner(&path, mtime, &db_conn);
+            }
             
-            get_full_metadata_for_path(&path, &db_conn);
-            generate_thumbnail_inner(&path, mtime, &db_conn);
-            
-            let _ = window.emit("precache-progress", (i + 1, total));
+            if i % 10 == 0 || i == total - 1 {
+                let _ = window.emit("precache-progress", (i + 1, total));
+            }
         }
         Ok(())
     })

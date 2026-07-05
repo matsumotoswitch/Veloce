@@ -697,9 +697,9 @@ window.updateThumbnailToast = function updateThumbnailToast() {
     appState.lastThumbnailToastTime = now;
 
     if (appState.thumbnailCompleted < appState.thumbnailTotalRequested) {
-      uiManager.showToast(`サムネイル作成中 (${appState.thumbnailCompleted}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
+      uiManager.showToast(`サムネイル読込中 (${appState.thumbnailCompleted}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
     } else {
-      uiManager.showToast(`サムネイル作成完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
+      uiManager.showToast(`サムネイル読込完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
       clearTimeout(appState.thumbnailToastTimeout);
       appState.thumbnailToastTimeout = setTimeout(() => {
         const t = document.getElementById('toast-thumbnail-progress');
