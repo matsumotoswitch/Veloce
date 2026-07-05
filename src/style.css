@@ -209,7 +209,7 @@ body.is-resizing .app-content {
   font-size: inherit;
   color: #fff;
   background-color: rgba(255, 255, 255, 0.1);
-  transition: opacity 0.2s, background-color 0.2s;
+  transition: opacity 0.2s, background-color 0.2s, filter 0.15s, transform 0.05s ease;
 }
 
 .dialog-btn:disabled {
@@ -236,7 +236,6 @@ body.is-resizing .app-content {
 /* ボタンをクリックした瞬間にわずかに沈み込むフィードバック（タクタイル感） */
 .dialog-btn:active:not(:disabled) {
   transform: scale(0.97);
-  transition: transform 0.05s ease;
 }
 
 .dialog-input {
@@ -848,14 +847,14 @@ table#file-table {
 #file-list-body tr {
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
-  transition: background-color 0.15s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: background-color 0.15s ease;
 }
 
 #file-table tr.selected {
-  background: rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.35);
   color: #fff;
   font-weight: normal;
-  box-shadow: inset 4px 0 0 var(--accent-color);
+  box-shadow: inset 3px 0 0 var(--accent-hover);
 }
 
 #file-table td {
@@ -1056,7 +1055,6 @@ input[type="range"]:focus {
   border: 1px solid transparent;
   cursor: pointer;
   border-radius: var(--radius-xs);
-  will-change: border-color, transform, box-shadow;
   transform: translateZ(0) scale(1);
   transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
   position: relative;
@@ -1142,8 +1140,7 @@ body.show-thumbnail-names .thumbnail-label {
 .inspector-data label {
   font-size: var(--font-size-xs);
   margin: 8px 0 4px 0;
-  color: var(--text-color);
-  opacity: 0.7;
+  color: rgba(205, 219, 224, 0.65);
 }
 
 .inspector-data textarea {
@@ -1555,8 +1552,7 @@ img.thumbnail-item.loading {
   transition: color 0.2s, filter 0.2s, background-color 0.2s;
 }
 
-.diff-copy-btn:hover,
-.open-folder-btn:hover {
+.diff-copy-btn:hover {
   color: #fff;
   opacity: 1;
 }
@@ -2574,7 +2570,19 @@ html.viewer-html,
 
 /* Global Focus Indicator for Keyboard Navigation */
 :focus-visible {
-  outline: none !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.6);
+  border-radius: var(--radius-xs);
+}
+
+/* ペイン等の非インタラクティブ要素のフォーカスリングを除外 */
+#left-pane:focus-visible,
+#center-pane:focus-visible,
+#right-pane:focus-visible,
+#center-bottom:focus-visible,
+#dir-tree:focus-visible,
+#smart-folders-list:focus-visible {
+  box-shadow: none;
 }
 
 /* --- ヘルプ画面用スタイル --- */
