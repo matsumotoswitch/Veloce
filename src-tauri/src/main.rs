@@ -3632,6 +3632,7 @@ fn main() {
                 tauri::http::ResponseBuilder::new()
                     .mimetype("image/jpeg")
                     .header("Access-Control-Allow-Origin", "*")
+                    .header("Cache-Control", "public, max-age=3600")
                     .status(200)
                     .body(cache_bytes)
             } else {

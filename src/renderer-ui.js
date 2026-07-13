@@ -1340,58 +1340,7 @@ class UIManager {
       content.removeChild(content.lastChild);
     }
 
-    // --- キャッシュ済みサムネイルのファストパス ---
-    {
-      const cachedPaths = [];
-      for (let i = startIndex; i <= endIndex; i++) {
-        const f = items[i - startIndex];
-        if (f && f.hasThumbnailCache && !appState.thumbnailUrls.has(f.path)) {
-          cachedPaths.push(f.path);
-        }
-      }
-      if (cachedPaths.length > 0 && window.veloceAPI && window.veloceAPI.getCachedThumbnailBatch) {
-        window.veloceAPI.getCachedThumbnailBatch(cachedPaths).then(function(results) {
-          if (!results) return;
-          var uiMgr = window.uiManager;
-          var returnedPaths = new Set();
-          for (var r = 0; r < results.length; r++) {
-            var res = results[r];
-            if (!res || !res.url) continue;
-            returnedPaths.add(res.path);
-            appState.thumbnailUrls.set(res.path, res.url);
-            var wrapper = (uiMgr && uiMgr._domByPath) ? uiMgr._domByPath.get(res.path) : null;
-            if (wrapper) {
-              var imgEl = wrapper.querySelector('.thumbnail-img');
-              if (imgEl && imgEl.dataset.currentSrc === res.path) {
-                imgEl.src = res.url;
-                imgEl.classList.remove('loading');
-              }
-            }
-            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(res.path);
-            if (window.thumbnailManager) window.thumbnailManager.remove(res.path);
-          }
-          
-          if (window.thumbnailManager) {
-            var missingPaths = cachedPaths.filter(function(p) { return !returnedPaths.has(p); });
-            if (missingPaths.length > 0) {
-              for (var m = 0; m < missingPaths.length; m++) {
-                window.thumbnailManager.enqueuePriority(missingPaths[m]);
-              }
-              if (typeof window.processNextTask === 'function') window.processNextTask();
-            }
-          }
-        }).catch(function(e) {
-          console.warn('getCachedThumbnailBatch failed:', e);
-          if (window.thumbnailManager) {
-            for (var m = 0; m < cachedPaths.length; m++) {
-              window.thumbnailManager.enqueuePriority(cachedPaths[m]);
-            }
-            if (typeof window.processNextTask === 'function') window.processNextTask();
-          }
-        });
-      }
-    }
-
+    // (getCachedThumbnailBatch has been removed in favor of native custom protocol streaming)
     const filesToEnqueue = [];
 
     for (let i = startIndex; i <= endIndex; i++) {
@@ -1452,6 +1401,30 @@ class UIManager {
                       window.appState.thumbnailUrls.set(file.path, fallback);
                     }
                     this.src = fallback;
+                  }
+                };
+            }
+            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+        } else if (file.hasThumbnailCache && file.hashKey) {
+            const url = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}`;
+            appState.thumbnailUrls.set(file.path, url);
+            img.src = url;
+            if (img.complete) {
+                img.classList.remove('loading');
+            } else {
+                img.classList.add('loading');
+                img.onload = function() { this.classList.remove('loading'); };
+                img.onerror = function() {
+                  this.classList.remove('loading');
+                  const fallback = window.veloceAPI.convertFileSrc(file.path);
+                  if (this.src !== fallback && !this.src.startsWith('asset://')) {
+                    if (window.appState && window.appState.thumbnailUrls) {
+                      window.appState.thumbnailUrls.set(file.path, fallback);
+                    }
+                    this.src = fallback;
+                  }
+                  if (window.thumbnailManager) {
+                    window.thumbnailManager.enqueuePriority(file.path);
                   }
                 };
             }

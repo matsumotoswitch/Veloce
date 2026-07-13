@@ -162,7 +162,6 @@ window.veloceAPI = {
   },
   saveThumbnail: (filePath, b64Data) => invoke('save_thumbnail', { filePath, b64Data }),
   generateThumbnailBatch: (filePaths) => invoke('generate_thumbnail_batch', { filePaths }),
-  getCachedThumbnailBatch: (filePaths) => invoke('get_cached_thumbnail_batch', { filePaths }),
   readBinaryFile: (filePath) => window.__TAURI__.fs.readBinaryFile(filePath),
   /**
    * 画像ファイルからプロンプトなどのメタデータを解析します。
