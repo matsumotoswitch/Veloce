@@ -1122,8 +1122,8 @@ class UIManager {
     const containerHeight = container.clientHeight || window.innerHeight;
 
     const startRow = Math.floor(Math.max(0, scrollTop) / rowHeight);
-    const safeStartRow = Math.max(0, startRow - 5);
-    const endRow = Math.min(totalRows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 5);
+    const safeStartRow = Math.max(0, startRow - 10);
+    const endRow = Math.min(totalRows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 10);
 
     if (!force && this.lastListStartIndex === safeStartRow && this.lastListEndIndex === endRow) {
       return;
@@ -1275,10 +1275,10 @@ class UIManager {
     const scrollTop = container.scrollTop;
     const containerHeight = container.clientHeight || window.innerHeight;
 
-    // 表示すべき行の計算 (上下に2行ずつのバッファ)
+    // 表示すべき行の計算 (上下に8行ずつのバッファ)
     const startRow = Math.floor(Math.max(0, scrollTop - padding) / rowHeight);
-    const safeStartRow = Math.max(0, startRow - 2);
-    const endRow = Math.min(rows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 2);
+    const safeStartRow = Math.max(0, startRow - 8);
+    const endRow = Math.min(rows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 8);
 
     const startIndex = safeStartRow * cols;
     const endIndex = Math.min(appState.totalCount - 1, ((endRow + 1) * cols) - 1);

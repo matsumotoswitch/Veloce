@@ -763,8 +763,11 @@ fn load_directory(
                     let chunk_size = 999;
                     let hash_path_pairs: Vec<(String, usize)> = files.iter().enumerate().map(|(i, f)| {
                         let clean = f.path.replace("\\\\?\\", "");
-                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean, f.mtime).as_bytes());
-                        (format!("{:016x}", digest), i)
+                        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+                        hasher.update(clean.as_bytes());
+                        hasher.update(b"_");
+                        hasher.update(f.mtime.to_string().as_bytes());
+                        (format!("{:016x}", hasher.digest()), i)
                     }).collect();
 
                     for chunk in hash_path_pairs.chunks(chunk_size) {
@@ -774,7 +777,7 @@ fn load_directory(
                             placeholders
                         );
                         let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|(hk, _)| hk as &dyn rusqlite::ToSql).collect();
-                        if let Ok(mut stmt) = conn.prepare(&query) {
+                        if let Ok(mut stmt) = conn.prepare_cached(&query) {
                             if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
                                 let hk: String = row.get(0)?;
                                 let has_thumb: bool = row.get(1)?;
@@ -791,8 +794,11 @@ fn load_directory(
                     // O(1) で各ファイルにフラグをセット
                     for (i, f) in files.iter_mut().enumerate() {
                         let clean = f.path.replace("\\\\?\\", "");
-                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean, f.mtime).as_bytes());
-                        let hk = format!("{:016x}", digest);
+                        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+                        hasher.update(clean.as_bytes());
+                        hasher.update(b"_");
+                        hasher.update(f.mtime.to_string().as_bytes());
+                        let hk = format!("{:016x}", hasher.digest());
                         if let Some(&(has_thumb, has_meta)) = cache_flags.get(&hk) {
                             f.has_thumbnail_cache = has_thumb;
                             f.has_metadata_cache = has_meta;

@@ -850,16 +850,31 @@ class ThumbnailQueueManager {
       
       // 2. キャッシュがない場合、WebView2 (ブラウザ) の高速エンジンでサムネイル生成
       if (!url) {
-        url = await this.generateThumbnailInBrowser(filePath);
-        // バックグラウンドでRustに保存指示
-        window.veloceAPI.saveThumbnail(filePath, url).catch(err => console.warn('Cache save error:', err));
-        fetchTime = performance.now();
+        const base64Url = await this.generateThumbnailInBrowser(filePath);
+        
+        appState.thumbnailUrls.set(filePath, base64Url);
+        this.updateDOM(filePath, base64Url);
+
+        // バックグラウンドでRustに保存後、巨大なBase64メモリを解放して軽量URLに差し替える
+        window.veloceAPI.saveThumbnail(filePath, base64Url).then(() => {
+          let mtime = 0;
+          if (appState.filtered_files) {
+            const f = appState.filtered_files.find(item => item.path === filePath);
+            if (f) mtime = f.mtime;
+          }
+          const lightUrl = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(filePath)}&mtime=${mtime}`;
+          // 生成時のBase64URLのままであれば（他の処理で上書きされていなければ）差し替える
+          if (appState.thumbnailUrls.get(filePath) === base64Url) {
+            appState.thumbnailUrls.set(filePath, lightUrl);
+            this.updateDOM(filePath, lightUrl);
+          }
+        }).catch(err => console.warn('Cache save error:', err));
+        
+        return; // ここで早期リターン
       }
 
       appState.thumbnailUrls.set(filePath, url);
       this.updateDOM(filePath, url);
-      const domTime = performance.now();
-      console.log(`[Thumbnail] ${filePath.split('\\').pop()}: fetch=${(fetchTime-start).toFixed(1)}ms, dom=${(domTime-fetchTime).toFixed(1)}ms`);
     } catch (err) {
       console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
       const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
