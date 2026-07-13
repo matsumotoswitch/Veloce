@@ -138,6 +138,10 @@ class AppState {
     this.metadataTargetCount = 0;     // メタデータ取得リクエストの総数
     this.metadataCompleted = 0;       // メタデータ取得完了数
 
+    // 仮想グリッドの可視アイテムを O(1) で引くための Set
+    // updateVirtualGrid() が更新し、ThumbnailQueueManager.processNext() が参照する
+    this.visiblePathSet = new Set();
+
     // 履歴管理
     this.isNavigatingHistory = false; // 履歴操作による遷移中のフラグ
     this.undoStack = [];              // アンドゥ（元に戻す）用の操作履歴

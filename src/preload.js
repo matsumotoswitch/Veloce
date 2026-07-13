@@ -157,9 +157,13 @@ window.veloceAPI = {
       return await invoke('generate_thumbnail', { filePath });
     } catch (e) {
       console.warn("Failed to generate thumbnail via command:", e);
-      return `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(filePath)}`;
+      return window.__TAURI__.tauri.convertFileSrc(filePath);
     }
   },
+  saveThumbnail: (filePath, b64Data) => invoke('save_thumbnail', { filePath, b64Data }),
+  generateThumbnailBatch: (filePaths) => invoke('generate_thumbnail_batch', { filePaths }),
+  getCachedThumbnailBatch: (filePaths) => invoke('get_cached_thumbnail_batch', { filePaths }),
+  readBinaryFile: (filePath) => window.__TAURI__.fs.readBinaryFile(filePath),
   /**
    * 画像ファイルからプロンプトなどのメタデータを解析します。
    * @param {string} filePath - 解析する画像ファイルのパス。

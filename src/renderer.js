@@ -30,9 +30,8 @@ appState.tabs = [];
 appState.activeTabIndex = -1;
 
 
-// サムネイル生成の同時実行数を制限します。
-// Rust側で直接リサイズ処理を行うため、I/Oやシェル依存のボトルネックが解消され、並列数を引き上げても高速に処理されます。
-const MAX_CONCURRENT_THUMBNAILS = 8;
+// サムネイル生成の並列数（v1.7.0と同等の8に戻す）
+const THUMBNAIL_BATCH_SIZE = 4;
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -715,6 +714,7 @@ window.updateThumbnailToast = function updateThumbnailToast() {
   }
 }
 
+// 個別タスクのタイムアウト付きサムネイル取得
 function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
   return Promise.race([
     window.veloceAPI.getThumbnail(filePath),
@@ -731,11 +731,11 @@ class ThumbnailQueueManager {
     this.isProcessing = false;
   }
 
-  enqueuePriority(filePath, renderId) {
+  enqueuePriority(filePath) {
     if (!this.activeTasks.has(filePath) && !appState.thumbnailUrls.has(filePath)) {
       const idx = this.priorityQueue.findIndex(req => req.filePath === filePath);
       if (idx > -1) this.priorityQueue.splice(idx, 1);
-      this.priorityQueue.push({ filePath, renderId });
+      this.priorityQueue.push({ filePath });
       this.processNext();
     }
   }
@@ -766,8 +766,8 @@ class ThumbnailQueueManager {
     this.isProcessing = true;
 
     try {
-      // 毎回DOMクエリを走らせると重いため、表示中のパス一覧をSet化する
-      const visiblePaths = new Set(Array.from(document.querySelectorAll('.thumbnail-item')).map(el => el.dataset.filepath).filter(Boolean));
+      // updateVirtualGrid() で同期した appState.visiblePathSet を参照する（querySelectorAll O(N) を排除）
+      const visiblePaths = appState.visiblePathSet || new Set();
 
       while (this.activeTasks.size < this.concurrency) {
         let targetFile = null;
@@ -779,8 +779,7 @@ class ThumbnailQueueManager {
           if (targetIndex === -1) targetIndex = 0;
 
           const req = this.priorityQueue.splice(targetIndex, 1)[0];
-
-          if (appState.currentRenderId !== req.renderId) continue;
+          
           if (appState.thumbnailUrls.has(req.filePath)) {
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(req.filePath);
             continue;
@@ -834,6 +833,7 @@ class ThumbnailQueueManager {
         if (!targetFile) break;
 
         this.activeTasks.add(targetFile);
+        // 個別タスクを非同期で起動（完了次第 updateDOM → processNext を呼ぶ）
         this.runTask(targetFile);
       }
     } finally {
@@ -842,88 +842,108 @@ class ThumbnailQueueManager {
   }
 
   async runTask(filePath) {
+    const start = performance.now();
     try {
-      const url = await fetchThumbnailWithTimeout(filePath);
-      let finalUrl = url || window.veloceAPI.convertFileSrc(filePath);
-      if (finalUrl && finalUrl.startsWith('https://veloce.localhost/thumbnail/')) {
-        finalUrl += `&t=${Date.now()}`;
-      }
+      // 1. Rust にキャッシュを問い合わせ (DBのみ検索なので超高速)
+      let url = await window.veloceAPI.getThumbnail(filePath);
+      let fetchTime = performance.now();
       
-      const img = new Image();
-      let isSettled = false;
-      let fallbackTimer = null;
+      // 2. キャッシュがない場合、WebView2 (ブラウザ) の高速エンジンでサムネイル生成
+      if (!url) {
+        url = await this.generateThumbnailInBrowser(filePath);
+        // バックグラウンドでRustに保存指示
+        window.veloceAPI.saveThumbnail(filePath, url).catch(err => console.warn('Cache save error:', err));
+        fetchTime = performance.now();
+      }
 
-      const settle = (isError) => {
-        if (isSettled) return;
-        isSettled = true;
-        if (fallbackTimer) clearTimeout(fallbackTimer);
-        
-        if (isError) {
-          const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
-          appState.thumbnailUrls.set(filePath, fallbackUrl);
-          this.updateDOM(filePath, fallbackUrl);
-        } else {
-          appState.thumbnailUrls.set(filePath, finalUrl);
-          this.updateDOM(filePath, finalUrl);
-        }
-        
-        this.activeTasks.delete(filePath);
-        if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(filePath);
-        this.processNext();
-      };
-
-      img.onload = () => settle(false);
-      img.onerror = () => {
-        console.warn('Failed to load thumbnail for:', filePath);
-        settle(true);
-      };
-      fallbackTimer = setTimeout(() => {
-        console.warn('Image load timed out for:', filePath);
-        settle(true);
-      }, 15000); // 15s absolute timeout for Image loading
-
-      img.src = finalUrl;
+      appState.thumbnailUrls.set(filePath, url);
+      this.updateDOM(filePath, url);
+      const domTime = performance.now();
+      console.log(`[Thumbnail] ${filePath.split('\\').pop()}: fetch=${(fetchTime-start).toFixed(1)}ms, dom=${(domTime-fetchTime).toFixed(1)}ms`);
     } catch (err) {
+      console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
       const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
       appState.thumbnailUrls.set(filePath, fallbackUrl);
       this.updateDOM(filePath, fallbackUrl);
+    } finally {
       this.activeTasks.delete(filePath);
-      if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(filePath);
       this.processNext();
     }
   }
 
-  updateDOM(filePath, url) {
-    const content = document.querySelector('.virtual-content');
-    if (!content) return;
-    for (const wrapper of content.children) {
-      if (wrapper.dataset.filepath === filePath) {
-        const img = wrapper.querySelector('.thumbnail-img');
-        if (img) {
-          img.src = url;
-          if (img.complete) {
-            img.classList.remove('loading');
-          } else {
-            img.onload = function () { this.classList.remove('loading'); };
-            img.onerror = function () {
-              this.classList.remove('loading');
-              const fallback = window.veloceAPI.convertFileSrc(filePath);
-              if (this.src !== fallback && !this.src.startsWith('asset://')) {
-                if (window.appState && window.appState.thumbnailUrls) {
-                  window.appState.thumbnailUrls.set(filePath, fallback);
-                }
-                this.src = fallback;
-              }
-            };
-          }
+  generateThumbnailInBrowser(filePath) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const assetUrl = window.veloceAPI.convertFileSrc(filePath);
+        const response = await fetch(assetUrl);
+        if (!response.ok) throw new Error("Fetch failed");
+        const blob = await response.blob();
+        const bmp = await createImageBitmap(blob);
+
+        const canvas = document.createElement('canvas');
+        let width = bmp.width;
+        let height = bmp.height;
+        
+        if (width > 384 || height > 384) {
+          const ratio = Math.min(384 / width, 384 / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
         }
-        break;
+        // 最低1pxを保証
+        width = Math.max(1, width);
+        height = Math.max(1, height);
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        
+        // Veloceの背景色(#1e1e1e)で塗りつぶして透明PNG/WebP対策
+        ctx.fillStyle = '#1e1e1e';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(bmp, 0, 0, width, height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        bmp.close(); // Free memory immediately
+        
+        resolve(dataUrl);
+      } catch (err) {
+        reject(err);
       }
+    });
+  }
+
+  updateDOM(filePath, url) {
+    // uiManager._domByPath (Map) から O(1) で要素を取得する
+    const uiMgr = window.uiManager || uiManager;
+    const wrapper = (uiMgr && uiMgr._domByPath) ? uiMgr._domByPath.get(filePath) : null;
+    if (wrapper) {
+      const img = wrapper.querySelector('.thumbnail-img');
+      if (img) {
+        img.src = url;
+        if (img.complete) {
+          img.classList.remove('loading');
+        } else {
+          img.onload = function () { this.classList.remove('loading'); };
+          img.onerror = function () {
+            this.classList.remove('loading');
+            const fallback = window.veloceAPI.convertFileSrc(filePath);
+            if (this.src !== fallback && !this.src.startsWith('asset://')) {
+              if (window.appState && window.appState.thumbnailUrls) {
+                window.appState.thumbnailUrls.set(filePath, fallback);
+              }
+              this.src = fallback;
+            }
+          };
+        }
+      }
+      return;
     }
+    // _domByPath に存在しない場合（スクロールで仮想化された範囲外）はスキップ
+    // スクロール後に updateVirtualGrid が再レンダリングする際に thumbnailUrls から引かれる
   }
 }
 
-window.thumbnailManager = new ThumbnailQueueManager(MAX_CONCURRENT_THUMBNAILS);
+window.thumbnailManager = new ThumbnailQueueManager(THUMBNAIL_BATCH_SIZE);
 window.processNextTask = () => window.thumbnailManager.processNext();
 
 function clearMetadataUI() {

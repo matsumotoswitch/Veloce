@@ -750,13 +750,62 @@ fn load_directory(
                         }
                         None
                     })
-                    .collect()
+                    .collect::<Vec<ImageFile>>()
             };
-            
+
+            // DB バッチ確認: hash_key を計算して一括クエリし hasThumbnailCache/hasMetadataCache を設定
+            // SQLite IN 句の上限 (999) に合わせてチャンク分割する
+            if !files.is_empty() {
+                if let Ok(conn) = db_conn_clone.get() {
+                    // (hash_key -> (has_thumbnail, has_metadata)) のマップを構築
+                    let mut cache_flags: std::collections::HashMap<String, (bool, bool)> = std::collections::HashMap::new();
+
+                    let chunk_size = 999;
+                    let hash_path_pairs: Vec<(String, usize)> = files.iter().enumerate().map(|(i, f)| {
+                        let clean = f.path.replace("\\\\?\\", "");
+                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean, f.mtime).as_bytes());
+                        (format!("{:016x}", digest), i)
+                    }).collect();
+
+                    for chunk in hash_path_pairs.chunks(chunk_size) {
+                        let placeholders = vec!["?"; chunk.len()].join(",");
+                        let query = format!(
+                            "SELECT hash_key, (thumbnail IS NOT NULL), (metadata IS NOT NULL) FROM cache WHERE hash_key IN ({})",
+                            placeholders
+                        );
+                        let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|(hk, _)| hk as &dyn rusqlite::ToSql).collect();
+                        if let Ok(mut stmt) = conn.prepare(&query) {
+                            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                                let hk: String = row.get(0)?;
+                                let has_thumb: bool = row.get(1)?;
+                                let has_meta: bool = row.get(2)?;
+                                Ok((hk, has_thumb, has_meta))
+                            }) {
+                                for row in rows.flatten() {
+                                    cache_flags.insert(row.0, (row.1, row.2));
+                                }
+                            }
+                        }
+                    }
+
+                    // O(1) で各ファイルにフラグをセット
+                    for (i, f) in files.iter_mut().enumerate() {
+                        let clean = f.path.replace("\\\\?\\", "");
+                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean, f.mtime).as_bytes());
+                        let hk = format!("{:016x}", digest);
+                        if let Some(&(has_thumb, has_meta)) = cache_flags.get(&hk) {
+                            f.has_thumbnail_cache = has_thumb;
+                            f.has_metadata_cache = has_meta;
+                            let _ = i; // suppress unused warning
+                        }
+                    }
+                }
+            }
             // デフォルトソート（名前順昇順）も並列処理で適用
             files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
-            
+
             files
+
         }).await;
 
         let files = match files_result {
@@ -794,15 +843,32 @@ fn load_directory(
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            let paths_to_process = {
+            // 未解析パスのみを抽出し、インデックスマップを構築する（O(N²) → O(N) 化）
+            let (paths_to_process, all_index_map, filtered_index_map) = {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
-                    if let Ok(lock) = state.all_files.lock() {
-                        lock.iter().map(|f| f.path.clone()).collect::<Vec<String>>()
+                    let all_map: std::collections::HashMap<String, usize> = if let Ok(lock) = state.all_files.lock() {
+                        lock.iter().enumerate().map(|(i, f)| (f.path.clone(), i)).collect()
                     } else {
-                        Vec::new()
-                    }
+                        std::collections::HashMap::new()
+                    };
+                    let filtered_map: std::collections::HashMap<String, usize> = if let Ok(lock) = state.filtered_files.lock() {
+                        lock.iter().enumerate().map(|(i, f)| (f.path.clone(), i)).collect()
+                    } else {
+                        std::collections::HashMap::new()
+                    };
+                    let unloaded: Vec<String> = all_map.iter()
+                        .filter_map(|(path, _)| {
+                            if let Ok(lock) = state.all_files.lock() {
+                                if lock.get(*all_map.get(path)?).map(|f| !f.meta_loaded).unwrap_or(false) {
+                                    return Some(path.clone());
+                                }
+                            }
+                            None
+                        })
+                        .collect();
+                    (unloaded, all_map, filtered_map)
                 } else {
-                    Vec::new()
+                    (Vec::new(), std::collections::HashMap::new(), std::collections::HashMap::new())
                 }
             };
 
@@ -814,51 +880,76 @@ fn load_directory(
                         }
                     }
 
-                    let needs_parsing = if let Ok(lock) = state.all_files.lock() {
-                        lock.iter()
-                            .find(|f| f.path == path)
-                            .map(|f| !f.meta_loaded)
-                            .unwrap_or(false)
-                    } else {
-                        false
+                    let path_clone_for_blocking = path.clone();
+                    let db_conn_clone = state.db_conn.clone();
+                    let (full_meta, meta_mtime, meta_size) = match tokio::task::spawn_blocking(move || {
+                        get_full_metadata_for_path(&path_clone_for_blocking, &db_conn_clone)
+                    })
+                    .await
+                    {
+                        Ok(meta) => meta,
+                        Err(_) => continue,
                     };
 
-                    if needs_parsing {
-                        let path_clone_for_blocking = path.clone();
-                        let db_conn_clone = state.db_conn.clone();
-                        let (full_meta, meta_mtime, meta_size) = match tokio::task::spawn_blocking(move || {
-                            get_full_metadata_for_path(&path_clone_for_blocking, &db_conn_clone)
-                        })
-                        .await
-                        {
-                            Ok(meta) => meta,
-                            Err(_) => continue,
-                        };
-
-                        if let Ok(mut all_files) = state.all_files.lock() {
-                            if let Some(f) = all_files.iter_mut().find(|f| f.path == path) {
-                                f.width = full_meta.width;
-                                f.height = full_meta.height;
-                                f.prompt = full_meta.prompt.clone();
-                                f.negative_prompt = full_meta.negative_prompt.clone();
-                                f.source = full_meta.source.clone();
-                                f.search_text = extract_searchable_text(&full_meta.params);
-                                if f.size == 0 { f.size = meta_size; }
-                                if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
-                                f.meta_loaded = true;
+                    // O(1) インデックスアクセスで all_files を更新
+                    if let Ok(mut all_files) = state.all_files.lock() {
+                        if let Some(&idx) = all_index_map.get(&path) {
+                            if let Some(f) = all_files.get_mut(idx) {
+                                if f.path == path {
+                                    f.width = full_meta.width;
+                                    f.height = full_meta.height;
+                                    f.prompt = full_meta.prompt.clone();
+                                    f.negative_prompt = full_meta.negative_prompt.clone();
+                                    f.source = full_meta.source.clone();
+                                    f.search_text = extract_searchable_text(&full_meta.params);
+                                    if f.size == 0 { f.size = meta_size; }
+                                    if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
+                                    f.meta_loaded = true;
+                                } else {
+                                    // インデックスが失効している場合は線形検索にフォールバック
+                                    if let Some(f2) = all_files.iter_mut().find(|f| f.path == path) {
+                                        f2.width = full_meta.width;
+                                        f2.height = full_meta.height;
+                                        f2.prompt = full_meta.prompt.clone();
+                                        f2.negative_prompt = full_meta.negative_prompt.clone();
+                                        f2.source = full_meta.source.clone();
+                                        f2.search_text = extract_searchable_text(&full_meta.params);
+                                        if f2.size == 0 { f2.size = meta_size; }
+                                        if f2.mtime == 0 { f2.mtime = meta_mtime / 1000; }
+                                        f2.meta_loaded = true;
+                                    }
+                                }
                             }
                         }
-                        if let Ok(mut filtered) = state.filtered_files.lock() {
-                            if let Some(f) = filtered.iter_mut().find(|f| f.path == path) {
-                                f.width = full_meta.width;
-                                f.height = full_meta.height;
-                                f.prompt = full_meta.prompt.clone();
-                                f.negative_prompt = full_meta.negative_prompt.clone();
-                                f.source = full_meta.source.clone();
-                                f.search_text = extract_searchable_text(&full_meta.params);
-                                if f.size == 0 { f.size = meta_size; }
-                                if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
-                                f.meta_loaded = true;
+                    }
+
+                    // O(1) インデックスアクセスで filtered_files を更新
+                    if let Ok(mut filtered) = state.filtered_files.lock() {
+                        if let Some(&idx) = filtered_index_map.get(&path) {
+                            if let Some(f) = filtered.get_mut(idx) {
+                                if f.path == path {
+                                    f.width = full_meta.width;
+                                    f.height = full_meta.height;
+                                    f.prompt = full_meta.prompt.clone();
+                                    f.negative_prompt = full_meta.negative_prompt.clone();
+                                    f.source = full_meta.source.clone();
+                                    f.search_text = extract_searchable_text(&full_meta.params);
+                                    if f.size == 0 { f.size = meta_size; }
+                                    if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
+                                    f.meta_loaded = true;
+                                } else {
+                                    if let Some(f2) = filtered.iter_mut().find(|f| f.path == path) {
+                                        f2.width = full_meta.width;
+                                        f2.height = full_meta.height;
+                                        f2.prompt = full_meta.prompt.clone();
+                                        f2.negative_prompt = full_meta.negative_prompt.clone();
+                                        f2.source = full_meta.source.clone();
+                                        f2.search_text = extract_searchable_text(&full_meta.params);
+                                        if f2.size == 0 { f2.size = meta_size; }
+                                        if f2.mtime == 0 { f2.mtime = meta_mtime / 1000; }
+                                        f2.meta_loaded = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -2106,6 +2197,7 @@ async fn generate_thumbnail(
     }
 
     let url = tokio::task::spawn_blocking(move || {
+        let t_start = std::time::Instant::now();
         let mtime = mem_mtime.unwrap_or_else(|| {
             std::fs::metadata(&file_path)
                 .and_then(|m| m.modified())
@@ -2115,90 +2207,192 @@ async fn generate_thumbnail(
                 .as_millis() as u64
         });
 
-        generate_thumbnail_inner(&file_path, mtime, &db_conn);
+        let cache_bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
+        let t_gen = t_start.elapsed();
 
-        let encoded_path = urlencoding::encode(&file_path);
-        format!("https://veloce.localhost/thumbnail/?path={}&mtime={}", encoded_path, mtime)
+        let url = if cache_bytes.is_empty() {
+            String::new()
+        } else {
+            use base64::{Engine as _, engine::general_purpose};
+            let b64 = general_purpose::STANDARD.encode(&cache_bytes);
+            format!("data:image/jpeg;base64,{}", b64)
+        };
+        
+        let fname = std::path::Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy();
+        println!("[Rust] {}: db_lookup={}ms", fname, t_gen.as_millis());
+        url
     }).await.map_err(|e| e.to_string())?;
 
     Ok(url)
+}
+
+#[derive(serde::Serialize)]
+struct ThumbnailResult {
+    path: String,
+    url: String,
+}
+
+#[tauri::command]
+async fn generate_thumbnail_batch(
+    state: tauri::State<'_, AppState>,
+    file_paths: Vec<String>,
+) -> Result<Vec<ThumbnailResult>, String> {
+    let db_conn = state.db_conn.clone();
+    
+    // Fast path: get mtimes from memory to avoid disk I/O
+    let mut files_to_process = Vec::new();
+    if let Ok(lock) = state.filtered_files.lock() {
+        for file_path in &file_paths {
+            if let Some(f) = lock.iter().find(|f| f.path == *file_path) {
+                files_to_process.push((file_path.clone(), f.mtime));
+            }
+        }
+    }
+
+    if files_to_process.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let results = tokio::task::spawn_blocking(move || {
+        use rayon::prelude::*;
+        use base64::{Engine as _, engine::general_purpose};
+        files_to_process.into_par_iter().map(|(file_path, mtime)| {
+            let bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
+            let url = if bytes.is_empty() {
+                String::new()
+            } else {
+                format!("data:image/jpeg;base64,{}", general_purpose::STANDARD.encode(&bytes))
+            };
+            ThumbnailResult { path: file_path, url }
+        }).collect::<Vec<_>>()
+    }).await.map_err(|e| e.to_string())?;
+
+    Ok(results)
+}
+
+/// キャッシュ済みサムネイルのみをDBから取得する（生成は行わない）。
+/// `hasThumbnailCache == true` のファイルを即時表示するためのファストパス。
+#[tauri::command]
+async fn get_cached_thumbnail_batch(
+    state: tauri::State<'_, AppState>,
+    file_paths: Vec<String>,
+) -> Result<Vec<ThumbnailResult>, String> {
+    let db_conn = state.db_conn.clone();
+
+    // filtered_files から mtime を取得
+    let mut files_with_mtime: Vec<(String, u64)> = Vec::new();
+    if let Ok(lock) = state.filtered_files.lock() {
+        for file_path in &file_paths {
+            if let Some(f) = lock.iter().find(|f| f.path == *file_path) {
+                files_with_mtime.push((file_path.clone(), f.mtime));
+            }
+        }
+    }
+
+    if files_with_mtime.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let results = tokio::task::spawn_blocking(move || {
+        use rayon::prelude::*;
+        use base64::{Engine as _, engine::general_purpose};
+        files_with_mtime.into_par_iter().filter_map(|(file_path, mtime)| {
+            let clean_path = file_path.replace("\\\\?\\", "");
+            let digest = xxhash_rust::xxh3::xxh3_64(
+                format!("{}_{}", clean_path, mtime).as_bytes()
+            );
+            let hash_key = format!("{:016x}", digest);
+
+            // DB のみを参照（生成しない）
+            if let Ok(conn) = db_conn.get() {
+                if let Ok(mut stmt) = conn.prepare_cached(
+                    "SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL"
+                ) {
+                    if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                        if !bytes.is_empty() {
+                            let url = format!("data:image/jpeg;base64,{}",
+                                general_purpose::STANDARD.encode(&bytes));
+                            return Some(ThumbnailResult { path: file_path, url });
+                        }
+                    }
+                }
+            }
+            None // キャッシュなし → JS側で通常キューに回す
+        }).collect::<Vec<_>>()
+    }).await.map_err(|e| e.to_string())?;
+
+    Ok(results)
 }
 
 fn generate_thumbnail_inner(
     file_path: &str,
     mtime: u64,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-) {
+) -> Vec<u8> {
     let clean_path = file_path.replace("\\\\?\\", "");
     let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
     let hash_key = format!("{:016x}", digest_clean);
 
-    let mut has_cache = false;
     if let Ok(conn) = db_conn.get() {
-        if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-            if stmt.exists([&hash_key]).unwrap_or(false) {
-                has_cache = true;
+        if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+            if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                return thumb;
             }
         }
     }
+    Vec::new() // キャッシュがない場合は空を返し、JS側でCanvas生成させる
+}
 
-    if !has_cache {
-        if let Ok(img) = image::open(&file_path) {
-            let rgb_img = img.to_rgb8();
-            let width = rgb_img.width();
-            let height = rgb_img.height();
-            
-            let mut dst_width = width;
-            let mut dst_height = height;
-            if width > 384 || height > 384 {
-                let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
-                dst_width = (width as f32 * ratio).round() as u32;
-                dst_height = (height as f32 * ratio).round() as u32;
-            }
+#[tauri::command]
+async fn save_thumbnail(
+    state: tauri::State<'_, AppState>,
+    file_path: String,
+    b64_data: String,
+) -> Result<(), String> {
+    let db_conn = state.db_conn.clone();
+    
+    // Fast path: get mtime from memory to avoid disk I/O
+    let mem_mtime = if let Ok(lock) = state.filtered_files.lock() {
+        lock.iter().find(|f| f.path == file_path).map(|f| f.mtime)
+    } else {
+        None
+    };
 
-            use std::num::NonZeroU32;
-            use fast_image_resize as fr;
+    let mtime = mem_mtime.unwrap_or_else(|| {
+        std::fs::metadata(&file_path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH)
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    });
 
-            if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
-                if let Ok(src_image) = fr::images::Image::from_vec_u8(
-                    src_width.get(),
-                    src_height.get(),
-                    rgb_img.into_raw(),
-                    fr::PixelType::U8x3,
-                ) {
-                    if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
-                        let mut dst_image = fr::images::Image::new(
-                            dst_w_nz.get(),
-                            dst_h_nz.get(),
-                            fr::PixelType::U8x3,
-                        );
-                        let mut resizer = fr::Resizer::new();
-                        if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
-                            let mut bytes: Vec<u8> = Vec::new();
-                            let mut cursor = std::io::Cursor::new(&mut bytes);
-                            if image::write_buffer_with_format(
-                                &mut cursor,
-                                dst_image.buffer(),
-                                dst_width,
-                                dst_height,
-                                image::ColorType::Rgb8,
-                                image::ImageFormat::Jpeg,
-                            ).is_ok() {
-                                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                                if let Ok(conn) = db_conn.get() {
-                                    let _ = conn.execute(
-                                        "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                                         ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                                        rusqlite::params![&hash_key, &bytes, now],
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    let clean_path = file_path.replace("\\\\?\\", "");
+    let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+    let hash_key = format!("{:016x}", digest_clean);
+
+    // b64_data is expected to be "data:image/jpeg;base64,..."
+    let b64 = if let Some(idx) = b64_data.find(',') {
+        &b64_data[idx + 1..]
+    } else {
+        &b64_data
+    };
+
+    use base64::{Engine as _, engine::general_purpose};
+    let bytes = general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
+
+    tokio::task::spawn_blocking(move || {
+        if let Ok(conn) = db_conn.get() {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let _ = conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                rusqlite::params![&hash_key, &bytes, now],
+            );
         }
-    }
+    }).await.map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -3404,12 +3598,55 @@ fn main() {
                 _ => {}
             }
         })
+        .register_uri_scheme_protocol("veloce", move |app, request| {
+            let uri = request.uri();
+            let mut path = String::new();
+            let mut mtime: u64 = 0;
+            if let Ok(parsed) = tauri::Url::parse(uri) {
+                for (k, v) in parsed.query_pairs() {
+                    if k == "path" {
+                        path = v.into_owned();
+                    } else if k == "mtime" {
+                        mtime = v.parse().unwrap_or(0);
+                    }
+                }
+            }
+
+            let mut cache_bytes = Vec::new();
+            if !path.is_empty() {
+                let clean_path = path.replace("\\\\?\\", "");
+                let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+                let hash_key = format!("{:016x}", digest);
+
+                let state = app.state::<AppState>();
+                if let Ok(conn) = state.db_conn.get() {
+                    if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+                        if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                            cache_bytes = thumb;
+                        }
+                    }
+                }
+            }
+
+            if !cache_bytes.is_empty() {
+                tauri::http::ResponseBuilder::new()
+                    .mimetype("image/jpeg")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .status(200)
+                    .body(cache_bytes)
+            } else {
+                tauri::http::ResponseBuilder::new()
+                    .status(404)
+                    .body(Vec::new())
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_drives,
             path_exists,
             load_directory,
             set_view_params,
             sync_ratings,
+            save_thumbnail,
             set_rating,
             get_items,
             get_file_by_index,
@@ -3420,6 +3657,8 @@ fn main() {
             get_full_metadata_batch,
             parse_metadata,
             generate_thumbnail,
+            generate_thumbnail_batch,
+            get_cached_thumbnail_batch,
             precache_directory_recursively,
             get_viewer_image,
             open_viewer,

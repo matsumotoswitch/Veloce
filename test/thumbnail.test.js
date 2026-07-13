@@ -11,7 +11,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     };
     window.veloceAPI = {
       convertFileSrc: vi.fn(path => `asset://${path}`),
-      getThumbnail: vi.fn(async (path) => `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(path)}`)
+      getThumbnail: vi.fn(async (path) => `data:image/jpeg;base64,/9j/mock`)
     };
     // Mock the DOM for updateDOM
     document.body.innerHTML = `

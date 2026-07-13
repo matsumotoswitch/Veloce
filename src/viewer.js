@@ -120,6 +120,10 @@ window.addEventListener('DOMContentLoaded', () => {
         viewerState.totalImages = initialData.total;
         
         if (!initialTotal) viewerState.paths = new Array(initialData.total).fill(null); // フォールバック時の初期化
+        // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
+        if (viewerState.paths && viewerState.currentIndex >= 0) {
+          viewerState.paths[viewerState.currentIndex] = initialData.path;
+        }
         const assetUrl = window.veloceAPI.convertFileSrc(initialData.path);
         if (viewerUI.elements.viewerImg) {
           viewerUI.elements.viewerImg.src = assetUrl;
@@ -545,7 +549,13 @@ async function loadImage() {
 }
 
 async function preloadAdjacentImages() {
-  const indicesToPreload = [viewerState.currentIndex + 1, viewerState.currentIndex - 1];
+  // ±2 までプリロード（±1 では大きい画像で次画像待ちが発生するため） (#7)
+  const indicesToPreload = [
+    viewerState.currentIndex + 1,
+    viewerState.currentIndex - 1,
+    viewerState.currentIndex + 2,
+    viewerState.currentIndex - 2,
+  ];
   for (const idx of indicesToPreload) {
     if (idx >= 0 && idx < viewerState.totalImages && !viewerState.preloadCache.has(idx)) {
       const path = await getImagePath(idx);
@@ -560,7 +570,7 @@ async function preloadAdjacentImages() {
   }
   // 不要になった古いキャッシュ（現在地から離れたもの）を削除してメモリを節約
   for (const cachedIdx of viewerState.preloadCache.keys()) {
-    if (Math.abs(cachedIdx - viewerState.currentIndex) > 2) {
+    if (Math.abs(cachedIdx - viewerState.currentIndex) > 3) {
       viewerState.preloadCache.delete(cachedIdx);
     }
   }
