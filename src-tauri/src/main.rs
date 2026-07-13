@@ -418,7 +418,7 @@ fn build_smart_folder_query(
     let select_clause = if is_count {
         "SELECT COUNT(*)"
     } else {
-        "SELECT c.path, c.width, c.height, c.size, c.mtime, c.ctime, c.hash_key, c.searchable_prompt, c.searchable_negative_prompt, c.searchable_source"
+        "SELECT c.path, c.width, c.height, c.size, c.mtime, c.ctime, c.hash_key, c.searchable_prompt, c.searchable_negative_prompt, c.searchable_source, (c.thumbnail IS NOT NULL)"
     };
 
     let mut is_inner_join = false;
