@@ -1095,9 +1095,15 @@ class UIManager {
     const tbody = this.elements.fileListBody;
 
     if (!this._listScrollAttached && container) {
+      let listTicked = false;
       container.addEventListener('scroll', () => {
-        if (this._listScrollRaf) cancelAnimationFrame(this._listScrollRaf);
-        this._listScrollRaf = requestAnimationFrame(() => this.updateVirtualList());
+        if (!listTicked) {
+          requestAnimationFrame(() => {
+            this.updateVirtualList();
+            listTicked = false;
+          });
+          listTicked = true;
+        }
       }, { passive: true });
       this._listResizeObserver = new ResizeObserver(() => {
         if (this._listResizeRaf) cancelAnimationFrame(this._listResizeRaf);
@@ -1230,9 +1236,15 @@ class UIManager {
       spacer = container.querySelector('.virtual-spacer');
 
       container.style.position = 'relative';
+      let gridTicked = false;
       container.addEventListener('scroll', () => {
-        if (this._gridScrollRaf) cancelAnimationFrame(this._gridScrollRaf);
-        this._gridScrollRaf = requestAnimationFrame(() => this.updateVirtualGrid());
+        if (!gridTicked) {
+          requestAnimationFrame(() => {
+            this.updateVirtualGrid();
+            gridTicked = false;
+          });
+          gridTicked = true;
+        }
       }, { passive: true });
       this._gridResizeObserver = new ResizeObserver(() => {
         if (this._gridResizeRaf) cancelAnimationFrame(this._gridResizeRaf);

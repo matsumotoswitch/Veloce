@@ -1062,6 +1062,8 @@ input[type="range"]:focus {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* レイアウトの再計算をコンポーネント内に閉じ込め、高速化する */
+  contain: layout paint style;
 }
 
 .thumbnail-img {
