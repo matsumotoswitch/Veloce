@@ -908,6 +908,17 @@ class ThumbnailQueueManager {
         let sourceElement, width, height;
 
         if (filePath.toLowerCase().endsWith('.mp4')) {
+          if (window.veloceAPI.getVideoThumbnail) {
+            try {
+              const nativeB64 = await window.veloceAPI.getVideoThumbnail(filePath);
+              if (nativeB64) {
+                return resolve(nativeB64);
+              }
+            } catch (err) {
+              console.warn(`[Thumbnail] Native extraction failed for ${filePath}, falling back...`, err);
+            }
+          }
+
           const tryExtractFrame = async (videoSrc, needsCrossOrigin) => {
             const video = document.createElement('video');
             if (needsCrossOrigin) video.crossOrigin = 'anonymous';
@@ -948,9 +959,20 @@ class ThumbnailQueueManager {
             sourceElement = null;
 
             try {
-              // Win8.1 CORS fallback: fetch the first 5MB and try to play it
-              const response = await fetch(assetUrl, { headers: { Range: 'bytes=0-5242880' } });
-              if (!response.ok && response.status !== 206) throw new Error("Fetch failed");
+              // Win8.1 CORS fallback: Check file size. If < 100MB, fetch entire file.
+              let fileSize = 0;
+              if (window.appState && window.appState.filteredFiles) {
+                const f = window.appState.filteredFiles.find(x => x.path === filePath);
+                if (f) fileSize = f.size || 0;
+              }
+
+              const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+              if (fileSize > MAX_SIZE) {
+                throw new Error(`File too large for Blob fallback: ${fileSize} bytes`);
+              }
+
+              const response = await fetch(assetUrl);
+              if (!response.ok) throw new Error("Fetch failed");
               const blob = await response.blob();
               const blobUrl = URL.createObjectURL(blob);
               

@@ -110,6 +110,7 @@ window.veloceAPI = {
    */
   getFileByIndex: (index) => invoke('get_file_by_index', { index }),
   getFilesByIndices: (indices) => invoke('get_files_by_indices', { indices }),
+  getVideoThumbnail: (path) => invoke('get_video_thumbnail', { path }),
   /**
    * メタデータの読み込み結果をRust側のSource of Truthに反映する
    */

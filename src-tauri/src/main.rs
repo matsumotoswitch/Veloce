@@ -2350,6 +2350,126 @@ fn generate_thumbnail_inner(
     Vec::new() // キャッシュがない場合は空を返し、JS側でCanvas生成させる
 }
 
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn get_video_thumbnail(path: String) -> Result<String, String> {
+    use windows::core::{HSTRING, PCWSTR, ComInterface};
+    use windows::Win32::UI::Shell::{
+        SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_MEMORYONLY, SIIGBF_THUMBNAILONLY
+    };
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED, CoUninitialize};
+    use windows::Win32::Graphics::Gdi::{
+        GetObjectW, DeleteObject, BITMAP, GetDIBits, CreateCompatibleDC, DeleteDC,
+        BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGBQUAD
+    };
+    use std::ffi::c_void;
+
+    tokio::task::spawn_blocking(move || {
+        unsafe {
+            // Ensure COM is initialized on this thread
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+
+            let hpath = HSTRING::from(&path);
+            let item: windows::Win32::UI::Shell::IShellItem = match SHCreateItemFromParsingName(PCWSTR::from_raw(hpath.as_ptr()), None) {
+                Ok(item) => item,
+                Err(e) => {
+                    let _ = CoUninitialize();
+                    return Err(format!("SHCreateItemFromParsingName failed: {}", e));
+                }
+            };
+
+            let factory: IShellItemImageFactory = match item.cast() {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = CoUninitialize();
+                    return Err(format!("IShellItemImageFactory cast failed: {}", e));
+                }
+            };
+
+            let size = SIZE { cx: 256, cy: 256 };
+            let hbitmap = match factory.GetImage(size, SIIGBF_MEMORYONLY | SIIGBF_THUMBNAILONLY) {
+                Ok(bmp) => bmp,
+                Err(e) => {
+                    let _ = CoUninitialize();
+                    return Err(format!("GetImage failed: {}", e));
+                }
+            };
+
+            let mut bm = BITMAP::default();
+            if GetObjectW(hbitmap, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut c_void)) == 0 {
+                let _ = DeleteObject(hbitmap);
+                let _ = CoUninitialize();
+                return Err("GetObjectW failed".into());
+            }
+
+            let hdc = CreateCompatibleDC(None);
+            let mut bmi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: bm.bmWidth,
+                    biHeight: -bm.bmHeight, // top-down
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0 as u32,
+                    biSizeImage: 0,
+                    biXPelsPerMeter: 0,
+                    biYPelsPerMeter: 0,
+                    biClrUsed: 0,
+                    biClrImportant: 0,
+                },
+                bmiColors: [RGBQUAD::default(); 1],
+            };
+
+            let pixel_count = (bm.bmWidth * bm.bmHeight) as usize;
+            let mut pixels = vec![0u8; pixel_count * 4];
+
+            let res = GetDIBits(
+                hdc,
+                hbitmap,
+                0,
+                bm.bmHeight as u32,
+                Some(pixels.as_mut_ptr() as *mut c_void),
+                &mut bmi,
+                DIB_RGB_COLORS,
+            );
+
+            let _ = DeleteDC(hdc);
+            let _ = DeleteObject(hbitmap);
+            let _ = CoUninitialize();
+
+            if res == 0 {
+                return Err("GetDIBits failed".into());
+            }
+
+            // Convert BGRA to RGBA
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk.swap(0, 2);
+            }
+
+            if let Some(rgba_img) = image::RgbaImage::from_raw(bm.bmWidth as u32, bm.bmHeight as u32, pixels) {
+                let mut bytes: Vec<u8> = Vec::new();
+                let mut cursor = std::io::Cursor::new(&mut bytes);
+                if let Err(e) = rgba_img.write_to(&mut cursor, image::ImageFormat::Png) {
+                    return Err(format!("Image encode failed: {}", e));
+                }
+                
+                use base64::{Engine as _, engine::general_purpose};
+                let b64 = general_purpose::STANDARD.encode(&bytes);
+                Ok(format!("data:image/png;base64,{}", b64))
+            } else {
+                Err("Failed to create RgbaImage from raw pixels".into())
+            }
+        }
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn get_video_thumbnail(_path: String) -> Result<String, String> {
+    Err("Not supported on this OS".into())
+}
+
 #[tauri::command]
 async fn save_thumbnail(
     state: tauri::State<'_, AppState>,
@@ -3388,8 +3508,16 @@ fn main() {
                         rusqlite::params![now, &hash_key]
                     );
                 }
+                let mimetype = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                    "image/png"
+                } else if bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
+                    "image/svg+xml"
+                } else {
+                    "image/jpeg"
+                };
+
                 return tauri::http::ResponseBuilder::new()
-                    .mimetype("image/jpeg")
+                    .mimetype(mimetype)
                     .header("Access-Control-Allow-Origin", "*")
                     .status(200)
                     .body(bytes);
@@ -3829,8 +3957,16 @@ fn main() {
             }
 
             if !cache_bytes.is_empty() {
+                let mimetype = if cache_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                    "image/png"
+                } else if cache_bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || cache_bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
+                    "image/svg+xml"
+                } else {
+                    "image/jpeg"
+                };
+
                 tauri::http::ResponseBuilder::new()
-                    .mimetype("image/jpeg")
+                    .mimetype(mimetype)
                     .header("Access-Control-Allow-Origin", "*")
                     .header("Cache-Control", "public, max-age=3600")
                     .status(200)
@@ -3883,6 +4019,7 @@ fn main() {
             get_all_ratings,
             migrate_ratings,
             get_smart_folder_counts,
+            get_video_thumbnail,
         ])
         .run(context)
         .expect("error while running tauri application");
