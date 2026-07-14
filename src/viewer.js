@@ -147,15 +147,20 @@ window.addEventListener('DOMContentLoaded', () => {
             video.id = 'viewer-img';
             video.src = assetUrl;
             
-            video.onloadedmetadata = () => {
+            viewerUI.elements.viewerImg.parentNode.replaceChild(video, viewerUI.elements.viewerImg);
+            viewerUI.elements.viewerImg = video;
+            currentViewerImg = video;
+
+            const onMeta = () => {
               setZoomState(viewerState.isZoomed);
               viewerUI.updateImageRendering();
               resizeWindowToFitImage();
             };
-
-            viewerUI.elements.viewerImg.parentNode.replaceChild(video, viewerUI.elements.viewerImg);
-            viewerUI.elements.viewerImg = video;
-            currentViewerImg = video;
+            if (video.readyState >= 1) { // HAVE_METADATA
+              onMeta();
+            } else {
+              video.addEventListener('loadedmetadata', onMeta, { once: true });
+            }
           } else {
             viewerUI.elements.viewerImg.src = assetUrl;
           }
@@ -518,17 +523,18 @@ function swapImageElement(newImg, sequenceId) {
   };
 
   if (newImg.tagName === 'VIDEO') {
-    if (newImg.readyState >= 3) {
+    if (newImg.readyState >= 1) { // HAVE_METADATA
       onImageReady();
     } else {
-      newImg.oncanplay = onImageReady;
-      newImg.onerror = onImageReady;
+      newImg.addEventListener('loadedmetadata', onImageReady, { once: true });
+      newImg.addEventListener('error', onImageReady, { once: true });
     }
   } else {
     if (newImg.complete) {
       onImageReady();
     } else {
-      newImg.onload = onImageReady;
+      newImg.addEventListener('load', onImageReady, { once: true });
+      newImg.addEventListener('error', onImageReady, { once: true });
     }
   }
 }
@@ -580,8 +586,8 @@ async function loadImage() {
         await targetImg.decode();
       } else if (targetImg.tagName === 'VIDEO' && targetImg.readyState === 0) {
         await new Promise(res => {
-          targetImg.onloadedmetadata = res;
-          targetImg.onerror = res;
+          targetImg.addEventListener('loadedmetadata', res, { once: true });
+          targetImg.addEventListener('error', res, { once: true });
         });
       }
     } catch (err) {
