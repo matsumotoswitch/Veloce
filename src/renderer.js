@@ -877,7 +877,9 @@ class ThumbnailQueueManager {
       this.updateDOM(filePath, url);
     } catch (err) {
       console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
-      const fallbackUrl = window.veloceAPI.convertFileSrc(filePath);
+      const fallbackUrl = filePath.toLowerCase().endsWith('.mp4')
+        ? `https://stream.localhost/?path=${encodeURIComponent(filePath)}`
+        : window.veloceAPI.convertFileSrc(filePath);
       appState.thumbnailUrls.set(filePath, fallbackUrl);
       this.updateDOM(filePath, fallbackUrl);
     } finally {
@@ -889,15 +891,44 @@ class ThumbnailQueueManager {
   generateThumbnailInBrowser(filePath) {
     return new Promise(async (resolve, reject) => {
       try {
-        const assetUrl = window.veloceAPI.convertFileSrc(filePath);
-        const response = await fetch(assetUrl);
-        if (!response.ok) throw new Error("Fetch failed");
-        const blob = await response.blob();
-        const bmp = await createImageBitmap(blob);
+        const assetUrl = filePath.toLowerCase().endsWith('.mp4')
+          ? `https://stream.localhost/?path=${encodeURIComponent(filePath)}`
+          : window.veloceAPI.convertFileSrc(filePath);
+        let sourceElement, width, height;
+
+        if (filePath.toLowerCase().endsWith('.mp4')) {
+          const video = document.createElement('video');
+          video.crossOrigin = 'anonymous'; // 必須: これがないとCanvasが汚染されtoDataURLでエラーになる
+          video.src = assetUrl;
+          video.muted = true;
+          video.preload = 'metadata';
+          
+          await new Promise((res, rej) => {
+            video.onloadedmetadata = () => {
+              // 0秒のままだと onseeked が発火しないブラウザの挙動を回避するため、
+              // かつ黒い画面（最初のフレーム）を避けるために1秒地点（短い動画なら中間）にシーク
+              const targetTime = video.duration ? Math.min(1.0, video.duration / 2) : 0.001;
+              video.currentTime = targetTime;
+            };
+            video.onseeked = () => {
+              width = video.videoWidth;
+              height = video.videoHeight;
+              sourceElement = video;
+              res();
+            };
+            video.onerror = (e) => rej(new Error("Video load failed"));
+          });
+          video.load();
+        } else {
+          const response = await fetch(assetUrl);
+          if (!response.ok) throw new Error("Fetch failed");
+          const blob = await response.blob();
+          sourceElement = await createImageBitmap(blob);
+          width = sourceElement.width;
+          height = sourceElement.height;
+        }
 
         const canvas = document.createElement('canvas');
-        let width = bmp.width;
-        let height = bmp.height;
         
         if (width > 384 || height > 384) {
           const ratio = Math.min(384 / width, 384 / height);
@@ -915,11 +946,15 @@ class ThumbnailQueueManager {
         // Veloceの背景色(#1e1e1e)で塗りつぶして透明PNG/WebP対策
         ctx.fillStyle = '#1e1e1e';
         ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(bmp, 0, 0, width, height);
+        ctx.drawImage(sourceElement, 0, 0, width, height);
         
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        bmp.close(); // Free memory immediately
-        
+        if (sourceElement.close) {
+          sourceElement.close(); // Free memory immediately for ImageBitmap
+        } else if (sourceElement.tagName === 'VIDEO') {
+          sourceElement.src = ''; // Release video resources
+          sourceElement.remove();
+        }
         resolve(dataUrl);
       } catch (err) {
         reject(err);

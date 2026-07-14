@@ -1395,8 +1395,10 @@ class UIManager {
                 img.onload = function() { this.classList.remove('loading'); };
                 img.onerror = function() {
                   this.classList.remove('loading');
-                  const fallback = window.veloceAPI.convertFileSrc(file.path);
-                  if (this.src !== fallback && !this.src.startsWith('asset://')) {
+                  const fallback = file.path.toLowerCase().endsWith('.mp4')
+                    ? `https://stream.localhost/?path=${encodeURIComponent(file.path)}`
+                    : window.veloceAPI.convertFileSrc(file.path);
+                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('https://stream.localhost/')) {
                     if (window.appState && window.appState.thumbnailUrls) {
                       window.appState.thumbnailUrls.set(file.path, fallback);
                     }
@@ -1405,7 +1407,7 @@ class UIManager {
                 };
             }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else if (file.hasThumbnailCache && file.hashKey) {
+        } else if (file.hasThumbnailCache) {
             const url = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}`;
             appState.thumbnailUrls.set(file.path, url);
             img.src = url;
@@ -1416,8 +1418,10 @@ class UIManager {
                 img.onload = function() { this.classList.remove('loading'); };
                 img.onerror = function() {
                   this.classList.remove('loading');
-                  const fallback = window.veloceAPI.convertFileSrc(file.path);
-                  if (this.src !== fallback && !this.src.startsWith('asset://')) {
+                  const fallback = file.path.toLowerCase().endsWith('.mp4')
+                    ? `https://stream.localhost/?path=${encodeURIComponent(file.path)}`
+                    : window.veloceAPI.convertFileSrc(file.path);
+                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('https://stream.localhost/')) {
                     if (window.appState && window.appState.thumbnailUrls) {
                       window.appState.thumbnailUrls.set(file.path, fallback);
                     }

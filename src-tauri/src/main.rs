@@ -717,7 +717,7 @@ fn load_directory(
                         if p.is_file() {
                             if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                                 let ext_lower = ext.to_lowercase();
-                                if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
+                                if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4") {
                                     if let Ok(metadata) = entry.metadata() {
                                         let size = metadata.len();
                                         let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
@@ -3146,6 +3146,76 @@ fn main() {
     context.config_mut().tauri.windows.clear();
 
     tauri::Builder::default()
+        .register_uri_scheme_protocol("stream", move |_app_handle, request| {
+            let uri = request.uri();
+            let mut path_str = String::new();
+            if let Some(query) = uri.split('?').nth(1) {
+                for pair in query.split('&') {
+                    if pair.starts_with("path=") {
+                        path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                    }
+                }
+            }
+
+            if path_str.is_empty() {
+                return tauri::http::ResponseBuilder::new().status(400).body(Vec::new());
+            }
+
+            use std::io::{Read, Seek, SeekFrom};
+            use std::fs::File;
+
+            if let Ok(mut file) = File::open(&path_str) {
+                if let Ok(metadata) = file.metadata() {
+                    let file_size = metadata.len();
+                    
+                    let range_header = request.headers().get("Range").and_then(|v| v.to_str().ok());
+                    let mut start: u64 = 0;
+                    let mut end: u64 = file_size.saturating_sub(1);
+                    let mut is_range = false;
+
+                    if let Some(range) = range_header {
+                        if range.starts_with("bytes=") {
+                            is_range = true;
+                            let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
+                            if !parts.is_empty() && !parts[0].is_empty() {
+                                start = parts[0].parse::<u64>().unwrap_or(0);
+                            }
+                            if parts.len() > 1 && !parts[1].is_empty() {
+                                end = parts[1].parse::<u64>().unwrap_or(end);
+                            }
+                        }
+                    }
+
+                    // チャンクサイズを最大2MBに制限してストリーミングを実現
+                    let max_chunk: u64 = 2 * 1024 * 1024;
+                    let chunk_size = std::cmp::min(end.saturating_sub(start) + 1, max_chunk);
+                    
+                    let mut buf = vec![0; chunk_size as usize];
+                    if file.seek(SeekFrom::Start(start)).is_ok() {
+                        if let Ok(read_len) = file.read(&mut buf) {
+                            buf.truncate(read_len);
+                            
+                            let mut resp = tauri::http::ResponseBuilder::new()
+                                .header("Content-Type", "video/mp4")
+                                .header("Accept-Ranges", "bytes")
+                                .header("Access-Control-Allow-Origin", "*");
+
+                            if is_range {
+                                resp = resp.status(206).header(
+                                    "Content-Range",
+                                    format!("bytes {}-{}/{}", start, start + read_len as u64 - 1, file_size),
+                                );
+                            } else {
+                                resp = resp.status(200).header("Content-Length", file_size.to_string());
+                            }
+                            
+                            return resp.body(buf);
+                        }
+                    }
+                }
+            }
+            tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
+        })
         .register_uri_scheme_protocol("veloce", move |app_handle, request| {
             let uri = request.uri();
             let mut path_str = String::new();
@@ -3378,7 +3448,7 @@ fn main() {
                                         let ext_lower = ext.to_lowercase();
                                         if matches!(
                                             ext_lower.as_str(),
-                                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+                                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4"
                                         ) {
                                             if let Ok(meta) = entry.metadata() {
                                                 let size = meta.len();
@@ -3429,7 +3499,7 @@ fn main() {
                                     let ext_lower = ext.to_lowercase();
                                     if matches!(
                                         ext_lower.as_str(),
-                                        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+                                        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4"
                                     ) {
                                         if let Ok(meta) = entry.metadata() {
                                             let size = meta.len();

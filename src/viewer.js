@@ -19,9 +19,20 @@ const CONFIG = {
   RESIZE_THROTTLE: 150    // リサイズイベントの間引き時間(ms)
 };
 
+function getMediaWidth(media) {
+  return media.tagName === 'VIDEO' ? media.videoWidth : media.naturalWidth;
+}
+
+function getMediaHeight(media) {
+  return media.tagName === 'VIDEO' ? media.videoHeight : media.naturalHeight;
+}
+
 window.addEventListener('focus', () => {
   viewerState.lastFocusTime = Date.now();
 });
+
+let currentViewerImg = document.getElementById('viewer-img');
+if (currentViewerImg) currentViewerImg.classList.add('mode-default');
 
 /**
  * SVGシャープネスフィルターの初期化
@@ -124,9 +135,23 @@ window.addEventListener('DOMContentLoaded', () => {
         if (viewerState.paths && viewerState.currentIndex >= 0) {
           viewerState.paths[viewerState.currentIndex] = initialData.path;
         }
-        const assetUrl = window.veloceAPI.convertFileSrc(initialData.path);
+        const assetUrl = initialData.path.toLowerCase().endsWith('.mp4') 
+          ? `https://stream.localhost/?path=${encodeURIComponent(initialData.path)}` 
+          : window.veloceAPI.convertFileSrc(initialData.path);
         if (viewerUI.elements.viewerImg) {
-          viewerUI.elements.viewerImg.src = assetUrl;
+          if (initialData.path.toLowerCase().endsWith('.mp4')) {
+            const video = document.createElement('video');
+            video.autoplay = true;
+            video.loop = true;
+            video.muted = true;
+            video.id = 'viewer-img';
+            video.src = assetUrl;
+            viewerUI.elements.viewerImg.parentNode.replaceChild(video, viewerUI.elements.viewerImg);
+            viewerUI.elements.viewerImg = video;
+            currentViewerImg = video;
+          } else {
+            viewerUI.elements.viewerImg.src = assetUrl;
+          }
         }
         document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
       } catch (e) {}
@@ -231,8 +256,8 @@ function setZoomState(zoomed) {
   if (viewerState.isZoomed) {
     clearViewerImgLayoutClasses(img);
     img.classList.add('is-zoomed');
-    img.style.width = `${img.naturalWidth}px`;
-    img.style.height = `${img.naturalHeight}px`;
+    img.style.width = `${getMediaWidth(img)}px`;
+    img.style.height = `${getMediaHeight(img)}px`;
     viewerUI.setCursor('grab');
   } else {
     applyFitState();
@@ -255,8 +280,8 @@ function isRotationSwapped() {
 function getNaturalDimensions() {
   const swapped = isRotationSwapped();
   return {
-    width: swapped ? viewerUI.elements.viewerImg.naturalHeight : viewerUI.elements.viewerImg.naturalWidth,
-    height: swapped ? viewerUI.elements.viewerImg.naturalWidth : viewerUI.elements.viewerImg.naturalHeight
+    width: swapped ? getMediaHeight(viewerUI.elements.viewerImg) : getMediaWidth(viewerUI.elements.viewerImg),
+    height: swapped ? getMediaWidth(viewerUI.elements.viewerImg) : getMediaHeight(viewerUI.elements.viewerImg)
   };
 }
 
@@ -346,8 +371,8 @@ function updateFullscreenStyles() {
   const isSwapped = isRotationSwapped();
 
   if (isSwapped) {
-    const marginY = (img.naturalWidth - img.naturalHeight) / 2;
-    const marginX = (img.naturalHeight - img.naturalWidth) / 2;
+    const marginY = (getMediaWidth(img) - getMediaHeight(img)) / 2;
+    const marginX = (getMediaHeight(img) - getMediaWidth(img)) / 2;
     img.style.margin = `${marginY}px ${marginX}px`;
   } else {
     img.style.margin = '0';
@@ -437,9 +462,6 @@ async function getImagePath(index) {
   return null;
 }
 
-let currentViewerImg = document.getElementById('viewer-img');
-if (currentViewerImg) currentViewerImg.classList.add('mode-default');
-
 let isViewerWindowShown = false; // 初回表示フラグ
 let imageLoadSequence = 0;       // 非同期ロード競合防止用
 
@@ -488,10 +510,19 @@ function swapImageElement(newImg, sequenceId) {
     } catch (e) {}
   };
 
-  if (newImg.complete) {
-    onImageReady();
+  if (newImg.tagName === 'VIDEO') {
+    if (newImg.readyState >= 3) {
+      onImageReady();
+    } else {
+      newImg.oncanplay = onImageReady;
+      newImg.onerror = onImageReady;
+    }
   } else {
-    newImg.onload = onImageReady;
+    if (newImg.complete) {
+      onImageReady();
+    } else {
+      newImg.onload = onImageReady;
+    }
   }
 }
 
@@ -517,19 +548,35 @@ async function loadImage() {
       }
     }
 
-    const targetSrc = window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
+    const targetSrc = viewerState.currentImagePath.toLowerCase().endsWith('.mp4')
+      ? `https://stream.localhost/?path=${encodeURIComponent(viewerState.currentImagePath)}`
+      : window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
     if (!targetImg && currentViewerImg && currentViewerImg.src === targetSrc) {
       targetImg = currentViewerImg;
     }
 
     if (!targetImg) {
-      targetImg = document.createElement('img');
-      targetImg.decoding = 'async';
+      if (targetSrc.toLowerCase().endsWith('.mp4')) {
+        targetImg = document.createElement('video');
+        targetImg.autoplay = true;
+        targetImg.loop = true;
+        targetImg.muted = true;
+      } else {
+        targetImg = document.createElement('img');
+        targetImg.decoding = 'async';
+      }
       targetImg.src = targetSrc;
     }
 
     try {
-      await targetImg.decode();
+      if (targetImg.tagName === 'IMG') {
+        await targetImg.decode();
+      } else if (targetImg.tagName === 'VIDEO' && targetImg.readyState === 0) {
+        await new Promise(res => {
+          targetImg.onloadedmetadata = res;
+          targetImg.onerror = res;
+        });
+      }
     } catch (err) {
       console.warn("Background decode failed:", err);
     }
@@ -560,9 +607,19 @@ async function preloadAdjacentImages() {
     if (idx >= 0 && idx < viewerState.totalImages && !viewerState.preloadCache.has(idx)) {
       const path = await getImagePath(idx);
       if (path) {
-        const url = window.veloceAPI.convertFileSrc(path);
-        const img = document.createElement('img');
-        img.decoding = 'async'; // プリロードはバックグラウンドで行う
+        const url = path.toLowerCase().endsWith('.mp4')
+          ? `https://stream.localhost/?path=${encodeURIComponent(path)}`
+          : window.veloceAPI.convertFileSrc(path);
+        let img;
+        if (path.toLowerCase().endsWith('.mp4')) {
+          img = document.createElement('video');
+          img.autoplay = true;
+          img.loop = true;
+          img.muted = true;
+        } else {
+          img = document.createElement('img');
+          img.decoding = 'async';
+        }
         img.src = url;
         viewerState.preloadCache.set(idx, { img: img, path: path });
       }
