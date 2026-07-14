@@ -179,6 +179,7 @@ pub struct AppState {
     rating_filter_op: Mutex<String>,
     db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     smart_folders: Mutex<Vec<SmartFolderRule>>,
+    video_server_port: u16,
 }
 
 // --- ユーティリティ ---
@@ -3138,7 +3139,129 @@ async fn get_cache_info() -> CacheInfo {
     })
 }
 
+#[tauri::command]
+fn get_video_server_port(state: tauri::State<'_, AppState>) -> u16 {
+    state.video_server_port
+}
+
+fn start_local_video_server() -> u16 {
+    use std::net::TcpListener;
+    use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+    use std::fs::File;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind local video server");
+    let port = listener.local_addr().unwrap().port();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if let Ok(mut stream) = stream {
+                std::thread::spawn(move || {
+                    let mut reader = BufReader::new(&mut stream);
+                    let mut request_line = String::new();
+                    if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
+                        return;
+                    }
+
+                    let parts: Vec<&str> = request_line.split_whitespace().collect();
+                    if parts.len() < 2 { return; }
+                    let method = parts[0];
+                    let uri = parts[1];
+
+                    if method == "OPTIONS" {
+                        let mut headers = String::new();
+                        headers.push_str("HTTP/1.1 200 OK\r\n");
+                        headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                        headers.push_str("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
+                        headers.push_str("Access-Control-Allow-Headers: Range, Content-Type\r\n");
+                        headers.push_str("Access-Control-Max-Age: 86400\r\n");
+                        headers.push_str("Connection: close\r\n\r\n");
+                        let _ = stream.write_all(headers.as_bytes());
+                        return;
+                    }
+                    let mut path_str = String::new();
+                    if let Some(query) = uri.split('?').nth(1) {
+                        for pair in query.split('&') {
+                            if pair.starts_with("path=") {
+                                path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                            }
+                        }
+                    }
+
+                    if path_str.is_empty() {
+                        let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                        return;
+                    }
+
+                    let mut range_header = None;
+                    loop {
+                        let mut header_line = String::new();
+                        if reader.read_line(&mut header_line).is_err() { break; }
+                        let trimmed = header_line.trim();
+                        if trimmed.is_empty() { break; }
+                        let lower = trimmed.to_lowercase();
+                        if lower.starts_with("range:") {
+                            range_header = Some(trimmed[6..].trim().to_string());
+                        }
+                    }
+
+                    if let Ok(mut file) = File::open(&path_str) {
+                        if let Ok(metadata) = file.metadata() {
+                            let file_size = metadata.len();
+                            let mut start: u64 = 0;
+                            let mut end: u64 = file_size.saturating_sub(1);
+                            let mut is_range = false;
+
+                            if let Some(range) = range_header {
+                                if range.starts_with("bytes=") {
+                                    is_range = true;
+                                    let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
+                                    if !parts.is_empty() && !parts[0].is_empty() {
+                                        start = parts[0].parse::<u64>().unwrap_or(0);
+                                    }
+                                    if parts.len() > 1 && !parts[1].is_empty() {
+                                        end = parts[1].parse::<u64>().unwrap_or(end);
+                                    }
+                                }
+                            }
+
+                            let max_chunk: u64 = 2 * 1024 * 1024;
+                            let chunk_size = std::cmp::min(end.saturating_sub(start) + 1, max_chunk);
+
+                            let mut headers = String::new();
+                            if is_range {
+                                headers.push_str("HTTP/1.1 206 Partial Content\r\n");
+                                headers.push_str(&format!("Content-Range: bytes {}-{}/{}\r\n", start, start + chunk_size - 1, file_size));
+                            } else {
+                                headers.push_str("HTTP/1.1 200 OK\r\n");
+                            }
+                            headers.push_str("Content-Type: video/mp4\r\n");
+                            headers.push_str("Accept-Ranges: bytes\r\n");
+                            headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                            headers.push_str(&format!("Content-Length: {}\r\n", chunk_size));
+                            headers.push_str("Connection: close\r\n");
+                            headers.push_str("\r\n");
+
+                            if stream.write_all(headers.as_bytes()).is_ok() {
+                                if file.seek(SeekFrom::Start(start)).is_ok() {
+                                    let mut handle = file.take(chunk_size);
+                                    let _ = std::io::copy(&mut handle, &mut stream);
+                                }
+                            }
+                            return;
+                        }
+                    }
+                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n");
+                });
+            }
+        }
+    });
+
+    port
+}
+
 fn main() {
+    let video_port = start_local_video_server();
+
     let mut context = tauri::generate_context!();
 
     // tauri.conf.json で定義されているメインウィンドウの設定を退避させて、自動生成をキャンセルする
@@ -3351,6 +3474,7 @@ fn main() {
             rating_filter_op: Mutex::new("gte".to_string()),
             db_conn: init_db().expect("Failed to initialize SQLite database"),
             smart_folders: Mutex::new(Vec::new()),
+            video_server_port: video_port,
         })
         .setup(move |app| {
             // SQLite からレーティング情報をメモリにロード
@@ -3728,6 +3852,7 @@ fn main() {
             get_items,
             get_file_by_index,
             update_metadata_in_state,
+            get_video_server_port,
             notify_file_changed,
             update_smart_folders,
             notify_file_removed,

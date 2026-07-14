@@ -58,6 +58,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<void>} clearCache
  * @property {() => Promise<{path: string, fileCount: number, totalSizeBytes: number}>} getCacheInfo
  * @property {(path: string) => Promise<void>} openInExplorer
+ * @property {() => Promise<number>} getVideoServerPort
  */
 /**
  * @description
@@ -98,6 +99,7 @@ window.veloceAPI = {
   deleteSmartFolder: (id) => invoke('delete_smart_folder', { id }),
   getSmartFolderCounts: (rules) => invoke('get_smart_folder_counts', { rules }),
   migrateRatings: (ratings) => invoke('migrate_ratings', { ratings }),
+  getVideoServerPort: () => invoke('get_video_server_port'),
   setRating: (path, rating) => invoke('set_rating', { path, rating }),
   /**
    * 仮想スクロール用: 指定範囲のImageFileをRustから取得する

@@ -61,13 +61,21 @@ export function applyGlowEffect(el) {
  * 開発者ツールのショートカットをブロックします。
  */
 export function blockDevtoolsShortcuts() {
-  window.addEventListener('keydown', (e) => {
-    if (
-      (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'i' || e.code === 'KeyI')) ||
-      e.key === 'F12' || e.code === 'F12'
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
+  // Disabled for debugging
+}
+
+export function getStreamUrl(filePath, baseSrc) {
+  if (filePath.toLowerCase().endsWith('.mp4')) {
+    if (window.videoServerPort) {
+      return `http://localhost:${window.videoServerPort}/?path=` + encodeURIComponent(filePath);
     }
-  }, true);
+    console.warn("videoServerPort is missing! Falling back for", filePath);
+    try {
+      const urlObj = new URL(baseSrc);
+      return urlObj.protocol + '//stream.localhost/?path=' + encodeURIComponent(filePath);
+    } catch (e) {
+      return 'https://stream.localhost/?path=' + encodeURIComponent(filePath);
+    }
+  }
+  return baseSrc;
 }

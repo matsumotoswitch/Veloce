@@ -4,7 +4,7 @@
 
 import { appState, SmartFolderStore } from './renderer-state.js';
 import { UIManager, uiManager, formatSize, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
-import { debounce, blockDevtoolsShortcuts } from './utils.js';
+import { debounce, blockDevtoolsShortcuts, getStreamUrl } from './utils.js';
 import { validateFilename } from './path-utils.js';
 import { extractMetadataFields, highlightSearchTerms, buildInspectorSections } from './metadata-format.js';
 import { resolvePathDisplay } from './favorite-icons.js';
@@ -887,9 +887,12 @@ class ThumbnailQueueManager {
       this.updateDOM(filePath, url);
     } catch (err) {
       console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
-      const fallbackUrl = filePath.toLowerCase().endsWith('.mp4')
-        ? `https://stream.localhost/?path=${encodeURIComponent(filePath)}`
-        : window.veloceAPI.convertFileSrc(filePath);
+      let fallbackUrl;
+      if (filePath.toLowerCase().endsWith('.mp4')) {
+        fallbackUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23aaa"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>`;
+      } else {
+        fallbackUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
+      }
       appState.thumbnailUrls.set(filePath, fallbackUrl);
       this.updateDOM(filePath, fallbackUrl);
     } finally {
@@ -901,34 +904,66 @@ class ThumbnailQueueManager {
   generateThumbnailInBrowser(filePath) {
     return new Promise(async (resolve, reject) => {
       try {
-        const assetUrl = filePath.toLowerCase().endsWith('.mp4')
-          ? `https://stream.localhost/?path=${encodeURIComponent(filePath)}`
-          : window.veloceAPI.convertFileSrc(filePath);
+        const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
         let sourceElement, width, height;
 
         if (filePath.toLowerCase().endsWith('.mp4')) {
-          const video = document.createElement('video');
-          video.crossOrigin = 'anonymous'; // 必須: これがないとCanvasが汚染されtoDataURLでエラーになる
-          video.src = assetUrl;
-          video.muted = true;
-          video.preload = 'metadata';
-          
-          await new Promise((res, rej) => {
-            video.onloadedmetadata = () => {
-              // 0秒のままだと onseeked が発火しないブラウザの挙動を回避するため、
-              // かつ黒い画面（最初のフレーム）を避けるために1秒地点（短い動画なら中間）にシーク
-              const targetTime = video.duration ? Math.min(1.0, video.duration / 2) : 0.001;
-              video.currentTime = targetTime;
-            };
-            video.onseeked = () => {
-              width = video.videoWidth;
-              height = video.videoHeight;
-              sourceElement = video;
-              res();
-            };
-            video.onerror = (e) => rej(new Error("Video load failed"));
-          });
-          video.load();
+          const tryExtractFrame = async (videoSrc, needsCrossOrigin) => {
+            const video = document.createElement('video');
+            if (needsCrossOrigin) video.crossOrigin = 'anonymous';
+            video.src = videoSrc;
+            video.muted = true;
+            video.preload = 'metadata';
+            video.style.visibility = 'hidden';
+            video.style.position = 'absolute';
+            video.style.width = '1px';
+            video.style.height = '1px';
+            document.body.appendChild(video);
+            
+            await new Promise((res, rej) => {
+              video.onloadedmetadata = () => {
+                const targetTime = video.duration ? Math.min(1.0, video.duration / 2) : 0.001;
+                video.currentTime = targetTime;
+              };
+              video.onseeked = () => {
+                width = video.videoWidth;
+                height = video.videoHeight;
+                sourceElement = video;
+                if (video.parentNode) video.parentNode.removeChild(video);
+                res();
+              };
+              video.onerror = (e) => {
+                if (video.parentNode) video.parentNode.removeChild(video);
+                rej(new Error("Video load failed"));
+              };
+            });
+            video.load();
+          };
+
+          try {
+            await tryExtractFrame(assetUrl, true);
+          } catch (firstErr) {
+            console.warn(`[Thumbnail] Fast path failed for ${filePath}, trying Blob workaround...`);
+            if (sourceElement && sourceElement.parentNode) sourceElement.parentNode.removeChild(sourceElement);
+            sourceElement = null;
+
+            try {
+              // Win8.1 CORS fallback: fetch the first 5MB and try to play it
+              const response = await fetch(assetUrl, { headers: { Range: 'bytes=0-5242880' } });
+              if (!response.ok && response.status !== 206) throw new Error("Fetch failed");
+              const blob = await response.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              
+              try {
+                await tryExtractFrame(blobUrl, false);
+              } finally {
+                URL.revokeObjectURL(blobUrl);
+              }
+            } catch (fallbackErr) {
+              console.warn(`[Thumbnail] Blob workaround failed for ${filePath}:`, fallbackErr);
+              throw fallbackErr;
+            }
+          }
         } else {
           const response = await fetch(assetUrl);
           if (!response.ok) throw new Error("Fetch failed");
@@ -4221,6 +4256,13 @@ async function handleTreeNavigation(key) {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+  try {
+    if (window.veloceAPI && window.veloceAPI.getVideoServerPort) {
+      window.videoServerPort = await window.veloceAPI.getVideoServerPort();
+    }
+  } catch (e) {
+    console.warn("Failed to get video server port", e);
+  }
   window.__TAURI__.event.listen('precache-progress', (event) => {
     const [current, total] = event.payload;
     showNotification(`${current} / ${total} 件のキャッシュを作成中...`, 'info', 1000, 'precache');

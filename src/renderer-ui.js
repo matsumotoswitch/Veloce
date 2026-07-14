@@ -1,5 +1,5 @@
 import { appState } from './renderer-state.js';
-import { applyGlowEffect as glowElement } from './utils.js';
+import { applyGlowEffect as glowElement, getStreamUrl } from './utils.js';
 import { validateFilename, INVALID_FILENAME_RE } from './path-utils.js';
 import { showAppDialog } from './dialog-base.js';
 import { extractMetadataFields, parsePromptTags, formatRequestType } from './metadata-format.js';
@@ -1407,10 +1407,13 @@ class UIManager {
                 img.onload = function() { this.classList.remove('loading'); };
                 img.onerror = function() {
                   this.classList.remove('loading');
-                  const fallback = file.path.toLowerCase().endsWith('.mp4')
-                    ? `https://stream.localhost/?path=${encodeURIComponent(file.path)}`
-                    : window.veloceAPI.convertFileSrc(file.path);
-                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('https://stream.localhost/')) {
+                  let fallback;
+                  if (file.path.toLowerCase().endsWith('.mp4')) {
+                    fallback = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23aaa"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>`;
+                  } else {
+                    fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
+                  }
+                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
                     if (window.appState && window.appState.thumbnailUrls) {
                       window.appState.thumbnailUrls.set(file.path, fallback);
                     }
@@ -1430,10 +1433,13 @@ class UIManager {
                 img.onload = function() { this.classList.remove('loading'); };
                 img.onerror = function() {
                   this.classList.remove('loading');
-                  const fallback = file.path.toLowerCase().endsWith('.mp4')
-                    ? `https://stream.localhost/?path=${encodeURIComponent(file.path)}`
-                    : window.veloceAPI.convertFileSrc(file.path);
-                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('https://stream.localhost/')) {
+                  let fallback;
+                  if (file.path.toLowerCase().endsWith('.mp4')) {
+                    fallback = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23aaa"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>`;
+                  } else {
+                    fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
+                  }
+                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
                     if (window.appState && window.appState.thumbnailUrls) {
                       window.appState.thumbnailUrls.set(file.path, fallback);
                     }

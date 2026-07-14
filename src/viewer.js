@@ -4,7 +4,7 @@
 
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
-import { debounce, blockDevtoolsShortcuts } from './utils.js';
+import { debounce, blockDevtoolsShortcuts, getStreamUrl } from './utils.js';
 
 blockDevtoolsShortcuts();
 
@@ -69,7 +69,14 @@ function initUnsharpFilter() {
 }
 initUnsharpFilter();
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      if (window.veloceAPI && window.veloceAPI.getVideoServerPort) {
+        window.videoServerPort = await window.veloceAPI.getVideoServerPort();
+      }
+    } catch (e) {
+      console.warn("Failed to get video server port", e);
+    }
     const urlParams = new URLSearchParams(window.location.search);
     const indexParam = urlParams.get('index');
     if (indexParam !== null) {
@@ -135,9 +142,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (viewerState.paths && viewerState.currentIndex >= 0) {
           viewerState.paths[viewerState.currentIndex] = initialData.path;
         }
-        const assetUrl = initialData.path.toLowerCase().endsWith('.mp4') 
-          ? `https://stream.localhost/?path=${encodeURIComponent(initialData.path)}` 
-          : window.veloceAPI.convertFileSrc(initialData.path);
+        const assetUrl = getStreamUrl(initialData.path, window.veloceAPI.convertFileSrc(initialData.path));
         if (viewerUI.elements.viewerImg) {
           if (initialData.path.toLowerCase().endsWith('.mp4')) {
             const video = document.createElement('video');
@@ -570,9 +575,7 @@ async function loadImage() {
       }
     }
 
-    const targetSrc = viewerState.currentImagePath.toLowerCase().endsWith('.mp4')
-      ? `https://stream.localhost/?path=${encodeURIComponent(viewerState.currentImagePath)}`
-      : window.veloceAPI.convertFileSrc(viewerState.currentImagePath);
+    const targetSrc = getStreamUrl(viewerState.currentImagePath, window.veloceAPI.convertFileSrc(viewerState.currentImagePath));
     if (!targetImg && currentViewerImg && currentViewerImg.src === targetSrc) {
       targetImg = currentViewerImg;
     }
@@ -629,9 +632,7 @@ async function preloadAdjacentImages() {
     if (idx >= 0 && idx < viewerState.totalImages && !viewerState.preloadCache.has(idx)) {
       const path = await getImagePath(idx);
       if (path) {
-        const url = path.toLowerCase().endsWith('.mp4')
-          ? `https://stream.localhost/?path=${encodeURIComponent(path)}`
-          : window.veloceAPI.convertFileSrc(path);
+        const url = getStreamUrl(path, window.veloceAPI.convertFileSrc(path));
         let img;
         if (path.toLowerCase().endsWith('.mp4')) {
           img = document.createElement('video');
