@@ -135,6 +135,16 @@ async function refreshFileList(showToast = false) {
   appState.selectedIndex = -1;
   appState.thumbnailUrls.clear();
   if (window.thumbnailManager) window.thumbnailManager.clear();
+  
+  // フォルダ切り替え時にサムネイル読み込み中のトーストを強制的に消去
+  appState.thumbnailTotalRequested = 0;
+  appState.thumbnailCompleted = 0;
+  const tToast = document.getElementById('toast-thumbnail-progress');
+  if (tToast) {
+    tToast.classList.remove('show');
+    setTimeout(() => { if (tToast.parentElement) tToast.remove(); }, 300);
+  }
+
   if (uiManager.elements.searchBar) {
     uiManager.elements.searchBar.value = '';
   }
