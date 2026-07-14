@@ -20,11 +20,11 @@ const CONFIG = {
 };
 
 function getMediaWidth(media) {
-  return media.tagName === 'VIDEO' ? media.videoWidth : media.naturalWidth;
+  return media.tagName === 'VIDEO' ? (media.videoWidth || 1) : (media.naturalWidth || 1);
 }
 
 function getMediaHeight(media) {
-  return media.tagName === 'VIDEO' ? media.videoHeight : media.naturalHeight;
+  return media.tagName === 'VIDEO' ? (media.videoHeight || 1) : (media.naturalHeight || 1);
 }
 
 window.addEventListener('focus', () => {
@@ -146,6 +146,13 @@ window.addEventListener('DOMContentLoaded', () => {
             video.muted = true;
             video.id = 'viewer-img';
             video.src = assetUrl;
+            
+            video.onloadedmetadata = () => {
+              setZoomState(viewerState.isZoomed);
+              viewerUI.updateImageRendering();
+              resizeWindowToFitImage();
+            };
+
             viewerUI.elements.viewerImg.parentNode.replaceChild(video, viewerUI.elements.viewerImg);
             viewerUI.elements.viewerImg = video;
             currentViewerImg = video;

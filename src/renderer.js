@@ -952,8 +952,10 @@ class ThumbnailQueueManager {
         if (sourceElement.close) {
           sourceElement.close(); // Free memory immediately for ImageBitmap
         } else if (sourceElement.tagName === 'VIDEO') {
-          sourceElement.src = ''; // Release video resources
-          sourceElement.remove();
+          sourceElement.pause();      // 再生/デコードを確実に停止
+          sourceElement.src = '';     // ストリームの切断
+          sourceElement.load();       // ビデオ要素のリセットを強制
+          sourceElement.remove();     // DOMのクリーンアップ
         }
         resolve(dataUrl);
       } catch (err) {
