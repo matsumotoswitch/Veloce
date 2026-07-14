@@ -2819,3 +2819,53 @@ kbd {
 input[type="range"]:active ~ .slider-tooltip {
   opacity: 1;
 }
+/* Video Viewer Seek Bar */
+#video-controls-container {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  max-width: 800px;
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  z-index: 2000;
+  transition: opacity 0.3s;
+}
+
+#video-seek-bar {
+  flex-grow: 1;
+  cursor: pointer;
+}
+
+#video-time-display {
+  color: white;
+  font-family: 'Consolas', monospace;
+  font-size: 14px;
+  min-width: 80px;
+  text-align: right;
+}
+#video-play-btn {
+  background: transparent;
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+#video-play-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+#video-play-btn svg {
+  fill: currentColor;
+}

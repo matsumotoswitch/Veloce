@@ -537,6 +537,15 @@ function swapImageElement(newImg, sequenceId) {
       newImg.addEventListener('error', onImageReady, { once: true });
     }
   }
+
+  // 動画以外の画像に切り替わった場合はシークバーを隠す
+  if (newImg.tagName !== 'VIDEO' && typeof videoSeekBarContainer !== 'undefined' && videoSeekBarContainer) {
+    videoSeekBarContainer.style.display = 'none';
+    if (typeof videoSeekBarUpdateInterval !== 'undefined' && videoSeekBarUpdateInterval) {
+      clearInterval(videoSeekBarUpdateInterval);
+      videoSeekBarUpdateInterval = null;
+    }
+  }
 }
 
 async function loadImage() {
@@ -1091,6 +1100,10 @@ window.addEventListener('keydown', async (e) => {
         window.veloceAPI.arrangeViewers();
       }
       break;
+    case 's':
+    case 'S':
+      toggleVideoSeekBar();
+      break;
     case 'b':
     case 'B':
       viewerState.isBorderVisible = !viewerState.isBorderVisible;
@@ -1274,3 +1287,119 @@ function updateInfoContainerVisibility() {
 }
 
 window.updateScaleDisplay = updateScaleDisplay;
+
+let videoSeekBarContainer = null;
+let videoSeekBarUpdateInterval = null;
+
+function toggleVideoSeekBar() {
+  const img = viewerUI.elements.viewerImg;
+  if (!img || img.tagName !== 'VIDEO') {
+    if (typeof showToast === 'function') showToast("動画ではありません");
+    return;
+  }
+
+  if (!videoSeekBarContainer) {
+    videoSeekBarContainer = document.createElement('div');
+    videoSeekBarContainer.id = 'video-controls-container';
+    
+    const playBtn = document.createElement('button');
+    playBtn.id = 'video-play-btn';
+    const playIcon = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M8 5v14l11-7z"/></svg>';
+    const pauseIcon = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+    playBtn.innerHTML = pauseIcon; // 初期状態は再生中なのでポーズアイコン
+
+    const seekBar = document.createElement('input');
+    seekBar.type = 'range';
+    seekBar.id = 'video-seek-bar';
+    seekBar.min = 0;
+    seekBar.max = 100;
+    seekBar.step = 0.1;
+    seekBar.value = 0;
+
+    const timeDisplay = document.createElement('div');
+    timeDisplay.id = 'video-time-display';
+    timeDisplay.innerText = '0:00 / 0:00';
+
+    videoSeekBarContainer.appendChild(playBtn);
+    videoSeekBarContainer.appendChild(seekBar);
+    videoSeekBarContainer.appendChild(timeDisplay);
+    document.body.appendChild(videoSeekBarContainer);
+
+    // シークバー操作時に画面のパン（移動）やその他のクリックイベントが誤爆するのを防ぐ
+    const stopPropagation = (e) => e.stopPropagation();
+    ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'dblclick', 'contextmenu'].forEach(event => {
+      videoSeekBarContainer.addEventListener(event, stopPropagation);
+    });
+
+    let isSeeking = false;
+
+    playBtn.addEventListener('click', () => {
+      const currentImg = viewerUI.elements.viewerImg;
+      if (currentImg && currentImg.tagName === 'VIDEO') {
+        if (currentImg.paused) {
+          currentImg.play();
+        } else {
+          currentImg.pause();
+        }
+      }
+    });
+
+    let lastPausedState = null;
+    videoSeekBarContainer.updatePlayStateIcon = () => {
+      const currentImg = viewerUI.elements.viewerImg;
+      if (currentImg && currentImg.tagName === 'VIDEO') {
+        if (currentImg.paused !== lastPausedState) {
+          lastPausedState = currentImg.paused;
+          playBtn.innerHTML = currentImg.paused ? playIcon : pauseIcon;
+        }
+      }
+    };
+
+    seekBar.addEventListener('input', () => {
+      isSeeking = true;
+      const currentImg = viewerUI.elements.viewerImg;
+      if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
+        const time = (seekBar.value / 100) * currentImg.duration;
+        currentImg.currentTime = time;
+        timeDisplay.innerText = formatTime(time) + ' / ' + formatTime(currentImg.duration);
+      }
+    });
+
+    seekBar.addEventListener('change', () => {
+      isSeeking = false;
+    });
+
+    function formatTime(seconds) {
+      if (isNaN(seconds)) return "0:00";
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    videoSeekBarContainer.updateProgress = () => {
+      if (isSeeking) return;
+      const currentImg = viewerUI.elements.viewerImg;
+      if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
+        seekBar.value = (currentImg.currentTime / currentImg.duration) * 100;
+        timeDisplay.innerText = formatTime(currentImg.currentTime) + ' / ' + formatTime(currentImg.duration);
+        videoSeekBarContainer.updatePlayStateIcon();
+      }
+    };
+  }
+
+  // 表示時に現在の再生状態を反映させる
+  if (videoSeekBarContainer.updatePlayStateIcon) {
+    videoSeekBarContainer.updatePlayStateIcon();
+  }
+
+  if (videoSeekBarContainer.style.display === 'none' || !videoSeekBarContainer.style.display) {
+    videoSeekBarContainer.style.display = 'flex';
+    videoSeekBarUpdateInterval = setInterval(videoSeekBarContainer.updateProgress, 100);
+  } else {
+    videoSeekBarContainer.style.display = 'none';
+    if (videoSeekBarUpdateInterval) {
+      clearInterval(videoSeekBarUpdateInterval);
+      videoSeekBarUpdateInterval = null;
+    }
+  }
+}
