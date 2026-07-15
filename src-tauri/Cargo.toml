@@ -1,6 +1,6 @@
 [package]
 name = "veloce"
-version = "1.8.0"
+version = "1.9.0"
 description = "Veloce Image Viewer"
 authors = ["matsumotoswitch"]
 edition = "2021"
