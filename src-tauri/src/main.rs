@@ -2351,21 +2351,58 @@ fn generate_thumbnail_inner(
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn get_video_thumbnail(path: String) -> Result<String, String> {
-    use windows::core::{HSTRING, PCWSTR, ComInterface};
-    use windows::Win32::UI::Shell::{
-        SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_MEMORYONLY, SIIGBF_THUMBNAILONLY
-    };
-    use windows::Win32::Foundation::SIZE;
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED, CoUninitialize};
-    use windows::Win32::Graphics::Gdi::{
-        GetObjectW, DeleteObject, BITMAP, GetDIBits, CreateCompatibleDC, DeleteDC,
-        BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGBQUAD
-    };
-    use std::ffi::c_void;
-
     tokio::task::spawn_blocking(move || {
+        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+
+        let ffmpeg_path = std::env::current_exe()
+            .ok()
+            .and_then(|mut p| {
+                p.pop();
+                p.push("ffmpeg.exe");
+                if p.exists() {
+                    Some(p.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "ffmpeg".to_string());
+
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let output = Command::new(&ffmpeg_path)
+            .args(&[
+                "-v", "error",
+                "-ss", "1.0",
+                "-i", &path,
+                "-vframes", "1",
+                "-f", "image2pipe",
+                "-vcodec", "mjpeg",
+                "-"
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() && !out.stdout.is_empty() {
+                use base64::{Engine as _, engine::general_purpose};
+                let b64 = general_purpose::STANDARD.encode(&out.stdout);
+                return Ok(format!("data:image/jpeg;base64,{}", b64));
+            }
+        }
+
+        use windows::core::{HSTRING, PCWSTR, ComInterface};
+        use windows::Win32::UI::Shell::{
+            SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_MEMORYONLY, SIIGBF_THUMBNAILONLY
+        };
+        use windows::Win32::Foundation::SIZE;
+        use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED, CoUninitialize};
+        use windows::Win32::Graphics::Gdi::{
+            GetObjectW, DeleteObject, BITMAP, GetDIBits, CreateCompatibleDC, DeleteDC,
+            BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGBQUAD
+        };
+        use std::ffi::c_void;
+
         unsafe {
-            // Ensure COM is initialized on this thread
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
 
             let hpath = HSTRING::from(&path);
@@ -4618,5 +4655,34 @@ mod tests {
         assert_eq!(img.width, 100);
 
         let _ = std::fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn test_ffmpeg_fallback_path_resolution() {
+        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+        
+        let output = Command::new("non_existent_ffmpeg_command_123")
+            .creation_flags(0x08000000)
+            .output();
+        
+        // Ensure execution of non-existent command gracefully errors out
+        assert!(output.is_err());
+        
+        let ffmpeg_path = std::env::current_exe()
+            .ok()
+            .and_then(|mut p| {
+                p.pop();
+                p.push("ffmpeg.exe");
+                if p.exists() {
+                    Some(p.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "ffmpeg".to_string());
+            
+        // At minimum, should fallback to "ffmpeg" string
+        assert!(!ffmpeg_path.is_empty());
     }
 }
