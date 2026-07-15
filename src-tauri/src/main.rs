@@ -2203,6 +2203,7 @@ async fn generate_thumbnail(
         return Ok(String::new());
     }
 
+    let video_port = state.video_server_port;
     let url = tokio::task::spawn_blocking(move || {
         let t_start = std::time::Instant::now();
         let mtime = mem_mtime.unwrap_or_else(|| {
@@ -2220,9 +2221,7 @@ async fn generate_thumbnail(
         let url = if cache_bytes.is_empty() {
             String::new()
         } else {
-            use base64::{Engine as _, engine::general_purpose};
-            let b64 = general_purpose::STANDARD.encode(&cache_bytes);
-            format!("data:image/jpeg;base64,{}", b64)
+            format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
         };
         
         let fname = std::path::Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy();
@@ -2260,15 +2259,15 @@ async fn generate_thumbnail_batch(
         return Ok(Vec::new());
     }
 
+    let video_port = state.video_server_port;
     let results = tokio::task::spawn_blocking(move || {
         use rayon::prelude::*;
-        use base64::{Engine as _, engine::general_purpose};
         files_to_process.into_par_iter().map(|(file_path, mtime)| {
             let bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
             let url = if bytes.is_empty() {
                 String::new()
             } else {
-                format!("data:image/jpeg;base64,{}", general_purpose::STANDARD.encode(&bytes))
+                format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
             };
             ThumbnailResult { path: file_path, url }
         }).collect::<Vec<_>>()
@@ -2300,9 +2299,9 @@ async fn get_cached_thumbnail_batch(
         return Ok(Vec::new());
     }
 
+    let video_port = state.video_server_port;
     let results = tokio::task::spawn_blocking(move || {
         use rayon::prelude::*;
-        use base64::{Engine as _, engine::general_purpose};
         files_with_mtime.into_par_iter().filter_map(|(file_path, mtime)| {
             let clean_path = file_path.replace("\\\\?\\", "");
             let digest = xxhash_rust::xxh3::xxh3_64(
@@ -2317,8 +2316,7 @@ async fn get_cached_thumbnail_batch(
                 ) {
                     if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
                         if !bytes.is_empty() {
-                            let url = format!("data:image/jpeg;base64,{}",
-                                general_purpose::STANDARD.encode(&bytes));
+                            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime);
                             return Some(ThumbnailResult { path: file_path, url });
                         }
                     }
@@ -2960,13 +2958,10 @@ async fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn toggle_devtools(_window: tauri::Window) {
-    #[cfg(debug_assertions)]
-    {
-        if _window.is_devtools_open() {
-            _window.close_devtools();
-        } else {
-            _window.open_devtools();
-        }
+    if _window.is_devtools_open() {
+        _window.close_devtools();
+    } else {
+        _window.open_devtools();
     }
 }
 
@@ -3299,16 +3294,64 @@ fn start_local_video_server() -> u16 {
                         return;
                     }
                     let mut path_str = String::new();
+                    let mut is_thumb = false;
+                    let mut mtime: u64 = 0;
                     if let Some(query) = uri.split('?').nth(1) {
                         for pair in query.split('&') {
                             if pair.starts_with("path=") {
                                 path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                            } else if pair.starts_with("thumb=1") {
+                                is_thumb = true;
+                            } else if pair.starts_with("mtime=") {
+                                mtime = pair[6..].parse().unwrap_or(0);
                             }
                         }
                     }
 
                     if path_str.is_empty() {
                         let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                        return;
+                    }
+
+                    if is_thumb {
+                        let clean_path = path_str.replace("\\\\?\\", "");
+                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+                        let hash_key = format!("{:016x}", digest);
+
+                        let mut cache_bytes = Vec::new();
+                        // Open sqlite directly since we don't easily have AppState here
+                        if let Some(mut db_path) = crate::get_veloce_data_dir() {
+                            db_path.push("veloce_cache.db");
+                            if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                                if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+                                    if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                                        cache_bytes = thumb;
+                                    }
+                                }
+                            }
+                        }
+
+                        if !cache_bytes.is_empty() {
+                            let mimetype = if cache_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                                "image/png"
+                            } else if cache_bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || cache_bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
+                                "image/svg+xml"
+                            } else {
+                                "image/jpeg"
+                            };
+
+                            let mut headers = String::new();
+                            headers.push_str("HTTP/1.1 200 OK\r\n");
+                            headers.push_str(&format!("Content-Type: {}\r\n", mimetype));
+                            headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                            headers.push_str("Cache-Control: public, max-age=3600\r\n");
+                            headers.push_str(&format!("Content-Length: {}\r\n\r\n", cache_bytes.len()));
+                            
+                            let _ = stream.write_all(headers.as_bytes());
+                            let _ = stream.write_all(&cache_bytes);
+                        } else {
+                            let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n");
+                        }
                         return;
                     }
 

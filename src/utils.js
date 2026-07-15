@@ -61,7 +61,16 @@ export function applyGlowEffect(el) {
  * 開発者ツールのショートカットをブロックします。
  */
 export function blockDevtoolsShortcuts() {
-  // Disabled for debugging
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F12') {
+      e.preventDefault();
+      if (window.veloceAPI && window.veloceAPI.invoke) {
+        window.veloceAPI.invoke('toggle_devtools');
+      } else if (window.__TAURI__ && window.__TAURI__.invoke) {
+        window.__TAURI__.invoke('toggle_devtools');
+      }
+    }
+  });
 }
 
 export function getStreamUrl(filePath, baseSrc) {

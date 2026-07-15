@@ -866,15 +866,9 @@ class ThumbnailQueueManager {
         this.updateDOM(filePath, base64Url);
 
         // バックグラウンドでRustに保存後、巨大なBase64メモリを解放して軽量URLに差し替える
-        window.veloceAPI.saveThumbnail(filePath, base64Url).then(() => {
-          let mtime = 0;
-          if (appState.filtered_files) {
-            const f = appState.filtered_files.find(item => item.path === filePath);
-            if (f) mtime = f.mtime;
-          }
-          const lightUrl = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(filePath)}&mtime=${mtime}`;
-          // 生成時のBase64URLのままであれば（他の処理で上書きされていなければ）差し替える
-          if (appState.thumbnailUrls.get(filePath) === base64Url) {
+        window.veloceAPI.saveThumbnail(filePath, base64Url).then(async () => {
+          const lightUrl = await window.veloceAPI.getThumbnail(filePath);
+          if (lightUrl && appState.thumbnailUrls.get(filePath) === base64Url) {
             appState.thumbnailUrls.set(filePath, lightUrl);
             this.updateDOM(filePath, lightUrl);
           }
@@ -919,73 +913,7 @@ class ThumbnailQueueManager {
             }
           }
 
-          const tryExtractFrame = async (videoSrc, needsCrossOrigin) => {
-            const video = document.createElement('video');
-            if (needsCrossOrigin) video.crossOrigin = 'anonymous';
-            video.src = videoSrc;
-            video.muted = true;
-            video.preload = 'metadata';
-            video.style.visibility = 'hidden';
-            video.style.position = 'absolute';
-            video.style.width = '1px';
-            video.style.height = '1px';
-            document.body.appendChild(video);
-            
-            await new Promise((res, rej) => {
-              video.onloadedmetadata = () => {
-                const targetTime = video.duration ? Math.min(1.0, video.duration / 2) : 0.001;
-                video.currentTime = targetTime;
-              };
-              video.onseeked = () => {
-                width = video.videoWidth;
-                height = video.videoHeight;
-                sourceElement = video;
-                if (video.parentNode) video.parentNode.removeChild(video);
-                res();
-              };
-              video.onerror = (e) => {
-                if (video.parentNode) video.parentNode.removeChild(video);
-                rej(new Error("Video load failed"));
-              };
-            });
-            video.load();
-          };
-
-          try {
-            await tryExtractFrame(assetUrl, true);
-          } catch (firstErr) {
-            console.warn(`[Thumbnail] Fast path failed for ${filePath}, trying Blob workaround...`);
-            if (sourceElement && sourceElement.parentNode) sourceElement.parentNode.removeChild(sourceElement);
-            sourceElement = null;
-
-            try {
-              // Win8.1 CORS fallback: Check file size. If < 100MB, fetch entire file.
-              let fileSize = 0;
-              if (window.appState && window.appState.filteredFiles) {
-                const f = window.appState.filteredFiles.find(x => x.path === filePath);
-                if (f) fileSize = f.size || 0;
-              }
-
-              const MAX_SIZE = 100 * 1024 * 1024; // 100MB
-              if (fileSize > MAX_SIZE) {
-                throw new Error(`File too large for Blob fallback: ${fileSize} bytes`);
-              }
-
-              const response = await fetch(assetUrl);
-              if (!response.ok) throw new Error("Fetch failed");
-              const blob = await response.blob();
-              const blobUrl = URL.createObjectURL(blob);
-              
-              try {
-                await tryExtractFrame(blobUrl, false);
-              } finally {
-                URL.revokeObjectURL(blobUrl);
-              }
-            } catch (fallbackErr) {
-              console.warn(`[Thumbnail] Blob workaround failed for ${filePath}:`, fallbackErr);
-              throw fallbackErr;
-            }
-          }
+          return reject(new Error("Native video thumbnail extraction failed or is unsupported."));
         } else {
           const response = await fetch(assetUrl);
           if (!response.ok) throw new Error("Fetch failed");
