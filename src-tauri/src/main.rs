@@ -2994,15 +2994,6 @@ async fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn toggle_devtools(_window: tauri::Window) {
-    if _window.is_devtools_open() {
-        _window.close_devtools();
-    } else {
-        _window.open_devtools();
-    }
-}
-
-#[tauri::command]
 fn get_license_text() -> String {
     include_str!("../../LICENSE.md").to_string()
 }
@@ -4085,7 +4076,6 @@ fn main() {
             trash_file,
             trash_folder,
             copy_image_to_clipboard,
-            toggle_devtools,
             get_license_text,
             rename_file,
             rename_folder,

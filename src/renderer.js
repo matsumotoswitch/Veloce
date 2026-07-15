@@ -1586,6 +1586,7 @@ function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>F11</kbd></td><td>フルスクリーン表示切り替え</td></tr>
         <tr><td><kbd>A</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
         <tr><td><kbd>B</kbd></td><td>ウィンドウ枠（ボーダー）・UIの表示切替</td></tr>
+        <tr><td><kbd>S</kbd></td><td>動画のシークバーの表示 / 非表示</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>画像をゴミ箱に移動し、次の画像を表示</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー</td></tr>
         <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる</td></tr>
