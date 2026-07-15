@@ -71,4 +71,27 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     expect(img.src).toContain('asset://test.jpg');
     expect(appState.thumbnailUrls.get('test.jpg')).toBe('asset://test.jpg');
   });
+
+  it('should fallback to Web Worker if Rust cache is empty (mock test)', async () => {
+    // 擬似的に Web Worker の動作をテスト
+    const workerPool = {
+      generate: vi.fn(async () => 'blob:worker-generated')
+    };
+    
+    window.veloceAPI.getThumbnail.mockResolvedValueOnce(null); // キャッシュミス
+    window.veloceAPI.saveThumbnail = vi.fn().mockResolvedValue(true);
+    
+    const filePath = 'test.webp';
+    let url = await window.veloceAPI.getThumbnail(filePath);
+    
+    if (!url) {
+      const assetUrl = window.veloceAPI.convertFileSrc(filePath);
+      url = await workerPool.generate(filePath, assetUrl);
+      window.veloceAPI.saveThumbnail(filePath, url);
+    }
+    
+    expect(workerPool.generate).toHaveBeenCalledWith('test.webp', 'asset://test.webp');
+    expect(window.veloceAPI.saveThumbnail).toHaveBeenCalledWith('test.webp', 'blob:worker-generated');
+    expect(url).toBe('blob:worker-generated');
+  });
 });

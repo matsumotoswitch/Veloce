@@ -15,6 +15,115 @@ import {
   getTabNameForPath as resolveTabName
 } from './renderer-tabs.js';
 
+
+// --- Thumbnail Web Worker Pool ---
+const workerCode = `
+self.onmessage = async (e) => {
+  const { id, assetUrl, filePath } = e.data;
+  try {
+    const response = await fetch(assetUrl);
+    if (!response.ok) throw new Error("Fetch failed");
+    const blob = await response.blob();
+    const sourceElement = await createImageBitmap(blob);
+    
+    let width = sourceElement.width;
+    let height = sourceElement.height;
+    if (width > 384 || height > 384) {
+      const ratio = Math.min(384 / width, 384 / height);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+    }
+    width = Math.max(1, width);
+    height = Math.max(1, height);
+    
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = '#1e1e1e';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(sourceElement, 0, 0, width, height);
+    
+    const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+    sourceElement.close();
+    
+    const reader = new FileReader();
+    reader.onload = () => {
+      self.postMessage({ id, filePath, success: true, base64Url: reader.result });
+    };
+    reader.onerror = () => {
+      self.postMessage({ id, filePath, success: false, error: "FileReader failed" });
+    };
+    reader.readAsDataURL(outBlob);
+  } catch (err) {
+    self.postMessage({ id, filePath, success: false, error: err.message });
+  }
+};
+`;
+
+class ThumbnailWorkerPool {
+  constructor(size = 4) {
+    this.workers = [];
+    this.queue = [];
+    this.callbacks = new Map();
+    this.nextId = 1;
+    this.activeCount = 0;
+    
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(blob);
+    
+    for (let i = 0; i < size; i++) {
+      const worker = new Worker(workerUrl);
+      worker.onmessage = (e) => this.onMessage(e);
+      this.workers.push(worker);
+    }
+  }
+
+  onMessage(e) {
+    this.activeCount--;
+    const { id, success, base64Url, error } = e.data;
+    const callbacks = this.callbacks.get(id);
+    if (callbacks) {
+      this.callbacks.delete(id);
+      if (success) callbacks.resolve(base64Url);
+      else callbacks.reject(new Error(error));
+    }
+    this.processQueue();
+  }
+
+  processQueue() {
+    if (this.queue.length === 0 || this.activeCount >= this.workers.length) return;
+    
+    const task = this.queue.shift();
+    const worker = this.workers[this.activeCount % this.workers.length];
+    this.activeCount++;
+    worker.postMessage(task.msg);
+  }
+
+  generate(filePath, assetUrl) {
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      this.callbacks.set(id, { resolve, reject });
+      this.queue.push({ msg: { id, filePath, assetUrl } });
+      this.processQueue();
+    });
+  }
+}
+const thumbnailWorkerPool = new ThumbnailWorkerPool(4);
+
+// Phase 4: Context Cleanup Strictness
+export function cleanupContext() {
+  if (appState && appState.thumbnailUrls) {
+    appState.thumbnailUrls.forEach(url => {
+      if (url && url.startsWith('blob:')) {
+        URL.revokeObjectURL(url);
+      }
+    });
+    appState.thumbnailUrls.clear();
+  }
+  if (window.thumbnailManager) window.thumbnailManager.clear();
+}
+
 blockDevtoolsShortcuts();
 
 const CONFIG = {
@@ -133,8 +242,7 @@ async function refreshFileList(showToast = false) {
   appState.totalCount = 0;
   appState.selection.clear();
   appState.selectedIndex = -1;
-  appState.thumbnailUrls.clear();
-  if (window.thumbnailManager) window.thumbnailManager.clear();
+  cleanupContext();
   
   // フォルダ切り替え時にサムネイル読み込み中のトーストを強制的に消去
   appState.thumbnailTotalRequested = 0;
@@ -852,20 +960,19 @@ class ThumbnailQueueManager {
   }
 
   async runTask(filePath) {
-    const start = performance.now();
     try {
-      // 1. Rust にキャッシュを問い合わせ (DBのみ検索なので超高速)
+      // 1. Rust にキャッシュ取得を依頼 (または動画のみRustで生成)
       let url = await window.veloceAPI.getThumbnail(filePath);
-      let fetchTime = performance.now();
       
-      // 2. キャッシュがない場合、WebView2 (ブラウザ) の高速エンジンでサムネイル生成
+      // 2. キャッシュがない場合、Web Workerで非同期＆非ブロッキングで生成
       if (!url) {
-        const base64Url = await this.generateThumbnailInBrowser(filePath);
+        const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
+        const base64Url = await thumbnailWorkerPool.generate(filePath, assetUrl);
         
         appState.thumbnailUrls.set(filePath, base64Url);
         this.updateDOM(filePath, base64Url);
 
-        // バックグラウンドでRustに保存後、巨大なBase64メモリを解放して軽量URLに差し替える
+        // バックグラウンドでRustに保存後、BlobURLなどがあれば差し替え
         window.veloceAPI.saveThumbnail(filePath, base64Url).then(async () => {
           const lightUrl = await window.veloceAPI.getThumbnail(filePath);
           if (lightUrl && appState.thumbnailUrls.get(filePath) === base64Url) {
@@ -882,7 +989,7 @@ class ThumbnailQueueManager {
     } catch (err) {
       console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
       let fallbackUrl;
-      if (filePath.toLowerCase().endsWith('.mp4')) {
+      if (filePath.toLowerCase().endsWith('.mp4') || filePath.toLowerCase().endsWith('.webm') || filePath.toLowerCase().endsWith('.avi')) {
         fallbackUrl = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23aaa"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>`;
       } else {
         fallbackUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
@@ -894,71 +1001,6 @@ class ThumbnailQueueManager {
       this.processNext();
     }
   }
-
-  generateThumbnailInBrowser(filePath) {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
-        let sourceElement, width, height;
-
-        if (filePath.toLowerCase().endsWith('.mp4')) {
-          if (window.veloceAPI.getVideoThumbnail) {
-            try {
-              const nativeB64 = await window.veloceAPI.getVideoThumbnail(filePath);
-              if (nativeB64) {
-                return resolve(nativeB64);
-              }
-            } catch (err) {
-              console.warn(`[Thumbnail] Native extraction failed for ${filePath}, falling back...`, err);
-            }
-          }
-
-          return reject(new Error("Native video thumbnail extraction failed or is unsupported."));
-        } else {
-          const response = await fetch(assetUrl);
-          if (!response.ok) throw new Error("Fetch failed");
-          const blob = await response.blob();
-          sourceElement = await createImageBitmap(blob);
-          width = sourceElement.width;
-          height = sourceElement.height;
-        }
-
-        const canvas = document.createElement('canvas');
-        
-        if (width > 384 || height > 384) {
-          const ratio = Math.min(384 / width, 384 / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        // 最低1pxを保証
-        width = Math.max(1, width);
-        height = Math.max(1, height);
-        
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        
-        // Veloceの背景色(#1e1e1e)で塗りつぶして透明PNG/WebP対策
-        ctx.fillStyle = '#1e1e1e';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(sourceElement, 0, 0, width, height);
-        
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        if (sourceElement.close) {
-          sourceElement.close(); // Free memory immediately for ImageBitmap
-        } else if (sourceElement.tagName === 'VIDEO') {
-          sourceElement.pause();      // 再生/デコードを確実に停止
-          sourceElement.src = '';     // ストリームの切断
-          sourceElement.load();       // ビデオ要素のリセットを強制
-          sourceElement.remove();     // DOMのクリーンアップ
-        }
-        resolve(dataUrl);
-      } catch (err) {
-        reject(err);
-      }
-    });
-  }
-
   updateDOM(filePath, url) {
     // uiManager._domByPath (Map) から O(1) で要素を取得する
     const uiMgr = window.uiManager || uiManager;
@@ -2202,10 +2244,7 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
 
     if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
       await window.veloceAPI.clearMetadataCache(pathsToRebuild);
-      appState.thumbnailUrls.forEach(url => {
-        if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
-      });
-      appState.thumbnailUrls.clear();
+      cleanupContext();
       appState.thumbnailTotalRequested = 0;
       appState.thumbnailCompleted = 0;
       uiManager.showToast('キャッシュの再構築が完了しました', 3000, 'rebuild-folder', 'success');
@@ -4891,7 +4930,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         uiManager.showToast('キャッシュを削除しています', 0, 'cache-clear', 'info');
         try {
           await window.veloceAPI.clearCache();
-          appState.thumbnailUrls.clear();
+          cleanupContext();
           resetThumbnailPreloader();
           await refreshFileList();
           uiManager.showToast('すべてのキャッシュを削除しました。', 3000, 'cache-clear', 'success');

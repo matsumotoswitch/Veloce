@@ -2329,29 +2329,9 @@ async fn get_cached_thumbnail_batch(
     Ok(results)
 }
 
-fn generate_thumbnail_inner(
-    file_path: &str,
-    mtime: u64,
-    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-) -> Vec<u8> {
-    let clean_path = file_path.replace("\\\\?\\", "");
-    let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-    let hash_key = format!("{:016x}", digest_clean);
-
-    if let Ok(conn) = db_conn.get() {
-        if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-            if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
-                return thumb;
-            }
-        }
-    }
-    Vec::new() // キャッシュがない場合は空を返し、JS側でCanvas生成させる
-}
-
-#[cfg(target_os = "windows")]
-#[tauri::command]
-async fn get_video_thumbnail(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
+    #[cfg(target_os = "windows")]
+    {
         use std::process::Command;
         use std::os::windows::process::CommandExt;
 
@@ -2373,7 +2353,7 @@ async fn get_video_thumbnail(path: String) -> Result<String, String> {
             .args(&[
                 "-v", "error",
                 "-ss", "1.0",
-                "-i", &path,
+                "-i", path,
                 "-vframes", "1",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
@@ -2384,9 +2364,7 @@ async fn get_video_thumbnail(path: String) -> Result<String, String> {
 
         if let Ok(out) = output {
             if out.status.success() && !out.stdout.is_empty() {
-                use base64::{Engine as _, engine::general_purpose};
-                let b64 = general_purpose::STANDARD.encode(&out.stdout);
-                return Ok(format!("data:image/jpeg;base64,{}", b64));
+                return Some(out.stdout); // JPEG bytes
             }
         }
 
@@ -2405,29 +2383,29 @@ async fn get_video_thumbnail(path: String) -> Result<String, String> {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
 
-            let hpath = HSTRING::from(&path);
+            let hpath = HSTRING::from(path);
             let item: windows::Win32::UI::Shell::IShellItem = match SHCreateItemFromParsingName(PCWSTR::from_raw(hpath.as_ptr()), None) {
                 Ok(item) => item,
-                Err(e) => {
+                Err(_) => {
                     let _ = CoUninitialize();
-                    return Err(format!("SHCreateItemFromParsingName failed: {}", e));
+                    return None;
                 }
             };
 
             let factory: IShellItemImageFactory = match item.cast() {
                 Ok(f) => f,
-                Err(e) => {
+                Err(_) => {
                     let _ = CoUninitialize();
-                    return Err(format!("IShellItemImageFactory cast failed: {}", e));
+                    return None;
                 }
             };
 
             let size = SIZE { cx: 256, cy: 256 };
             let hbitmap = match factory.GetImage(size, SIIGBF_MEMORYONLY | SIIGBF_THUMBNAILONLY) {
                 Ok(bmp) => bmp,
-                Err(e) => {
+                Err(_) => {
                     let _ = CoUninitialize();
-                    return Err(format!("GetImage failed: {}", e));
+                    return None;
                 }
             };
 
@@ -2435,7 +2413,7 @@ async fn get_video_thumbnail(path: String) -> Result<String, String> {
             if GetObjectW(hbitmap, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut c_void)) == 0 {
                 let _ = DeleteObject(hbitmap);
                 let _ = CoUninitialize();
-                return Err("GetObjectW failed".into());
+                return None;
             }
 
             let hdc = CreateCompatibleDC(None);
@@ -2474,10 +2452,9 @@ async fn get_video_thumbnail(path: String) -> Result<String, String> {
             let _ = CoUninitialize();
 
             if res == 0 {
-                return Err("GetDIBits failed".into());
+                return None;
             }
 
-            // Convert BGRA to RGBA
             for chunk in pixels.chunks_exact_mut(4) {
                 chunk.swap(0, 2);
             }
@@ -2485,25 +2462,58 @@ async fn get_video_thumbnail(path: String) -> Result<String, String> {
             if let Some(rgba_img) = image::RgbaImage::from_raw(bm.bmWidth as u32, bm.bmHeight as u32, pixels) {
                 let mut bytes: Vec<u8> = Vec::new();
                 let mut cursor = std::io::Cursor::new(&mut bytes);
-                if let Err(e) = rgba_img.write_to(&mut cursor, image::ImageFormat::Png) {
-                    return Err(format!("Image encode failed: {}", e));
+                if rgba_img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {
+                    return Some(bytes);
                 }
-                
-                use base64::{Engine as _, engine::general_purpose};
-                let b64 = general_purpose::STANDARD.encode(&bytes);
-                Ok(format!("data:image/png;base64,{}", b64))
-            } else {
-                Err("Failed to create RgbaImage from raw pixels".into())
             }
         }
-    }).await.map_err(|e| e.to_string())?
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
 }
 
-#[cfg(not(target_os = "windows"))]
-#[tauri::command]
-async fn get_video_thumbnail(_path: String) -> Result<String, String> {
-    Err("Not supported on this OS".into())
+fn generate_thumbnail_inner(
+    file_path: &str,
+    mtime: u64,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) -> Vec<u8> {
+    let clean_path = file_path.replace("\\\\?\\", "");
+    let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+    let hash_key = format!("{:016x}", digest_clean);
+
+    if let Ok(conn) = db_conn.get() {
+        if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+            if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                return thumb;
+            }
+        }
+    }
+    
+    let lower_path = file_path.to_lowercase();
+    let generated_bytes = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+        generate_video_thumbnail_sync(file_path)
+    } else {
+        None
+    };
+    
+    if let Some(bytes) = generated_bytes {
+        if let Ok(conn) = db_conn.get() {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let _ = conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, last_accessed = excluded.last_accessed",
+                rusqlite::params![hash_key, bytes, now],
+            );
+        }
+        return bytes;
+    }
+    
+    Vec::new()
 }
+
 
 #[tauri::command]
 async fn save_thumbnail(
@@ -4089,7 +4099,6 @@ fn main() {
             get_all_ratings,
             migrate_ratings,
             get_smart_folder_counts,
-            get_video_thumbnail,
         ])
         .run(context)
         .expect("error while running tauri application");
