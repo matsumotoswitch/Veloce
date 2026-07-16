@@ -696,6 +696,7 @@ fn load_directory(
         // Veloceのキャッシュディレクトリ構造に合わせる
         let path_for_spawn = path_clone.clone();
         // 非同期ランタイムのワーカースレッドをブロックしないよう、spawn_blockingでラップする
+        let app_clone2 = app_clone.clone();
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
 
@@ -772,6 +773,14 @@ fn load_directory(
                     }).collect();
 
                     for chunk in hash_path_pairs.chunks(chunk_size) {
+                        {
+                            use tauri::Manager;
+                            if let Ok(dir_lock) = app_clone2.state::<AppState>().current_dir.lock() {
+                                if *dir_lock != path_for_spawn {
+                                    break;
+                                }
+                            }
+                        }
                         let placeholders = vec!["?"; chunk.len()].join(",");
                         let query = format!(
                             "SELECT hash_key, (thumbnail IS NOT NULL), (metadata IS NOT NULL) FROM cache WHERE hash_key IN ({})",
