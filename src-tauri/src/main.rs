@@ -2370,10 +2370,10 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
 
         use windows::core::{HSTRING, PCWSTR, ComInterface};
         use windows::Win32::UI::Shell::{
-            SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_MEMORYONLY, SIIGBF_THUMBNAILONLY
+            SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_THUMBNAILONLY
         };
         use windows::Win32::Foundation::SIZE;
-        use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED, CoUninitialize};
+        use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED, CoUninitialize};
         use windows::Win32::Graphics::Gdi::{
             GetObjectW, DeleteObject, BITMAP, GetDIBits, CreateCompatibleDC, DeleteDC,
             BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGBQUAD
@@ -2381,12 +2381,13 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
         use std::ffi::c_void;
 
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
-            let hpath = HSTRING::from(path);
+            let clean_path = path.replace("\\\\?\\", "");
+            let hpath = HSTRING::from(clean_path);
             let item: windows::Win32::UI::Shell::IShellItem = match SHCreateItemFromParsingName(PCWSTR::from_raw(hpath.as_ptr()), None) {
                 Ok(item) => item,
-                Err(_) => {
+                Err(_e) => {
                     let _ = CoUninitialize();
                     return None;
                 }
@@ -2394,16 +2395,16 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
 
             let factory: IShellItemImageFactory = match item.cast() {
                 Ok(f) => f,
-                Err(_) => {
+                Err(_e) => {
                     let _ = CoUninitialize();
                     return None;
                 }
             };
 
             let size = SIZE { cx: 256, cy: 256 };
-            let hbitmap = match factory.GetImage(size, SIIGBF_MEMORYONLY | SIIGBF_THUMBNAILONLY) {
+            let hbitmap = match factory.GetImage(size, SIIGBF_THUMBNAILONLY) {
                 Ok(bmp) => bmp,
-                Err(_) => {
+                Err(_e) => {
                     let _ = CoUninitialize();
                     return None;
                 }
@@ -2460,9 +2461,10 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
             }
 
             if let Some(rgba_img) = image::RgbaImage::from_raw(bm.bmWidth as u32, bm.bmHeight as u32, pixels) {
+                let rgb_img = image::DynamicImage::ImageRgba8(rgba_img).into_rgb8();
                 let mut bytes: Vec<u8> = Vec::new();
                 let mut cursor = std::io::Cursor::new(&mut bytes);
-                if rgba_img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {
+                if rgb_img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {
                     return Some(bytes);
                 }
             }
@@ -4683,5 +4685,17 @@ mod tests {
             
         // At minimum, should fallback to "ffmpeg" string
         assert!(!ffmpeg_path.is_empty());
+    }
+
+    #[test]
+    fn test_os_thumbnail_fallback() {
+        let root_dir = std::env::current_dir().unwrap().parent().unwrap().to_path_buf();
+        let test_img_path = root_dir.join("app-icon.png");
+        
+        // This should fall back to the OS API since ffmpeg will fail to extract a video frame from a png.
+        let result = super::generate_video_thumbnail_sync(&test_img_path.to_string_lossy());
+        
+        // The OS API should successfully extract a thumbnail.
+        assert!(result.is_some(), "OS thumbnail fallback failed");
     }
 }
