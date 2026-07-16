@@ -726,7 +726,7 @@ function renderFavorites() {
       icon.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
       icon.style.color = 'var(--glow-gold)';
     } else {
-      icon.textContent = fav.icon || '⭐';
+      icon.innerHTML = UIManager.ICONS.FAV_STAR;
     }
     icon.style.display = 'flex';
     icon.style.alignItems = 'center';
@@ -5396,7 +5396,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
         window.debouncedUpdateSmartFolderCounts();
       }
-      updateSmartFolderCountsUI();
     });
   }
 
