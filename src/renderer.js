@@ -815,6 +815,19 @@ window.updateThumbnailToast = function updateThumbnailToast() {
 
     if (appState.thumbnailCompleted < appState.thumbnailTotalRequested) {
       uiManager.showToast(`サムネイル読込中 (${appState.thumbnailCompleted}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
+      
+      // フォールバック: 3秒間進捗がなければ強制的にトーストを消去（スタック防止）
+      clearTimeout(appState.thumbnailToastTimeout);
+      appState.thumbnailToastTimeout = setTimeout(() => {
+        const t = document.getElementById('toast-thumbnail-progress');
+        if (t) {
+          t.classList.remove('show');
+          setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+        }
+        appState.thumbnailTotalRequested = 0;
+        appState.thumbnailCompleted = 0;
+        appState.lastThumbnailToastTime = 0;
+      }, 3000);
     } else {
       uiManager.showToast(`サムネイル読込完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
       clearTimeout(appState.thumbnailToastTimeout);
@@ -998,6 +1011,9 @@ class ThumbnailQueueManager {
       this.updateDOM(filePath, fallbackUrl);
     } finally {
       this.activeTasks.delete(filePath);
+      if (typeof window.markThumbnailCompleted === 'function') {
+        window.markThumbnailCompleted(filePath);
+      }
       this.processNext();
     }
   }
