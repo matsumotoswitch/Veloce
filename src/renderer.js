@@ -1095,6 +1095,9 @@ const scheduleRefresh = debounce(async () => {
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
   }
+  if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+    window.debouncedUpdateSmartFolderCounts();
+  }
 }, CONFIG.REFRESH_DELAY);
 
 function createTreeNode(folder, isRoot = false) {
@@ -5390,6 +5393,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (appState.ratingFilterVal > 0 || appState.sortConfig.key === 'rating') {
         scheduleRefresh();
       }
+      if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+        window.debouncedUpdateSmartFolderCounts();
+      }
       updateSmartFolderCountsUI();
     });
   }
@@ -5466,6 +5472,8 @@ function createSmartFolderNode(f) {
 /**
  * スマートフォルダの件数を取得してUIに反映する非同期関数
  */
+window.debouncedUpdateSmartFolderCounts = debounce(updateSmartFolderCountsUI, 500);
+
 async function updateSmartFolderCountsUI() {
   if (!window.veloceAPI.getSmartFolderCounts) return;
   try {
