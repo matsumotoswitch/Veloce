@@ -61,23 +61,30 @@ self.onmessage = async (e) => {
 };
 `;
 
-class ThumbnailWorkerPool {
-  constructor(size = 4) {
-    this.workers = [];
-    this.queue = [];
-    this.callbacks = new Map();
-    this.nextId = 1;
-    this.activeCount = 0;
-    
-    const blob = new Blob([workerCode], { type: 'application/javascript' });
-    const workerUrl = URL.createObjectURL(blob);
-    
-    for (let i = 0; i < size; i++) {
-      const worker = new Worker(workerUrl);
-      worker.onmessage = (e) => this.onMessage(e);
-      this.workers.push(worker);
+  class ThumbnailWorkerPool {
+    constructor(size = 4) {
+      this.workers = [];
+      this.queue = [];
+      this.callbacks = new Map();
+      this.nextId = 1;
+      this.activeCount = 0;
+      this.initialized = false;
+
+      try {
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+
+        for (let i = 0; i < size; i++) {
+          const worker = new Worker(workerUrl);
+          worker.onmessage = (e) => this.onMessage(e);
+          this.workers.push(worker);
+        }
+        this.initialized = true;
+      } catch (err) {
+        console.warn("Failed to initialize Web Workers. Falling back to main thread thumbnail generation.", err);
+        this.initialized = false;
+      }
     }
-  }
 
   onMessage(e) {
     this.activeCount--;
@@ -91,24 +98,66 @@ class ThumbnailWorkerPool {
     this.processQueue();
   }
 
-  processQueue() {
-    if (this.queue.length === 0 || this.activeCount >= this.workers.length) return;
-    
-    const task = this.queue.shift();
-    const worker = this.workers[this.activeCount % this.workers.length];
-    this.activeCount++;
-    worker.postMessage(task.msg);
-  }
+    processQueue() {
+      if (this.queue.length === 0 || this.activeCount >= this.workers.length || !this.initialized) return;
 
-  generate(filePath, assetUrl) {
-    return new Promise((resolve, reject) => {
-      const id = this.nextId++;
-      this.callbacks.set(id, { resolve, reject });
-      this.queue.push({ msg: { id, filePath, assetUrl } });
-      this.processQueue();
-    });
+      const task = this.queue.shift();
+      const worker = this.workers[this.activeCount % this.workers.length];
+      this.activeCount++;
+      worker.postMessage(task.msg);
+    }
+
+    generate(filePath, assetUrl) {
+      if (!this.initialized || this.workers.length === 0) {
+        return this.generateMainThread(filePath, assetUrl);
+      }
+      return new Promise((resolve, reject) => {
+        const id = this.nextId++;
+        this.callbacks.set(id, { resolve, reject });
+        this.queue.push({ msg: { id, filePath, assetUrl } });
+        this.processQueue();
+      });
+    }
+
+    async generateMainThread(filePath, assetUrl) {
+      try {
+        const response = await fetch(assetUrl);
+        if (!response.ok) throw new Error("Fetch failed");
+        const blob = await response.blob();
+        const sourceElement = await createImageBitmap(blob);
+        
+        let width = sourceElement.width;
+        let height = sourceElement.height;
+        if (width > 384 || height > 384) {
+          const ratio = Math.min(384 / width, 384 / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        width = Math.max(1, width);
+        height = Math.max(1, height);
+        
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.fillStyle = '#1e1e1e';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(sourceElement, 0, 0, width, height);
+        
+        const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+        sourceElement.close();
+        
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("FileReader failed"));
+          reader.readAsDataURL(outBlob);
+        });
+      } catch (err) {
+        throw new Error(err.message || "Main thread generation failed");
+      }
+    }
   }
-}
 const thumbnailWorkerPool = new ThumbnailWorkerPool(4);
 
 // Phase 4: Context Cleanup Strictness
@@ -1094,9 +1143,6 @@ const scheduleRefresh = debounce(async () => {
   uiManager.updateSelectionUI();
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
-  }
-  if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
-    window.debouncedUpdateSmartFolderCounts();
   }
 }, CONFIG.REFRESH_DELAY);
 
@@ -5407,6 +5453,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       await window.veloceAPI.notifyFileChanged(newFile);
       scheduleRefresh();
+      if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+        window.debouncedUpdateSmartFolderCounts();
+      }
     });
   }
 
@@ -5414,6 +5463,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onFileRemoved(async (path) => {
       await window.veloceAPI.notifyFileRemoved(path);
       scheduleRefresh();
+      if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+        window.debouncedUpdateSmartFolderCounts();
+      }
     });
   }
 

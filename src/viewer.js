@@ -422,6 +422,8 @@ const debouncedFocusWindow = debounce(() => {
   window.focus();
 }, 200);
 
+let _resizePending = false;
+
 /**
  * 回転を考慮した画像本来のサイズに合わせてウィンドウをリサイズします。
  */
@@ -453,9 +455,15 @@ function resizeWindowToFitImage() {
     return;
   }
 
+  if (_resizePending) return;
+
   if (window.veloceAPI && window.veloceAPI.setWindowSize) {
+    _resizePending = true;
     window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
+      _resizePending = false;
       debouncedFocusWindow(); // 連続呼び出しによるフォーカス外れを防ぐためデバウンス処理を行う
+    }).catch(() => {
+      _resizePending = false;
     });
   }
 }
