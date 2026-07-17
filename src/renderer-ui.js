@@ -36,6 +36,7 @@ class UIManager {
     FLAME: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>`,
     CHEVRON_LEFT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" fill="none"/></svg>`,
     CHEVRON_RIGHT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" fill="none"/></svg>`,
+    DATABASE_ZAP: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5V19A9 3 0 0 0 15 21.84"></path><path d="M21 5V8.5"></path><path d="M21 12L18 17H22L19 22"></path></svg>`,
     CHEVRON_UP: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" fill="none"/></svg>`,
     CHEVRON_DOWN: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" fill="none"/></svg>`,
     SORT_ASC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><path d="m18 15-6-6-6 6" fill="none"/></svg>`,
@@ -135,7 +136,8 @@ class UIManager {
       searchBar: document.getElementById('search-bar'),
       searchClearBtn: document.getElementById('search-clear-btn'),
       openCacheBtn: document.getElementById('open-cache-btn'),
-      clearCacheBtn: document.getElementById('clear-cache-btn')
+      clearCacheBtn: document.getElementById('clear-cache-btn'),
+      auditCacheBtn: document.getElementById('audit-cache-btn')
     };
     this.toastContainer = document.getElementById('toast-container');
     this.initCustomTooltip();

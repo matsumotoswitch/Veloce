@@ -5007,6 +5007,46 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  if (uiManager.elements.auditCacheBtn) {
+    uiManager.elements.auditCacheBtn.innerHTML = UIManager.ICONS.DATABASE_ZAP;
+    uiManager.elements.auditCacheBtn.removeAttribute('title');
+    let auditCacheText = 'キャッシュの精査と修復';
+    uiManager.elements.auditCacheBtn.addEventListener('mouseenter', async (e) => {
+      uiManager.showCustomTooltip(auditCacheText, e.clientX, e.clientY);
+    });
+    uiManager.elements.auditCacheBtn.addEventListener('mousemove', (e) => {
+      uiManager.showCustomTooltip(auditCacheText, e.clientX, e.clientY);
+    });
+    uiManager.elements.auditCacheBtn.addEventListener('mouseleave', () => {
+      uiManager.hideCustomTooltip();
+    });
+    uiManager.elements.auditCacheBtn.addEventListener('click', async () => {
+      uiManager.applyGlowEffect(uiManager.elements.auditCacheBtn);
+      uiManager.hideCustomTooltip();
+      const isConfirmed = await uiManager.showConfirm('キャッシュの精査と修復を実行しますか？\n\n・存在しないファイルのキャッシュ削除\n・欠損メタデータやサムネイルの再生成\n\n上記が行われます。件数によっては\n非常に時間がかかる場合があります。');
+      if (isConfirmed) {
+        let unlisten = null;
+        try {
+          unlisten = await window.__TAURI__.event.listen('audit-progress', (event) => {
+            const p = event.payload;
+            uiManager.showToast(`キャッシュ精査中... ${p.current} / ${p.total}\n削除: ${p.deleted} | 修復: ${p.fixed}`, 0, 'cache-audit', 'info');
+          });
+          uiManager.showToast('キャッシュの精査を開始しました...', 0, 'cache-audit', 'info');
+          
+          const invoke = window.__TAURI__.invoke || (window.__TAURI__.tauri && window.__TAURI__.tauri.invoke) || (window.__TAURI__.core && window.__TAURI__.core.invoke);
+          await invoke('audit_cache');
+          
+          uiManager.showToast('キャッシュの精査と修復が完了しました！', 3000, 'cache-audit', 'success');
+        } catch (err) {
+          console.error("Failed to audit cache:", err);
+          uiManager.showToast('キャッシュの精査中にエラーが発生しました。', 3000, 'cache-audit', 'error');
+        } finally {
+          if (unlisten) unlisten();
+        }
+      }
+    });
+  }
+
   // --- ツールバー：ファイル名表示設定の初期化 ---
   const chkThumbnailName = document.getElementById('show-thumbnail-name-chk');
   const chkViewerName = document.getElementById('show-viewer-name-chk');

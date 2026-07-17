@@ -13,6 +13,15 @@ use std::time::UNIX_EPOCH;
 use tauri::Manager;
 
 // --- データ構造の定義 ---
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AuditProgress {
+    current: usize,
+    total: usize,
+    deleted: usize,
+    fixed: usize,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")] // フロントエンドのJSがキャメルケースを期待しているため変換
 pub struct ImageFile {
@@ -2338,6 +2347,58 @@ async fn get_cached_thumbnail_batch(
     Ok(results)
 }
 
+fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
+    if let Ok(img) = image::open(path_str) {
+        let rgb_img = img.to_rgb8();
+        let width = rgb_img.width();
+        let height = rgb_img.height();
+        
+        let mut dst_width = width;
+        let mut dst_height = height;
+        if width > 384 || height > 384 {
+            let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
+            dst_width = (width as f32 * ratio).round() as u32;
+            dst_height = (height as f32 * ratio).round() as u32;
+        }
+
+        use std::num::NonZeroU32;
+        use fast_image_resize as fr;
+
+        if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
+            if let Ok(src_image) = fr::images::Image::from_vec_u8(
+                src_width.get(),
+                src_height.get(),
+                rgb_img.into_raw(),
+                fr::PixelType::U8x3,
+            ) {
+                if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
+                    let mut dst_image = fr::images::Image::new(
+                        dst_w_nz.get(),
+                        dst_h_nz.get(),
+                        fr::PixelType::U8x3,
+                    );
+                    let mut resizer = fr::Resizer::new();
+                    if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
+                        let mut bytes: Vec<u8> = Vec::new();
+                        let mut cursor = std::io::Cursor::new(&mut bytes);
+                        if image::write_buffer_with_format(
+                            &mut cursor,
+                            dst_image.buffer(),
+                            dst_width,
+                            dst_height,
+                            image::ColorType::Rgb8,
+                            image::ImageFormat::Jpeg,
+                        ).is_ok() {
+                            return Some(bytes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
     #[cfg(target_os = "windows")]
     {
@@ -3166,6 +3227,131 @@ fn open_cache_folder() -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn audit_cache(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db_conn = state.db_conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = match db_conn.get() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        
+        let total: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
+        if total == 0 {
+            return;
+        }
+
+        let mut stmt = match conn.prepare("SELECT hash_key, path, width, height, size, mtime, ctime, (thumbnail IS NOT NULL) FROM cache") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        
+        let records = match stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<u32>>(2)?,
+                row.get::<_, Option<u32>>(3)?,
+                row.get::<_, Option<u64>>(4)?,
+                row.get::<_, Option<u64>>(5)?,
+                row.get::<_, Option<u64>>(6)?,
+                row.get::<_, bool>(7)?,
+            ))
+        }) {
+            Ok(m) => m.filter_map(|r| r.ok()).collect::<Vec<_>>(),
+            Err(_) => return,
+        };
+
+        let mut deleted = 0;
+        let mut fixed = 0;
+        
+        for (i, (hash_key, path_opt, width_opt, height_opt, size_opt, mtime_opt, ctime_opt, has_thumbnail)) in records.into_iter().enumerate() {
+            if i % 100 == 0 || i == total - 1 {
+                let _ = app.emit_all("audit-progress", AuditProgress {
+                    current: i + 1,
+                    total,
+                    deleted,
+                    fixed,
+                });
+            }
+            
+            let path_str = match path_opt {
+                Some(p) => p,
+                None => {
+                    let _ = conn.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]);
+                    deleted += 1;
+                    continue;
+                }
+            };
+            
+            let path = std::path::Path::new(&path_str);
+            if !path.exists() {
+                let _ = conn.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]);
+                deleted += 1;
+                continue;
+            }
+
+            let mut needs_update = false;
+            let mut new_width = width_opt.unwrap_or(0);
+            let mut new_height = height_opt.unwrap_or(0);
+            let mut new_size = size_opt.unwrap_or(0);
+            let mut new_mtime = mtime_opt.unwrap_or(0);
+            let mut new_ctime = ctime_opt.unwrap_or(0);
+
+            if new_size == 0 || new_mtime == 0 {
+                if let Ok(metadata) = std::fs::metadata(&path) {
+                    new_size = metadata.len();
+                    new_mtime = metadata.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                    new_ctime = metadata.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                    needs_update = true;
+                }
+            }
+
+            if new_width == 0 || new_height == 0 {
+                if let Ok(dim) = image::image_dimensions(&path) {
+                    new_width = dim.0;
+                    new_height = dim.1;
+                    needs_update = true;
+                }
+            }
+
+            if needs_update {
+                let _ = conn.execute(
+                    "UPDATE cache SET width=?, height=?, size=?, mtime=?, ctime=? WHERE hash_key=?",
+                    rusqlite::params![new_width, new_height, new_size, new_mtime, new_ctime, hash_key]
+                );
+                fixed += 1;
+            }
+
+            // Thumbnail recreation for existing files without thumbnail
+            if !has_thumbnail {
+                let lower_path = path_str.to_lowercase();
+                let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+                    generate_video_thumbnail_sync(&path_str)
+                } else {
+                    generate_image_thumbnail_sync(&path_str)
+                };
+                
+                if let Some(bytes) = generated {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                    let _ = conn.execute(
+                        "UPDATE cache SET thumbnail=?, last_accessed=? WHERE hash_key=?",
+                        rusqlite::params![&bytes, now, &hash_key]
+                    );
+                    if !needs_update { fixed += 1; }
+                }
+            }
+        }
+        
+        let _ = conn.execute("VACUUM", []); // Optional optimization after deletion
+    });
+    
+    Ok(())
+}
+
+#[tauri::command]
 async fn clear_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let db_conn_clone = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
@@ -3615,65 +3801,20 @@ fn main() {
                     .body(bytes);
             }
 
-            if let Ok(img) = image::open(&path_str) {
-                let rgb_img = img.to_rgb8();
-                let width = rgb_img.width();
-                let height = rgb_img.height();
-                
-                let mut dst_width = width;
-                let mut dst_height = height;
-                if width > 384 || height > 384 {
-                    let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
-                    dst_width = (width as f32 * ratio).round() as u32;
-                    dst_height = (height as f32 * ratio).round() as u32;
+            if let Some(bytes) = generate_image_thumbnail_sync(&path_str) {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                if let Ok(conn) = state.db_conn.get() {
+                    let _ = conn.execute(
+                        "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                         ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                        rusqlite::params![&hash_key, &bytes, now],
+                    );
                 }
-
-                use std::num::NonZeroU32;
-                use fast_image_resize as fr;
-
-                if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
-                    if let Ok(src_image) = fr::images::Image::from_vec_u8(
-                        src_width.get(),
-                        src_height.get(),
-                        rgb_img.into_raw(),
-                        fr::PixelType::U8x3,
-                    ) {
-                        if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
-                            let mut dst_image = fr::images::Image::new(
-                                dst_w_nz.get(),
-                                dst_h_nz.get(),
-                                fr::PixelType::U8x3,
-                            );
-                            let mut resizer = fr::Resizer::new();
-                            if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
-                                let mut bytes: Vec<u8> = Vec::new();
-                                let mut cursor = std::io::Cursor::new(&mut bytes);
-                                if image::write_buffer_with_format(
-                                    &mut cursor,
-                                    dst_image.buffer(),
-                                    dst_width,
-                                    dst_height,
-                                    image::ColorType::Rgb8,
-                                    image::ImageFormat::Jpeg,
-                                ).is_ok() {
-                                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                                    if let Ok(conn) = state.db_conn.get() {
-                                        let _ = conn.execute(
-                                            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                                            rusqlite::params![&hash_key, &bytes, now],
-                                        );
-                                    }
-                                    return tauri::http::ResponseBuilder::new()
-                                        .mimetype("image/jpeg")
-                                        .header("Access-Control-Allow-Origin", "*")
-                                        .status(200)
-                                        .body(bytes);
-                                }
-                            }
-                        }
-                    }
-                }
+                return tauri::http::ResponseBuilder::new()
+                    .mimetype("image/jpeg")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .status(200)
+                    .body(bytes);
             }
 
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
@@ -4102,7 +4243,9 @@ fn main() {
             rename_folder,
             open_cache_folder,
             clear_cache,
+            audit_cache,
             get_cache_info,
+            get_smart_folder_counts,
             open_in_explorer,
             check_conflicts,
             clear_metadata_cache,

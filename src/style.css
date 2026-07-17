@@ -170,6 +170,7 @@ body.is-resizing .app-content {
 
 .dialog-message {
   margin-bottom: 20px;
+  white-space: pre-wrap;
 }
 
 .dialog-message.has-input {

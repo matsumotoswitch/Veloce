@@ -31,7 +31,7 @@ tauri = { version = "1", features = [ "dialog-open",
     "window-start-dragging",
     "window-unmaximize"
 ] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 flate2 = "1.0"
 trash = "3.3"
 arboard = "3.3"
