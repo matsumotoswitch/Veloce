@@ -388,11 +388,7 @@ pub struct SmartFolderItem {
     pub has_thumbnail: bool,
 }
 
-fn create_image_file_from_smart_item(
-    item: SmartFolderItem,
-    has_thumbnail_cache: bool,
-    has_metadata_cache: bool,
-) -> ImageFile {
+fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
     let p = std::path::Path::new(&item.path);
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
     let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
@@ -409,8 +405,10 @@ fn create_image_file_from_smart_item(
         size,
         mtime,
         ctime,
-        has_thumbnail_cache,
-        has_metadata_cache,
+        // SQLクエリで既にhas_thumbnailを取得済み。DBへの再問い合わせ不要。
+        has_thumbnail_cache: item.has_thumbnail,
+        // メタデータとサムネイルは同一クエリ(get_full_metadata_for_path)で保存されるため同値。
+        has_metadata_cache: item.has_thumbnail,
         width: item.width,
         height: item.height,
         prompt: String::new(),
@@ -451,7 +449,7 @@ fn build_smart_folder_query(
     let mut params = Vec::new();
 
     if rule.conditions.is_empty() {
-        if !is_count { query.push_str(" ORDER BY +c.mtime DESC"); }
+        if !is_count { query.push_str(" ORDER BY c.mtime DESC"); }
         return (query, params);
     }
 
@@ -557,7 +555,7 @@ fn build_smart_folder_query(
     query.push_str(")");
 
     if !is_count {
-        query.push_str(" ORDER BY +c.mtime DESC");
+        query.push_str(" ORDER BY c.mtime DESC");
     }
 
     (query, params)
@@ -711,9 +709,9 @@ fn load_directory(
 
             let mut files: Vec<ImageFile> = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
-                smart_items.into_par_iter().map(|item| {
-                    create_image_file_from_smart_item(item, false, false)
-                }).collect()
+                // スマートフォルダはSQLで既に hash_key・has_thumbnail を取得済みのため
+                // 後続のDB再クエリブロックをスキップする
+                smart_items.into_par_iter().map(create_image_file_from_smart_item).collect()
             } else {
                 let target_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&path_for_spawn)
                     .into_iter()
@@ -766,7 +764,8 @@ fn load_directory(
 
             // DB バッチ確認: hash_key を計算して一括クエリし hasThumbnailCache/hasMetadataCache を設定
             // SQLite IN 句の上限 (999) に合わせてチャンク分割する
-            if !files.is_empty() {
+            // スマートフォルダはSQLクエリ内で既にhas_thumbnailを取得済みのためスキップ
+            if !files.is_empty() && !path_for_spawn.starts_with("smart://") {
                 if let Ok(conn) = db_conn_clone.get() {
                     // (hash_key -> (has_thumbnail, has_metadata)) のマップを構築
                     let mut cache_flags: std::collections::HashMap<String, (bool, bool)> = std::collections::HashMap::new();
@@ -4800,12 +4799,15 @@ mod tests {
             has_thumbnail: false,
         };
 
-        let img = super::create_image_file_from_smart_item(item, false, false);
+        let img = super::create_image_file_from_smart_item(item);
 
         // パフォーマンス上の理由から、size や mtime が 0 の場合でも同期的にはファイルシステムから補完されないこと（遅延読み込みで対応）
         assert_eq!(img.size, 0);
         assert_eq!(img.mtime, 0);
         assert_eq!(img.width, 100);
+        // has_thumbnail は SmartFolderItem.has_thumbnail から引き継がれること
+        assert!(!img.has_thumbnail_cache);
+        assert!(!img.has_metadata_cache);
 
         let _ = std::fs::remove_file(file_path);
     }
