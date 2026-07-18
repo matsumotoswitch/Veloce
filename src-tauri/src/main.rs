@@ -1362,8 +1362,9 @@ async fn get_full_metadata_batch(
     // されているため、Rust側では直列処理でも十分に高速かつ安全に動作します。
     let db_conn_clone = state.db_conn.clone();
     Ok(tokio::task::spawn_blocking(move || {
+        use rayon::prelude::*;
         file_paths
-            .into_iter()
+            .into_par_iter()
             .map(|path| get_full_metadata_for_path(&path, &db_conn_clone).0)
             .collect()
     })

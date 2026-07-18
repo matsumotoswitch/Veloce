@@ -417,7 +417,7 @@ function updateMetadataToast() {
 async function loadAllMetadataInBackground() {
   if (!window.veloceAPI.getFullMetadataBatch) return;
   // まだメタデータが読み込まれていないファイルのみを対象にする
-  const FETCH_BATCH = 200;
+  const FETCH_BATCH = 5000;
   const allFiles = [];
   for (let offset = 0; offset < appState.totalCount; offset += FETCH_BATCH) {
     const items = await window.veloceAPI.getItems(offset, FETCH_BATCH);
@@ -438,7 +438,7 @@ async function loadAllMetadataInBackground() {
   }
 
   const batchId = ++appState.currentMetaBatchId;
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = 200;
 
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
     // フォルダ切り替えなどでリセットされた場合は中断
@@ -461,7 +461,7 @@ async function loadAllMetadataInBackground() {
       updateMetadataToast();
 
       // メインスレッドをブロックしないよう少し休止
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 10));
     } catch (error) {
       console.error('Failed to load metadata batch:', error);
     }
