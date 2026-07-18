@@ -190,7 +190,7 @@ const CONFIG = {
 /**
  * thumbnailUrls のサイズが膨らみすぎないように古いエントリを削除する
  */
-function evictThumbnailCache(maxSize = 2000) {
+const evictThumbnailCache = debounce((maxSize = 2000) => {
   if (!appState || !appState.thumbnailUrls || appState.thumbnailUrls.size <= maxSize) return;
   const toDelete = appState.thumbnailUrls.size - maxSize;
   let i = 0;
@@ -201,7 +201,7 @@ function evictThumbnailCache(maxSize = 2000) {
     appState.thumbnailUrls.delete(key);
     if (++i >= toDelete) break;
   }
-}
+}, 100);
 window.evictThumbnailCache = evictThumbnailCache;
 
 // --- タブ機能用 ---
@@ -1587,7 +1587,7 @@ function toggleHelpOverlay(forceShow) {
     <div id="help-main" class="help-tab-content active">
       <h3 class="help-group-title">ナビゲーション・選択</h3>
       <table class="help-table">
-        <tr><td><kbd>矢印キー</kbd></td><td>画像の選択を移動（Shift 併用で範囲選択）</td></tr>
+        <tr><td><kbd>矢印キー</kbd> / <kbd>PageUp/Down</kbd> / <kbd>Home/End</kbd></td><td>画像の選択を移動（矢印キーはShift 併用で範囲選択）</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>現在のフォルダ内のすべての画像を選択</td></tr>
         <tr><td><kbd>Ctrl</kbd> / <kbd>Shift</kbd> + クリック</td><td>画像の複数選択</td></tr>
         <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>フォルダ移動履歴の「戻る」 / 「進む」</td></tr>
@@ -4139,7 +4139,7 @@ window.addEventListener('keydown', async (e) => {
     return;
   }
 
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
     const isLeftPaneFocused = document.activeElement && document.activeElement.closest('#left-pane');
     if (isLeftPaneFocused) {
       e.preventDefault();
@@ -4167,6 +4167,16 @@ window.addEventListener('keydown', async (e) => {
       else if (e.key === 'ArrowRight') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + 1);
       else if (e.key === 'ArrowUp') newIndex = Math.max(0, appState.selectedIndex - columns);
       else if (e.key === 'ArrowDown') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + columns);
+      else if (e.key === 'PageUp') {
+        const rows = Math.max(1, Math.floor(uiManager.elements.thumbnailGrid.clientHeight / (itemSize + gap)));
+        newIndex = Math.max(0, appState.selectedIndex - (columns * rows));
+      }
+      else if (e.key === 'PageDown') {
+        const rows = Math.max(1, Math.floor(uiManager.elements.thumbnailGrid.clientHeight / (itemSize + gap)));
+        newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + (columns * rows));
+      }
+      else if (e.key === 'Home') newIndex = 0;
+      else if (e.key === 'End') newIndex = appState.totalCount - 1;
     }
 
     if (newIndex !== appState.selectedIndex) {
@@ -5463,6 +5473,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (window.veloceAPI.onFileChanged) {
     window.veloceAPI.onFileChanged(async (newFile) => {
+      const oldUrl = appState.thumbnailUrls.get(newFile.path);
+      if (oldUrl && oldUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(oldUrl);
+      }
       appState.thumbnailUrls.delete(newFile.path);
 
       if (window.thumbnailManager) window.thumbnailManager.remove(newFile.path);

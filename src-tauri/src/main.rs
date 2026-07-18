@@ -280,6 +280,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path ON cache (path)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_mtime ON cache (mtime)", []).map_err(|e| e.to_string())?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_last_accessed ON cache (last_accessed DESC)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings (rating)", []).map_err(|e| e.to_string())?;
     let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover", []);
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)", []).map_err(|e| e.to_string())?;
