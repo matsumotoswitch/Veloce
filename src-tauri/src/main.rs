@@ -105,6 +105,13 @@ pub struct SortConfig {
     asc: bool,
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataBatchUpdatedPayload {
+    processed: usize,
+    total: usize,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FullMetadata {
@@ -179,8 +186,8 @@ pub struct AppState {
     current_dir: Mutex<String>,
     viewer_paths: Mutex<std::collections::HashMap<String, Vec<String>>>,
     // Source of Truth: 全ファイルとフィルタリング済みファイルをRust側で保持
-    all_files: Mutex<Vec<ImageFile>>,
-    filtered_files: Mutex<Vec<ImageFile>>,
+    all_files: Mutex<Vec<std::sync::Arc<ImageFile>>>,
+    filtered_files: Mutex<Vec<std::sync::Arc<ImageFile>>>,
     sort_config: Mutex<SortConfig>,
     search_query: Mutex<String>,
     ratings: Mutex<std::collections::HashMap<String, u8>>,
@@ -689,10 +696,10 @@ fn load_directory(
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
 
-            let mut files: Vec<ImageFile> = if path_for_spawn.starts_with("smart://") {
+            let mut files: Vec<std::sync::Arc<ImageFile>> = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
                 
-                smart_items.into_par_iter().map(create_image_file_from_smart_item).collect()
+                smart_items.into_par_iter().map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i))).collect()
             } else {
                 let target_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&path_for_spawn)
                     .into_iter()
@@ -740,7 +747,7 @@ fn load_directory(
                         }
                         None
                     })
-                    .collect::<Vec<ImageFile>>()
+                    .map(std::sync::Arc::new).collect::<Vec<std::sync::Arc<ImageFile>>>()
             };
 
             // SQLiteでの同期バッチ確認は起動速度に影響するため削除し、フロントエンドの遅延ロードに完全に委譲します。
@@ -817,7 +824,10 @@ fn load_directory(
                 }
             };
 
-            for path in paths_to_process {
+            let total_paths = paths_to_process.len();
+            let mut processed_count = 0;
+
+            for chunk in paths_to_process.chunks(200) {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
                     if let Ok(dir_lock) = state.current_dir.lock() {
                         if *dir_lock != path_for_bg {
@@ -825,22 +835,27 @@ fn load_directory(
                         }
                     }
 
-                    let path_clone_for_blocking = path.clone();
+                    let chunk_paths: Vec<String> = chunk.to_vec();
                     let db_conn_clone = state.db_conn.clone();
-                    let (full_meta, meta_mtime, meta_size) = match tokio::task::spawn_blocking(move || {
-                        get_full_metadata_for_path(&path_clone_for_blocking, &db_conn_clone)
-                    })
-                    .await
-                    {
-                        Ok(meta) => meta,
-                        Err(_) => continue,
-                    };
+                    
+                    let metadata_results = tokio::task::spawn_blocking(move || {
+                        use rayon::prelude::*;
+                        chunk_paths.into_par_iter().map(|p| {
+                            let (meta, mtime, size) = get_full_metadata_for_path(&p, &db_conn_clone);
+                            (p, meta, mtime, size)
+                        }).collect::<Vec<_>>()
+                    }).await.unwrap_or_default();
 
-                    // O(1) インデックスアクセスで all_files を更新
-                    if let Ok(mut all_files) = state.all_files.lock() {
+                    processed_count += metadata_results.len();
+
+                    let mut all_files_lock = state.all_files.lock().unwrap();
+                    let mut filtered_files_lock = state.filtered_files.lock().unwrap();
+
+                    for (path, full_meta, meta_mtime, meta_size) in metadata_results {
                         if let Some(&idx) = all_index_map.get(&path) {
-                            if let Some(f) = all_files.get_mut(idx) {
-                                if f.path == path {
+                            if let Some(f_arc) = all_files_lock.get_mut(idx) {
+                                if f_arc.path == path {
+                                    let f = std::sync::Arc::make_mut(f_arc);
                                     f.width = full_meta.width;
                                     f.height = full_meta.height;
                                     f.prompt = full_meta.prompt.clone();
@@ -850,29 +865,14 @@ fn load_directory(
                                     if f.size == 0 { f.size = meta_size; }
                                     if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
                                     f.meta_loaded = true;
-                                } else {
-                                    // インデックスが失効している場合は線形検索にフォールバック
-                                    if let Some(f2) = all_files.iter_mut().find(|f| f.path == path) {
-                                        f2.width = full_meta.width;
-                                        f2.height = full_meta.height;
-                                        f2.prompt = full_meta.prompt.clone();
-                                        f2.negative_prompt = full_meta.negative_prompt.clone();
-                                        f2.source = full_meta.source.clone();
-                                        f2.search_text = extract_searchable_text(&full_meta.params);
-                                        if f2.size == 0 { f2.size = meta_size; }
-                                        if f2.mtime == 0 { f2.mtime = meta_mtime / 1000; }
-                                        f2.meta_loaded = true;
-                                    }
                                 }
                             }
                         }
-                    }
-
-                    // O(1) インデックスアクセスで filtered_files を更新
-                    if let Ok(mut filtered) = state.filtered_files.lock() {
+                        
                         if let Some(&idx) = filtered_index_map.get(&path) {
-                            if let Some(f) = filtered.get_mut(idx) {
-                                if f.path == path {
+                            if let Some(f_arc) = filtered_files_lock.get_mut(idx) {
+                                if f_arc.path == path {
+                                    let f = std::sync::Arc::make_mut(f_arc);
                                     f.width = full_meta.width;
                                     f.height = full_meta.height;
                                     f.prompt = full_meta.prompt.clone();
@@ -882,22 +882,16 @@ fn load_directory(
                                     if f.size == 0 { f.size = meta_size; }
                                     if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
                                     f.meta_loaded = true;
-                                } else {
-                                    if let Some(f2) = filtered.iter_mut().find(|f| f.path == path) {
-                                        f2.width = full_meta.width;
-                                        f2.height = full_meta.height;
-                                        f2.prompt = full_meta.prompt.clone();
-                                        f2.negative_prompt = full_meta.negative_prompt.clone();
-                                        f2.source = full_meta.source.clone();
-                                        f2.search_text = extract_searchable_text(&full_meta.params);
-                                        if f2.size == 0 { f2.size = meta_size; }
-                                        if f2.mtime == 0 { f2.mtime = meta_mtime / 1000; }
-                                        f2.meta_loaded = true;
-                                    }
                                 }
                             }
                         }
                     }
+                    
+                    // Emit event to JS
+                    let _ = app_for_bg.emit_all("metadata-batch-updated", MetadataBatchUpdatedPayload {
+                        processed: processed_count,
+                        total: total_paths,
+                    });
                 }
             }
         });
@@ -1085,7 +1079,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     let sort_config = state.sort_config.lock().unwrap();
     let search_query = state.search_query.lock().unwrap();
 
-    let mut filtered: Vec<ImageFile> = if search_query.trim().is_empty() {
+    let mut filtered: Vec<std::sync::Arc<ImageFile>> = if search_query.trim().is_empty() {
         all_files.clone()
     } else {
         let terms: Vec<String> = search_query
@@ -1272,7 +1266,7 @@ async fn get_items(
     state: tauri::State<'_, AppState>,
     offset: usize,
     limit: usize,
-) -> Result<Vec<ImageFile>, String> {
+) -> Result<Vec<std::sync::Arc<ImageFile>>, String> {
     let lock = state.filtered_files.lock().unwrap();
     let end = std::cmp::min(offset + limit, lock.len());
     if offset >= lock.len() {
@@ -1286,7 +1280,7 @@ async fn get_items(
 async fn get_file_by_index(
     state: tauri::State<'_, AppState>,
     index: usize,
-) -> Result<Option<ImageFile>, String> {
+) -> Result<Option<std::sync::Arc<ImageFile>>, String> {
     let lock = state.filtered_files.lock().unwrap();
     Ok(lock.get(index).cloned())
 }
@@ -1296,7 +1290,8 @@ async fn get_file_by_index(
 fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<FullMetadata>) {
     if let Ok(mut all_files) = state.all_files.lock() {
         for meta in &updates {
-            if let Some(file) = all_files.iter_mut().find(|f| f.path == meta.path) {
+            if let Some(f_arc) = all_files.iter_mut().find(|f| f.path == meta.path) {
+                let file = std::sync::Arc::make_mut(f_arc);
                 file.width = meta.width;
                 file.height = meta.height;
                 file.prompt = meta.prompt.clone();
@@ -1309,7 +1304,8 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
     }
     if let Ok(mut filtered) = state.filtered_files.lock() {
         for meta in &updates {
-            if let Some(file) = filtered.iter_mut().find(|f| f.path == meta.path) {
+            if let Some(f_arc) = filtered.iter_mut().find(|f| f.path == meta.path) {
+                let file = std::sync::Arc::make_mut(f_arc);
                 file.width = meta.width;
                 file.height = meta.height;
                 file.prompt = meta.prompt.clone();
@@ -1331,9 +1327,9 @@ fn notify_file_changed(
 ) -> usize {
     if let Ok(mut all_files) = state.all_files.lock() {
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
-            *existing = file.clone();
+            *existing = std::sync::Arc::new(file.clone());
         } else {
-            all_files.push(file);
+            all_files.push(std::sync::Arc::new(file));
         }
     }
     apply_filters_and_sort(Some(&app), &state)
@@ -2943,7 +2939,7 @@ fn remove_collected_caches(cache_paths: Vec<std::path::PathBuf>) {
 fn get_files_by_indices(
     state: tauri::State<'_, AppState>,
     indices: Vec<usize>,
-) -> Result<Vec<ImageFile>, String> {
+) -> Result<Vec<std::sync::Arc<ImageFile>>, String> {
     let lock = state.filtered_files.lock().unwrap();
     let mut files = Vec::with_capacity(indices.len());
     for idx in indices {

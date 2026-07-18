@@ -1418,6 +1418,7 @@ class UIManager {
                   if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
                     if (window.appState && window.appState.thumbnailUrls) {
                       window.appState.thumbnailUrls.set(file.path, fallback);
+                      if (window.evictThumbnailCache) window.evictThumbnailCache();
                     }
                     this.src = fallback;
                   }
@@ -1427,6 +1428,7 @@ class UIManager {
         } else if (file.hasThumbnailCache) {
             const url = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}`;
             appState.thumbnailUrls.set(file.path, url);
+            if (window.evictThumbnailCache) window.evictThumbnailCache();
             img.src = url;
             if (img.complete) {
                 img.classList.remove('loading');
@@ -1444,6 +1446,7 @@ class UIManager {
                   if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
                     if (window.appState && window.appState.thumbnailUrls) {
                       window.appState.thumbnailUrls.set(file.path, fallback);
+                      if (window.evictThumbnailCache) window.evictThumbnailCache();
                     }
                     this.src = fallback;
                   }

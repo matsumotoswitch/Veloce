@@ -183,6 +183,27 @@ const CONFIG = {
   GRID_PADDING: 8         // サムネイルグリッドのパディング(px)
 };
 
+// ----------------------------------------------------
+// UI State & Global DOM Elements
+// ----------------------------------------------------
+
+/**
+ * thumbnailUrls のサイズが膨らみすぎないように古いエントリを削除する
+ */
+function evictThumbnailCache(maxSize = 2000) {
+  if (!appState || !appState.thumbnailUrls || appState.thumbnailUrls.size <= maxSize) return;
+  const toDelete = appState.thumbnailUrls.size - maxSize;
+  let i = 0;
+  for (const [key, val] of appState.thumbnailUrls) {
+    if (val && val.startsWith('blob:')) {
+      URL.revokeObjectURL(val);
+    }
+    appState.thumbnailUrls.delete(key);
+    if (++i >= toDelete) break;
+  }
+}
+window.evictThumbnailCache = evictThumbnailCache;
+
 // --- タブ機能用 ---
 appState.tabs = [];
 appState.activeTabIndex = -1;
@@ -414,77 +435,6 @@ function updateMetadataToast() {
   uiManager.showToast(msg, 0, 'metadata-load', 'info');
 }
 
-async function loadAllMetadataInBackground() {
-  if (!window.veloceAPI.getFullMetadataBatch) return;
-  // まだメタデータが読み込まれていないファイルのみを対象にする
-  const FETCH_BATCH = 5000;
-  const allFiles = [];
-  for (let offset = 0; offset < appState.totalCount; offset += FETCH_BATCH) {
-    const items = await window.veloceAPI.getItems(offset, FETCH_BATCH);
-    allFiles.push(...items);
-  }
-  const targets = allFiles.filter(f => !f.metaLoaded);
-
-  // プログレス表示用の分母と分子は、「キャッシュがなく、実際に抽出が必要なファイル数」をベースにする
-  const noCacheFiles = allFiles.filter(f => !f.hasMetadataCache);
-  const noCacheTargets = targets.filter(f => !f.hasMetadataCache);
-  appState.metadataTargetCount = noCacheFiles.length;
-  appState.metadataCompleted = noCacheFiles.length - noCacheTargets.length;
-
-  // 対象がゼロなら通知を出さずに終了
-  if (targets.length === 0) {
-    updateMetadataToast();
-    return;
-  }
-
-  const batchId = ++appState.currentMetaBatchId;
-  const BATCH_SIZE = 200;
-
-  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-    // フォルダ切り替えなどでリセットされた場合は中断
-    if (appState.currentMetaBatchId !== batchId) return;
-
-    const batch = targets.slice(i, i + BATCH_SIZE);
-    const paths = batch.map(f => f.path);
-
-    try {
-      const results = await window.veloceAPI.getFullMetadataBatch(paths);
-      if (appState.currentMetaBatchId !== batchId) return;
-
-      await window.veloceAPI.updateMetadataInState(results);
-      const newCompletions = results.filter(m => {
-        const t = batch.find(f => f.path === m.path);
-        return t && !t.hasMetadataCache;
-      });
-      appState.metadataCompleted += newCompletions.length;
-
-      updateMetadataToast();
-
-      // メインスレッドをブロックしないよう少し休止
-      await new Promise(resolve => setTimeout(resolve, 10));
-    } catch (error) {
-      console.error('Failed to load metadata batch:', error);
-    }
-  }
-
-  if (appState.currentMetaBatchId === batchId) {
-    if (['width', 'height', 'ratio'].includes(appState.sortConfig.key)) {
-      scheduleRefresh();
-    } else if (appState.searchQuery.trim() !== '') {
-      scheduleRefresh();
-    } else {
-      if (typeof uiManager.updateVirtualList === 'function') {
-        uiManager.updateVirtualList(true);
-      }
-      if (appState.selection.size > 0) {
-        const idx = Array.from(appState.selection)[0];
-        window.veloceAPI.getFileByIndex(idx).then(file => {
-          if (file) renderMetadata(file);
-        });
-      }
-    }
-  }
-}
 
 async function renameSelectedFolder() {
   const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
@@ -1032,6 +982,7 @@ class ThumbnailQueueManager {
         const base64Url = await thumbnailWorkerPool.generate(filePath, assetUrl);
         
         appState.thumbnailUrls.set(filePath, base64Url);
+        evictThumbnailCache();
         this.updateDOM(filePath, base64Url);
 
         // バックグラウンドでRustに保存後、BlobURLなどがあれば差し替え
@@ -1039,6 +990,7 @@ class ThumbnailQueueManager {
           const lightUrl = await window.veloceAPI.getThumbnail(filePath);
           if (lightUrl && appState.thumbnailUrls.get(filePath) === base64Url) {
             appState.thumbnailUrls.set(filePath, lightUrl);
+            evictThumbnailCache();
             this.updateDOM(filePath, lightUrl);
           }
         }).catch(err => console.warn('Cache save error:', err));
@@ -1047,6 +999,7 @@ class ThumbnailQueueManager {
       }
 
       appState.thumbnailUrls.set(filePath, url);
+      evictThumbnailCache();
       this.updateDOM(filePath, url);
     } catch (err) {
       console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
@@ -1057,6 +1010,7 @@ class ThumbnailQueueManager {
         fallbackUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
       }
       appState.thumbnailUrls.set(filePath, fallbackUrl);
+      evictThumbnailCache();
       this.updateDOM(filePath, fallbackUrl);
     } finally {
       this.activeTasks.delete(filePath);
@@ -1139,7 +1093,6 @@ const scheduleRefresh = debounce(async () => {
   appState.preloadCursor = 0;
   await appState.setViewParams();
   uiManager.renderAll();
-  loadAllMetadataInBackground();
   uiManager.updateSelectionUI();
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
@@ -4510,6 +4463,29 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (e.button === 3) navigateHistory(-1);
     if (e.button === 4) navigateHistory(1);
   });
+
+  if (window.veloceAPI.onMetadataBatchUpdated) {
+    window.veloceAPI.onMetadataBatchUpdated((payload) => {
+      appState.metadataTargetCount = payload.total;
+      appState.metadataCompleted = payload.processed;
+      updateMetadataToast();
+      if (payload.processed >= payload.total) {
+        if (['width', 'height', 'ratio'].includes(appState.sortConfig.key) || appState.searchQuery.trim() !== '') {
+          scheduleRefresh();
+        } else {
+          if (typeof uiManager.updateVirtualList === 'function') {
+            uiManager.updateVirtualList(true);
+          }
+          if (appState.selection.size > 0) {
+            const idx = Array.from(appState.selection)[0];
+            window.veloceAPI.getFileByIndex(idx).then(file => {
+              if (file) renderMetadata(file);
+            });
+          }
+        }
+      }
+    });
+  }
 
   if (window.veloceAPI.onDirectoryLoaded) {
     window.veloceAPI.onDirectoryLoaded(async (payload) => {
