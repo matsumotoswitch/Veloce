@@ -659,6 +659,17 @@ async function preloadAdjacentImages() {
   // 不要になった古いキャッシュ（現在地から離れたもの）を削除してメモリを節約
   for (const cachedIdx of viewerState.preloadCache.keys()) {
     if (Math.abs(cachedIdx - viewerState.currentIndex) > 3) {
+      const cached = viewerState.preloadCache.get(cachedIdx);
+      if (cached && cached.img) {
+        if (cached.img.tagName === 'VIDEO') {
+          cached.img.pause();
+          cached.img.removeAttribute('src');
+          cached.img.load();
+        } else {
+          cached.img.src = '';
+        }
+        if (cached.img.remove) cached.img.remove();
+      }
       viewerState.preloadCache.delete(cachedIdx);
     }
   }

@@ -48,6 +48,8 @@ pub struct ImageFile {
     meta_loaded: bool,
     #[serde(skip)]
     search_text: String,
+    #[serde(skip)]
+    unified_search_text: String,
 }
 
 fn extract_searchable_text(val: &serde_json::Value) -> String {
@@ -421,6 +423,7 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         source: String::new(),
         meta_loaded: false,
         search_text: String::new(),
+            unified_search_text: String::new(),
     }
 }
 
@@ -741,6 +744,7 @@ fn load_directory(
                                             source: String::new(),
                                             meta_loaded: false,
                                             search_text: String::new(),
+            unified_search_text: String::new(),
                                         });
                                     }
                                 }
@@ -863,6 +867,7 @@ fn load_directory(
                                     f.negative_prompt = full_meta.negative_prompt.clone();
                                     f.source = full_meta.source.clone();
                                     f.search_text = extract_searchable_text(&full_meta.params);
+                                    f.unified_search_text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
                                     if f.size == 0 { f.size = meta_size; }
                                     if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
                                     f.meta_loaded = true;
@@ -880,6 +885,7 @@ fn load_directory(
                                     f.negative_prompt = full_meta.negative_prompt.clone();
                                     f.source = full_meta.source.clone();
                                     f.search_text = extract_searchable_text(&full_meta.params);
+                                    f.unified_search_text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
                                     if f.size == 0 { f.size = meta_size; }
                                     if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
                                     f.meta_loaded = true;
@@ -1092,12 +1098,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
         all_files
             .iter()
             .filter(|f| {
-                let text = format!(
-                    "{} {} {} {} {}",
-                    f.name, f.prompt, f.negative_prompt, f.source, f.search_text
-                )
-                .to_lowercase();
-                terms.iter().all(|term| text.contains(term))
+                terms.iter().all(|term| f.unified_search_text.contains(term))
             })
             .cloned()
             .collect()
@@ -1299,6 +1300,7 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
                 file.negative_prompt = meta.negative_prompt.clone();
                 file.source = meta.source.clone();
                 file.search_text = extract_searchable_text(&meta.params);
+                file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
                 file.meta_loaded = true;
             }
         }
@@ -1313,6 +1315,7 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
                 file.negative_prompt = meta.negative_prompt.clone();
                 file.source = meta.source.clone();
                 file.search_text = extract_searchable_text(&meta.params);
+                file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
                 file.meta_loaded = true;
             }
         }
@@ -4016,6 +4019,7 @@ fn main() {
                                                         source: String::new(),
                                                         meta_loaded: false,
                                                         search_text: String::new(),
+            unified_search_text: String::new(),
                                                     };
                                                     let _ = app_handle
                                                         .emit_all("file-changed", img_file);
@@ -4049,6 +4053,7 @@ fn main() {
                                                     source: String::new(),
                                                     meta_loaded: false,
                                                     search_text: String::new(),
+            unified_search_text: String::new(),
                                                 };
                                                 let _ =
                                                     app_handle.emit_all("file-changed", img_file);
