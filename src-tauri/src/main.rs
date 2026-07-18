@@ -680,22 +680,13 @@ fn load_directory(
         // Veloceのキャッシュディレクトリ構造に合わせる
         let path_for_spawn = path_clone.clone();
         // 非同期ランタイムのワーカースレッドをブロックしないよう、spawn_blockingでラップする
-        let app_clone2 = app_clone.clone();
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
-            use std::io::Write;
-            let start = std::time::Instant::now();
-            let mut log = String::new();
 
             let mut files: Vec<ImageFile> = if path_for_spawn.starts_with("smart://") {
-                let q_start = std::time::Instant::now();
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
-                log.push_str(&format!("SQL get_smart_folder_paths took: {:?} ({} items)\n", q_start.elapsed(), smart_items.len()));
                 
-                let p_start = std::time::Instant::now();
-                let res = smart_items.into_par_iter().map(create_image_file_from_smart_item).collect();
-                log.push_str(&format!("par_iter map took: {:?}\n", p_start.elapsed()));
-                res
+                smart_items.into_par_iter().map(create_image_file_from_smart_item).collect()
             } else {
                 let target_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&path_for_spawn)
                     .into_iter()
@@ -749,14 +740,8 @@ fn load_directory(
             // SQLiteでの同期バッチ確認は起動速度に影響するため削除し、フロントエンドの遅延ロードに完全に委譲します。
             // デフォルトソート（名前順昇順）も並列処理で適用
             if !path_for_spawn.starts_with("smart://") {
-                let s_start = std::time::Instant::now();
                 files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
-                log.push_str(&format!("par_sort_by took: {:?}\n", s_start.elapsed()));
             }
-            
-            log.push_str(&format!("Total open_folder spawn_blocking took: {:?}\n", start.elapsed()));
-            let mut f = std::fs::OpenOptions::new().append(true).create(true).open("veloce_profile.txt").unwrap();
-            f.write_all(log.as_bytes()).unwrap();
             
             files
 
@@ -1090,7 +1075,6 @@ fn set_rating(
 }
 
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
-    let apply_start = std::time::Instant::now();
     let all_files = state.all_files.lock().unwrap();
     let sort_config = state.sort_config.lock().unwrap();
     let search_query = state.search_query.lock().unwrap();
@@ -1203,12 +1187,6 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
 
     let total = filtered.len();
     let paths: Vec<String> = filtered.iter().map(|f| f.path.clone()).collect();
-    
-    let profile_msg = format!("apply_filters_and_sort took: {:?}\n", apply_start.elapsed());
-    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open("veloce_profile.txt") {
-        use std::io::Write;
-        let _ = f.write_all(profile_msg.as_bytes());
-    }
 
     drop(all_files);
     drop(sort_config);
