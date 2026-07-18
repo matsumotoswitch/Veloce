@@ -4135,6 +4135,11 @@ fn main() {
                 tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
                     let label = event.window().label().to_string();
                     if label == "main" {
+                        // アプリ終了時にWALファイルを切り詰める
+                        let state = event.window().state::<AppState>();
+                        if let Ok(conn) = state.db_conn.get() {
+                            let _ = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);", []);
+                        }
                         std::process::exit(0);
                     } else if label.starts_with("viewer_") {
                         let _ = event.window().set_always_on_top(false);
