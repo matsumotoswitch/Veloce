@@ -1410,6 +1410,56 @@ fn decode_metadata_string(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+fn parse_mp4_dimensions(path: &str) -> Option<(u32, u32)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buffer = [0u8; 8];
+    let file_len = file.metadata().ok()?.len();
+    
+    let mut pos = 0u64;
+    while pos < file_len && pos < 10 * 1024 * 1024 { // Search only first 10MB
+        if file.seek(SeekFrom::Start(pos)).is_err() { break; }
+        if file.read_exact(&mut buffer).is_err() { break; }
+        let size = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as u64;
+        let box_type = &buffer[4..8];
+        
+        if size < 8 {
+            if size == 1 { 
+                let mut large_size_buf = [0u8; 8];
+                if file.read_exact(&mut large_size_buf).is_err() { break; }
+                let large_size = u64::from_be_bytes(large_size_buf);
+                if box_type == b"mdat" { pos += large_size; continue; }
+            }
+            break; 
+        }
+        
+        if box_type == b"moov" || box_type == b"trak" {
+            pos += 8;
+            continue;
+        } else if box_type == b"tkhd" {
+            let content_size = size - 8;
+            let mut tkhd_data = vec![0u8; content_size as usize];
+            if file.read_exact(&mut tkhd_data).is_ok() {
+                if !tkhd_data.is_empty() {
+                    let version = tkhd_data[0];
+                    let offset = if version == 1 { 88 } else { 76 };
+                    if tkhd_data.len() >= offset + 8 {
+                        let w = u32::from_be_bytes([tkhd_data[offset], tkhd_data[offset+1], tkhd_data[offset+2], tkhd_data[offset+3]]) >> 16;
+                        let h = u32::from_be_bytes([tkhd_data[offset+4], tkhd_data[offset+5], tkhd_data[offset+6], tkhd_data[offset+7]]) >> 16;
+                        if w > 0 && h > 0 {
+                            return Some((w, h));
+                        }
+                    }
+                }
+            }
+            pos += size;
+        } else {
+            pos += size;
+        }
+    }
+    None
+}
+
 fn get_full_metadata_for_path(
     file_path: &str,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
@@ -1448,7 +1498,15 @@ fn get_full_metadata_for_path(
         }
     }
 
-    let (width, height) = image::image_dimensions(file_path).unwrap_or((0, 0));
+    let (mut width, mut height) = image::image_dimensions(file_path).unwrap_or((0, 0));
+    let lower_path = file_path.to_lowercase();
+    
+    if width == 0 && height == 0 && lower_path.ends_with(".mp4") {
+        if let Some((w, h)) = parse_mp4_dimensions(file_path) {
+            width = w;
+            height = h;
+        }
+    }
 
     let mut raw_description = String::new();
     let mut raw_comment = String::new();
@@ -4258,6 +4316,48 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_mp4_dimensions() {
+        use super::parse_mp4_dimensions;
+        use std::io::Write;
+        
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_dummy.mp4");
+        
+        // 1920x1080のダミーMP4データ (tkhd box) を作成
+        let mut tkhd_payload = vec![0u8; 84];
+        
+        // version 0, width is at 76, height is at 80 from start of payload
+        tkhd_payload[76..80].copy_from_slice(&(1920u32 << 16).to_be_bytes());
+        tkhd_payload[80..84].copy_from_slice(&(1080u32 << 16).to_be_bytes());
+        
+        let mut tkhd_box = vec![];
+        tkhd_box.extend_from_slice(&(8u32 + tkhd_payload.len() as u32).to_be_bytes());
+        tkhd_box.extend_from_slice(b"tkhd");
+        tkhd_box.extend_from_slice(&tkhd_payload);
+        
+        let mut moov_data = vec![];
+        moov_data.extend_from_slice(&(8u32 + tkhd_box.len() as u32).to_be_bytes());
+        moov_data.extend_from_slice(b"moov");
+        moov_data.extend_from_slice(&tkhd_box);
+        
+        let mut ftyp = vec![];
+        ftyp.extend_from_slice(&16u32.to_be_bytes());
+        ftyp.extend_from_slice(b"ftypisomisom");
+        
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            file.write_all(&ftyp).unwrap();
+            file.write_all(&moov_data).unwrap();
+        }
+        
+        let dims = parse_mp4_dimensions(test_file.to_str().unwrap());
+        assert_eq!(dims, Some((1920, 1080)));
+        
+        // テスト後はファイルを削除 (Rule #4)
+        let _ = std::fs::remove_file(test_file);
+    }
+
+    #[test]
     fn test_extract_searchable_text() {
         use super::extract_searchable_text;
         use serde_json::json;
@@ -4720,6 +4820,8 @@ mod tests {
             size: 0,
             mtime: 0,
             ctime: 0,
+            width: 0,
+            height: 0,
         };
 
         let img = super::create_image_file_from_smart_item(item);
