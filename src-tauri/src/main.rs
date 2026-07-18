@@ -1141,7 +1141,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
 
     if !skip_sort {
         use rayon::prelude::*;
-        filtered.par_sort_by(|a, b| {
+        filtered.par_sort_unstable_by(|a, b| {
             let cmp = match key.as_str() {
             "name" => natural_cmp(&a.name, &b.name),
             "ext" => a.ext.cmp(&b.ext),
