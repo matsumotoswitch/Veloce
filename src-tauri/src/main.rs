@@ -274,7 +274,8 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path ON cache (path)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_mtime ON cache (mtime)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings (rating)", []).map_err(|e| e.to_string())?;
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover ON cache (path, mtime DESC, size, ctime)", []).map_err(|e| e.to_string())?;
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover", []);
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)", []).map_err(|e| e.to_string())?;
 
     // マイグレーション（カラムが存在しない場合は無視される）
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
@@ -382,6 +383,8 @@ pub struct SmartFolderItem {
     pub size: u64,
     pub mtime: u64,
     pub ctime: u64,
+    pub width: u32,
+    pub height: u32,
 }
 
 fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
@@ -403,8 +406,8 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         ctime,
         has_thumbnail_cache: false,
         has_metadata_cache: false,
-        width: 0,
-        height: 0,
+        width: item.width,
+        height: item.height,
         prompt: String::new(),
         negative_prompt: String::new(),
         source: String::new(),
@@ -420,7 +423,7 @@ fn build_smart_folder_query(
     let select_clause = if is_count {
         "SELECT COUNT(c.path)"
     } else {
-        "SELECT c.path, c.size, c.mtime, c.ctime"
+        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height"
     };
 
     let mut is_inner_join = false;
@@ -575,6 +578,8 @@ fn get_smart_folder_paths(
                         size: row.get(1)?,
                         mtime: row.get(2)?,
                         ctime: row.get(3)?,
+                        width: row.get(4)?,
+                        height: row.get(5)?,
                     })
                 }) {
                     for r in rows {
@@ -598,7 +603,7 @@ fn get_smart_folder_paths(
             if !paths.is_empty() {
                 if let Ok(conn) = db_conn.get() {
                     let placeholders = vec!["?"; paths.len()].join(",");
-                    let query = format!("SELECT path, size, mtime, ctime FROM cache WHERE path IN ({})", placeholders);
+                    let query = format!("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path IN ({})", placeholders);
                     if let Ok(mut stmt) = conn.prepare(&query) {
                         let params: Vec<&dyn rusqlite::ToSql> = paths.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
                         if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
@@ -607,6 +612,8 @@ fn get_smart_folder_paths(
                                 size: row.get(1)?,
                                 mtime: row.get(2)?,
                                 ctime: row.get(3)?,
+                                width: row.get(4)?,
+                                height: row.get(5)?,
                             })
                         }) {
                             target_paths = rows.flatten().collect();
@@ -616,23 +623,22 @@ fn get_smart_folder_paths(
             }
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
-                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
+                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
                 if let Ok(rows) = stmt.query_map([], |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
                         size: row.get(1)?,
                         mtime: row.get(2)?,
                         ctime: row.get(3)?,
+                        width: row.get(4)?,
+                        height: row.get(5)?,
                     })
                 }) {
-                    let mut count = 0;
                     for r in rows {
                         if let Ok(item) = r {
                             target_paths.push(item);
-                            count += 1;
                         }
                     }
-                    let _ = std::fs::write("veloce_profile.txt", format!("history fetched {} items\n", count));
                 }
                 }
             }
