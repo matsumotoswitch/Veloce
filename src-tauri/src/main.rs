@@ -274,6 +274,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path ON cache (path)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_mtime ON cache (mtime)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings (rating)", []).map_err(|e| e.to_string())?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover ON cache (path, mtime DESC, size, ctime)", []).map_err(|e| e.to_string())?;
 
     // マイグレーション（カラムが存在しない場合は無視される）
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
@@ -378,14 +379,9 @@ fn path_exists(path: String) -> bool {
 #[derive(Clone, Debug)]
 pub struct SmartFolderItem {
     pub path: String,
-    pub width: u32,
-    pub height: u32,
     pub size: u64,
     pub mtime: u64,
     pub ctime: u64,
-    pub hash_key: String,
-    pub search_text: String,
-    pub has_thumbnail: bool,
 }
 
 fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
@@ -405,17 +401,15 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         size,
         mtime,
         ctime,
-        // SQLクエリで既にhas_thumbnailを取得済み。DBへの再問い合わせ不要。
-        has_thumbnail_cache: item.has_thumbnail,
-        // メタデータとサムネイルは同一クエリ(get_full_metadata_for_path)で保存されるため同値。
-        has_metadata_cache: item.has_thumbnail,
-        width: item.width,
-        height: item.height,
+        has_thumbnail_cache: false,
+        has_metadata_cache: false,
+        width: 0,
+        height: 0,
         prompt: String::new(),
         negative_prompt: String::new(),
         source: String::new(),
-        meta_loaded: true,
-        search_text: item.search_text.clone(),
+        meta_loaded: false,
+        search_text: String::new(),
     }
 }
 
@@ -424,9 +418,9 @@ fn build_smart_folder_query(
     is_count: bool,
 ) -> (String, Vec<rusqlite::types::Value>) {
     let select_clause = if is_count {
-        "SELECT COUNT(*)"
+        "SELECT COUNT(c.path)"
     } else {
-        "SELECT c.path, c.width, c.height, c.size, c.mtime, c.ctime, c.hash_key, c.searchable_prompt, c.searchable_negative_prompt, c.searchable_source, (c.thumbnail IS NOT NULL)"
+        "SELECT c.path, c.size, c.mtime, c.ctime"
     };
 
     let mut is_inner_join = false;
@@ -572,26 +566,22 @@ fn get_smart_folder_paths(
 
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.get() {
+            let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
             let (query_str, params) = build_smart_folder_query(rule, false);
             if let Ok(mut stmt) = conn.prepare(&query_str) {
                 if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                    let prompt: String = row.get(7).unwrap_or_default();
-                    let n_prompt: String = row.get(8).unwrap_or_default();
-                    let source: String = row.get(9).unwrap_or_default();
-                    let search_text = format!("{}\n{}\n{}", prompt, n_prompt, source).to_lowercase();
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
-                        width: row.get(1)?,
-                        height: row.get(2)?,
-                        size: row.get(3)?,
-                        mtime: row.get(4)?,
-                        ctime: row.get(5)?,
-                        hash_key: row.get(6)?,
-                        search_text,
-                        has_thumbnail: row.get(10).unwrap_or(false),
+                        size: row.get(1)?,
+                        mtime: row.get(2)?,
+                        ctime: row.get(3)?,
                     })
                 }) {
-                    target_paths = rows.flatten().collect();
+                    for r in rows {
+                        if let Ok(item) = r {
+                            target_paths.push(item);
+                        }
+                    }
                 }
             }
         }
@@ -608,24 +598,15 @@ fn get_smart_folder_paths(
             if !paths.is_empty() {
                 if let Ok(conn) = db_conn.get() {
                     let placeholders = vec!["?"; paths.len()].join(",");
-                    let query = format!("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source, (thumbnail IS NOT NULL) FROM cache WHERE path IN ({})", placeholders);
+                    let query = format!("SELECT path, size, mtime, ctime FROM cache WHERE path IN ({})", placeholders);
                     if let Ok(mut stmt) = conn.prepare(&query) {
                         let params: Vec<&dyn rusqlite::ToSql> = paths.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
                         if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-                            let prompt: String = row.get(7).unwrap_or_default();
-                            let n_prompt: String = row.get(8).unwrap_or_default();
-                            let source: String = row.get(9).unwrap_or_default();
-                            let search_text = format!("{}\n{}\n{}", prompt, n_prompt, source).to_lowercase();
                             Ok(SmartFolderItem {
-                                width: row.get(0)?,
-                                height: row.get(1)?,
-                                path: row.get(2)?,
-                                size: row.get(3)?,
-                                mtime: row.get(4)?,
-                                ctime: row.get(5)?,
-                                hash_key: row.get(6)?,
-                                search_text,
-                                has_thumbnail: row.get(10).unwrap_or(false),
+                                path: row.get(0)?,
+                                size: row.get(1)?,
+                                mtime: row.get(2)?,
+                                ctime: row.get(3)?,
                             })
                         }) {
                             target_paths = rows.flatten().collect();
@@ -635,28 +616,24 @@ fn get_smart_folder_paths(
             }
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
-                if let Ok(mut stmt) =
-                    conn.prepare("SELECT width, height, path, size, mtime, ctime, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source, (thumbnail IS NOT NULL) FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100")
-                {
-                    if let Ok(rows) = stmt.query_map([], |row| {
-                        let prompt: String = row.get(7).unwrap_or_default();
-                        let n_prompt: String = row.get(8).unwrap_or_default();
-                        let source: String = row.get(9).unwrap_or_default();
-                        let search_text = format!("{}\n{}\n{}", prompt, n_prompt, source).to_lowercase();
-                        Ok(SmartFolderItem {
-                            width: row.get(0)?,
-                            height: row.get(1)?,
-                            path: row.get(2)?,
-                            size: row.get(3)?,
-                            mtime: row.get(4)?,
-                            ctime: row.get(5)?,
-                            hash_key: row.get(6)?,
-                            search_text,
-                            has_thumbnail: row.get(10).unwrap_or(false),
-                        })
-                    }) {
-                        target_paths = rows.flatten().collect();
+                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
+                if let Ok(rows) = stmt.query_map([], |row| {
+                    Ok(SmartFolderItem {
+                        path: row.get(0)?,
+                        size: row.get(1)?,
+                        mtime: row.get(2)?,
+                        ctime: row.get(3)?,
+                    })
+                }) {
+                    let mut count = 0;
+                    for r in rows {
+                        if let Ok(item) = r {
+                            target_paths.push(item);
+                            count += 1;
+                        }
                     }
+                    let _ = std::fs::write("veloce_profile.txt", format!("history fetched {} items\n", count));
+                }
                 }
             }
         }
@@ -706,12 +683,19 @@ fn load_directory(
         let app_clone2 = app_clone.clone();
         let files_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
+            use std::io::Write;
+            let start = std::time::Instant::now();
+            let mut log = String::new();
 
             let mut files: Vec<ImageFile> = if path_for_spawn.starts_with("smart://") {
+                let q_start = std::time::Instant::now();
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
-                // スマートフォルダはSQLで既に hash_key・has_thumbnail を取得済みのため
-                // 後続のDB再クエリブロックをスキップする
-                smart_items.into_par_iter().map(create_image_file_from_smart_item).collect()
+                log.push_str(&format!("SQL get_smart_folder_paths took: {:?} ({} items)\n", q_start.elapsed(), smart_items.len()));
+                
+                let p_start = std::time::Instant::now();
+                let res = smart_items.into_par_iter().map(create_image_file_from_smart_item).collect();
+                log.push_str(&format!("par_iter map took: {:?}\n", p_start.elapsed()));
+                res
             } else {
                 let target_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&path_for_spawn)
                     .into_iter()
@@ -762,72 +746,18 @@ fn load_directory(
                     .collect::<Vec<ImageFile>>()
             };
 
-            // DB バッチ確認: hash_key を計算して一括クエリし hasThumbnailCache/hasMetadataCache を設定
-            // SQLite IN 句の上限 (999) に合わせてチャンク分割する
-            // スマートフォルダはSQLクエリ内で既にhas_thumbnailを取得済みのためスキップ
-            if !files.is_empty() && !path_for_spawn.starts_with("smart://") {
-                if let Ok(conn) = db_conn_clone.get() {
-                    // (hash_key -> (has_thumbnail, has_metadata)) のマップを構築
-                    let mut cache_flags: std::collections::HashMap<String, (bool, bool)> = std::collections::HashMap::new();
-
-                    let chunk_size = 999;
-                    let hash_path_pairs: Vec<(String, usize)> = files.iter().enumerate().map(|(i, f)| {
-                        let clean = f.path.replace("\\\\?\\", "");
-                        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-                        hasher.update(clean.as_bytes());
-                        hasher.update(b"_");
-                        hasher.update(f.mtime.to_string().as_bytes());
-                        (format!("{:016x}", hasher.digest()), i)
-                    }).collect();
-
-                    for chunk in hash_path_pairs.chunks(chunk_size) {
-                        {
-                            use tauri::Manager;
-                            if let Ok(dir_lock) = app_clone2.state::<AppState>().current_dir.lock() {
-                                if *dir_lock != path_for_spawn {
-                                    break;
-                                }
-                            }
-                        }
-                        let placeholders = vec!["?"; chunk.len()].join(",");
-                        let query = format!(
-                            "SELECT hash_key, (thumbnail IS NOT NULL), (metadata IS NOT NULL) FROM cache WHERE hash_key IN ({})",
-                            placeholders
-                        );
-                        let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|(hk, _)| hk as &dyn rusqlite::ToSql).collect();
-                        if let Ok(mut stmt) = conn.prepare_cached(&query) {
-                            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-                                let hk: String = row.get(0)?;
-                                let has_thumb: bool = row.get(1)?;
-                                let has_meta: bool = row.get(2)?;
-                                Ok((hk, has_thumb, has_meta))
-                            }) {
-                                for row in rows.flatten() {
-                                    cache_flags.insert(row.0, (row.1, row.2));
-                                }
-                            }
-                        }
-                    }
-
-                    // O(1) で各ファイルにフラグをセット
-                    for (i, f) in files.iter_mut().enumerate() {
-                        let clean = f.path.replace("\\\\?\\", "");
-                        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-                        hasher.update(clean.as_bytes());
-                        hasher.update(b"_");
-                        hasher.update(f.mtime.to_string().as_bytes());
-                        let hk = format!("{:016x}", hasher.digest());
-                        if let Some(&(has_thumb, has_meta)) = cache_flags.get(&hk) {
-                            f.has_thumbnail_cache = has_thumb;
-                            f.has_metadata_cache = has_meta;
-                            let _ = i; // suppress unused warning
-                        }
-                    }
-                }
-            }
+            // SQLiteでの同期バッチ確認は起動速度に影響するため削除し、フロントエンドの遅延ロードに完全に委譲します。
             // デフォルトソート（名前順昇順）も並列処理で適用
-            files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
-
+            if !path_for_spawn.starts_with("smart://") {
+                let s_start = std::time::Instant::now();
+                files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
+                log.push_str(&format!("par_sort_by took: {:?}\n", s_start.elapsed()));
+            }
+            
+            log.push_str(&format!("Total open_folder spawn_blocking took: {:?}\n", start.elapsed()));
+            let mut f = std::fs::OpenOptions::new().append(true).create(true).open("veloce_profile.txt").unwrap();
+            f.write_all(log.as_bytes()).unwrap();
+            
             files
 
         }).await;
@@ -1101,6 +1031,8 @@ fn get_smart_folder_counts(
     let db_conn = state.db_conn.clone();
     
     if let Ok(conn) = db_conn.get() {
+        let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
+        
         for rule in rules {
             let mut count = 0;
             if rule.conditions.is_empty() && (rule.id == "fav_5" || rule.id == "fav_4_plus" || rule.id == "history") {
@@ -1158,6 +1090,7 @@ fn set_rating(
 }
 
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
+    let apply_start = std::time::Instant::now();
     let all_files = state.all_files.lock().unwrap();
     let sort_config = state.sort_config.lock().unwrap();
     let search_query = state.search_query.lock().unwrap();
@@ -1208,7 +1141,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     }
 
     // ソート
-    let key = sort_config.key.as_str();
+    let key = sort_config.key.clone();
     let asc = sort_config.asc;
     
     let ratings_map_for_sort = if key == "rating" {
@@ -1217,8 +1150,13 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
         None
     };
 
-    filtered.sort_by(|a, b| {
-        let cmp = match key {
+    let current_dir = state.current_dir.lock().unwrap().clone();
+    let skip_sort = current_dir.starts_with("smart://") && key == "name";
+
+    if !skip_sort {
+        use rayon::prelude::*;
+        filtered.par_sort_by(|a, b| {
+            let cmp = match key.as_str() {
             "name" => natural_cmp(&a.name, &b.name),
             "ext" => a.ext.cmp(&b.ext),
             "size" => a.size.cmp(&b.size),
@@ -1261,9 +1199,16 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             cmp
         }
     });
+    }
 
     let total = filtered.len();
     let paths: Vec<String> = filtered.iter().map(|f| f.path.clone()).collect();
+    
+    let profile_msg = format!("apply_filters_and_sort took: {:?}\n", apply_start.elapsed());
+    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open("veloce_profile.txt") {
+        use std::io::Write;
+        let _ = f.write_all(profile_msg.as_bytes());
+    }
 
     drop(all_files);
     drop(sort_config);
@@ -4770,7 +4715,6 @@ mod tests {
         
         let item = &paths[0];
         assert_eq!(item.path, fake_path);
-        assert_eq!(item.width, 1920);
         assert_eq!(item.size, 123456);
         assert_eq!(item.mtime, 1700000000);
     }
@@ -4789,14 +4733,9 @@ mod tests {
         // DBにはサイズ0, mtime0で保存されていたと仮定
         let item = super::SmartFolderItem {
             path: file_path.to_string_lossy().to_string(),
-            width: 100,
-            height: 100,
             size: 0,
             mtime: 0,
             ctime: 0,
-            hash_key: "dummy_hash".to_string(),
-            search_text: String::new(),
-            has_thumbnail: false,
         };
 
         let img = super::create_image_file_from_smart_item(item);
@@ -4804,8 +4743,6 @@ mod tests {
         // パフォーマンス上の理由から、size や mtime が 0 の場合でも同期的にはファイルシステムから補完されないこと（遅延読み込みで対応）
         assert_eq!(img.size, 0);
         assert_eq!(img.mtime, 0);
-        assert_eq!(img.width, 100);
-        // has_thumbnail は SmartFolderItem.has_thumbnail から引き継がれること
         assert!(!img.has_thumbnail_cache);
         assert!(!img.has_metadata_cache);
 
