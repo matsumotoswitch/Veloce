@@ -243,7 +243,8 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
             conn.execute_batch(
                 "PRAGMA journal_mode = WAL;
                  PRAGMA synchronous = NORMAL;
-                 PRAGMA cache_size = -64000;
+                 PRAGMA mmap_size = 268435456;
+                 PRAGMA cache_size = -4000;
                  PRAGMA temp_store = MEMORY;
                  PRAGMA busy_timeout = 5000;"
             )
