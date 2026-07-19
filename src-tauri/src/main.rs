@@ -3789,7 +3789,14 @@ fn main() {
                     .body(bytes);
             }
 
-            if let Some(bytes) = generate_image_thumbnail_sync(&path_str) {
+            let lower_path = path_str.to_lowercase();
+            let generated_bytes = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+                generate_video_thumbnail_sync(&path_str)
+            } else {
+                generate_image_thumbnail_sync(&path_str)
+            };
+
+            if let Some(bytes) = generated_bytes {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
                 if let Ok(conn) = state.db_conn.get() {
                     let _ = conn.execute(

@@ -588,8 +588,10 @@ async function rebuildSelectedCache() {
       }
       appState.thumbnailTotalRequested += pathsToRebuild.length;
 
+      if (!appState.rebuiltPaths) appState.rebuiltPaths = new Set();
       pathsToRebuild.forEach(p => {
         appState.thumbnailCounted.delete(p);
+        appState.rebuiltPaths.add(p);
       });
 
       if (window.thumbnailManager) window.thumbnailManager.unshiftPreload(pathsToRebuild);
