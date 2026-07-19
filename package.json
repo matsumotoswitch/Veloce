@@ -9,11 +9,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "license": "cd src-tauri && cargo about generate about.hbs > ../dist/RUST_LICENSES.html"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1",
     "jsdom": "^22.1.0",
+    "rollup-plugin-license": "^3.7.1",
     "vite": "^4.5.14",
     "vitest": "^0.34.6"
   }

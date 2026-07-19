@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Third-Party Licenses (Rust)</title>
+  <style>
+    body { font-family: sans-serif; background: #1e1e1e; color: #eee; padding: 20px; }
+    h1 { color: #fff; }
+    h2 { color: #ccc; margin-top: 40px; }
+    pre { background: #2a2a2a; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    a { color: #66b3ff; }
+  </style>
+</head>
+<body>
+  <h1>Rust Third-Party Licenses</h1>
+  <p>This software uses the following third-party Rust crates:</p>
+  <ul>
+    {{#each overview}}
+    <li><a href="#{{id}}">{{name}} {{version}}</a> ({{license}})</li>
+    {{/each}}
+  </ul>
+
+  <hr/>
+
+  {{#each licenses}}
+  <h2 id="{{id}}">{{name}}</h2>
+  <p>Used by:</p>
+  <ul>
+    {{#each used_by}}
+    <li>{{crate.name}} {{crate.version}}</li>
+    {{/each}}
+  </ul>
+  <pre>{{text}}</pre>
+  {{/each}}
+</body>
+</html>

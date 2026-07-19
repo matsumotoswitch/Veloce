@@ -126,7 +126,9 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 > DEALINGS IN THE SOFTWARE.
 
 ## 6. その他の依存パッケージについて
-本アプリケーションのビルドに利用されている、または静的にリンクされているその他の各種依存パッケージ（NPMパッケージおよびRustクレート）のライセンスに関する完全なリストと詳細については、ソースコードリポジトリ内の以下のファイルをご参照ください。
+本アプリケーションのビルドに利用されている、または静的にリンクされているその他の各種依存パッケージ（NPMパッケージおよびRustクレート）のライセンスに関する完全なリストと詳細なライセンス条項（Copyright表示を含む）については、ビルドプロセスによって自動生成される以下のファイルをご参照ください。
 
-* フロントエンド依存関係: `package.json` および `package-lock.json`
-* バックエンド（Rust）依存関係: `src-tauri/Cargo.toml` および `src-tauri/Cargo.lock`
+* フロントエンド依存関係のライセンス一覧: `dist/NPM_LICENSES.txt`
+* バックエンド（Rust）依存関係のライセンス一覧: `dist/RUST_LICENSES.html`
+
+ビルド時にこれらのファイルが自動で生成され、本ソフトウェアに含まれるすべてのサードパーティソフトウェアの著作権表示とライセンス条項が網羅されます。
