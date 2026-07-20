@@ -299,6 +299,45 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_negative_prompt TEXT DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT ''", []);
 
+    // --- FTS5 Setup ---
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source)",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    // Triggers to keep FTS in sync
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS cache_ai AFTER INSERT ON cache BEGIN
+            INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+            VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
+        END;", []
+    ).map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS cache_ad AFTER DELETE ON cache BEGIN
+            DELETE FROM cache_fts WHERE hash_key = old.hash_key;
+        END;", []
+    ).map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS cache_au AFTER UPDATE ON cache BEGIN
+            DELETE FROM cache_fts WHERE hash_key = old.hash_key;
+            INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+            VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
+        END;", []
+    ).map_err(|e| e.to_string())?;
+    
+    // Backfill FTS if needed (only if cache_fts is empty but cache is not)
+    let fts_count: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
+    if fts_count == 0 {
+        let _ = conn.execute(
+            "INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+             SELECT hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache",
+            []
+        );
+    }
+
+
     // 既存データのバックフィル
     let _ = conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
 
@@ -454,7 +493,19 @@ fn build_smart_folder_query(
     }
 
     let join_type = if is_inner_join { "INNER JOIN" } else { "LEFT JOIN" };
-    let mut query = format!("{} FROM cache c {} ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause, join_type);
+    
+    // Check if FTS is needed
+    let mut uses_fts = false;
+    for cond in &rule.conditions {
+        if cond.r#type == "prompt" || cond.r#type == "negative_prompt" || cond.r#type == "source" {
+            uses_fts = true;
+            break;
+        }
+    }
+    
+    let fts_join = if uses_fts { "INNER JOIN cache_fts fts ON c.hash_key = fts.hash_key" } else { "" };
+    
+    let mut query = format!("{} FROM cache c {} {} ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause, fts_join, join_type);
     let mut params = Vec::new();
 
     if rule.conditions.is_empty() {
@@ -474,30 +525,48 @@ fn build_smart_folder_query(
         
         match cond.r#type.as_str() {
             "prompt" => {
+                // Escape FTS syntax characters by enclosing in quotes if it's not empty, or use standard LIKE as fallback if MATCH is too strict?
+                // Actually, for FTS5 MATCH, we can just use the value directly, but we need to escape it to avoid syntax errors.
+                // Simple escaping: replace " with " and wrap in quotes.
+                let escaped_val = val_lower.replace("\"", "\"\"");
+                let fts_query = format!("\"{}\"", escaped_val);
+                
                 if cond.operator == "contains" {
-                    clause = "c.searchable_prompt LIKE ?".to_string();
-                    params.push(rusqlite::types::Value::Text(val_like));
+                    clause = "fts.searchable_prompt MATCH ?".to_string();
+                    params.push(rusqlite::types::Value::Text(fts_query));
                 } else if cond.operator == "not_contains" {
-                    clause = "c.searchable_prompt NOT LIKE ?".to_string();
-                    params.push(rusqlite::types::Value::Text(val_like));
+                    clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
+                    params.push(rusqlite::types::Value::Text(fts_query));
                 } else { clause = "1=1".to_string(); }
             }
             "negative_prompt" => {
+                // Escape FTS syntax characters by enclosing in quotes if it's not empty, or use standard LIKE as fallback if MATCH is too strict?
+                // Actually, for FTS5 MATCH, we can just use the value directly, but we need to escape it to avoid syntax errors.
+                // Simple escaping: replace " with " and wrap in quotes.
+                let escaped_val = val_lower.replace("\"", "\"\"");
+                let fts_query = format!("\"{}\"", escaped_val);
+                
                 if cond.operator == "contains" {
-                    clause = "c.searchable_negative_prompt LIKE ?".to_string();
-                    params.push(rusqlite::types::Value::Text(val_like));
+                    clause = "fts.searchable_negative_prompt MATCH ?".to_string();
+                    params.push(rusqlite::types::Value::Text(fts_query));
                 } else if cond.operator == "not_contains" {
-                    clause = "c.searchable_negative_prompt NOT LIKE ?".to_string();
-                    params.push(rusqlite::types::Value::Text(val_like));
+                    clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
+                    params.push(rusqlite::types::Value::Text(fts_query));
                 } else { clause = "1=1".to_string(); }
             }
             "source" => {
+                // Escape FTS syntax characters by enclosing in quotes if it's not empty, or use standard LIKE as fallback if MATCH is too strict?
+                // Actually, for FTS5 MATCH, we can just use the value directly, but we need to escape it to avoid syntax errors.
+                // Simple escaping: replace " with " and wrap in quotes.
+                let escaped_val = val_lower.replace("\"", "\"\"");
+                let fts_query = format!("\"{}\"", escaped_val);
+                
                 if cond.operator == "contains" {
-                    clause = "c.searchable_source LIKE ?".to_string();
-                    params.push(rusqlite::types::Value::Text(val_like));
+                    clause = "fts.searchable_source MATCH ?".to_string();
+                    params.push(rusqlite::types::Value::Text(fts_query));
                 } else if cond.operator == "not_contains" {
-                    clause = "c.searchable_source NOT LIKE ?".to_string();
-                    params.push(rusqlite::types::Value::Text(val_like));
+                    clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
+                    params.push(rusqlite::types::Value::Text(fts_query));
                 } else { clause = "1=1".to_string(); }
             }
             "rating" => {
@@ -3888,6 +3957,14 @@ fn main() {
             // ゴミ箱からの復元やブラウザからの保存など、外部からの変更を検知してフロントエンドに通知する
             let app_handle = app.handle();
             std::thread::spawn(move || {
+                use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+                use std::sync::mpsc::channel;
+
+                let (tx, rx) = channel();
+                let mut watcher = notify::recommended_watcher(tx).unwrap();
+                let mut current_watched_dir = String::new();
+                let mut current_watched_parent = String::new();
+
                 let mut last_dir = String::new();
                 let mut known_files: std::collections::HashMap<String, (u64, u64)> =
                     std::collections::HashMap::new();
@@ -3895,7 +3972,57 @@ fn main() {
                     std::collections::HashSet::new();
 
                 loop {
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    let current_dir = {
+                        let state = app_handle.state::<AppState>();
+                        let dir = if let Ok(dir_lock) = state.current_dir.lock() {
+                            dir_lock.clone()
+                        } else {
+                            String::new()
+                        };
+                        dir
+                    };
+
+                    if current_dir.is_empty() {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        continue;
+                    }
+
+                    let parent_dir = std::path::Path::new(&current_dir)
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string());
+                        
+                    let parent_watch = parent_dir.clone().unwrap_or_default();
+
+                    let mut dir_changed = false;
+                    if current_dir != current_watched_dir || parent_watch != current_watched_parent {
+                        if !current_watched_dir.is_empty() {
+                            let _ = watcher.unwatch(std::path::Path::new(&current_watched_dir));
+                        }
+                        if !current_watched_parent.is_empty() {
+                            let _ = watcher.unwatch(std::path::Path::new(&current_watched_parent));
+                        }
+                        if std::path::Path::new(&current_dir).exists() {
+                            let _ = watcher.watch(std::path::Path::new(&current_dir), RecursiveMode::NonRecursive);
+                            current_watched_dir = current_dir.clone();
+                        }
+                        if !parent_watch.is_empty() && std::path::Path::new(&parent_watch).exists() {
+                            let _ = watcher.watch(std::path::Path::new(&parent_watch), RecursiveMode::NonRecursive);
+                            current_watched_parent = parent_watch.clone();
+                        }
+                        dir_changed = true;
+                    }
+
+                    // Wait for events
+                    let mut rx_ready = false;
+                    if let Ok(Ok(_)) = rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                        rx_ready = true;
+                        std::thread::sleep(std::time::Duration::from_millis(100)); // Debounce
+                        while let Ok(_) = rx.try_recv() {}
+                    }
+
+                    if !dir_changed && !rx_ready {
+                        continue;
+                    }
 
                     let current_dir = {
                         let state = app_handle.state::<AppState>();
@@ -4890,5 +5017,47 @@ mod tests {
         
         // The OS API should successfully extract a thumbnail.
         assert!(result.is_some(), "OS thumbnail fallback failed");
+    }
+}
+
+#[cfg(test)]
+mod fts_tests {
+    use rusqlite::Connection;
+    
+    #[test]
+    fn test_fts_triggers() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Create schema
+        conn.execute(
+            "CREATE TABLE cache (hash_key TEXT PRIMARY KEY, searchable_prompt TEXT DEFAULT '', searchable_negative_prompt TEXT DEFAULT '', searchable_source TEXT DEFAULT '')",
+            [],
+        ).unwrap();
+        
+        conn.execute(
+            "CREATE VIRTUAL TABLE cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source)",
+            [],
+        ).unwrap();
+        
+        // Triggers
+        conn.execute("CREATE TRIGGER cache_ai AFTER INSERT ON cache BEGIN INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source); END;", []).unwrap();
+        conn.execute("CREATE TRIGGER cache_au AFTER UPDATE ON cache BEGIN DELETE FROM cache_fts WHERE hash_key = old.hash_key; INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source); END;", []).unwrap();
+        conn.execute("CREATE TRIGGER cache_ad AFTER DELETE ON cache BEGIN DELETE FROM cache_fts WHERE hash_key = old.hash_key; END;", []).unwrap();
+        
+        // Test Insert
+        conn.execute("INSERT INTO cache (hash_key, searchable_prompt) VALUES ('key1', '1girl, long hair, blue eyes')", []).unwrap();
+        let count: i64 = conn.query_row("SELECT count(*) FROM cache_fts WHERE searchable_prompt MATCH '\"1girl\"'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 1);
+        
+        // Test Update
+        conn.execute("UPDATE cache SET searchable_prompt = '1boy, short hair' WHERE hash_key = 'key1'", []).unwrap();
+        let count_girl: i64 = conn.query_row("SELECT count(*) FROM cache_fts WHERE searchable_prompt MATCH '\"1girl\"'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count_girl, 0);
+        let count_boy: i64 = conn.query_row("SELECT count(*) FROM cache_fts WHERE searchable_prompt MATCH '\"1boy\"'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count_boy, 1);
+        
+        // Test Delete
+        conn.execute("DELETE FROM cache WHERE hash_key = 'key1'", []).unwrap();
+        let count_all: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap();
+        assert_eq!(count_all, 0);
     }
 }
