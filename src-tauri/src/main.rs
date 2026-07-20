@@ -255,7 +255,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
         .build(manager)
         .map_err(|e| e.to_string())?;
 
-    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let conn = pool.get().map_err(|e| e.to_string())?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS cache (
@@ -327,55 +327,58 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
         END;", []
     ).map_err(|e| e.to_string())?;
     
-    // Backfill FTS if needed (only if cache_fts is empty but cache is not)
-    let fts_count: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
-    if fts_count == 0 {
-        let _ = conn.execute(
-            "INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
-             SELECT hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache",
-            []
-        );
-    }
+    let pool_clone = pool.clone();
+    std::thread::spawn(move || {
+        if let Ok(mut bg_conn) = pool_clone.get() {
+            // 既存データのバックフィル (width, height, path)
+            let _ = bg_conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
 
+            // カラムのマイグレーション (searchable_*)
+            let has_unmigrated = bg_conn.query_row(
+                "SELECT 1 FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != '' LIMIT 1",
+                [],
+                |_| Ok(()),
+            ).is_ok();
+            
+            if has_unmigrated {
+                let mut rows_to_update = Vec::new();
+                if let Ok(mut stmt) = bg_conn.prepare("SELECT hash_key, metadata FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != ''") {
+                    if let Ok(mut rows) = stmt.query([]) {
+                        while let Ok(Some(row)) = rows.next() {
+                            let hash_key: String = row.get(0).unwrap_or_default();
+                            let metadata_str: String = row.get(1).unwrap_or_default();
+                            if let Ok(meta) = serde_json::from_str::<FullMetadata>(&metadata_str) {
+                                let (sp, snp, ss) = extract_searchable_strings(&meta);
+                                rows_to_update.push((hash_key, sp, snp, ss));
+                            }
+                        }
+                    }
+                }
 
-    // 既存データのバックフィル
-    let _ = conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
-
-    // 検索用カラムのマイグレーション
-    let has_unmigrated = conn.query_row(
-        "SELECT 1 FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != '' LIMIT 1",
-        [],
-        |_| Ok(()),
-    ).is_ok();
-
-    if has_unmigrated {
-        let mut rows_to_update = Vec::new();
-        {
-            let mut stmt = conn.prepare("SELECT hash_key, metadata FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != ''").unwrap();
-            let mut rows = stmt.query([]).unwrap();
-            while let Ok(Some(row)) = rows.next() {
-                let hash_key: String = row.get(0).unwrap_or_default();
-                let metadata_str: String = row.get(1).unwrap_or_default();
-                if let Ok(meta) = serde_json::from_str::<FullMetadata>(&metadata_str) {
-                    let (sp, snp, ss) = extract_searchable_strings(&meta);
-                    rows_to_update.push((hash_key, sp, snp, ss));
+                if !rows_to_update.is_empty() {
+                    if let Ok(tx) = bg_conn.transaction() {
+                        if let Ok(mut update_stmt) = tx.prepare("UPDATE cache SET searchable_prompt = ?, searchable_negative_prompt = ?, searchable_source = ? WHERE hash_key = ?") {
+                            for (hk, sp, snp, ss) in rows_to_update {
+                                let _ = update_stmt.execute(rusqlite::params![sp, snp, ss, hk]);
+                            }
+                        }
+                        let _ = tx.commit();
+                    }
                 }
             }
-        }
-        
-        if !rows_to_update.is_empty() {
-            println!("Migrating {} records for searchable columns...", rows_to_update.len());
-            let tx = conn.transaction().map_err(|e| e.to_string())?;
-            {
-                let mut update_stmt = tx.prepare("UPDATE cache SET searchable_prompt = ?, searchable_negative_prompt = ?, searchable_source = ? WHERE hash_key = ?").map_err(|e| e.to_string())?;
-                for (hk, sp, snp, ss) in rows_to_update {
-                    let _ = update_stmt.execute(rusqlite::params![sp, snp, ss, hk]);
-                }
+            
+            // FTSバックフィル
+            let fts_count: i64 = bg_conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
+            if fts_count == 0 {
+                let _ = bg_conn.execute(
+                    "INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+                     SELECT hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache",
+                    []
+                );
             }
-            tx.commit().map_err(|e| e.to_string())?;
             println!("Migration completed.");
         }
-    }
+    });
 
     Ok(pool)
 }
@@ -521,7 +524,7 @@ fn build_smart_folder_query(
 
         let clause;
         let val_lower = cond.value.to_lowercase();
-        let val_like = format!("%{}%", val_lower);
+        let _val_like = format!("%{}%", val_lower);
         
         match cond.r#type.as_str() {
             "prompt" => {
@@ -3307,14 +3310,14 @@ async fn audit_cache(
         
         let records = match stmt.query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<u32>>(2)?,
-                row.get::<_, Option<u32>>(3)?,
-                row.get::<_, Option<u64>>(4)?,
-                row.get::<_, Option<u64>>(5)?,
-                row.get::<_, Option<u64>>(6)?,
-                row.get::<_, bool>(7)?,
+                row.get::<_, String>(0).unwrap_or_default(),
+                row.get::<_, Option<String>>(1).unwrap_or(None),
+                row.get::<_, Option<i64>>(2).unwrap_or(None).map(|v| v as u32),
+                row.get::<_, Option<i64>>(3).unwrap_or(None).map(|v| v as u32),
+                row.get::<_, Option<i64>>(4).unwrap_or(None).map(|v| v as u64),
+                row.get::<_, Option<i64>>(5).unwrap_or(None).map(|v| v as u64),
+                row.get::<_, Option<i64>>(6).unwrap_or(None).map(|v| v as u64),
+                row.get::<_, i64>(7).unwrap_or(0) != 0,
             ))
         }) {
             Ok(m) => m.filter_map(|r| r.ok()).collect::<Vec<_>>(),
@@ -3326,6 +3329,7 @@ async fn audit_cache(
         
         for (i, (hash_key, path_opt, width_opt, height_opt, size_opt, mtime_opt, ctime_opt, has_thumbnail)) in records.into_iter().enumerate() {
             if i % 100 == 0 || i == total - 1 {
+                std::thread::sleep(std::time::Duration::from_millis(1));
                 let _ = app.emit_all("audit-progress", AuditProgress {
                     current: i + 1,
                     total,
@@ -3957,11 +3961,17 @@ fn main() {
             // ゴミ箱からの復元やブラウザからの保存など、外部からの変更を検知してフロントエンドに通知する
             let app_handle = app.handle();
             std::thread::spawn(move || {
-                use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+                use notify::{RecursiveMode, Watcher};
                 use std::sync::mpsc::channel;
 
                 let (tx, rx) = channel();
-                let mut watcher = notify::recommended_watcher(tx).unwrap();
+                let mut watcher = match notify::recommended_watcher(tx) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        eprintln!("Watcher init failed: {}", e);
+                        return; // Exit thread without aborting the app
+                    }
+                };
                 let mut current_watched_dir = String::new();
                 let mut current_watched_parent = String::new();
 
@@ -5059,5 +5069,31 @@ mod fts_tests {
         conn.execute("DELETE FROM cache WHERE hash_key = 'key1'", []).unwrap();
         let count_all: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap();
         assert_eq!(count_all, 0);
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use rusqlite::Connection;
+    #[test]
+    fn test_audit_query() {
+        let db_path = dirs::data_local_dir().unwrap().join("veloce").join("veloce.db");
+        let conn = Connection::open(db_path).unwrap();
+        let mut stmt = conn.prepare("SELECT hash_key, path, width, height, size, mtime, ctime, (thumbnail IS NOT NULL) FROM cache LIMIT 5").unwrap();
+        let records = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0),
+                row.get::<_, Option<String>>(1),
+                row.get::<_, Option<u32>>(2),
+                row.get::<_, Option<u32>>(3),
+                row.get::<_, Option<u64>>(4),
+                row.get::<_, Option<u64>>(5),
+                row.get::<_, Option<u64>>(6),
+                row.get::<_, bool>(7),
+            ))
+        }).unwrap();
+        for r in records {
+            println!("{:?}", r);
+        }
     }
 }
