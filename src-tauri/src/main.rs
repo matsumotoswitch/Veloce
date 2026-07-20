@@ -1648,6 +1648,18 @@ fn get_full_metadata_for_path(
                 .trim_end_matches('\0')
                 .to_string();
         }
+        if let Some(make) = exif_data.get("Make") {
+            let make_str = decode_metadata_string(make)
+                .trim_end_matches('\0')
+                .trim()
+                .to_string();
+            if !make_str.is_empty() {
+                if !raw_comment.is_empty() {
+                    raw_comment.push_str("\n");
+                }
+                raw_comment.push_str(&make_str);
+            }
+        }
     }
 
     // EXIF等でプロンプトが見つからなかった場合、Stealthメタデータを試行
@@ -1664,23 +1676,12 @@ fn get_full_metadata_for_path(
 
     let desc_string = raw_description.trim();
     let target_strings = [comment_string, desc_string];
-    let mut extracted_json_text = None;
+    let mut extracted_jsons: Vec<serde_json::Value> = Vec::new();
 
     for s in target_strings.iter() {
-        if let Some(start) = s.find('{') {
-            if let Some(end) = s.rfind('}') {
-                let full_span = &s[start..=end];
-                if serde_json::from_str::<serde_json::Value>(full_span).is_ok() {
-                    extracted_json_text = Some(full_span.to_string());
-                    break;
-                }
-            }
-        }
-    }
-
-    if extracted_json_text.is_none() {
-        for s in target_strings.iter() {
-            if let Some(start) = s.find('{') {
+        let mut idx = 0;
+        while idx < s.len() {
+            if let Some(start) = s[idx..].find('{').map(|i| idx + i) {
                 let mut brace_count = 0;
                 let mut valid_end = None;
                 for (i, c) in s[start..].char_indices() {
@@ -1696,17 +1697,40 @@ fn get_full_metadata_for_path(
                 }
                 if let Some(end) = valid_end {
                     let candidate = &s[start..=end];
-                    if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
-                        extracted_json_text = Some(candidate.to_string());
-                        break;
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(candidate) {
+                        extracted_jsons.push(parsed);
+                        idx = end + 1;
+                        continue;
+                    } else {
+                        idx = start + 1;
+                        continue;
                     }
                 }
+                idx = start + 1;
+            } else {
+                break;
             }
         }
     }
 
-    if let Some(json_text) = extracted_json_text {
-        if let Ok(mut comment_obj) = serde_json::from_str::<serde_json::Value>(&json_text) {
+    if !extracted_jsons.is_empty() {
+        let mut merged_map = serde_json::Map::new();
+        for mut obj in extracted_jsons {
+            // If it's {"generation_data": ...}, unpack it
+            if let Some(gen_data) = obj.get("generation_data").cloned() {
+                if obj.as_object().map_or(false, |m| m.len() == 1) {
+                    obj = gen_data;
+                }
+            }
+            if let Some(map) = obj.as_object_mut() {
+                for (k, v) in map.iter() {
+                    merged_map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        let mut comment_obj = serde_json::Value::Object(merged_map);
+        {
+            let _ = 1; // Dummy block to match the original two braces!
             let mut json_source = None;
 
             // WebP等の二重エンコードJSON対応
@@ -2066,6 +2090,9 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
                 } else if tag == 0x0131 && typ == 2 {
                     // Software
                     results.insert("Software".to_string(), data[..byte_count].to_vec());
+                } else if tag == 0x010F && typ == 2 {
+                    // Make
+                    results.insert("Make".to_string(), data[..byte_count].to_vec());
                 } else if tag == 0x8769 && typ == 4 {
                     // ExifOffset
                     let sub_ifd = if byte_count <= 4 {

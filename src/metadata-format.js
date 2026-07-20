@@ -65,6 +65,9 @@ export function extractMetadataFields(file, meta = {}) {
   if (Array.isArray(p.nodes) && Array.isArray(p.links)) {
     return parseComfyUI(file, meta, p);
   }
+  if (p && typeof p === 'object' && !Array.isArray(p.nodes) && Object.values(p).some(v => v && typeof v === 'object' && v.class_type)) {
+    return parseComfyUIPromptFormat(file, meta, p);
+  }
   // --- A1111 / Forge 解析 ---
   let a1111Candidate = p.rawParameters || p.Description || p.prompt || file.prompt || meta.prompt;
   if (typeof a1111Candidate === 'string') {
@@ -197,7 +200,7 @@ function parseComfyUI(file, meta, p) {
     nodeMap[n.id] = n;
   }
 
-  const samplers = nodes.filter(n => n.type === 'KSampler' || n.type === 'KSamplerAdvanced');
+  const samplers = nodes.filter(n => n.type && typeof n.type === 'string' && n.type.includes('KSampler'));
   const sampler = samplers[0];
 
   let positivePrompt = '';
@@ -413,3 +416,80 @@ function parseA1111(file, meta, p) {
     }
   };
 }
+
+function parseComfyUIPromptFormat(file, meta, p) {
+  let positivePrompt = '';
+  let negativePrompt = '';
+  let seed = null;
+  let steps = null;
+  let samplerName = null;
+  let cfg = null;
+  let modelName = null;
+
+  let sampler = null;
+  for (const key in p) {
+    if (p[key] && typeof p[key].class_type === 'string' && p[key].class_type.includes('KSampler')) {
+      sampler = p[key];
+      break;
+    }
+  }
+
+  function extractTextFromNodeId(nodeId) {
+    const node = p[nodeId];
+    if (!node || !node.inputs) return '';
+    if (node.class_type === 'CLIPTextEncode' || node.class_type === 'CLIPTextEncodeSDXL') {
+      return (node.inputs.text || '').toString();
+    }
+    if (node.inputs.text) return node.inputs.text.toString();
+    return '';
+  }
+
+  if (sampler && sampler.inputs) {
+    if (sampler.inputs.seed !== undefined) seed = sampler.inputs.seed;
+    if (sampler.inputs.noise_seed !== undefined) seed = sampler.inputs.noise_seed;
+    if (sampler.inputs.steps !== undefined) steps = sampler.inputs.steps;
+    if (sampler.inputs.cfg !== undefined) cfg = sampler.inputs.cfg;
+    if (sampler.inputs.sampler_name !== undefined) samplerName = sampler.inputs.sampler_name;
+    if (sampler.inputs.scheduler !== undefined) samplerName = (samplerName || '') + '_' + sampler.inputs.scheduler;
+
+    if (sampler.inputs.positive && Array.isArray(sampler.inputs.positive)) {
+      positivePrompt = extractTextFromNodeId(sampler.inputs.positive[0]);
+    }
+    if (sampler.inputs.negative && Array.isArray(sampler.inputs.negative)) {
+      negativePrompt = extractTextFromNodeId(sampler.inputs.negative[0]);
+    }
+  } else {
+    let foundText = [];
+    for (const key in p) {
+      if (p[key] && p[key].class_type && p[key].class_type.includes('CLIPTextEncode')) {
+        if (p[key].inputs && p[key].inputs.text) foundText.push(p[key].inputs.text.toString());
+      }
+    }
+    if (foundText.length > 0) positivePrompt = foundText[0];
+    if (foundText.length > 1) negativePrompt = foundText[1];
+  }
+
+  const w = meta.width || file.width;
+  const h = meta.height || file.height;
+  const res = (w && h) ? `${formatMetadataNumber(w)}x${formatMetadataNumber(h)}` : null;
+
+  return {
+    name: file.name,
+    source: "ComfyUI",
+    requestType: null,
+    prompt: positivePrompt || '',
+    negativePrompt: negativePrompt || '',
+    chars: [],
+    params: {
+      resolution: res,
+      seed: seed,
+      steps: steps ? formatMetadataNumber(steps) : null,
+      sampler: samplerName,
+      cfg_rescale: cfg,
+      scale: cfg,
+      model: modelName,
+      rawParameters: JSON.stringify(p, null, 2)
+    }
+  };
+}
+
