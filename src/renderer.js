@@ -308,6 +308,12 @@ async function refreshFileList(showToast = false) {
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
   }
 
+  // 追加: 現在のスクロール位置をキャッシュ
+  const gridContainer = uiManager.elements.thumbnailGrid;
+  const listContainer = document.getElementById('center-top');
+  appState.savedScrollTopGrid = gridContainer ? gridContainer.scrollTop : 0;
+  appState.savedScrollTopList = listContainer ? listContainer.scrollTop : 0;
+
   // UIとデータの初期化
   appState.totalCount = 0;
   appState.selection.clear();
@@ -2268,7 +2274,7 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
       appState.thumbnailTotalRequested = 0;
       appState.thumbnailCompleted = 0;
       uiManager.showToast('キャッシュの再構築が完了しました', 3000, 'rebuild-folder', 'success');
-      await refreshFileList(true);
+      scheduleRefresh();
     }
   } catch (err) {
     uiManager.showToast(`再構築に失敗しました: ${err}`, 3000, 'rebuild-folder', 'error');
@@ -4511,6 +4517,19 @@ window.addEventListener('DOMContentLoaded', async () => {
       appState.thumbnailCompleted = 0;
       appState.thumbnailCounted.clear();
       await scheduleRefresh();
+      
+      // 追加: 描画が完了したタイミングでスクロール位置を復元
+      requestAnimationFrame(() => {
+        if (uiManager.elements.thumbnailGrid && appState.savedScrollTopGrid) {
+          uiManager.elements.thumbnailGrid.scrollTop = appState.savedScrollTopGrid;
+        }
+        const listContainer = document.getElementById('center-top');
+        if (listContainer && appState.savedScrollTopList) {
+          listContainer.scrollTop = appState.savedScrollTopList;
+        }
+        appState.savedScrollTopGrid = 0;
+        appState.savedScrollTopList = 0;
+      });
       setTimeout(() => {
         const t = document.getElementById('toast-dir-load-progress');
         if (t) {

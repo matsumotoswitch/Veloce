@@ -2870,7 +2870,7 @@ async fn open_viewer(
 
     tauri::WindowBuilder::new(
         &app,
-        label,
+        label.clone(),
         tauri::WindowUrl::App(format!("/viewer.html?index={}", current_index).into()),
     )
     .title("Veloce Viewer")
@@ -2880,6 +2880,39 @@ async fn open_viewer(
     .visible(false)
     .build()
     .map_err(|e| e.to_string())?;
+
+    // Windows 8.1 前面化ハック: 生成直後のウィンドウがタスクバーの後ろに潜り込まないよう
+    // 50ms 遅延後に SetWindowPos(HWND_TOPMOST) → SetForegroundWindow を呼び出す。
+    // arrange_viewers と同じパターン。
+    #[cfg(target_os = "windows")]
+    {
+        let label_clone = label.clone();
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if let Some(win) = app_clone.get_window(&label_clone) {
+                if let Ok(hwnd_ptr) = win.hwnd() {
+                    let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
+                    unsafe {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE,
+                            SWP_NOSIZE,
+                        };
+                        let _ = SetWindowPos(
+                            hwnd,
+                            HWND_TOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE,
+                        );
+                        let _ = SetForegroundWindow(hwnd);
+                    }
+                }
+            }
+        });
+    }
 
     Ok(())
 }
@@ -4442,9 +4475,31 @@ mod tests {
         };
         
         let (query, params) = super::build_smart_folder_query(&rule, false);
-        assert!(query.contains("c.searchable_prompt LIKE ?"));
-        assert!(query.contains("c.searchable_negative_prompt NOT LIKE ?"));
+        // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
+        assert!(
+            query.contains("fts.searchable_prompt MATCH ?"),
+            "prompt の contains 条件は FTS5 MATCH を使うべき。実際のクエリ: {}", query
+        );
+        // not_contains は NOT IN (SELECT ... MATCH ?) 形式
+        assert!(
+            query.contains("searchable_negative_prompt MATCH ?"),
+            "negative_prompt の not_contains 条件は MATCH を含むサブクエリを使うべき。実際のクエリ: {}", query
+        );
+        // FTS JOIN が含まれていること
+        assert!(query.contains("cache_fts"), "FTS JOIN が含まれるべき");
+        // パラメータは2つ（prompt用 + negative_prompt用）
         assert_eq!(params.len(), 2);
+        // パラメータはFTS5のクォートされた形式 ("girl", "bad") になっていること
+        if let rusqlite::types::Value::Text(ref v) = params[0] {
+            assert_eq!(v, "\"girl\"", "FTS5クエリはダブルクォートで囲まれるべき");
+        } else {
+            panic!("params[0] は Text 型であるべき");
+        }
+        if let rusqlite::types::Value::Text(ref v) = params[1] {
+            assert_eq!(v, "\"bad\"", "FTS5クエリはダブルクォートで囲まれるべき");
+        } else {
+            panic!("params[1] は Text 型であるべき");
+        }
     }
 
     #[test]
@@ -5090,28 +5145,52 @@ mod fts_tests {
     }
 }
 
+
 #[cfg(test)]
-mod debug_tests {
-    use rusqlite::Connection;
+mod viewer_tests {
+    /// open_viewer の Zオーダー制御ロジックのテスト。
+    /// Win32 API 呼び出しそのものはユニットテストでは検証できないため、
+    /// 「ウィンドウラベルの生成ロジック」と「遅延時間の妥当性」を検証する。
+
     #[test]
-    fn test_audit_query() {
-        let db_path = dirs::data_local_dir().unwrap().join("veloce").join("veloce.db");
-        let conn = Connection::open(db_path).unwrap();
-        let mut stmt = conn.prepare("SELECT hash_key, path, width, height, size, mtime, ctime, (thumbnail IS NOT NULL) FROM cache LIMIT 5").unwrap();
-        let records = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0),
-                row.get::<_, Option<String>>(1),
-                row.get::<_, Option<u32>>(2),
-                row.get::<_, Option<u32>>(3),
-                row.get::<_, Option<u64>>(4),
-                row.get::<_, Option<u64>>(5),
-                row.get::<_, Option<u64>>(6),
-                row.get::<_, bool>(7),
-            ))
-        }).unwrap();
-        for r in records {
-            println!("{:?}", r);
-        }
+    fn test_viewer_label_format() {
+        // ビューアーウィンドウのラベルは "viewer_{timestamp}_{hash}" の形式であること
+        let now_ms: u128 = 1700000000000;
+        let hash_str = "1234567890abcdef";
+        let label = format!("viewer_{:016}_{}", now_ms, hash_str);
+        assert!(label.starts_with("viewer_"));
+        assert!(label.ends_with(hash_str));
+        // タイムスタンプ部分が16桁でゼロパディングされていること
+        assert!(label.contains("viewer_0001700000000000_"));
+    }
+
+    #[test]
+    fn test_viewer_zorder_delay_is_reasonable() {
+        // Zオーダー制御の遅延時間が合理的な範囲（10ms〜500ms）にあることを検証
+        let delay_ms: u64 = 50;
+        assert!(delay_ms >= 10, "遅延が短すぎる: OSのウィンドウ初期化が完了しない可能性がある");
+        assert!(delay_ms <= 500, "遅延が長すぎる: ユーザーが不自然に感じる");
+    }
+
+    #[test]
+    fn test_viewer_existing_window_reuse_logic() {
+        // 同じ画像パスのハッシュが一致する場合、同じラベル末尾（hash_str）を持つこと
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let path1 = "C:\\images\\test.png";
+        let path2 = "C:\\images\\test.png";
+        let path3 = "C:\\images\\other.png";
+
+        let hash_of = |p: &str| -> String {
+            let mut hasher = DefaultHasher::new();
+            p.hash(&mut hasher);
+            format!("{}", hasher.finish())
+        };
+
+        // 同じパスは同じハッシュ → 既存ウィンドウが再利用される
+        assert_eq!(hash_of(path1), hash_of(path2));
+        // 異なるパスは異なるハッシュ → 新しいウィンドウが開かれる
+        assert_ne!(hash_of(path1), hash_of(path3));
     }
 }

@@ -261,6 +261,7 @@ function clearViewerImgLayoutClasses(img) {
   img.style.width = '';
   img.style.height = '';
   img.style.margin = '';
+  img.style.transform = ''; // オーバースキャン補正をクリア
 }
 
 /**
@@ -462,6 +463,35 @@ function resizeWindowToFitImage() {
     window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
       _resizePending = false;
       debouncedFocusWindow(); // 連続呼び出しによるフォーカス外れを防ぐためデバウンス処理を行う
+
+      // ウィンドウの非クライアント領域（影・ボーダー）による数px誤差を
+      // transform: scale() で補正し、画像端の黒い隙間をなくす。
+      // ズーム中は補正しない（ユーザー操作の scale と競合するため）。
+      if (!viewerState.isZoomed) {
+        const img = viewerUI.elements.viewerImg;
+        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          const actualW = window.innerWidth;
+          const actualH = window.innerHeight;
+          // ウィンドウに対して画像が占める割合を計算
+          const imgAspect = targetWidth / targetHeight;
+          const winAspect = actualW / actualH;
+          // 短辺方向の誤差比率を補正倍率として使う（オーバースキャン）
+          var compensate;
+          if (imgAspect >= winAspect) {
+            // 高さが制約軸: actualH と targetHeight の比
+            compensate = (actualH > 0 && targetHeight > 0) ? actualH / targetHeight : 1.0;
+          } else {
+            // 幅が制約軸: actualW と targetWidth の比
+            compensate = (actualW > 0 && targetWidth > 0) ? actualW / targetWidth : 1.0;
+          }
+          // 誤差が0.5px以上の場合のみ適用（不要な再描画を回避）
+          if (Math.abs(compensate - 1.0) > 0.0005 && compensate > 0.9 && compensate < 1.1) {
+            img.style.transform = 'scale(' + compensate + ')';
+          } else {
+            img.style.transform = '';
+          }
+        }
+      }
     }).catch(() => {
       _resizePending = false;
     });
