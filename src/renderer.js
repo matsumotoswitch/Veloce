@@ -229,7 +229,7 @@ document.body.appendChild(tabListMenu);
  * メニューを特定の位置にアニメーション付きで表示します。
  */
 function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) {
-  menuElement.style.display = 'block';
+  menuElement.classList.add('show');
   const rect = menuElement.getBoundingClientRect();
   let x = startX;
   let y = startY;
@@ -248,11 +248,6 @@ function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) 
   menuElement.style.transformOrigin = `${originY} ${originX}`;
   menuElement.style.left = `${x}px`;
   menuElement.style.top = `${y}px`;
-
-  menuElement.animate([
-    { opacity: 0, transform: 'scale(0.95)' },
-    { opacity: 1, transform: 'scale(1)' }
-  ], { duration: 80, easing: 'cubic-bezier(0, 0, 0.2, 1)', fill: 'forwards' });
 }
 
 // ============================================================================
@@ -692,7 +687,7 @@ const bookmarkResizeObserver = new ResizeObserver(() => {
 
 window.addEventListener('click', (e) => {
   if (bookmarkOverflowMenu && !e.target.closest('#bookmark-overflow-btn') && !e.target.closest('#bookmark-overflow-menu')) {
-    bookmarkOverflowMenu.style.display = 'none';
+    bookmarkOverflowMenu.classList.remove('show');
   }
 });
 
@@ -778,7 +773,7 @@ function createMenuItem(label, iconSvg, onClick, isDanger = false, shortcut = ''
 
   item.addEventListener('click', (e) => {
     e.stopPropagation();
-    contextMenu.style.display = 'none';
+    contextMenu.classList.remove('show');
     if (onClick) onClick();
   });
   return item;
@@ -1077,8 +1072,8 @@ function clearMetadataUI() {
 
   const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (emptyInspectorMsg) {
-    emptyInspectorMsg.style.display = 'flex';
-    emptyInspectorMsg.className = 'empty-state-msg';
+    emptyInspectorMsg.classList.add('show');
+    emptyInspectorMsg.className = 'empty-state-msg show';
     emptyInspectorMsg.innerHTML = '<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>画像を選択すると詳細が表示されます</div>';
   } else {
     const container = document.getElementById('inspector-content');
@@ -1104,6 +1099,8 @@ const scheduleRefresh = debounce(async () => {
   uiManager.updateSelectionUI();
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
+  } else if (appState.files[appState.selectedIndex]) {
+    renderMetadata(appState.files[appState.selectedIndex]);
   }
 }, CONFIG.REFRESH_DELAY);
 
@@ -1549,7 +1546,10 @@ function toggleHelpOverlay(forceShow) {
   let overlay = document.getElementById('help-overlay');
 
   if (overlay) {
-    overlay.remove();
+    overlay.classList.remove('show');
+    setTimeout(() => {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 200);
     return;
   }
 
@@ -1689,6 +1689,11 @@ function toggleHelpOverlay(forceShow) {
 
   overlay.appendChild(content);
   document.body.appendChild(overlay);
+
+  // DOM追加後にアニメーションをトリガー
+  requestAnimationFrame(() => {
+    overlay.classList.add('show');
+  });
 }
 
 /**
@@ -1940,7 +1945,7 @@ async function renderMetadata(file) {
       : [];
 
     resetInspectorPools();
-    if (emptyInspectorMsg) emptyInspectorMsg.style.display = 'none';
+    if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
 
     let badge = container.querySelector('.inspector-location-badge');
     if (badge) badge.remove();
@@ -2010,6 +2015,7 @@ async function renderMetadata(file) {
               tagEl.style.border = '1px solid #ffcc00';
               tagEl.style.backgroundColor = 'rgba(255, 204, 0, 0.25)';
               tagEl.style.color = '#ffcc00';
+              tagEl.style.fontWeight = 'bold';
               tagEl.style.boxShadow = '0 0 8px rgba(255,204,0,0.3)';
             } else {
               tagEl.style.cssText = '';
@@ -2085,9 +2091,8 @@ async function renderMetadata(file) {
         if (secEl.root.parentNode !== container) container.appendChild(secEl.root);
       } else {
         if (emptyInspectorMsg) {
-          emptyInspectorMsg.className = 'empty-state-msg';
+          emptyInspectorMsg.className = 'empty-state-msg show';
           emptyInspectorMsg.innerHTML = '<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>メタデータが含まれていないか、読み取れませんでした。</div>';
-          emptyInspectorMsg.style.display = 'flex';
         }
       }
     }
@@ -2360,7 +2365,7 @@ const handleSortChange = (key, asc) => {
   localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
   updateSortIndicators();
   scheduleRefresh();
-  contextMenu.style.display = 'none';
+  contextMenu.classList.remove('show');
 };
 
 const createSubOption = (label, onClick, dataKey, dataVal) => {
@@ -2556,7 +2561,7 @@ function showEditSmartFolderModal(sf, isNew = false) {
 
   newCancelBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    modal.style.display = 'none';
+    modal.classList.remove('show');
   });
 
   newSaveBtn.addEventListener('click', async () => {
@@ -2604,7 +2609,7 @@ function showEditSmartFolderModal(sf, isNew = false) {
     }
 
     // 4. ダイアログを閉じる
-    modal.style.display = 'none';
+    modal.classList.remove('show');
 
     if (appState.currentDirectory === 'smart://' + sf.id) {
       refreshFileList(true);
@@ -2614,7 +2619,7 @@ function showEditSmartFolderModal(sf, isNew = false) {
     updateSmartFolderCountsUI();
   });
 
-  modal.style.display = 'flex';
+  modal.classList.add('show');
 }
 
 const menuAddSmartFolder = createMenuItem('スマートフォルダを追加...', UIManager.ICONS.FOLDER_PLUS, () => {
@@ -2633,12 +2638,12 @@ const menuDuplicateSmartFolder = createMenuItem('スマートフォルダを複�
   if (!contextMenu.targetSmartFolderId) return;
   const sf = appState.smartFolders.find(f => f.id === contextMenu.targetSmartFolderId);
   if (sf) {
-    const newName = `${sf.name} (1)`;
+    const newName = `${sf.name || '無題のスマートフォルダ'} (1)`;
     const newSf = {
       name: newName,
       icon: sf.icon,
       color: sf.color,
-      conditions: JSON.parse(JSON.stringify(sf.conditions))
+      conditions: sf.conditions ? JSON.parse(JSON.stringify(sf.conditions)) : []
     };
     showEditSmartFolderModal(newSf, true);
   }
@@ -2691,7 +2696,7 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
 
     newCancelBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      document.getElementById('edit-favorite-modal').style.display = 'none';
+      document.getElementById('edit-favorite-modal').classList.remove('show');
     });
 
     newSaveBtn.addEventListener('click', () => {
@@ -2712,14 +2717,14 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
       });
       if (tabUpdated) { saveTabsState(); uiManager.renderTabs(); }
 
-      document.getElementById('edit-favorite-modal').style.display = 'none';
+      document.getElementById('edit-favorite-modal').classList.remove('show');
     });
 
     const nameInput = document.getElementById('fav-name-input');
     nameInput.value = fav.name;
     document.getElementById('fav-path-input').value = fav.path;
     contextMenu.editingFavoriteId = fav.id;
-    document.getElementById('edit-favorite-modal').style.display = 'flex';
+    document.getElementById('edit-favorite-modal').classList.add('show');
     nameInput.focus();
     nameInput.select();
   }
@@ -3085,10 +3090,10 @@ const closeAllMenus = (e) => {
   }
 
   // 現在の display 状態を問わず、強制的にすべて非表示にする
-  if (typeof contextMenu !== 'undefined' && contextMenu) contextMenu.style.display = 'none';
-  if (typeof tabListMenu !== 'undefined' && tabListMenu) tabListMenu.style.display = 'none';
+  if (typeof contextMenu !== 'undefined' && contextMenu) contextMenu.classList.remove('show');
+  if (typeof tabListMenu !== 'undefined' && tabListMenu) tabListMenu.classList.remove('show');
   const historyMenu = document.getElementById('history-menu');
-  if (historyMenu) historyMenu.style.display = 'none';
+  if (historyMenu) historyMenu.classList.remove('show');
   const overflowMenu = document.getElementById('bookmark-overflow-menu');
   if (overflowMenu) overflowMenu.style.display = 'none';
 };
@@ -3103,11 +3108,11 @@ window.addEventListener('contextmenu', closeAllMenus, true);
 window.addEventListener('click', (e) => {
   const diffModal = document.getElementById('diff-modal');
   if (diffModal && e.target === diffModal) {
-    diffModal.style.display = 'none';
+    diffModal.classList.remove('show');
   }
   const favModal = document.getElementById('edit-favorite-modal');
   if (favModal && e.target === favModal) {
-    favModal.style.display = 'none';
+    favModal.classList.remove('show');
   }
 });
 
@@ -3538,26 +3543,32 @@ function createResizerToggle(resizer, type) {
   btn.style.width = isHorizontal ? '30px' : '14px';
   btn.style.height = isHorizontal ? '14px' : '30px';
 
-  let openIcon, closeIcon;
-  if (type === 'left') { openIcon = UIManager.ICONS.CHEVRON_LEFT; closeIcon = UIManager.ICONS.CHEVRON_RIGHT; }
-  else if (type === 'right') { openIcon = UIManager.ICONS.CHEVRON_RIGHT; closeIcon = UIManager.ICONS.CHEVRON_LEFT; }
-  else { openIcon = UIManager.ICONS.CHEVRON_UP; closeIcon = UIManager.ICONS.CHEVRON_DOWN; }
+  let openIcon;
+  if (type === 'left') openIcon = UIManager.ICONS.CHEVRON_LEFT;
+  else if (type === 'right') openIcon = UIManager.ICONS.CHEVRON_RIGHT;
+  else openIcon = UIManager.ICONS.CHEVRON_UP;
 
-  if (type === 'left') btn.innerHTML = appState.layout.leftVisible ? openIcon : closeIcon;
-  else if (type === 'right') btn.innerHTML = appState.layout.rightVisible ? openIcon : closeIcon;
-  else if (type === 'leftTop') btn.innerHTML = appState.layout.leftTopVisible ? openIcon : closeIcon;
-  else btn.innerHTML = openIcon;
+  btn.innerHTML = openIcon;
+  let isVisible = true;
+  if (type === 'left') isVisible = appState.layout.leftVisible;
+  else if (type === 'right') isVisible = appState.layout.rightVisible;
+  else if (type === 'leftTop') isVisible = appState.layout.leftTopVisible;
+  else if (type === 'center') isVisible = !document.documentElement.getAttribute('data-center-collapsed');
+  
+  if (!isVisible) {
+    btn.classList.add('expanded');
+  }
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (type === 'left') {
       appState.layout.leftVisible = !appState.layout.leftVisible;
-      btn.innerHTML = appState.layout.leftVisible ? openIcon : closeIcon;
+      if (appState.layout.leftVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
       localStorage.setItem('leftVisible', appState.layout.leftVisible);
       uiManager.applyLayout();
     } else if (type === 'right') {
       appState.layout.rightVisible = !appState.layout.rightVisible;
-      btn.innerHTML = appState.layout.rightVisible ? openIcon : closeIcon;
+      if (appState.layout.rightVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
       localStorage.setItem('rightVisible', appState.layout.rightVisible);
       uiManager.applyLayout();
     } else if (type === 'center') {
@@ -3569,14 +3580,14 @@ function createResizerToggle(resizer, type) {
         root.style.setProperty('--top-height', restoreHeight);
         root.removeAttribute('data-center-collapsed');
         localStorage.setItem('topHeight', restoreHeight);
-        btn.innerHTML = openIcon;
+        btn.classList.remove('expanded');
       } else {
         // 閉じる直前の高さを prevTopHeight として退避させてから 0px にする
         localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
         root.style.setProperty('--top-height', '0px');
         root.setAttribute('data-center-collapsed', 'true');
         localStorage.setItem('topHeight', '0px');
-        btn.innerHTML = closeIcon;
+        btn.classList.add('expanded');
       }
     } else if (type === 'leftTop') {
       const root = document.documentElement;
@@ -3587,14 +3598,14 @@ function createResizerToggle(resizer, type) {
         root.removeAttribute('data-left-top-collapsed');
         localStorage.setItem('leftTopHeight', restoreHeight);
         appState.layout.leftTopVisible = true;
-        btn.innerHTML = openIcon;
+        btn.classList.remove('expanded');
       } else {
         localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
         root.style.setProperty('--left-top-height', '0px');
         root.setAttribute('data-left-top-collapsed', 'true');
         localStorage.setItem('leftTopHeight', '0px');
         appState.layout.leftTopVisible = false;
-        btn.innerHTML = closeIcon;
+        btn.classList.add('expanded');
       }
     } else if (type === 'rightTop') {
       const root = document.documentElement;
@@ -3604,13 +3615,13 @@ function createResizerToggle(resizer, type) {
         root.style.setProperty('--right-top-height', restoreHeight);
         localStorage.setItem('rightTopHeight', restoreHeight);
         appState.layout.rightTopVisible = true;
-        btn.innerHTML = openIcon;
+        btn.classList.remove('expanded');
       } else {
         localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
         root.style.setProperty('--right-top-height', '0px');
         localStorage.setItem('rightTopHeight', '0px');
         appState.layout.rightTopVisible = false;
-        btn.innerHTML = closeIcon;
+        btn.classList.add('expanded');
       }
     }
   });
@@ -3639,7 +3650,7 @@ window.addEventListener('mousemove', (e) => {
           appState.layout.leftVisible = false;
           localStorage.setItem('leftVisible', 'false');
           const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
-          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+          if (btn) btn.classList.add('expanded');
           uiManager.applyLayout();
         }
       } else {
@@ -3649,7 +3660,7 @@ window.addEventListener('mousemove', (e) => {
           appState.layout.leftVisible = true;
           localStorage.setItem('leftVisible', 'true');
           const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
-          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
+          if (btn) btn.classList.remove('expanded');
         }
         uiManager.applyLayout();
       }
@@ -3660,7 +3671,7 @@ window.addEventListener('mousemove', (e) => {
           appState.layout.rightVisible = false;
           localStorage.setItem('rightVisible', 'false');
           const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
-          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
+          if (btn) btn.classList.add('expanded');
           uiManager.applyLayout();
         }
       } else {
@@ -3670,7 +3681,7 @@ window.addEventListener('mousemove', (e) => {
           appState.layout.rightVisible = true;
           localStorage.setItem('rightVisible', 'true');
           const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
-          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+          if (btn) btn.classList.remove('expanded');
         }
         uiManager.applyLayout();
       }
@@ -3687,7 +3698,7 @@ window.addEventListener('mousemove', (e) => {
           root.setAttribute('data-center-collapsed', 'true');
           localStorage.setItem('topHeight', '0px');
           const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
-          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+          if (btn) btn.classList.add('expanded');
         }
       } else {
         newHeight = Math.max(50, Math.min(newHeight, rect.height - 50));
@@ -3696,8 +3707,8 @@ window.addEventListener('mousemove', (e) => {
         root.removeAttribute('data-center-collapsed');
 
         const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
-        if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
-          btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
+        if (btn && btn.classList.contains('expanded')) {
+          btn.classList.remove('expanded');
         }
       }
     } else if (resizingState.leftTop) {
@@ -3713,7 +3724,7 @@ window.addEventListener('mousemove', (e) => {
           root.setAttribute('data-left-top-collapsed', 'true');
           localStorage.setItem('leftTopHeight', '0px');
           const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
-          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+          if (btn) btn.classList.add('expanded');
         }
       } else {
         newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
@@ -3723,8 +3734,8 @@ window.addEventListener('mousemove', (e) => {
         appState.layout.leftTopHeight = newHeight;
 
         const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
-        if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
-          btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
+        if (btn && btn.classList.contains('expanded')) {
+          btn.classList.remove('expanded');
         }
       }
     } else if (resizingState.rightTop) {
@@ -3739,7 +3750,7 @@ window.addEventListener('mousemove', (e) => {
           root.style.setProperty('--right-top-height', '0px');
           localStorage.setItem('rightTopHeight', '0px');
           const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
-          if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+          if (btn) btn.classList.add('expanded');
         }
       } else {
         newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
@@ -3748,8 +3759,8 @@ window.addEventListener('mousemove', (e) => {
         appState.layout.rightTopHeight = newHeight;
 
         const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
-        if (btn && btn.innerHTML !== UIManager.ICONS.CHEVRON_UP) {
-          btn.innerHTML = UIManager.ICONS.CHEVRON_UP;
+        if (btn && btn.classList.contains('expanded')) {
+          btn.classList.remove('expanded');
         }
       }
     }
@@ -3870,6 +3881,8 @@ document.querySelectorAll('th').forEach(th => {
 });
 
 window.addEventListener('keydown', async (e) => {
+  if (e._isAggressiveFallback) return;
+
   const activeTagName = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
 
   if (e.altKey && e.key === 'ArrowLeft') {
@@ -3950,23 +3963,48 @@ window.addEventListener('keydown', async (e) => {
     }
   }
 
-  if (e.key === 'Escape') {
-    const diffModal = document.getElementById('diff-modal');
-    if (diffModal && diffModal.style.display === 'flex') {
+  if (e.key === 'Escape' || e.keyCode === 27) {
+    // 汎用ダイアログ（プロンプトや確認等）の強制クローズ処理
+    const dialogOverlays = document.querySelectorAll('.dialog-overlay.show');
+    if (dialogOverlays.length > 0) {
       e.preventDefault();
-      diffModal.style.display = 'none';
+      dialogOverlays.forEach(overlay => {
+        overlay.classList.remove('show');
+        // 要素自体の削除は呼び出し元の cleanup に任せるが、念のため非表示化を保証する
+        overlay.style.display = 'none';
+        
+        // Escapeキーのイベントをディスパッチして、元のハンドラ（Promiseの解決など）をトリガーする
+        const escEvent = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+        // このイベントは既に処理済みとするためのフラグ
+        escEvent._isAggressiveFallback = true;
+        
+        // もし入力フィールドがあればそこに、なければオーバーレイ自身にイベントを送る
+        const input = overlay.querySelector('input');
+        if (input) {
+          input.dispatchEvent(escEvent);
+        } else {
+          overlay.dispatchEvent(escEvent);
+        }
+      });
+      return;
+    }
+
+    const diffModal = document.getElementById('diff-modal');
+    if (diffModal && diffModal.classList.contains('show')) {
+      e.preventDefault();
+      diffModal.classList.remove('show');
       return;
     }
     const favModal = document.getElementById('edit-favorite-modal');
-    if (favModal && favModal.style.display === 'flex') {
+    if (favModal && favModal.classList.contains('show')) {
       e.preventDefault();
-      favModal.style.display = 'none';
+      favModal.classList.remove('show');
       return;
     }
     const sfModal = document.getElementById('edit-smart-folder-modal');
-    if (sfModal && sfModal.style.display === 'flex') {
+    if (sfModal && sfModal.classList.contains('show')) {
       e.preventDefault();
-      sfModal.style.display = 'none';
+      sfModal.classList.remove('show');
       return;
     }
     if (document.getElementById('help-overlay')) {
@@ -3975,11 +4013,11 @@ window.addEventListener('keydown', async (e) => {
       return;
     }
     const historyMenu = document.getElementById('history-menu');
-    if (contextMenu.style.display === 'block' || tabListMenu.style.display === 'block' || (historyMenu && historyMenu.style.display === 'block')) {
+    if (contextMenu.classList.contains('show') || tabListMenu.classList.contains('show') || (historyMenu && historyMenu.classList.contains('show'))) {
       e.preventDefault();
-      contextMenu.style.display = 'none';
-      tabListMenu.style.display = 'none';
-      if (historyMenu) historyMenu.style.display = 'none';
+      contextMenu.classList.remove('show');
+      tabListMenu.classList.remove('show');
+      if (historyMenu) historyMenu.classList.remove('show');
       return;
     }
   }
@@ -4311,7 +4349,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     overflowBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (bookmarkOverflowMenu && bookmarkOverflowMenu.style.display !== 'none') {
-        bookmarkOverflowMenu.style.display = 'none';
+        bookmarkOverflowMenu.classList.remove('show');
         return;
       }
 
@@ -4332,7 +4370,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.body.appendChild(bookmarkOverflowMenu);
       }
       bookmarkOverflowMenu.innerHTML = '';
-      bookmarkOverflowMenu.style.display = 'block';
+      bookmarkOverflowMenu.classList.add('show');
       bookmarkOverflowMenu.style.zIndex = '10001';
 
       hiddenItems.forEach(domItem => {
@@ -4348,7 +4386,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
 
         const menuItem = createMenuItem(fav.name, iconSvg, async () => {
-          bookmarkOverflowMenu.style.display = 'none';
+          bookmarkOverflowMenu.classList.remove('show');
 
           if (window.veloceAPI.loadDirectory) {
             const activeTab = appState.tabs[appState.activeTabIndex];
@@ -4693,7 +4731,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         e.stopPropagation();
         if (window.onTabClose) {
           await window.onTabClose(index);
-          if (tabListMenu.style.display === 'block') updateTabListMenu();
+          if (tabListMenu.classList.contains('show')) updateTabListMenu();
         }
       });
 
@@ -4709,14 +4747,14 @@ window.addEventListener('DOMContentLoaded', async () => {
           e.stopPropagation();
           if (window.onTabClose) {
             await window.onTabClose(index);
-            if (tabListMenu.style.display === 'block') updateTabListMenu();
+            if (tabListMenu.classList.contains('show')) updateTabListMenu();
           }
         }
       });
 
       option.addEventListener('click', async (e) => {
         e.stopPropagation();
-        tabListMenu.style.display = 'none';
+        tabListMenu.classList.remove('show');
         await window.onTabClick(index);
 
         const container = document.getElementById('tab-container');
@@ -4745,8 +4783,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     tabListBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       uiManager.hideCustomTooltip();
-      if (tabListMenu.style.display === 'block') {
-        tabListMenu.style.display = 'none';
+      if (tabListMenu.classList.contains('show')) {
+        tabListMenu.classList.remove('show');
         return;
       }
 
@@ -4835,11 +4873,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (!appState.layout.leftVisible && uiManager.elements.resizerLeft) {
     const btn = uiManager.elements.resizerLeft.querySelector('.resizer-toggle');
-    if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
+    if (btn) btn.classList.add('expanded');
   }
   if (!appState.layout.rightVisible && uiManager.elements.resizerRight) {
     const btn = uiManager.elements.resizerRight.querySelector('.resizer-toggle');
-    if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_LEFT;
+    if (btn) btn.classList.add('expanded');
   }
 
   const savedTopHeight = localStorage.getItem('topHeight');
@@ -4849,7 +4887,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       document.documentElement.setAttribute('data-center-collapsed', 'true');
       if (uiManager.elements.resizerCenter) {
         const btn = uiManager.elements.resizerCenter.querySelector('.resizer-toggle');
-        if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+        if (btn) btn.classList.add('expanded');
       }
     } else {
       document.documentElement.removeAttribute('data-center-collapsed');
@@ -4862,7 +4900,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (savedLeftTopHeight === '0px') {
       document.documentElement.setAttribute('data-left-top-collapsed', 'true');
       const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
-      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+      if (btn) btn.classList.add('expanded');
     } else {
       document.documentElement.removeAttribute('data-left-top-collapsed');
     }
@@ -4872,7 +4910,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (savedRightTopHeight) {
     if (savedRightTopHeight === '0px') {
       const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
-      if (btn) btn.innerHTML = UIManager.ICONS.CHEVRON_DOWN;
+      if (btn) btn.classList.add('expanded');
     }
   }
 
@@ -5291,7 +5329,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   document.getElementById('fav-cancel-btn')?.addEventListener('click', () => {
-    document.getElementById('edit-favorite-modal').style.display = 'none';
+    document.getElementById('edit-favorite-modal').classList.remove('show');
   });
 
   const savedSort = localStorage.getItem('currentSort');
@@ -5459,9 +5497,9 @@ window.addEventListener('DOMContentLoaded', async () => {
           if (badge) {
             if (rating > 0) {
               badge.querySelector('.rating-value').textContent = rating;
-              badge.style.display = 'flex';
+              badge.classList.add('show');
             } else {
-              badge.style.display = 'none';
+              badge.classList.remove('show');
             }
           }
         }
@@ -5590,9 +5628,9 @@ async function updateSmartFolderCountsUI() {
       if (id && countSpan) {
         if (counts[id] !== undefined) {
           countSpan.textContent = Number(counts[id]).toLocaleString();
-          countSpan.style.display = 'block';
+          countSpan.classList.add('show');
         } else {
-          countSpan.style.display = 'none';
+          countSpan.classList.remove('show');
         }
       }
     });

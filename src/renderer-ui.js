@@ -435,13 +435,13 @@ class UIManager {
   showCustomTooltip(text, x, y) {
     const tabMenu = document.getElementById('tab-list-menu');
     // タブ一覧メニューが開いている時はツールチップを出さず、メニューも消さない
-    if (tabMenu && tabMenu.style.display === 'block') {
+    if (tabMenu && tabMenu.classList.contains('show')) {
       return;
     }
 
     const ctxMenu = document.getElementById('context-menu');
     // コンテキストメニューが開いている時はツールチップを出さず、メニューも消さない
-    if (ctxMenu && ctxMenu.style.display === 'block') {
+    if (ctxMenu && ctxMenu.classList.contains('show')) {
       return;
     }
 
@@ -602,11 +602,28 @@ class UIManager {
       dialog.appendChild(buttonsDiv);
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
+      requestAnimationFrame(() => {
+        overlay.classList.add('show');
+      });
+
+      const keydownHandler = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          cleanup();
+          resolve(null);
+        }
+      };
+      document.addEventListener('keydown', keydownHandler, true);
 
       const cleanup = () => {
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
+        document.removeEventListener('keydown', keydownHandler, true);
+        overlay.classList.remove('show');
+        setTimeout(() => {
+          if (document.body.contains(overlay)) {
+            document.body.removeChild(overlay);
+          }
+        }, 200);
       };
 
       const validateInput = () => {
@@ -633,29 +650,25 @@ class UIManager {
       inputEl.addEventListener('input', validateInput);
       validateInput();
 
-      inputEl.focus();
-      if (selectBaseNameOnly && defaultValue.lastIndexOf('.') > 0) {
-        inputEl.setSelectionRange(0, defaultValue.lastIndexOf('.'));
-      } else {
-        inputEl.select();
-      }
+      setTimeout(() => {
+        inputEl.focus();
+        if (selectBaseNameOnly && defaultValue.lastIndexOf('.') > 0) {
+          inputEl.setSelectionRange(0, defaultValue.lastIndexOf('.'));
+        } else {
+          inputEl.select();
+        }
+      }, 50);
 
       const finishPrompt = () => {
         if (!okBtn.disabled) {
           cleanup();
           let finalValue = inputEl.value;
 
-          /**
-           * 拡張子の変更または削除を防止し、元の拡張子を維持する機構。
-           * selectBaseNameOnly が有効な場合は、変更後の値に元の拡張子を強制的に補完します。
-           */
           if (selectBaseNameOnly && originalExt) {
             if (!finalValue.toLowerCase().endsWith(originalExt.toLowerCase())) {
               if (finalValue.includes('.')) {
-                // 別の拡張子に変更された場合は、元の拡張子で上書きする
                 finalValue = finalValue.slice(0, finalValue.lastIndexOf('.')) + originalExt;
               } else {
-                // 拡張子が完全に削除された場合は補完する
                 finalValue += originalExt;
               }
             }
@@ -672,13 +685,12 @@ class UIManager {
         resolve(null);
       });
 
+
+
       inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           finishPrompt();
-        } else if (e.key === 'Escape') {
-          cleanup();
-          resolve(null);
         }
       });
     });
@@ -1028,7 +1040,7 @@ class UIManager {
       });
     });
 
-    modal.style.display = 'flex';
+    modal.classList.add('show');
 
     // モーダルが表示されてレイアウトが計算された後にスクロールをリセットする
     requestAnimationFrame(() => {
@@ -1231,7 +1243,7 @@ class UIManager {
     if (!content || !spacer) {
       container.innerHTML = `
         <div class="virtual-spacer" style="width: 1px; visibility: hidden; pointer-events: none;"></div>
-        <div class="virtual-content" style="position: absolute; top: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumbnail-size), 1fr)); gap: 8px; padding: 0 8px; justify-content: center;"></div>
+        <div class="virtual-content" style="position: absolute; top: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(auto-fill, var(--thumbnail-size)); gap: 8px; padding: 0 8px; justify-content: start;"></div>
         <div class="empty-state-container" style="display: none; position: absolute; inset: 0; align-items: center; justify-content: center; flex-direction: column; opacity: 0.5; pointer-events: none; color: var(--text-color);"></div>
       `;
       content = container.querySelector('.virtual-content');
@@ -1260,7 +1272,7 @@ class UIManager {
       spacer.style.height = '0px';
       const emptyContainer = container.querySelector('.empty-state-container');
       if (emptyContainer) {
-        emptyContainer.style.display = 'flex';
+        emptyContainer.classList.add('show');
         emptyContainer.innerHTML = appState.searchQuery 
           ? `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><div style="font-size: 14px; letter-spacing: 0.5px;">検索結果が見つかりません</div>`
           : `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div style="font-size: 14px; letter-spacing: 0.5px;">このフォルダには画像がありません</div>`;
@@ -1270,7 +1282,7 @@ class UIManager {
       return;
     } else {
       const emptyContainer = container.querySelector('.empty-state-container');
-      if (emptyContainer) emptyContainer.style.display = 'none';
+      if (emptyContainer) emptyContainer.classList.remove('show');
     }
 
     const itemSize = parseFloat(this.elements.thumbnailSizeSlider?.value) || 120;
@@ -1341,7 +1353,7 @@ class UIManager {
       const badge = document.createElement('div');
       badge.className = 'rating-badge';
       badge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="rating-value"></span>';
-      badge.style.display = 'none';
+      badge.classList.remove('show');
       
       wrapper.appendChild(img);
       wrapper.appendChild(label);
@@ -1394,9 +1406,9 @@ class UIManager {
         if (badge) {
           if (rating && rating > 0) {
             badge.querySelector('.rating-value').textContent = rating;
-            badge.style.display = 'flex';
+            badge.classList.add('show');
           } else {
-            badge.style.display = 'none';
+            badge.classList.remove('show');
           }
         }
 

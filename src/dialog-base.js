@@ -17,9 +17,12 @@ export function createDialogShell() {
       document.removeEventListener('keydown', keydownHandler);
       keydownHandler = null;
     }
-    if (document.body.contains(overlay)) {
-      document.body.removeChild(overlay);
-    }
+    overlay.classList.remove('show');
+    setTimeout(() => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+    }, 200);
   };
 
   const bindEscape = (resolve, value) => {
@@ -111,5 +114,8 @@ export function showAppDialog(config) {
     bind(resolve, cleanup);
 
     document.body.appendChild(overlay);
+    requestAnimationFrame(() => {
+      overlay.classList.add('show');
+    });
   });
 }

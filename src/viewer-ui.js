@@ -47,11 +47,13 @@ class ViewerUI {
         posY = tx;
       }
       
+      let comp = this.state.compensateScale || 1.0;
       this.elements.viewerImg.style.objectPosition = `calc(50% + ${posX}px) calc(50% + ${posY}px)`;
-      this.elements.viewerImg.style.transform = `translate(0px, 0px) scale(${this.state.flipX}, ${this.state.flipY}) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+      this.elements.viewerImg.style.transform = `translate(0px, 0px) scale(${this.state.flipX}, ${this.state.flipY}) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale * comp})`;
     } else {
+      let comp = this.state.compensateScale || 1.0;
       this.elements.viewerImg.style.objectPosition = '50% 50%';
-      this.elements.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) scale(${this.state.flipX}, ${this.state.flipY}) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale})`;
+      this.elements.viewerImg.style.transform = `translate(${this.state.currentTranslateX}px, ${this.state.currentTranslateY}px) scale(${this.state.flipX}, ${this.state.flipY}) rotate(${this.state.currentRotation}deg) scale(${this.state.currentScale * comp})`;
     }
   }
 

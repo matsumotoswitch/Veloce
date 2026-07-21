@@ -486,10 +486,11 @@ function resizeWindowToFitImage() {
           }
           // 誤差が0.5px以上の場合のみ適用（不要な再描画を回避）
           if (Math.abs(compensate - 1.0) > 0.0005 && compensate > 0.9 && compensate < 1.1) {
-            img.style.transform = 'scale(' + compensate + ')';
+            viewerState.compensateScale = compensate;
           } else {
-            img.style.transform = '';
+            viewerState.compensateScale = 1.0;
           }
+          viewerUI.updateImageRendering();
         }
       }
     }).catch(() => {
@@ -1062,17 +1063,19 @@ window.addEventListener('keydown', async (e) => {
       break;
     case 'ArrowUp':
       viewerState.currentRotation += 90;
-      viewerUI.updateImageRendering();
-      resizeWindowToFitImage();
       applyFitState();
       updateFullscreenStyles();
+      void viewerUI.elements.viewerImg.offsetHeight; // 強制リフロー (Chromium 109対策)
+      viewerUI.updateImageRendering();
+      resizeWindowToFitImage();
       break;
     case 'ArrowDown':
       viewerState.currentRotation -= 90;
-      viewerUI.updateImageRendering();
-      resizeWindowToFitImage();
       applyFitState();
       updateFullscreenStyles();
+      void viewerUI.elements.viewerImg.offsetHeight; // 強制リフロー (Chromium 109対策)
+      viewerUI.updateImageRendering();
+      resizeWindowToFitImage();
       break;
     case 'f':
     case 'F': {

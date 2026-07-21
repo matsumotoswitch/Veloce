@@ -144,7 +144,7 @@ body.is-resizing .app-content {
 }
 
 /* --- Dialog Styles --- */
-.dialog-overlay {
+.dialog-overlay, .modal {
   position: fixed;
   top: 0;
   left: 0;
@@ -154,6 +154,19 @@ body.is-resizing .app-content {
   display: flex;
   justify-content: center;
   align-items: center;
+  /* アニメーション用の初期状態 */
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0.2s;
+  pointer-events: none;
+}
+
+.dialog-overlay.show,
+.modal.show,
+#help-overlay.show {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .dialog-box {
@@ -161,11 +174,22 @@ body.is-resizing .app-content {
   border: 1px solid var(--modal-border) !important;
   border-radius: var(--radius-lg) !important;
   padding: 24px;
-  min-width: 300px;
-  box-shadow: var(--popup-shadow) !important;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   color: var(--text-color, #cddbe0);
+  box-shadow: var(--popup-shadow) !important;
   font-family: inherit;
   backdrop-filter: none !important;
+  transform: translateY(10px) scale(0.98);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dialog-overlay.show .dialog-box,
+.modal.show .modal-content,
+#help-overlay.show .help-modal-content {
+  transform: translateY(0) scale(1);
 }
 
 .dialog-message {
@@ -220,6 +244,7 @@ body.is-resizing .app-content {
 
 .dialog-btn:hover:not(:disabled) {
   filter: brightness(1.2);
+  transform: translateY(-1px);
 }
 
 .dialog-btn.cancel {
@@ -355,7 +380,7 @@ input:-webkit-autofill:focus {
 
 /* トグルスイッチの追加スタイル（JSで生成される要素用） */
 .resizer-toggle {
-  transition: background-color 0.2s, border-color 0.2s, color 0.2s, opacity 0.2s;
+  transition: background-color 0.15s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
 }
 
 .resizer-toggle:hover {
@@ -363,6 +388,14 @@ input:-webkit-autofill:focus {
   border-color: var(--accent-color) !important;
   color: #fff !important;
   opacity: 1 !important;
+  transform: scale(1.05);
+}
+
+.resizer-toggle.expanded svg {
+  transform: rotate(180deg);
+}
+.resizer-toggle svg {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Panes */
@@ -594,8 +627,8 @@ input:-webkit-autofill:focus {
 }
 
 .smart-folder-icon svg {
-  width: 100%;
-  height: 100%;
+  width: 16px;
+  height: 16px;
 }
 
 .smart-folder-count {
@@ -605,6 +638,10 @@ input:-webkit-autofill:focus {
   display: none;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+}
+
+.smart-folder-count.show {
+  display: block;
 }
 
 .smart-folder-item.selected .smart-folder-count {
@@ -1123,8 +1160,9 @@ body.show-thumbnail-names .thumbnail-label {
 .thumbnail-item.selected {
   border-color: var(--accent-color);
   box-shadow: 0 0 0 2px var(--accent-color);
+  border-radius: var(--radius-xs);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   z-index: 2;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .thumbnail-item.selected:hover {
@@ -1239,17 +1277,16 @@ body.show-thumbnail-names .thumbnail-label {
 
 /* トグルアイコンのベース色とホバー連動 */
 .toggle-icon {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: #888;
   margin-right: 8px;
   cursor: pointer;
-  transition: color 0.2s;
 }
 
-.toggle-icon svg {
-  transition: transform 0.2s ease;
-}
-
-.toggle-icon.expanded svg {
+.toggle-icon.expanded {
   transform: rotate(90deg);
 }
 
@@ -1437,7 +1474,7 @@ img.thumbnail-item.loading {
   height: 100vh;
   background-color: rgba(0, 0, 0, 0.7);
   z-index: 9999;
-  display: none;
+  display: flex;
   justify-content: center;
   align-items: center;
   padding: 40px;
@@ -1664,9 +1701,24 @@ img.thumbnail-item.loading {
   position: fixed;
   z-index: 10001;
   padding: 4px 0;
-  display: none;
   font-size: var(--font-size-sm);
   transform-origin: top left;
+  /* アニメーション用の初期状態 */
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0.15s;
+  pointer-events: none;
+}
+
+#context-menu.show,
+#tab-list-menu.show,
+#history-menu.show,
+#bookmark-overflow-menu.show {
+  visibility: visible;
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
 }
 
 #context-menu {
@@ -2099,13 +2151,17 @@ th[data-sort] svg path {
   opacity: 0.6;
   text-align: center;
   flex: 1;
-  display: flex;
+  display: none;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
   font-size: var(--font-size-sm);
   padding: 24px;
+}
+
+.empty-state-msg.show {
+  display: flex;
 }
 
 .empty-state-msg svg {
@@ -2136,7 +2192,6 @@ th[data-sort] svg path {
 }
 
 #edit-favorite-modal {
-  display: none;
 }
 
 #edit-favorite-modal .dialog-box,
@@ -2245,14 +2300,15 @@ html.viewer-html,
   object-fit: contain;
   max-width: 100vw;
   max-height: 100vh;
-  width: 100vw;
+  width: auto;
   height: auto;
 }
 
 .viewer-body #viewer-img.mode-default.is-swapped {
   max-width: 100vh;
   max-height: 100vw;
-  width: 100vh;
+  width: auto;
+  height: auto;
 }
 
 .viewer-body #border-overlay.border-hidden {
@@ -2518,6 +2574,12 @@ html.viewer-html,
   backdrop-filter: none !important;
   /* 重いぼかし処理を完全にカット */
   -webkit-backdrop-filter: none !important;
+  
+  /* モーダルのアニメーション基本設定 */
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0.2s;
+  pointer-events: none;
 }
 
 /* --- Inspector Location Badge (Smart Folder Only) --- */
@@ -2785,11 +2847,15 @@ kbd {
   padding: 2px 6px;
   font-size: 11px;
   font-weight: bold;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 2px;
   z-index: 10;
   pointer-events: none;
+}
+
+.rating-badge.show {
+  display: flex;
 }
 
 .rating-badge svg {
@@ -2869,4 +2935,11 @@ input[type="range"]:active ~ .slider-tooltip {
 }
 #video-play-btn svg {
   fill: currentColor;
+}
+
+.search-highlight {
+  background-color: transparent;
+  color: inherit;
+  font-weight: bold;
+  text-decoration: underline;
 }
