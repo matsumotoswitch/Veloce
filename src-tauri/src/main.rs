@@ -1682,29 +1682,12 @@ fn get_full_metadata_for_path(
         let mut idx = 0;
         while idx < s.len() {
             if let Some(start) = s[idx..].find('{').map(|i| idx + i) {
-                let mut brace_count = 0;
-                let mut valid_end = None;
-                for (i, c) in s[start..].char_indices() {
-                    if c == '{' {
-                        brace_count += 1;
-                    } else if c == '}' {
-                        brace_count -= 1;
-                        if brace_count == 0 {
-                            valid_end = Some(start + i);
-                            break;
-                        }
-                    }
-                }
-                if let Some(end) = valid_end {
-                    let candidate = &s[start..=end];
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(candidate) {
-                        extracted_jsons.push(parsed);
-                        idx = end + 1;
-                        continue;
-                    } else {
-                        idx = start + 1;
-                        continue;
-                    }
+                let candidate_str = &s[start..];
+                let mut iter = serde_json::Deserializer::from_str(candidate_str).into_iter::<serde_json::Value>();
+                if let Some(Ok(parsed)) = iter.next() {
+                    extracted_jsons.push(parsed);
+                    idx = start + iter.byte_offset();
+                    continue;
                 }
                 idx = start + 1;
             } else {
@@ -1715,23 +1698,31 @@ fn get_full_metadata_for_path(
 
     if !extracted_jsons.is_empty() {
         let mut merged_map = serde_json::Map::new();
-        for mut obj in extracted_jsons {
-            // If it's {"generation_data": ...}, unpack it
-            if let Some(gen_data) = obj.get("generation_data").cloned() {
-                if obj.as_object().map_or(false, |m| m.len() == 1) {
-                    obj = gen_data;
+        for obj in extracted_jsons {
+            if let serde_json::Value::Object(mut map) = obj {
+                if map.len() == 1 {
+                    if let Some(gen_data) = map.remove("generation_data") {
+                        if let serde_json::Value::Object(gen_map) = gen_data {
+                            for (k, v) in gen_map {
+                                merged_map.insert(k, v);
+                            }
+                            continue;
+                        } else {
+                            merged_map.insert("generation_data".to_string(), gen_data);
+                            continue;
+                        }
+                    }
                 }
-            }
-            if let Some(map) = obj.as_object_mut() {
-                for (k, v) in map.iter() {
-                    merged_map.insert(k.clone(), v.clone());
+                for (k, v) in map {
+                    merged_map.insert(k, v);
                 }
             }
         }
         let mut comment_obj = serde_json::Value::Object(merged_map);
         {
-            let _ = 1; // Dummy block to match the original two braces!
+            let _ = 1; // Dummy block to match the original indentation level!
             let mut json_source = None;
+
 
             // WebP等の二重エンコードJSON対応
             if let Some(inner_str) = comment_obj.get("Comment").and_then(|v| v.as_str()) {
