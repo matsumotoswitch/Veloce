@@ -157,53 +157,73 @@ export function initTabHandlers(ctx) {
 
     if (container) {
       targetTabEl = container.querySelector(`.tab-item[data-tab-id="${tabToRemove.id}"]`) || container.querySelector(`.tab-item[data-index="${index}"]`);
-      if (targetTabEl) {
-        const startWidth = targetTabEl.getBoundingClientRect().width;
-        targetTabEl.style.width = `${startWidth}px`;
-        targetTabEl.style.minWidth = '0px';
-        targetTabEl.style.maxWidth = `${startWidth}px`;
-        targetTabEl.classList.add('tab-fade-out');
-
-        requestAnimationFrame(() => {
-          targetTabEl.style.width = '0px';
-          targetTabEl.style.maxWidth = '0px';
-          targetTabEl.style.paddingLeft = '0px';
-          targetTabEl.style.paddingRight = '0px';
-          targetTabEl.style.marginLeft = '0px';
-          targetTabEl.style.marginRight = '0px';
-        });
-      }
     }
 
-    appState.tabs.splice(index, 1);
+    // フェーズ1: その場でキュッとへこんで戻るアニメーション (180ms)
+    if (targetTabEl) {
+      targetTabEl.classList.add('tab-dent');
+    }
 
-    let shouldSwitch = false;
     let nextIndex = appState.activeTabIndex;
+    let shouldSwitch = false;
 
     if (appState.activeTabIndex === index) {
       nextIndex = index - 1;
       if (nextIndex < 0) nextIndex = 0;
       shouldSwitch = true;
-      appState.activeTabIndex = -1;
     } else if (appState.activeTabIndex > index) {
       appState.activeTabIndex -= 1;
     }
 
-    if (shouldSwitch) {
-      await window.onTabClick(nextIndex);
-    } else {
+    if (shouldSwitch && appState.tabs[nextIndex]) {
+      const nextTab = appState.tabs[nextIndex];
+      appState.activeTabIndex = nextIndex;
+
+      if (container) {
+        container.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+        const newActiveEl = container.querySelector(`.tab-item[data-tab-id="${nextTab.id}"]`) || container.querySelector(`.tab-item[data-index="${nextIndex}"]`);
+        if (newActiveEl) newActiveEl.classList.add('active');
+      }
+
+      if (window.veloceAPI?.loadDirectory) {
+        appState.currentDirectory = nextTab.path;
+        localStorage.setItem('currentDirectory', appState.currentDirectory);
+        appState.totalCount = 0;
+        appState.selection.clear();
+        uiManager.renderAll(true);
+        clearMetadataUI();
+        updateNavButtons();
+        window.veloceAPI.loadDirectory(nextTab.path);
+        expandTreeToPath(appState.currentDirectory);
+      }
+    }
+
+    // フェーズ2: 180ms後にdent終了 → 幅ゼロに縮んでDOM削除
+    setTimeout(function() {
+      if (targetTabEl) {
+        targetTabEl.classList.remove('tab-dent');
+        targetTabEl.style.transition = 'none';
+        targetTabEl.style.minWidth = '0px';
+        targetTabEl.style.maxWidth = '0px';
+        targetTabEl.style.width = '0px';
+        targetTabEl.style.paddingLeft = '0px';
+        targetTabEl.style.paddingRight = '0px';
+        targetTabEl.style.opacity = '0';
+        targetTabEl.style.overflow = 'hidden';
+      }
+
+      const currentTabIdx = appState.tabs.indexOf(tabToRemove);
+      if (currentTabIdx !== -1) {
+        appState.tabs.splice(currentTabIdx, 1);
+      }
+
+      if (targetTabEl && targetTabEl.parentNode) {
+        targetTabEl.remove();
+      }
+
       uiManager.renderTabs();
-    }
-
-    saveTabsState(appState, uiManager);
-
-    if (targetTabEl) {
-      setTimeout(() => {
-        if (targetTabEl && targetTabEl.parentNode) {
-          targetTabEl.remove();
-        }
-      }, 220);
-    }
+      saveTabsState(appState, uiManager);
+    }, 180);
   };
 
   window.onTabMove = (fromIndex, toIndex, insertAfter) => {
