@@ -2294,15 +2294,16 @@ menuSortRoot.innerHTML = `
   ${UIManager.ICONS.SORT || '<div style="width:16px;height:16px;"></div>'}
   <span style="text-align: left; white-space: nowrap;">並べ替え</span>
   <span></span>
-  <span style="display: inline-flex; align-items: center; justify-content: flex-end; opacity: 0.7;">${UIManager.ICONS.CHEVRON_RIGHT}</span>
+  <span class="menu-arrow">${UIManager.ICONS.CHEVRON_RIGHT}</span>
 `;
 
 menuSortRoot.onmouseenter = () => {
+  menuSortRoot.classList.add('open');
   // Reset position
   sortSubmenu.style.left = 'calc(100% + 2px)';
   sortSubmenu.style.right = 'auto';
   sortSubmenu.style.top = '-7px';
-  sortSubmenu.style.bottom = 'auto';
+  sortSubmenu.style.bottom = 'auto';;
 
   // We need to temporarily force display block if not already to measure it
   // But CSS :hover handles display:block immediately.
@@ -2329,6 +2330,10 @@ menuSortRoot.onmouseenter = () => {
     { opacity: 0, transform: 'scale(0.95)' },
     { opacity: 1, transform: 'scale(1)' }
   ], { duration: 80, easing: 'cubic-bezier(0, 0, 0.2, 1)', fill: 'forwards' });
+};
+
+menuSortRoot.onmouseleave = () => {
+  menuSortRoot.classList.remove('open');
 };
 
 const sortSubmenu = document.createElement('div');
@@ -3096,6 +3101,12 @@ const closeAllMenus = (e) => {
   if (historyMenu) historyMenu.classList.remove('show');
   const overflowMenu = document.getElementById('bookmark-overflow-menu');
   if (overflowMenu) overflowMenu.style.display = 'none';
+
+  const tabListBtn = document.getElementById('titlebar-tab-list');
+  if (tabListBtn) tabListBtn.classList.remove('open');
+  const overflowBtn = document.getElementById('bookmark-overflow-btn');
+  if (overflowBtn) overflowBtn.classList.remove('open');
+  document.querySelectorAll('.context-menu-item.open').forEach(el => el.classList.remove('open'));
 };
 
 // 全てのマウス・タッチ操作の「キャプチャフェーズ（最優先）」で強制実行する
@@ -4348,8 +4359,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (overflowBtn) {
     overflowBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (bookmarkOverflowMenu && bookmarkOverflowMenu.style.display !== 'none') {
+      if (bookmarkOverflowMenu && (bookmarkOverflowMenu.classList.contains('show') || bookmarkOverflowMenu.style.display !== 'none')) {
         bookmarkOverflowMenu.classList.remove('show');
+        bookmarkOverflowMenu.style.display = 'none';
+        overflowBtn.classList.remove('open');
         return;
       }
 
@@ -4370,7 +4383,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.body.appendChild(bookmarkOverflowMenu);
       }
       bookmarkOverflowMenu.innerHTML = '';
+      bookmarkOverflowMenu.style.display = 'block';
       bookmarkOverflowMenu.classList.add('show');
+      overflowBtn.classList.add('open');
       bookmarkOverflowMenu.style.zIndex = '10001';
 
       hiddenItems.forEach(domItem => {
@@ -4785,12 +4800,14 @@ window.addEventListener('DOMContentLoaded', async () => {
       uiManager.hideCustomTooltip();
       if (tabListMenu.classList.contains('show')) {
         tabListMenu.classList.remove('show');
+        tabListBtn.classList.remove('open');
         return;
       }
 
       updateTabListMenu();
 
       const rect = tabListBtn.getBoundingClientRect();
+      tabListBtn.classList.add('open');
       showMenuWithAnimation(tabListMenu, rect.left, rect.bottom, true);
     });
   }

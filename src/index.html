@@ -187,17 +187,23 @@
 
   <template id="sf-condition-template">
     <div class="sf-condition-row" style="display: flex; gap: 8px; align-items: center;">
-      <select class="cond-type dialog-input" style="width: 160px;">
-        <option value="rating">レーティング</option>
-        <option value="prompt">プロンプト</option>
-        <option value="negative_prompt">ネガティブプロンプト</option>
-        <option value="source">生成元 (Source)</option>
-        <option value="aspect_ratio">アスペクト比</option>
+      <div class="select-wrapper" style="width: 160px;">
+        <select class="cond-type dialog-input" style="width: 100%;">
+          <option value="rating">レーティング</option>
+          <option value="prompt">プロンプト</option>
+          <option value="negative_prompt">ネガティブプロンプト</option>
+          <option value="source">生成元 (Source)</option>
+          <option value="aspect_ratio">アスペクト比</option>
           <option value="width">横幅 (px)</option>
           <option value="height">高さ (px)</option>
-        <option value="path">フォルダ (パス)</option>
-      </select>
-      <select class="cond-operator dialog-input" style="width: 130px;"></select>
+          <option value="path">フォルダ (パス)</option>
+        </select>
+        <svg class="select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </div>
+      <div class="select-wrapper" style="width: 130px;">
+        <select class="cond-operator dialog-input" style="width: 100%;"></select>
+        <svg class="select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </div>
       <div class="cond-value-container" style="display: flex; flex: 1; gap: 4px; align-items: center;"></div>
       <button type="button" class="btn-remove-cond dialog-btn" style="padding: 4px 8px;">✕</button>
     </div>

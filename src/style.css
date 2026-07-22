@@ -289,9 +289,35 @@ body.is-resizing .app-content {
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
+select.dialog-input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 26px;
+  cursor: pointer;
+}
+
 select.dialog-input option {
   background-color: var(--panel-bg);
   color: var(--text-color);
+}
+
+.select-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.select-wrapper .select-arrow {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: var(--text-color);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.select-wrapper select.dialog-input:focus + .select-arrow,
+.select-wrapper select.dialog-input:active + .select-arrow {
+  transform: rotate(180deg);
 }
 
 .dialog-input.error {
@@ -2794,11 +2820,40 @@ kbd {
 
 .custom-select-arrow {
   color: var(--text-color);
-  transition: transform 0.2s ease;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .custom-select.open .custom-select-arrow {
   transform: rotate(180deg);
+}
+
+/* ドロップダウン・トグルボタン全般の矢印アニメーション統一表示 */
+#titlebar-tab-list svg {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#titlebar-tab-list.open svg {
+  transform: rotate(180deg);
+}
+
+#bookmark-overflow-btn svg {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#bookmark-overflow-btn.open svg {
+  transform: rotate(90deg);
+}
+
+.context-menu-item .menu-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  opacity: 0.7;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.context-menu-item.open .menu-arrow {
+  transform: rotate(90deg);
 }
 
 .custom-select-menu {
