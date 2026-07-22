@@ -970,16 +970,23 @@ class UIManager {
     const src1 = window.veloceAPI.convertFileSrc(file1.path);
     const src2 = window.veloceAPI.convertFileSrc(file2.path);
 
+    const getMediaHtml = (path, src) => {
+      if (path.toLowerCase().endsWith('.mp4')) {
+        return `<video src="${src}" class="diff-thumbnail" autoplay loop muted playsinline></video>`;
+      }
+      return `<img src="${src}" class="diff-thumbnail" decoding="async">`;
+    };
+
     const headerHtml = `
       <div style="display: flex; gap: 15px; margin-bottom: 15px;">
         <div style="flex: 1; display: flex; flex-direction: column;">
           <div class="diff-thumbnail-container" style="margin-top: 0;">
-            <img src="${src1}" class="diff-thumbnail" decoding="async">
+            ${getMediaHtml(file1.path, src1)}
           </div>
         </div>
         <div style="flex: 1; display: flex; flex-direction: column;">
           <div class="diff-thumbnail-container" style="margin-top: 0;">
-            <img src="${src2}" class="diff-thumbnail" decoding="async">
+            ${getMediaHtml(file2.path, src2)}
           </div>
         </div>
       </div>

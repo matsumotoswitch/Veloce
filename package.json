@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "license": "cd src-tauri && cargo about generate about.hbs > ../dist/RUST_LICENSES.html"
+    "license": "cd src-tauri && cargo about generate about.hbs -o ../dist/RUST_LICENSES.html"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1",
