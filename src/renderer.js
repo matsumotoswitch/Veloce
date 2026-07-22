@@ -1284,9 +1284,18 @@ function updateSortIndicators() {
   document.querySelectorAll('th[data-sort]').forEach(th => {
     const key = th.dataset.sort;
     if (TABLE_HEADERS[key]) {
+      let arrow = th.querySelector('.sort-arrow');
       if (appState.sortConfig.key === key) {
-        th.innerHTML = TABLE_HEADERS[key] + (appState.sortConfig.asc ? UIManager.ICONS.SORT_ASC : UIManager.ICONS.SORT_DESC);
+        if (!arrow) {
+          th.innerHTML = `${TABLE_HEADERS[key]}${UIManager.ICONS.SORT_ARROW || ''}`;
+          arrow = th.querySelector('.sort-arrow');
+        }
+        if (arrow) {
+          arrow.classList.toggle('asc', appState.sortConfig.asc);
+          arrow.classList.toggle('desc', !appState.sortConfig.asc);
+        }
       } else {
+        if (arrow) arrow.remove();
         th.textContent = TABLE_HEADERS[key];
       }
     }
@@ -4526,6 +4535,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
     reloadBtn.addEventListener('click', async () => {
       uiManager.hideCustomTooltip();
+      reloadBtn.classList.remove('refreshing');
+      void reloadBtn.offsetWidth;
+      reloadBtn.classList.add('refreshing');
+      setTimeout(() => reloadBtn.classList.remove('refreshing'), 600);
       await refreshFileList(true);
     });
   }
