@@ -2042,33 +2042,71 @@ th[data-sort] svg path {
 }
 
 @keyframes tabFadeIn {
-  from {
+  0% {
     opacity: 0;
-    transform: translateX(-16px);
+    transform: translate(-14px, 8px) scale(0.88);
   }
-
-  to {
+  70% {
     opacity: 1;
-    transform: translateX(0);
+    transform: translate(2px, -1px) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
   }
 }
 
 .tab-item.tab-fade-in {
-  animation: tabFadeIn 0.25s ease-out;
+  transform-origin: bottom left;
+  animation: tabFadeIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.tab-item.tab-fade-out {
+@keyframes tabFadeOut {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  30% {
+    opacity: 0.9;
+    transform: translate(3px, -2px) scale(0.84);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-18px, 12px) scale(0.70);
+  }
+}
+
+#tab-container .tab-item.tab-fade-out {
+  animation: tabFadeOut 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) forwards !important;
+  transform-origin: bottom left !important;
+  border: 0 !important;
+  border-width: 0px !important;
+  background-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  transition: width 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+              min-width 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+              max-width 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+              padding 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+              margin 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
+/* タブ消去時の疑似要素（アクセントバー・下線）及び内部アイコン・テキストの残像・ゴミを完全削除 */
+#tab-container .tab-item.tab-fade-out::before,
+#tab-container .tab-item.tab-fade-out::after {
+  display: none !important;
+  content: none !important;
   opacity: 0 !important;
-  transform: translateX(-15px) !important;
-  min-width: 0 !important;
   width: 0 !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-  margin-right: 0 !important;
-  border-width: 0 !important;
-  transition: opacity 0.15s ease-out, transform 0.15s ease-out, width 0.2s ease-out, padding 0.2s ease-out, margin-right 0.2s ease-out, min-width 0.2s ease-out;
-  pointer-events: none;
-  overflow: hidden;
+  height: 0 !important;
+}
+
+#tab-container .tab-item.tab-fade-out * {
+  opacity: 0 !important;
+  transition: opacity 0.12s ease-out !important;
 }
 
 /* タブ追加ボタン専用の独立したスタイル（通常時は背景完全透明） */

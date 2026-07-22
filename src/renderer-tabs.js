@@ -153,23 +153,29 @@ export function initTabHandlers(ctx) {
     tabToRemove.isClosing = true;
 
     const container = document.getElementById('tab-container');
-    let delay = 0;
     let targetTabEl = null;
 
     if (container) {
-      targetTabEl = container.querySelector(`.tab-item[data-index="${index}"]`);
+      targetTabEl = container.querySelector(`.tab-item[data-tab-id="${tabToRemove.id}"]`) || container.querySelector(`.tab-item[data-index="${index}"]`);
       if (targetTabEl) {
-        targetTabEl.style.width = `${targetTabEl.offsetWidth}px`;
+        const startWidth = targetTabEl.getBoundingClientRect().width;
+        targetTabEl.style.width = `${startWidth}px`;
         targetTabEl.style.minWidth = '0px';
-        void targetTabEl.offsetWidth;
+        targetTabEl.style.maxWidth = `${startWidth}px`;
         targetTabEl.classList.add('tab-fade-out');
-        targetTabEl.removeAttribute('data-index');
-        delay = 200;
+
+        requestAnimationFrame(() => {
+          targetTabEl.style.width = '0px';
+          targetTabEl.style.maxWidth = '0px';
+          targetTabEl.style.paddingLeft = '0px';
+          targetTabEl.style.paddingRight = '0px';
+          targetTabEl.style.marginLeft = '0px';
+          targetTabEl.style.marginRight = '0px';
+        });
       }
     }
 
     appState.tabs.splice(index, 1);
-    saveTabsState(appState, uiManager);
 
     let shouldSwitch = false;
     let nextIndex = appState.activeTabIndex;
@@ -189,12 +195,14 @@ export function initTabHandlers(ctx) {
       uiManager.renderTabs();
     }
 
-    if (delay > 0) {
+    saveTabsState(appState, uiManager);
+
+    if (targetTabEl) {
       setTimeout(() => {
-        if (targetTabEl?.parentElement) targetTabEl.remove();
-      }, delay);
-    } else if (targetTabEl?.parentElement) {
-      targetTabEl.remove();
+        if (targetTabEl && targetTabEl.parentNode) {
+          targetTabEl.remove();
+        }
+      }, 220);
     }
   };
 

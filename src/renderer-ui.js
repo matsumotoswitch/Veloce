@@ -199,20 +199,28 @@ class UIManager {
       });
     }
 
-    // DOMの再生成を防ぎ、既存のタブ要素を再利用してアニメーションが途切れないようにする
-    // 削除アニメーション中のタブ（.tab-fade-out）は再利用対象から除外する
-    const existingTabs = Array.from(container.querySelectorAll('.tab-item:not(#new-tab-btn):not(.tab-fade-out)'));
-    const tabCount = this.state.tabs.length;
+    // DOMの再生成を防ぎ、タブIDを元に既存のタブ要素を正確にマップ・再利用する
+    this.state.tabs.forEach((tab, idx) => {
+      if (!tab.id) tab.id = 'tab_' + idx + '_' + Date.now();
+    });
 
-    if (existingTabs.length > tabCount) {
-      for (let i = tabCount; i < existingTabs.length; i++) {
-        existingTabs[i].remove();
+    const activeTabIds = new Set(this.state.tabs.map(t => String(t.id)));
+
+    const existingTabMap = new Map();
+    container.querySelectorAll('.tab-item:not(#new-tab-btn)').forEach(el => {
+      if (el.dataset.tabId) {
+        existingTabMap.set(el.dataset.tabId, el);
       }
-      existingTabs.length = tabCount;
-    }
+    });
+
+    existingTabMap.forEach((el, id) => {
+      if (!activeTabIds.has(id) && !el.classList.contains('tab-fade-out')) {
+        el.remove();
+      }
+    });
 
     this.state.tabs.forEach((tab, index) => {
-      let tabEl = existingTabs[index];
+      let tabEl = existingTabMap.get(String(tab.id));
 
       if (!tabEl) {
         tabEl = document.createElement('div');
@@ -358,6 +366,7 @@ class UIManager {
       tabEl.style.minWidth = '';
 
       tabEl.dataset.index = index;
+      tabEl.dataset.tabId = tab.id;
 
       if (index === this.state.activeTabIndex) {
         tabEl.classList.add('active');
