@@ -1732,8 +1732,8 @@ img.thumbnail-item.loading {
   /* アニメーション用の初期状態 */
   visibility: hidden;
   opacity: 0;
-  transform: scale(0.95);
-  transition: opacity 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0.2s;
+  transform: scale(0.88) translateY(-6px);
+  transition: opacity 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s;
   pointer-events: none;
 }
 
@@ -1743,7 +1743,7 @@ img.thumbnail-item.loading {
 #bookmark-overflow-menu.show {
   visibility: visible;
   opacity: 1;
-  transform: scale(1);
+  transform: scale(1) translateY(0);
   pointer-events: auto;
 }
 
@@ -2901,11 +2901,15 @@ th[data-sort] .sort-arrow.desc {
 }
 
 @keyframes fadeInMenu {
-  from {
+  0% {
     opacity: 0;
-    transform: translateY(-4px) scale(0.97);
+    transform: translateY(-8px) scale(0.88);
   }
-  to {
+  70% {
+    opacity: 1;
+    transform: translateY(1px) scale(1.03);
+  }
+  100% {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
@@ -2913,8 +2917,41 @@ th[data-sort] .sort-arrow.desc {
 
 .custom-select.open .custom-select-menu {
   display: block;
-  animation: fadeInMenu 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: fadeInMenu 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
   transform-origin: top center;
+}
+
+/* スマートフォルダの条件行 z-index 制御と上向き展開 */
+.sf-condition-row {
+  position: relative;
+  z-index: 1;
+}
+
+.sf-condition-row:focus-within,
+.sf-condition-row.open-select {
+  z-index: 1000;
+}
+
+@keyframes fadeInMenuUp {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.88);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.custom-select.open.open-up .custom-select-menu {
+  top: auto;
+  bottom: calc(100% + 4px);
+  transform-origin: bottom center;
+  animation: fadeInMenuUp 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .custom-select-item {

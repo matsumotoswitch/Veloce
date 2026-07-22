@@ -187,22 +187,26 @@
 
   <template id="sf-condition-template">
     <div class="sf-condition-row" style="display: flex; gap: 8px; align-items: center;">
-      <div class="select-wrapper" style="width: 160px;">
-        <select class="cond-type dialog-input" style="width: 100%;">
-          <option value="rating">レーティング</option>
-          <option value="prompt">プロンプト</option>
-          <option value="negative_prompt">ネガティブプロンプト</option>
-          <option value="source">生成元 (Source)</option>
-          <option value="aspect_ratio">アスペクト比</option>
-          <option value="width">横幅 (px)</option>
-          <option value="height">高さ (px)</option>
-          <option value="path">フォルダ (パス)</option>
-        </select>
-        <svg class="select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      <div class="custom-select cond-type-select" tabindex="0" style="width: 160px; height: 28px;">
+        <span class="custom-select-label">レーティング</span>
+        <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        <div class="custom-select-menu">
+          <div class="custom-select-item selected" data-value="rating">レーティング</div>
+          <div class="custom-select-item" data-value="prompt">プロンプト</div>
+          <div class="custom-select-item" data-value="negative_prompt">ネガティブプロンプト</div>
+          <div class="custom-select-item" data-value="source">生成元 (Source)</div>
+          <div class="custom-select-item" data-value="aspect_ratio">アスペクト比</div>
+          <div class="custom-select-item" data-value="width">横幅 (px)</div>
+          <div class="custom-select-item" data-value="height">高さ (px)</div>
+          <div class="custom-select-item" data-value="path">フォルダ (パス)</div>
+        </div>
+        <input type="hidden" class="cond-type" value="rating">
       </div>
-      <div class="select-wrapper" style="width: 130px;">
-        <select class="cond-operator dialog-input" style="width: 100%;"></select>
-        <svg class="select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      <div class="custom-select cond-op-select" tabindex="0" style="width: 130px; height: 28px;">
+        <span class="custom-select-label">以上</span>
+        <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        <div class="custom-select-menu"></div>
+        <input type="hidden" class="cond-operator" value=">=">
       </div>
       <div class="cond-value-container" style="display: flex; flex: 1; gap: 4px; align-items: center;"></div>
       <button type="button" class="btn-remove-cond dialog-btn" style="padding: 4px 8px;">✕</button>
@@ -265,7 +269,7 @@
           <label class="form-label" style="margin-bottom: 0;">条件 (すべての条件に一致)</label>
           <button id="smart-add-condition-btn" class="dialog-btn" style="padding: 8px 12px;">+ 条件を追加</button>
         </div>
-        <div id="smart-conditions-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;">
+        <div id="smart-conditions-list" style="display: flex; flex-direction: column; gap: 8px; overflow: visible;">
           <!-- JSで動的に追加 -->
         </div>
       </div>

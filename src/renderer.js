@@ -2443,32 +2443,55 @@ const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICO
 let sfModalDelegated = false;
 
 function updateSmartFolderRowUI(row, type, initialCond = null) {
-  const operatorSelect = row.querySelector('.cond-operator');
+  const typeSelect = row.querySelector('.cond-type-select');
+  const typeInput = row.querySelector('.cond-type');
+  const opSelect = row.querySelector('.cond-op-select');
+  const opInput = row.querySelector('.cond-operator');
   const valueContainer = row.querySelector('.cond-value-container');
+
+  if (typeInput) typeInput.value = type;
+  if (typeSelect) {
+    const typeLabel = typeSelect.querySelector('.custom-select-label');
+    const typeItems = typeSelect.querySelectorAll('.custom-select-item');
+    typeItems.forEach(i => {
+      const match = i.dataset.value === type;
+      i.classList.toggle('selected', match);
+      if (match && typeLabel) typeLabel.textContent = i.textContent;
+    });
+  }
 
   const opVal = initialCond ? initialCond.operator : null;
   const valVal = initialCond ? initialCond.value : '';
 
-  function makeOptions(ops) {
-    return ops.map(o => `<option value="${o.value}" ${o.value === opVal ? 'selected' : ''}>${o.label}</option>`).join('');
+  function setOpCustomSelect(ops) {
+    if (!opSelect) return;
+    const menu = opSelect.querySelector('.custom-select-menu');
+    const label = opSelect.querySelector('.custom-select-label');
+    const selectedOp = ops.find(o => o.value === opVal) || ops[0];
+
+    if (menu) {
+      menu.innerHTML = ops.map(o => `<div class="custom-select-item ${o.value === selectedOp.value ? 'selected' : ''}" data-value="${o.value}">${o.label}</div>`).join('');
+    }
+    if (label) label.textContent = selectedOp.label;
+    if (opInput) opInput.value = selectedOp.value;
   }
 
   if (type === 'prompt' || type === 'negative_prompt') {
-    operatorSelect.innerHTML = makeOptions([
+    setOpCustomSelect([
       { value: 'contains', label: 'を含む' },
       { value: 'not_contains', label: 'を含まない' }
     ]);
     valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="キーワード">`;
     valueContainer.querySelector('input').value = valVal;
   } else if (type === 'source') {
-    operatorSelect.innerHTML = makeOptions([
+    setOpCustomSelect([
       { value: '==', label: 'と一致' },
       { value: '!=', label: 'と一致しない' }
     ]);
     valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="生成元">`;
     valueContainer.querySelector('input').value = valVal;
   } else if (type === 'width' || type === 'height') {
-    operatorSelect.innerHTML = makeOptions([
+    setOpCustomSelect([
       { value: '<=', label: '以下' },
       { value: '==', label: 'ちょうど' },
       { value: '>=', label: '以上' }
@@ -2476,7 +2499,7 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
     valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0">`;
     valueContainer.querySelector('input').value = valVal || 0;
   } else if (type === 'rating') {
-    operatorSelect.innerHTML = makeOptions([
+    setOpCustomSelect([
       { value: '>=', label: '以上' },
       { value: '<=', label: '以下' },
       { value: '==', label: 'と一致' }
@@ -2484,14 +2507,14 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
     valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0" max="5">`;
     valueContainer.querySelector('input').value = valVal || 0;
   } else if (type === 'aspect_ratio') {
-    operatorSelect.innerHTML = makeOptions([
+    setOpCustomSelect([
       { value: 'portrait', label: '縦長' },
       { value: 'landscape', label: '横長' },
       { value: 'square', label: '正方形' }
     ]);
     valueContainer.innerHTML = `<div style="flex:1"></div><input type="hidden" class="cond-value-input" value="">`;
   } else if (type === 'path') {
-    operatorSelect.innerHTML = makeOptions([
+    setOpCustomSelect([
       { value: 'in_folder', label: '直下のみ' },
       { value: 'under_folder', label: 'サブフォルダ含む' }
     ]);
@@ -2520,8 +2543,8 @@ function showEditSmartFolderModal(sf, isNew = false) {
   conds.forEach(cond => {
     const clone = template.content.cloneNode(true);
     const row = clone.querySelector('.sf-condition-row');
-    const typeSel = row.querySelector('.cond-type');
-    typeSel.value = cond.type;
+    const typeInput = row.querySelector('.cond-type');
+    if (typeInput) typeInput.value = cond.type;
     updateSmartFolderRowUI(row, cond.type, cond);
     fragment.appendChild(clone);
   });
@@ -2531,6 +2554,65 @@ function showEditSmartFolderModal(sf, isNew = false) {
     sfModalDelegated = true;
 
     modal.addEventListener('click', async (e) => {
+      const selectItem = e.target.closest('.custom-select-item');
+      if (selectItem) {
+        const parentSelect = selectItem.closest('.custom-select');
+        if (parentSelect) {
+          const hiddenInput = parentSelect.querySelector('input[type="hidden"]');
+          const label = parentSelect.querySelector('.custom-select-label');
+          const val = selectItem.dataset.value;
+
+          parentSelect.querySelectorAll('.custom-select-item').forEach(i => i.classList.remove('selected'));
+          selectItem.classList.add('selected');
+          if (label) label.textContent = selectItem.textContent;
+          if (hiddenInput) hiddenInput.value = val;
+          parentSelect.classList.remove('open');
+          parentSelect.classList.remove('open-up');
+
+          const parentRow = parentSelect.closest('.sf-condition-row');
+          if (parentRow) parentRow.classList.remove('open-select');
+
+          if (parentSelect.classList.contains('cond-type-select')) {
+            if (parentRow) updateSmartFolderRowUI(parentRow, val);
+          }
+        }
+        return;
+      }
+
+      const customSelect = e.target.closest('.custom-select');
+      if (customSelect) {
+        e.stopPropagation();
+        const isOpen = customSelect.classList.contains('open');
+
+        modal.querySelectorAll('.custom-select.open').forEach(el => {
+          el.classList.remove('open');
+          el.classList.remove('open-up');
+        });
+        modal.querySelectorAll('.sf-condition-row.open-select').forEach(el => el.classList.remove('open-select'));
+
+        if (!isOpen) {
+          customSelect.classList.add('open');
+          const row = customSelect.closest('.sf-condition-row');
+          if (row) row.classList.add('open-select');
+
+          const rect = customSelect.getBoundingClientRect();
+          const dialogBox = modal.querySelector('.dialog-box');
+          const dialogRect = dialogBox ? dialogBox.getBoundingClientRect() : null;
+          const spaceBelow = dialogRect ? dialogRect.bottom - rect.bottom : window.innerHeight - rect.bottom;
+
+          if (spaceBelow < 180 && rect.top > 200) {
+            customSelect.classList.add('open-up');
+          }
+        }
+        return;
+      }
+
+      modal.querySelectorAll('.custom-select.open').forEach(el => {
+        el.classList.remove('open');
+        el.classList.remove('open-up');
+      });
+      modal.querySelectorAll('.sf-condition-row.open-select').forEach(el => el.classList.remove('open-select'));
+
       if (e.target.closest('.btn-remove-cond')) {
         const row = e.target.closest('.sf-condition-row');
         if (row) row.remove();
@@ -2542,7 +2624,8 @@ function showEditSmartFolderModal(sf, isNew = false) {
         const list = document.getElementById('smart-conditions-list');
         list.appendChild(clone);
         const newRow = list.lastElementChild;
-        newRow.querySelector('.cond-type').value = 'rating';
+        const typeInput = newRow.querySelector('.cond-type');
+        if (typeInput) typeInput.value = 'rating';
         updateSmartFolderRowUI(newRow, 'rating', { operator: '>=', value: '4' });
       }
 
@@ -2553,13 +2636,6 @@ function showEditSmartFolderModal(sf, isNew = false) {
           const folder = await window.veloceAPI.openFolderDialog();
           if (folder) input.value = folder;
         }
-      }
-    });
-
-    modal.addEventListener('change', (e) => {
-      if (e.target.classList.contains('cond-type')) {
-        const row = e.target.closest('.sf-condition-row');
-        updateSmartFolderRowUI(row, e.target.value);
       }
     });
   }
