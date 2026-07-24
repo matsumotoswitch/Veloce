@@ -186,32 +186,27 @@ export function initTabHandlers(ctx) {
       }
 
       if (window.veloceAPI?.loadDirectory) {
-        appState.currentDirectory = nextTab.path;
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
-        appState.totalCount = 0;
-        appState.selection.clear();
-        uiManager.renderAll(true);
-        clearMetadataUI();
-        updateNavButtons();
-        window.veloceAPI.loadDirectory(nextTab.path);
-        expandTreeToPath(appState.currentDirectory);
+        // 重いDOM更新とIPC通信を遅延させ、タブが閉じるアニメーション（220ms）が
+        // メインスレッドのブロックによってコマ落ち（フレームドロップ）しないようにする
+        setTimeout(() => {
+          // もし遅延中に別のタブがアクティブになっていたらキャンセル
+          if (appState.activeTabIndex !== nextIndex) return;
+
+          appState.currentDirectory = nextTab.path;
+          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          appState.totalCount = 0;
+          appState.selection.clear();
+          uiManager.renderAll(true);
+          clearMetadataUI();
+          updateNavButtons();
+          window.veloceAPI.loadDirectory(nextTab.path);
+          expandTreeToPath(appState.currentDirectory);
+        }, 220);
       }
     }
 
-    // フェーズ2: 180ms後にdent終了 → 幅ゼロに縮んでDOM削除
+    // フェーズ2: アニメーション完了(220ms+余白20ms)後にDOM削除
     setTimeout(function() {
-      if (targetTabEl) {
-        targetTabEl.classList.remove('tab-dent');
-        targetTabEl.style.transition = 'none';
-        targetTabEl.style.minWidth = '0px';
-        targetTabEl.style.maxWidth = '0px';
-        targetTabEl.style.width = '0px';
-        targetTabEl.style.paddingLeft = '0px';
-        targetTabEl.style.paddingRight = '0px';
-        targetTabEl.style.opacity = '0';
-        targetTabEl.style.overflow = 'hidden';
-      }
-
       const currentTabIdx = appState.tabs.indexOf(tabToRemove);
       if (currentTabIdx !== -1) {
         appState.tabs.splice(currentTabIdx, 1);
@@ -223,7 +218,7 @@ export function initTabHandlers(ctx) {
 
       uiManager.renderTabs();
       saveTabsState(appState, uiManager);
-    }, 180);
+    }, 240);
   };
 
   window.onTabMove = (fromIndex, toIndex, insertAfter) => {
