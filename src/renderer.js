@@ -2615,7 +2615,12 @@ function showEditSmartFolderModal(sf, isNew = false) {
 
       if (e.target.closest('.btn-remove-cond')) {
         const row = e.target.closest('.sf-condition-row');
-        if (row) row.remove();
+        if (row) {
+          row.classList.add('row-fade-out');
+          setTimeout(() => {
+            if (row.parentNode) row.remove();
+          }, 240);
+        }
       }
 
       if (e.target.closest('#smart-add-condition-btn')) {
