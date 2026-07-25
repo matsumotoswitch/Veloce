@@ -169,17 +169,15 @@ export function initTabHandlers(ctx) {
 
       targetTabEl.classList.add('tab-dent');
 
-      // transform アニメーション完了(220ms)後に幅ゼロへのトランジションを開始する
-      // transform animation と width transition を分離することで、
-      // 視覚的なアニメーションが width 縮小によって打ち消されるのを防ぐ
-      // 隣のタブは 220ms 後にスライドしてくる（60ms で完了）
+      // transform のバウンスが完了するタイミング(約70ms)で幅ゼロへのトランジションを開始する
+      // overflow: hidden を解除したため、幅が縮小しても transform アニメーションは途切れない
       setTimeout(() => {
         if (!targetTabEl.parentNode) return;
         targetTabEl.style.transition =
-          'min-width 0.06s ease-in, max-width 0.06s ease-in, width 0.06s ease-in, ' +
-          'padding-left 0.06s ease-in, padding-right 0.06s ease-in, ' +
-          'margin-left 0.06s ease-in, margin-right 0.06s ease-in, ' +
-          'border-width 0.06s ease-in';
+          'min-width 0.15s ease-out, max-width 0.15s ease-out, width 0.15s ease-out, ' +
+          'padding-left 0.15s ease-out, padding-right 0.15s ease-out, ' +
+          'margin-left 0.15s ease-out, margin-right 0.15s ease-out, ' +
+          'border-width 0.15s ease-out';
         targetTabEl.style.minWidth = '0';
         targetTabEl.style.maxWidth = '0';
         targetTabEl.style.width = '0';
@@ -188,7 +186,7 @@ export function initTabHandlers(ctx) {
         targetTabEl.style.marginLeft = '0';
         targetTabEl.style.marginRight = '0';
         targetTabEl.style.borderWidth = '0';
-      }, 220);
+      }, 70);
     }
 
     let nextIndex = appState.activeTabIndex;
@@ -232,7 +230,7 @@ export function initTabHandlers(ctx) {
       }
     }
 
-    // フェーズ2: アニメーション(220ms) + 幅縮小(60ms) + 余白(20ms) = 300ms後にDOM削除
+    // フェーズ2: アニメーション(70ms遅延) + 幅縮小(150ms) + 余白(10ms) = 230ms後にDOM削除
     setTimeout(function() {
       const currentTabIdx = appState.tabs.indexOf(tabToRemove);
       if (currentTabIdx !== -1) {
@@ -245,7 +243,7 @@ export function initTabHandlers(ctx) {
 
       uiManager.renderTabs();
       saveTabsState(appState, uiManager);
-    }, 300);
+    }, 230);
   };
 
   window.onTabMove = (fromIndex, toIndex, insertAfter) => {
