@@ -1950,13 +1950,15 @@ th[data-sort] svg path {
   border-bottom: 1px solid var(--border-color) !important;
   /* #2b3d41: 通常時は下側にインスペクターとの境界線を持たせる */
   border-radius: 8px 8px 0 0 !important;
-  opacity: 0.8 !important;
+  /* opacity は !important なしにする。CSS アニメーションが opacity を制御できるようにするため。
+     ホバー・アクティブは詳細度が高いため !important なしでも正しく上書きできる */
+  opacity: 0.8;
   /* タブ間の隙間は gap で管理 */
   margin-bottom: 0 !important;
   /* 枠外へのめり込みを無くし、下線を確実に表示させる */
   padding: 7px 25px 6px 17px !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
-  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease !important;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
   height: 32px !important;
 }
 
@@ -1989,7 +1991,7 @@ th[data-sort] svg path {
 #tab-container .tab-item:not(.active):hover {
   background-color: rgba(var(--accent-rgb), 0.35) !important;
   color: #ffffff !important;
-  opacity: 1 !important;
+  opacity: 1;
 }
 
 #tab-container .tab-item.active {
@@ -2008,7 +2010,7 @@ th[data-sort] svg path {
   z-index: 10 !important;
   /* 最前面に浮かせる */
   padding: 6px 24px 7px 16px !important;
-  opacity: 1 !important;
+  opacity: 1;
   margin-bottom: 0 !important;
 }
 
@@ -2049,18 +2051,15 @@ th[data-sort] svg path {
   right: -2px;
 }
 
-/* タブ追加: 左下から右上へ膨らんで着地 */
+/* タブ追加: 左下から右上へ膨らんで着地 (透明化なし・transform のみ) */
 @keyframes tabFadeIn {
   0% {
-    opacity: 0;
     transform: translate(-14px, 8px) scale(0.88);
   }
   70% {
-    opacity: 1;
     transform: translate(2px, -1px) scale(1.04);
   }
   100% {
-    opacity: 1;
     transform: translate(0, 0) scale(1);
   }
 }
@@ -2070,59 +2069,32 @@ th[data-sort] svg path {
   animation: tabFadeIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-/* タブ消去: tabFadeIn の逆再生
-   0%→25%: 右上へバウンス (tabFadeIn と同じバウンス曲線)
-   25%→100%: ease-in で左下へスッと退場 (背景色変化なし) */
+/* タブ消去: tabFadeIn の視覚的な逆再生 (透明化なし・transform のみ)
+   tabFadeIn:  0%(左下, scale 0.88) → 70%(右上, scale 1.04) → 100%(定位置, scale 1)
+   tabFadeOut: 0%(定位置, scale 1) → 30%(右上, scale 1.04) → 100%(左下, scale 0.88)
+   ※ 30%点はtabFadeInの70%点の逆 (1.0 - 0.7 = 0.3) */
 @keyframes tabFadeOut {
   0% {
     transform: translate(0, 0) scale(1);
     animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
-  25% {
-    transform: translate(4px, -3px) scale(1.12);
+  30% {
+    transform: translate(2px, -1px) scale(1.04);
     animation-timing-function: ease-in;
   }
   100% {
-    transform: translate(-20px, 12px) scale(0.65);
-    opacity: 0;
+    transform: translate(-14px, 8px) scale(0.88);
   }
 }
 
 #tab-container .tab-item.tab-dent,
 #tab-container .tab-item.tab-fade-out {
-  animation: tabFadeOut 0.22s linear forwards !important;
-  transform-origin: bottom left !important;
-  pointer-events: none !important;
-
-  /* 隣のタブが滑らかにスライドするための幅ゼロ化 (バウンスが終わる約0.06s後から縮小開始) */
-  min-width: 0 !important;
-  max-width: 0 !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-  border-width: 0 !important;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-  overflow: hidden !important;
-  transition: min-width 0.16s ease-in 0.06s,
-              max-width 0.16s ease-in 0.06s,
-              padding 0.16s ease-in 0.06s,
-              margin 0.16s ease-in 0.06s,
-              border-width 0.16s ease-in 0.06s !important;
-}
-
-/* タブ消去時の疑似要素（アクセントバー・下線）及び内部アイコン・テキストの残像・ゴミを完全削除 */
-#tab-container .tab-item.tab-fade-out::before,
-#tab-container .tab-item.tab-fade-out::after {
-  display: none !important;
-  content: none !important;
-  opacity: 0 !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
-#tab-container .tab-item.tab-fade-out * {
-  opacity: 0 !important;
-  transition: opacity 0.12s ease-out !important;
+  animation: tabFadeOut 0.22s linear forwards;
+  transform-origin: bottom left;
+  pointer-events: none;
+  overflow: hidden;
+  /* 逃げるタブが隣のタブの下に潜らないよう最前面へ */
+  z-index: 20;
 }
 
 /* タブ追加ボタン専用の独立したスタイル（通常時は背景完全透明） */

@@ -159,9 +159,36 @@ export function initTabHandlers(ctx) {
       targetTabEl = container.querySelector(`.tab-item[data-tab-id="${tabToRemove.id}"]`) || container.querySelector(`.tab-item[data-index="${index}"]`);
     }
 
-    // フェーズ1: その場でキュッとへこんで戻るアニメーション (180ms)
+    // フェーズ1: tabFadeOut アニメーション開始
     if (targetTabEl) {
+      // アニメーション開始前に現在の幅を確定してロック（flex による可変幅を固定値にする）
+      const currentWidth = targetTabEl.getBoundingClientRect().width;
+      targetTabEl.style.minWidth = currentWidth + 'px';
+      targetTabEl.style.maxWidth = currentWidth + 'px';
+      targetTabEl.style.width = currentWidth + 'px';
+
       targetTabEl.classList.add('tab-dent');
+
+      // transform アニメーション完了(220ms)後に幅ゼロへのトランジションを開始する
+      // transform animation と width transition を分離することで、
+      // 視覚的なアニメーションが width 縮小によって打ち消されるのを防ぐ
+      // 隣のタブは 220ms 後にスライドしてくる（60ms で完了）
+      setTimeout(() => {
+        if (!targetTabEl.parentNode) return;
+        targetTabEl.style.transition =
+          'min-width 0.06s ease-in, max-width 0.06s ease-in, width 0.06s ease-in, ' +
+          'padding-left 0.06s ease-in, padding-right 0.06s ease-in, ' +
+          'margin-left 0.06s ease-in, margin-right 0.06s ease-in, ' +
+          'border-width 0.06s ease-in';
+        targetTabEl.style.minWidth = '0';
+        targetTabEl.style.maxWidth = '0';
+        targetTabEl.style.width = '0';
+        targetTabEl.style.paddingLeft = '0';
+        targetTabEl.style.paddingRight = '0';
+        targetTabEl.style.marginLeft = '0';
+        targetTabEl.style.marginRight = '0';
+        targetTabEl.style.borderWidth = '0';
+      }, 220);
     }
 
     let nextIndex = appState.activeTabIndex;
@@ -205,7 +232,7 @@ export function initTabHandlers(ctx) {
       }
     }
 
-    // フェーズ2: アニメーション完了(220ms+余白20ms)後にDOM削除
+    // フェーズ2: アニメーション(220ms) + 幅縮小(60ms) + 余白(20ms) = 300ms後にDOM削除
     setTimeout(function() {
       const currentTabIdx = appState.tabs.indexOf(tabToRemove);
       if (currentTabIdx !== -1) {
@@ -218,7 +245,7 @@ export function initTabHandlers(ctx) {
 
       uiManager.renderTabs();
       saveTabsState(appState, uiManager);
-    }, 240);
+    }, 300);
   };
 
   window.onTabMove = (fromIndex, toIndex, insertAfter) => {

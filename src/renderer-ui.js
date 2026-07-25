@@ -214,7 +214,7 @@ class UIManager {
     });
 
     existingTabMap.forEach((el, id) => {
-      if (!activeTabIds.has(id) && !el.classList.contains('tab-fade-out')) {
+      if (!activeTabIds.has(id) && !el.classList.contains('tab-fade-out') && !el.classList.contains('tab-dent')) {
         el.remove();
       }
     });
@@ -360,10 +360,17 @@ class UIManager {
         tab.isNew = false;
       }
 
-      // 再利用されたDOMに削除アニメーションのクラスやスタイルが残っていればリセット
-      tabEl.classList.remove('tab-fade-out');
+      // 再利用されたDOMに削除アニメーションのクラスやインラインスタイルが残っていればリセット
+      tabEl.classList.remove('tab-fade-out', 'tab-dent');
       tabEl.style.width = '';
       tabEl.style.minWidth = '';
+      tabEl.style.maxWidth = '';
+      tabEl.style.paddingLeft = '';
+      tabEl.style.paddingRight = '';
+      tabEl.style.marginLeft = '';
+      tabEl.style.marginRight = '';
+      tabEl.style.borderWidth = '';
+      tabEl.style.transition = '';
 
       tabEl.dataset.index = index;
       tabEl.dataset.tabId = tab.id;
