@@ -226,7 +226,7 @@ export function initTabHandlers(ctx) {
           updateNavButtons();
           window.veloceAPI.loadDirectory(nextTab.path);
           expandTreeToPath(appState.currentDirectory);
-        }, 220);
+        }, 230);
       }
     }
 

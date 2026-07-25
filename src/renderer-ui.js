@@ -350,6 +350,13 @@ class UIManager {
         } else {
           container.appendChild(tabEl);
         }
+      } else {
+        // Ensure the existing element is moved to the correct visual order
+        if (newTabBtn) {
+          container.insertBefore(tabEl, newTabBtn);
+        } else {
+          container.appendChild(tabEl);
+        }
       }
 
       // --- 状態の更新 ---
@@ -358,6 +365,17 @@ class UIManager {
         void tabEl.offsetWidth; // リフローを強制してアニメーションを再トリガー
         tabEl.classList.add('tab-fade-in');
         tab.isNew = false;
+        
+        // アニメーション完了後にクラスを削除し、DOM移動時の意図しない再再生を防ぐ
+        const onAnimationEnd = (e) => {
+          if (e.animationName === 'tabFadeIn') {
+            tabEl.classList.remove('tab-fade-in');
+            tabEl.removeEventListener('animationend', onAnimationEnd);
+          }
+        };
+        tabEl.addEventListener('animationend', onAnimationEnd);
+      } else {
+        tabEl.classList.remove('tab-fade-in');
       }
 
       // 再利用されたDOMに削除アニメーションのクラスやインラインスタイルが残っていればリセット
@@ -411,8 +429,7 @@ class UIManager {
           iconSpan.className = `tab-icon icon-color-${itemData.color || 'default'}`;
         } else {
           iconSpan.innerHTML = UIManager.ICONS.FOLDER;
-          iconSpan.className = 'tab-icon';
-          iconSpan.style.color = '#4da8da';
+          iconSpan.className = 'tab-icon icon-color-cyan';
         }
 
         if (isSmartFolder) {

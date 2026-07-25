@@ -332,11 +332,17 @@ select.dialog-input option {
   font-size: var(--font-size-xs);
   min-height: 16px;
   margin-bottom: 8px;
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  height: 0;
+  overflow: hidden;
 }
 
 .dialog-warning.show {
-  display: block;
+  opacity: 1;
+  visibility: visible;
+  height: auto;
 }
 
 /* オートコンプリート(自動補完)時の背景色・文字色の変化を防ぐ */
@@ -662,7 +668,7 @@ input:-webkit-autofill:focus {
 
 .smart-folder-count {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: rgba(255, 255, 255, 0.5);
   display: none;
   font-variant-numeric: tabular-nums;
@@ -1152,7 +1158,7 @@ input[type="range"]:focus {
   border-radius: 8px;
   /* やや小さめのピル */
   color: #fff;
-  font-size: 10.5px;
+  font-size: var(--font-size-xs);
   /* 少し小さく */
   padding: 2px 8px;
   /* 余白を削ってスリムに */
@@ -2092,8 +2098,6 @@ th[data-sort] svg path {
   animation: tabFadeOut 0.22s linear forwards;
   transform-origin: bottom left;
   pointer-events: none;
-  overflow: hidden;
-  /* 逃げるタブが隣のタブの下に潜らないよう最前面へ */
   z-index: 20;
 }
 
@@ -2120,7 +2124,7 @@ th[data-sort] svg path {
   opacity: 0.6;
   cursor: pointer;
   box-shadow: none !important;
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ホバー時にフワッと上品なアクリル調の丸背景を浮かび上がらせる */
@@ -2153,7 +2157,7 @@ th[data-sort] svg path {
   align-items: center;
   justify-content: center;
   opacity: 0.4;
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s, opacity 0.2s, border-radius 0.2s;
 }
 
 .tab-item:hover .tab-close-btn,
@@ -2532,7 +2536,7 @@ html.viewer-html,
   margin: 0 !important;
   cursor: pointer;
   color: var(--text-color, #ececec);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
   width: 24px !important;
   height: 24px !important;
   min-width: 24px !important;
@@ -2549,9 +2553,9 @@ html.viewer-html,
 }
 
 .icon-grid .icon-btn.active {
-    border-color: #3b82f6 !important;
-    background: rgba(59, 130, 246, 0.2) !important;
-  }
+  border-color: var(--accent-color) !important;
+  background: rgba(var(--accent-rgb), 0.2) !important;
+}
 
 /* --- お気に入り: カラー選択パレット --- */
 .color-grid {
@@ -2626,12 +2630,6 @@ html.viewer-html,
   backdrop-filter: none !important;
   /* 重いぼかし処理を完全にカット */
   -webkit-backdrop-filter: none !important;
-  
-  /* モーダルのアニメーション基本設定 */
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0.2s;
-  pointer-events: none;
 }
 
 /* --- Inspector Location Badge (Smart Folder Only) --- */
@@ -2644,7 +2642,7 @@ html.viewer-html,
   background-color: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.2s, border-color 0.2s;
@@ -2731,7 +2729,7 @@ html.viewer-html,
   color: var(--text-color);
   opacity: 0.6;
   border-bottom: 2px solid transparent;
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   font-weight: bold;
 }
 
@@ -2747,15 +2745,21 @@ html.viewer-html,
 }
 
 .help-tab-content {
-  display: none;
-  overflow-y: auto;
+  opacity: 0;
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
   padding-right: 8px;
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
 .help-tab-content.active {
-  display: block;
+  opacity: 1;
+  visibility: visible;
+  height: auto;
+  overflow-y: auto;
+  flex: 1;
 }
 
 /* キーボード風ショートカットキー */
@@ -3037,7 +3041,7 @@ th[data-sort] .sort-arrow.desc {
   color: #fff;
   border-radius: 4px;
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: bold;
   display: none;
   align-items: center;
@@ -3061,11 +3065,11 @@ th[data-sort] .sort-arrow.desc {
   top: -24px;
   left: 0;
   transform: translateX(-50%);
-  background-color: var(--accent-color, #0078D7);
+  background-color: var(--accent-color);
   color: #fff;
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.2s, transform 0.1s;
@@ -3087,7 +3091,6 @@ input[type="range"]:active ~ .slider-tooltip {
   width: 80%;
   max-width: 800px;
   background: rgba(30, 30, 30, 0.85);
-  backdrop-filter: blur(10px);
   border-radius: 8px;
   padding: 10px 20px;
   display: flex;
@@ -3106,7 +3109,7 @@ input[type="range"]:active ~ .slider-tooltip {
 #video-time-display {
   color: white;
   font-family: 'Consolas', monospace;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   min-width: 80px;
   text-align: right;
 }
