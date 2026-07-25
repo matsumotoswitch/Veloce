@@ -544,6 +544,9 @@ function swapImageElement(newImg, sequenceId) {
   }
 
   if (currentViewerImg && currentViewerImg.parentNode) {
+    if (currentViewerImg.tagName === 'VIDEO') {
+      currentViewerImg.pause();
+    }
     currentViewerImg.remove();
   }
   
@@ -569,8 +572,12 @@ function swapImageElement(newImg, sequenceId) {
   if (newImg.tagName === 'VIDEO') {
     if (newImg.readyState >= 1) { // HAVE_METADATA
       onImageReady();
+      newImg.play().catch(e => console.warn('Video play failed:', e));
     } else {
-      newImg.addEventListener('loadedmetadata', onImageReady, { once: true });
+      newImg.addEventListener('loadedmetadata', () => {
+        onImageReady();
+        newImg.play().catch(e => console.warn('Video play failed:', e));
+      }, { once: true });
       newImg.addEventListener('error', onImageReady, { once: true });
     }
   } else {
