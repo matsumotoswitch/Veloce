@@ -2084,20 +2084,30 @@ th[data-sort] svg path {
   }
   100% {
     transform: translate(-20px, 12px) scale(0.65);
+    opacity: 0;
   }
 }
 
-#tab-container .tab-item.tab-dent {
-  animation: tabFadeOut 0.22s linear forwards !important;
-  transform-origin: bottom left !important;
-  pointer-events: none !important;
-}
-
-/* 旧クラス互換 */
+#tab-container .tab-item.tab-dent,
 #tab-container .tab-item.tab-fade-out {
   animation: tabFadeOut 0.22s linear forwards !important;
   transform-origin: bottom left !important;
   pointer-events: none !important;
+
+  /* 隣のタブが滑らかにスライドするための幅ゼロ化 (バウンスが終わる約0.06s後から縮小開始) */
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  border-width: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  overflow: hidden !important;
+  transition: min-width 0.16s ease-in 0.06s,
+              max-width 0.16s ease-in 0.06s,
+              padding 0.16s ease-in 0.06s,
+              margin 0.16s ease-in 0.06s,
+              border-width 0.16s ease-in 0.06s !important;
 }
 
 /* タブ消去時の疑似要素（アクセントバー・下線）及び内部アイコン・テキストの残像・ゴミを完全削除 */
