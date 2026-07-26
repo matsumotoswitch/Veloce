@@ -33,6 +33,13 @@
   --input-bg: #000000;
   --dialog-bg: #1a2327;
   --viewer-bg: #131b1e;
+
+  /* v1.11.0 Unifications */
+  --transition-smooth: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-fast: cubic-bezier(0.4, 0, 0.2, 1);
+  --text-light: #ffffff;
+  --bg-darker: #1e1e1e;
 }
 
 * {
@@ -136,7 +143,7 @@ body {
   height: calc(100vh - 108px);
   box-sizing: border-box;
   color: var(--text-color);
-  transition: grid-template-columns 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: grid-template-columns 0.25s var(--transition-smooth);
 }
 
 body.is-resizing .app-content {
@@ -167,7 +174,7 @@ body.is-resizing .app-content {
   /* 開く時のアニメーション（バウンス） */
   visibility: visible;
   opacity: 1;
-  transition: opacity 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s;
+  transition: opacity 0.22s var(--transition-bounce), visibility 0.22s;
   pointer-events: auto;
 }
 
@@ -192,7 +199,7 @@ body.is-resizing .app-content {
 .modal.show .modal-content,
 #help-overlay.show .help-modal-content {
   transform: translateY(0) scale(1);
-  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.22s var(--transition-bounce);
 }
 
 .dialog-message {
@@ -235,7 +242,7 @@ body.is-resizing .app-content {
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: inherit;
-  color: #fff;
+  color: var(--text-light);
   background-color: rgba(255, 255, 255, 0.1);
   transition: opacity 0.2s, background-color 0.2s, filter 0.15s, transform 0.05s ease;
 }
@@ -315,7 +322,7 @@ select.dialog-input option {
   right: 8px;
   pointer-events: none;
   color: var(--text-color);
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s var(--transition-fast);
 }
 
 .select-wrapper select.dialog-input:focus + .select-arrow,
@@ -415,13 +422,13 @@ input:-webkit-autofill:focus {
 
 /* トグルスイッチの追加スタイル（JSで生成される要素用） */
 .resizer-toggle {
-  transition: background-color 0.15s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
+  transition: background-color 0.15s ease, transform 0.2s var(--transition-fast), opacity 0.15s ease;
 }
 
 .resizer-toggle:hover {
   background-color: var(--accent-color) !important;
   border-color: var(--accent-color) !important;
-  color: #fff !important;
+  color: var(--text-light) !important;
   opacity: 1 !important;
   transform: scale(1.05);
 }
@@ -430,7 +437,7 @@ input:-webkit-autofill:focus {
   transform: rotate(180deg);
 }
 .resizer-toggle svg {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s var(--transition-fast);
 }
 
 /* Panes */
@@ -488,12 +495,12 @@ input:-webkit-autofill:focus {
 
 .bookmark-item:hover {
   background-color: rgba(var(--accent-rgb), 0.25);
-  color: #fff;
+  color: var(--text-light);
 }
 
 .bookmark-item.selected {
   background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.25), rgba(28, 94, 105, 0.35));
-  color: #ffffff;
+  color: var(--text-light);
   box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
   transition: background 0.2s ease, box-shadow 0.2s ease;
 }
@@ -560,7 +567,7 @@ input:-webkit-autofill:focus {
   flex-direction: column;
   overflow: hidden;
   border-bottom: 1px solid var(--border-color);
-  transition: flex-basis 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: flex-basis 0.25s var(--transition-smooth);
 }
 
 :root[data-left-top-collapsed="true"] #smart-folders-section {
@@ -627,7 +634,7 @@ input:-webkit-autofill:focus {
   cursor: pointer;
   user-select: none;
   font-size: var(--font-size-sm);
-  transition: background-color 0.2s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color 0.2s, transform 0.1s var(--transition-fast);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -642,12 +649,12 @@ input:-webkit-autofill:focus {
 
 .smart-folder-item:hover {
   background-color: rgba(var(--accent-rgb), 0.15);
-  color: #fff;
+  color: var(--text-light);
 }
 
 .smart-folder-item.selected {
   background-color: rgba(var(--accent-rgb), 0.3);
-  color: #fff;
+  color: var(--text-light);
   font-weight: normal;
 }
 
@@ -773,7 +780,7 @@ input:-webkit-autofill:focus {
 }
 
 #search-container:focus-within {
-  background: #1e1e1e;
+  background: var(--bg-darker);
   border-color: var(--accent-color);
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
@@ -792,7 +799,7 @@ input:-webkit-autofill:focus {
 }
 
 #search-clear-btn:hover {
-  color: #fff;
+  color: var(--text-light);
   opacity: 1;
 }
 
@@ -816,7 +823,7 @@ input:-webkit-autofill:focus {
   overflow-x: hidden;
   min-height: 0;
   background-color: var(--bg-color);
-  transition: flex-basis 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: flex-basis 0.25s var(--transition-smooth);
   border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
@@ -925,7 +932,7 @@ table#file-table {
 
 #file-table tr.selected {
   background: rgba(var(--accent-rgb), 0.35);
-  color: #fff;
+  color: var(--text-light);
   font-weight: normal;
   box-shadow: inset 3px 0 0 var(--accent-hover);
 }
@@ -1026,12 +1033,12 @@ table#file-table {
   border-radius: var(--radius-xs);
   color: var(--text-color);
   opacity: 0.8;
-  transition: background-color 0.2s, color 0.2s, opacity 0.2s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color 0.2s, color 0.2s, opacity 0.2s, transform 0.1s var(--transition-fast);
 }
 
 .icon-btn:hover {
   background-color: transparent;
-  color: #fff;
+  color: var(--text-light);
   opacity: 1;
 }
 
@@ -1129,7 +1136,7 @@ input[type="range"]:focus {
   cursor: pointer;
   border-radius: var(--radius-xs);
   transform: translateZ(0) scale(1);
-  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.2s var(--transition-smooth), box-shadow 0.2s ease, border-color 0.2s ease;
   position: relative;
   z-index: 1;
   display: flex;
@@ -1157,7 +1164,7 @@ input[type="range"]:focus {
   /* 非ホバー時でも背景を暗くして読みやすく */
   border-radius: 8px;
   /* やや小さめのピル */
-  color: #fff;
+  color: var(--text-light);
   font-size: var(--font-size-xs);
   /* 少し小さく */
   padding: 2px 8px;
@@ -1268,7 +1275,7 @@ body.show-thumbnail-names .thumbnail-label {
   position: relative;
   overflow: hidden;
   /* インジケーターの左端を角丸に合わせてクリップする */
-  transition: color 0.2s, background-color 0.2s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 0.2s, background-color 0.2s, transform 0.1s var(--transition-fast);
 }
 
 #dir-tree .tree-item:active {
@@ -1290,12 +1297,12 @@ body.show-thumbnail-names .thumbnail-label {
 
 #dir-tree .tree-item:hover {
   background-color: rgba(var(--accent-rgb), 0.15);
-  color: #fff;
+  color: var(--text-light);
 }
 
 #dir-tree .tree-item.selected {
   background: rgba(var(--accent-rgb), 0.4);
-  color: #ffffff;
+  color: var(--text-light);
   box-shadow: none;
   transition: background 0.2s ease;
 }
@@ -1312,7 +1319,7 @@ body.show-thumbnail-names .thumbnail-label {
 
 /* トグルアイコンのベース色とホバー連動 */
 .toggle-icon {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s var(--transition-fast);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1327,7 +1334,7 @@ body.show-thumbnail-names .thumbnail-label {
 
 .tree-item:hover .toggle-icon,
 .tree-item.selected .toggle-icon {
-  color: #fff;
+  color: var(--text-light);
 }
 
 /* アイコンのホバー・選択時の色反転処理 */
@@ -1335,7 +1342,7 @@ body.show-thumbnail-names .thumbnail-label {
 .tree-item.selected .tree-icon,
 .favorite-item:hover .tree-icon,
 .favorite-item.selected .tree-icon {
-  color: #fff !important;
+  color: var(--text-light) !important;
 }
 
 /* --- トースト通知 --- */
@@ -1468,7 +1475,7 @@ body.show-thumbnail-names .thumbnail-label {
 }
 
 #license-text strong {
-  color: #fff !important;
+  color: var(--text-light) !important;
 }
 
 #license-text a {
@@ -1628,7 +1635,7 @@ img.thumbnail-item.loading {
 }
 
 .diff-copy-btn:hover {
-  color: #fff;
+  color: var(--text-light);
   opacity: 1;
 }
 
@@ -1715,7 +1722,7 @@ img.thumbnail-item.loading {
   visibility: visible;
   transform: translateY(0) scale(1);
   /* 開く時のアニメーション（バウンス） */
-  transition: opacity 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s;
+  transition: opacity 0.22s var(--transition-bounce), transform 0.22s var(--transition-bounce), visibility 0.22s;
 }
 
 /* --- コンテキストメニュー --- */
@@ -1757,7 +1764,7 @@ img.thumbnail-item.loading {
   visibility: visible;
   opacity: 1;
   transform: scale(1) translateY(0);
-  transition: opacity 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s;
+  transition: opacity 0.22s var(--transition-bounce), transform 0.22s var(--transition-bounce), visibility 0.22s;
   pointer-events: auto;
 }
 
@@ -1812,7 +1819,7 @@ img.thumbnail-item.loading {
 .context-menu-item:hover {
   background-color: rgba(var(--accent-rgb), 0.3);
   /* アクセントカラーの透過 */
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .context-menu-item:hover svg {
@@ -1821,14 +1828,14 @@ img.thumbnail-item.loading {
 
 /* メニューアイテムホバー時に、アイコンの色を強制的に白へ反転させる */
 .context-menu-item:hover .menu-icon {
-  color: #fff !important;
+  color: var(--text-light) !important;
 }
 
 /* 危険な操作（削除など）のホバーエフェクト */
 .context-menu-item.danger:hover {
   background-color: rgba(224, 82, 99, 0.3);
   /* 赤の透過 */
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .submenu {
@@ -1843,11 +1850,12 @@ img.thumbnail-item.loading {
 
 .context-menu-item:hover>.submenu {
   display: block;
+  animation: menuFadeIn 0.15s var(--transition-smooth) forwards;
 }
 
 /* tab-list-item 固有の調整 */
 .tab-list-item.active {
-  color: #ffffff;
+  color: var(--text-light);
   background-color: rgba(var(--accent-rgb), 0.15);
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
@@ -1896,7 +1904,7 @@ img.thumbnail-item.loading {
 
 /* ホバー時は他のテキストやアイコンに合わせて白くし、コントラストを維持する */
 .context-menu-item:hover .menu-check {
-  color: #fff;
+  color: var(--text-light);
 }
 
 /* 矢印アイコンが塗りつぶされて三角形になるのを確実に防ぐ */
@@ -1996,7 +2004,7 @@ th[data-sort] svg path {
 
 #tab-container .tab-item:not(.active):hover {
   background-color: rgba(var(--accent-rgb), 0.35) !important;
-  color: #ffffff !important;
+  color: var(--text-light) !important;
   opacity: 1;
 }
 
@@ -2004,7 +2012,7 @@ th[data-sort] svg path {
   /* アクティブタブ（メインコンテンツ領域とシームレスに結合） */
   background-color: var(--top-bar-bg) !important;
   /* インスペクターの背景色と完全に同期 */
-  color: #ffffff !important;
+  color: var(--text-light) !important;
   border-left: 1px solid var(--border-color) !important;
   border-right: 1px solid var(--border-color) !important;
   border-top: 1px solid var(--border-color) !important;
@@ -2041,10 +2049,12 @@ th[data-sort] svg path {
 .tab-item.drag-over-right::after {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background-color: var(--glow-gold);
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  background-color: var(--accent-color);
+  border-radius: 2px;
+  box-shadow: 0 0 6px var(--accent-color);
   z-index: 10;
   pointer-events: none;
 }
@@ -2072,7 +2082,7 @@ th[data-sort] svg path {
 
 .tab-item.tab-fade-in {
   transform-origin: bottom left;
-  animation: tabFadeIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: tabFadeIn 0.22s var(--transition-bounce) both;
 }
 
 /* タブ消去: tabFadeIn の視覚的な逆再生 (透明化なし・transform のみ)
@@ -2082,7 +2092,7 @@ th[data-sort] svg path {
 @keyframes tabFadeOut {
   0% {
     transform: translate(0, 0) scale(1);
-    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation-timing-function: var(--transition-bounce);
   }
   30% {
     transform: translate(2px, -1px) scale(1.04);
@@ -2124,13 +2134,13 @@ th[data-sort] svg path {
   opacity: 0.6;
   cursor: pointer;
   box-shadow: none !important;
-  transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.15s var(--transition-fast), color 0.15s var(--transition-fast), opacity 0.15s var(--transition-fast), transform 0.15s var(--transition-fast);
 }
 
 /* ホバー時にフワッと上品なアクリル調の丸背景を浮かび上がらせる */
 .titlebar #new-tab-btn:hover {
   background: rgba(255, 255, 255, 0.08) !important;
-  color: #ffffff !important;
+  color: var(--text-light) !important;
   opacity: 1;
 }
 
@@ -2535,7 +2545,7 @@ html.viewer-html,
   padding: 0 !important;
   margin: 0 !important;
   cursor: pointer;
-  color: var(--text-color, #ececec);
+  color: var(--text-color, var(--text-color));
   transition: background 0.15s ease, border-color 0.15s ease;
   width: 24px !important;
   height: 24px !important;
@@ -2582,7 +2592,7 @@ html.viewer-html,
 
 /* 選択されたカラーボタンは一回り大きくし、外側に白い輪郭、さらに外側にアクセント色のシャドウを当てる */
 .color-btn.active {
-  border-color: #ffffff !important;
+  border-color: var(--text-light) !important;
   transform: scale(1.15) !important;
   box-shadow: 0 0 0 2px var(--accent-color, #257e8c) !important;
   outline: none;
@@ -2590,7 +2600,7 @@ html.viewer-html,
 
 /* --- Veloce 厳選カラークラス --- */
 .icon-color-default {
-  color: #ececec;
+  color: var(--text-color);
 }
 
 .icon-color-red {
@@ -2850,7 +2860,7 @@ kbd {
 
 .custom-select-arrow {
   color: var(--text-color);
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s var(--transition-fast);
 }
 
 .custom-select.open .custom-select-arrow {
@@ -2859,7 +2869,7 @@ kbd {
 
 /* ドロップダウン・トグルボタン全般の矢印アニメーション統一表示 */
 #titlebar-tab-list svg {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s var(--transition-fast);
 }
 
 #titlebar-tab-list.open svg {
@@ -2867,7 +2877,7 @@ kbd {
 }
 
 #bookmark-overflow-btn svg {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s var(--transition-fast);
 }
 
 #bookmark-overflow-btn.open svg {
@@ -2879,7 +2889,7 @@ kbd {
   align-items: center;
   justify-content: flex-end;
   opacity: 0.7;
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s var(--transition-fast);
 }
 
 .context-menu-item.open .menu-arrow {
@@ -2897,7 +2907,7 @@ kbd {
 }
 
 #nav-reload-btn.refreshing svg {
-  animation: spin-reload 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: spin-reload 0.6s var(--transition-fast);
 }
 
 /* テーブルヘッダーのソート矢印回転アニメーション */
@@ -2905,7 +2915,7 @@ th[data-sort] .sort-arrow {
   display: inline-block;
   margin-left: 4px;
   vertical-align: middle;
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+  transition: transform 0.2s var(--transition-fast), opacity 0.2s;
 }
 
 th[data-sort] .sort-arrow.asc {
@@ -2939,7 +2949,7 @@ th[data-sort] .sort-arrow.desc {
   visibility: visible;
   opacity: 1;
   transform: translateY(0) scale(1);
-  transition: opacity 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s;
+  transition: opacity 0.22s var(--transition-bounce), transform 0.22s var(--transition-bounce), visibility 0.22s;
   transform-origin: top center;
 }
 
@@ -2971,7 +2981,7 @@ th[data-sort] .sort-arrow.desc {
     max-height: 40px;
     margin-top: 0;
     transform: translateY(0) scale(1);
-    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation-timing-function: var(--transition-bounce);
   }
   25% {
     opacity: 1;
@@ -2991,7 +3001,7 @@ th[data-sort] .sort-arrow.desc {
 .sf-condition-row {
   position: relative;
   z-index: 1;
-  animation: rowFadeIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: rowFadeIn 0.22s var(--transition-bounce) both;
   transform-origin: top center;
 }
 
@@ -3038,7 +3048,7 @@ th[data-sort] .sort-arrow.desc {
   top: 4px;
   left: 4px;
   background-color: rgba(0, 0, 0, 0.8);
-  color: #fff;
+  color: var(--text-light);
   border-radius: 4px;
   padding: 2px 6px;
   font-size: var(--font-size-xs);
@@ -3066,7 +3076,7 @@ th[data-sort] .sort-arrow.desc {
   left: 0;
   transform: translateX(-50%);
   background-color: var(--accent-color);
-  color: #fff;
+  color: var(--text-light);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: var(--font-size-xs);
@@ -3137,4 +3147,15 @@ input[type="range"]:active ~ .slider-tooltip {
   color: inherit;
   font-weight: bold;
   text-decoration: underline;
+}
+
+@keyframes menuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }

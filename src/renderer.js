@@ -2610,9 +2610,7 @@ function showEditSmartFolderModal(sf, isNew = false) {
           if (row) row.classList.add('open-select');
 
           const rect = customSelect.getBoundingClientRect();
-          const dialogBox = modal.querySelector('.dialog-box');
-          const dialogRect = dialogBox ? dialogBox.getBoundingClientRect() : null;
-          const spaceBelow = dialogRect ? dialogRect.bottom - rect.bottom : window.innerHeight - rect.bottom;
+          const spaceBelow = window.innerHeight - rect.bottom;
 
           if (spaceBelow < 180 && rect.top > 200) {
             customSelect.classList.add('open-up');
