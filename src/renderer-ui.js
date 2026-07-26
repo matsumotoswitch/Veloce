@@ -1,10 +1,12 @@
 import { appState } from './renderer-state.js';
-import { applyGlowEffect as glowElement, getStreamUrl } from './utils.js';
+import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml } from './utils.js';
 import { validateFilename, INVALID_FILENAME_RE } from './path-utils.js';
 import { showAppDialog } from './dialog-base.js';
 import { extractMetadataFields, parsePromptTags, formatRequestType } from './metadata-format.js';
 
 const CHUNK_SIZE = 100;
+
+let dragCache = { element: null, midX: 0 };
 
 export function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return '-';
@@ -308,18 +310,22 @@ class UIManager {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           
-          const container = document.getElementById('tab-container');
-          if (container) {
-            container.querySelectorAll('.tab-item').forEach(item => {
-              if (item !== tabEl) {
-                item.classList.remove('drag-over-left', 'drag-over-right');
-                item.style.zIndex = '';
-              }
-            });
+          if (dragCache.element !== tabEl) {
+            const container = document.getElementById('tab-container');
+            if (container) {
+              container.querySelectorAll('.tab-item').forEach(item => {
+                if (item !== tabEl) {
+                  item.classList.remove('drag-over-left', 'drag-over-right');
+                  item.style.zIndex = '';
+                }
+              });
+            }
+            const rect = tabEl.getBoundingClientRect();
+            dragCache.element = tabEl;
+            dragCache.midX = rect.left + rect.width / 2;
           }
-          const rect = tabEl.getBoundingClientRect();
-          const midX = rect.left + rect.width / 2;
-          if (e.clientX < midX) {
+
+          if (e.clientX < dragCache.midX) {
             tabEl.classList.add('drag-over-left');
             tabEl.classList.remove('drag-over-right');
           } else {
@@ -1242,8 +1248,9 @@ class UIManager {
         ratingStr = starSvg + rating;
       }
 
+      const escapedName = escapeHtml(file.name);
       tr.innerHTML = `
-        <td>${file.name}</td>
+        <td>${escapedName}</td>
         <td>${file.ext}</td>
         <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
         <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
