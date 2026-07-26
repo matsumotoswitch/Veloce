@@ -473,6 +473,7 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
 fn build_smart_folder_query(
     rule: &SmartFolderRule,
     is_count: bool,
+    use_fallback: bool,
 ) -> (String, Vec<rusqlite::types::Value>) {
     let select_clause = if is_count {
         "SELECT COUNT(c.path)"
@@ -499,10 +500,12 @@ fn build_smart_folder_query(
     
     // Check if FTS is needed
     let mut uses_fts = false;
-    for cond in &rule.conditions {
-        if cond.r#type == "prompt" || cond.r#type == "negative_prompt" || cond.r#type == "source" {
-            uses_fts = true;
-            break;
+    if !use_fallback {
+        for cond in &rule.conditions {
+            if cond.r#type == "prompt" || cond.r#type == "negative_prompt" || cond.r#type == "source" {
+                uses_fts = true;
+                break;
+            }
         }
     }
     
@@ -528,49 +531,70 @@ fn build_smart_folder_query(
         
         match cond.r#type.as_str() {
             "prompt" => {
-                // Escape FTS syntax characters by enclosing in quotes if it's not empty, or use standard LIKE as fallback if MATCH is too strict?
-                // Actually, for FTS5 MATCH, we can just use the value directly, but we need to escape it to avoid syntax errors.
-                // Simple escaping: replace " with " and wrap in quotes.
-                let escaped_val = val_lower.replace("\"", "\"\"");
-                let fts_query = format!("\"{}\"", escaped_val);
-                
-                if cond.operator == "contains" {
-                    clause = "fts.searchable_prompt MATCH ?".to_string();
-                    params.push(rusqlite::types::Value::Text(fts_query));
-                } else if cond.operator == "not_contains" {
-                    clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
-                    params.push(rusqlite::types::Value::Text(fts_query));
-                } else { clause = "1=1".to_string(); }
+                if use_fallback {
+                    let like_query = format!("%{}%", val_lower.replace("%", "\\%").replace("_", "\\_"));
+                    if cond.operator == "contains" {
+                        clause = "c.searchable_prompt LIKE ? ESCAPE '\\'".to_string();
+                        params.push(rusqlite::types::Value::Text(like_query));
+                    } else if cond.operator == "not_contains" {
+                        clause = "c.searchable_prompt NOT LIKE ? ESCAPE '\\'".to_string();
+                        params.push(rusqlite::types::Value::Text(like_query));
+                    } else { clause = "1=1".to_string(); }
+                } else {
+                    let escaped_val = val_lower.replace("\"", "\"\"");
+                    let fts_query = format!("\"{}\"", escaped_val);
+                    if cond.operator == "contains" {
+                        clause = "fts.searchable_prompt MATCH ?".to_string();
+                        params.push(rusqlite::types::Value::Text(fts_query));
+                    } else if cond.operator == "not_contains" {
+                        clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
+                        params.push(rusqlite::types::Value::Text(fts_query));
+                    } else { clause = "1=1".to_string(); }
+                }
             }
             "negative_prompt" => {
-                // Escape FTS syntax characters by enclosing in quotes if it's not empty, or use standard LIKE as fallback if MATCH is too strict?
-                // Actually, for FTS5 MATCH, we can just use the value directly, but we need to escape it to avoid syntax errors.
-                // Simple escaping: replace " with " and wrap in quotes.
-                let escaped_val = val_lower.replace("\"", "\"\"");
-                let fts_query = format!("\"{}\"", escaped_val);
-                
-                if cond.operator == "contains" {
-                    clause = "fts.searchable_negative_prompt MATCH ?".to_string();
-                    params.push(rusqlite::types::Value::Text(fts_query));
-                } else if cond.operator == "not_contains" {
-                    clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
-                    params.push(rusqlite::types::Value::Text(fts_query));
-                } else { clause = "1=1".to_string(); }
+                if use_fallback {
+                    let like_query = format!("%{}%", val_lower.replace("%", "\\%").replace("_", "\\_"));
+                    if cond.operator == "contains" {
+                        clause = "c.searchable_negative_prompt LIKE ? ESCAPE '\\'".to_string();
+                        params.push(rusqlite::types::Value::Text(like_query));
+                    } else if cond.operator == "not_contains" {
+                        clause = "c.searchable_negative_prompt NOT LIKE ? ESCAPE '\\'".to_string();
+                        params.push(rusqlite::types::Value::Text(like_query));
+                    } else { clause = "1=1".to_string(); }
+                } else {
+                    let escaped_val = val_lower.replace("\"", "\"\"");
+                    let fts_query = format!("\"{}\"", escaped_val);
+                    if cond.operator == "contains" {
+                        clause = "fts.searchable_negative_prompt MATCH ?".to_string();
+                        params.push(rusqlite::types::Value::Text(fts_query));
+                    } else if cond.operator == "not_contains" {
+                        clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
+                        params.push(rusqlite::types::Value::Text(fts_query));
+                    } else { clause = "1=1".to_string(); }
+                }
             }
             "source" => {
-                // Escape FTS syntax characters by enclosing in quotes if it's not empty, or use standard LIKE as fallback if MATCH is too strict?
-                // Actually, for FTS5 MATCH, we can just use the value directly, but we need to escape it to avoid syntax errors.
-                // Simple escaping: replace " with " and wrap in quotes.
-                let escaped_val = val_lower.replace("\"", "\"\"");
-                let fts_query = format!("\"{}\"", escaped_val);
-                
-                if cond.operator == "contains" {
-                    clause = "fts.searchable_source MATCH ?".to_string();
-                    params.push(rusqlite::types::Value::Text(fts_query));
-                } else if cond.operator == "not_contains" {
-                    clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
-                    params.push(rusqlite::types::Value::Text(fts_query));
-                } else { clause = "1=1".to_string(); }
+                if use_fallback {
+                    let like_query = format!("%{}%", val_lower.replace("%", "\\%").replace("_", "\\_"));
+                    if cond.operator == "contains" {
+                        clause = "c.searchable_source LIKE ? ESCAPE '\\'".to_string();
+                        params.push(rusqlite::types::Value::Text(like_query));
+                    } else if cond.operator == "not_contains" {
+                        clause = "c.searchable_source NOT LIKE ? ESCAPE '\\'".to_string();
+                        params.push(rusqlite::types::Value::Text(like_query));
+                    } else { clause = "1=1".to_string(); }
+                } else {
+                    let escaped_val = val_lower.replace("\"", "\"\"");
+                    let fts_query = format!("\"{}\"", escaped_val);
+                    if cond.operator == "contains" {
+                        clause = "fts.searchable_source MATCH ?".to_string();
+                        params.push(rusqlite::types::Value::Text(fts_query));
+                    } else if cond.operator == "not_contains" {
+                        clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
+                        params.push(rusqlite::types::Value::Text(fts_query));
+                    } else { clause = "1=1".to_string(); }
+                }
             }
             "rating" => {
                 let rating_val: i64 = cond.value.parse().unwrap_or(0);
@@ -654,7 +678,19 @@ fn get_smart_folder_paths(
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.get() {
             let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
-            let (query_str, params) = build_smart_folder_query(rule, false);
+            
+            let mut use_fallback = false;
+            let (mut query_str, mut params) = build_smart_folder_query(rule, false, false);
+            
+            if let Err(_) = conn.prepare(&query_str) {
+                use_fallback = true;
+            }
+            if use_fallback {
+                let (fallback_query, fallback_params) = build_smart_folder_query(rule, false, true);
+                query_str = fallback_query;
+                params = fallback_params;
+            }
+
             if let Ok(mut stmt) = conn.prepare(&query_str) {
                 if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
                     Ok(SmartFolderItem {
@@ -1110,7 +1146,18 @@ fn get_smart_folder_counts(
                     if count > 100 { count = 100; }
                 }
             } else {
-                let (query_str, params) = build_smart_folder_query(&rule, true);
+                let mut use_fallback = false;
+                let (mut query_str, mut params) = build_smart_folder_query(&rule, true, false);
+                
+                if let Err(_) = conn.prepare(&query_str) {
+                    use_fallback = true;
+                }
+                if use_fallback {
+                    let (fallback_query, fallback_params) = build_smart_folder_query(&rule, true, true);
+                    query_str = fallback_query;
+                    params = fallback_params;
+                }
+
                 if let Ok(mut stmt) = conn.prepare(&query_str) {
                     count = stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, usize>(0)).unwrap_or(0);
                 }
@@ -3283,7 +3330,7 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
                 updates.push((new_path_exact.clone(), *rating));
             } else if p.starts_with(&format!("{}\\*", old_path_exact).replace("*", "")) || p.starts_with(&format!("{}/", old_path_exact)) {
                 keys_to_remove.push(p.clone());
-                let new_p = p.replacen(&old_path_exact, &new_path_exact, 1);
+                let new_p = format!("{}{}", new_path_exact, &p[old_path_exact.len()..]);
                 updates.push((new_p, *rating));
             }
         }
@@ -4463,7 +4510,7 @@ mod tests {
             ],
         };
         
-        let (query, params) = super::build_smart_folder_query(&rule, false);
+        let (query, _params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
         assert!(
             query.contains("fts.searchable_prompt MATCH ?"),

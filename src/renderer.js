@@ -1794,10 +1794,10 @@ function showHistoryMenu(event, direction, btnElement) {
 
     // お気に入りに登録されているかチェック
     const fav = appState.favorites.find(f => f.path === item.path);
-    const { displayName, iconHtml, iconColor } = resolvePathDisplay(fav, item.path);
+    const { displayName, iconHtml, iconClass } = resolvePathDisplay(fav, item.path);
 
     menuItem.innerHTML = `
-      <span class="menu-icon" style="color: ${iconColor}; display: inline-flex; align-items: center;">${iconHtml}</span>
+      <span class="menu-icon ${iconClass}" style="display: inline-flex; align-items: center;">${iconHtml}</span>
       <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${displayName}</span>
     `;
     menuItem.title = item.path; // ホバーでフルパス表示
@@ -3305,7 +3305,12 @@ function handleItemDragStart(e, isGrid) {
   if (!item || !item.dataset.index) return;
   const index = parseInt(item.dataset.index, 10);
 
-  if (!appState.selection.has(index)) selectImage(index);
+  if (!appState.selection.has(index)) {
+    appState.selection.clear();
+    appState.selection.add(index);
+    uiManager.updateSelectionUI();
+    // ドラッグ開始時のインスペクター更新によるカクつきを防ぐため、updateInspector() は呼ばない
+  }
 
   const selectedIndices = Array.from(appState.selection);
   e.dataTransfer.setData('application/json-indices', JSON.stringify(selectedIndices));
@@ -4785,10 +4790,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
 
       let iconHtml = '';
-      let iconColor = '';
+      let iconClass = '';
       if (itemData) {
-        const c = COLORS.find(c => c.id === (itemData.color || 'default'));
-        iconColor = c ? c.hex : 'var(--glow-gold)';
+        iconClass = `icon-color-${itemData.color || 'default'}`;
 
         if (itemData.icon && typeof ICON_SVGS !== 'undefined' && ICON_SVGS[itemData.icon]) {
           iconHtml = ICON_SVGS[itemData.icon];
@@ -4799,18 +4803,17 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
       } else {
         iconHtml = UIManager.ICONS.FOLDER;
-        iconColor = '#4da8da';
+        iconClass = 'icon-color-cyan';
       }
 
       const iconSpan = document.createElement('span');
-      iconSpan.className = 'tab-list-icon';
+      iconSpan.className = `tab-list-icon ${iconClass}`;
       iconSpan.style.display = 'flex';
       iconSpan.style.alignItems = 'center';
       iconSpan.style.justifyContent = 'center';
       iconSpan.style.flexShrink = '0';
       iconSpan.style.width = '16px';
       iconSpan.innerHTML = iconHtml;
-      if (iconColor) iconSpan.style.color = iconColor;
 
       const svg = iconSpan.querySelector('svg');
       if (svg) {
