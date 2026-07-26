@@ -399,6 +399,12 @@ async function expandTreeToPath(targetPath, disableScroll = false, rootElement =
   const searchRoot = rootElement === document ? document.getElementById('dir-tree') : rootElement;
   if (!searchRoot) return;
 
+  if (targetPath.startsWith('smart://')) {
+    const activeItem = searchRoot.querySelector('.tree-item.selected');
+    if (activeItem) activeItem.classList.remove('selected');
+    return;
+  }
+
   const separator = '\\';
   const parts = targetPath.split(separator).filter(p => p !== '');
   let pathsToExpand = [];
@@ -5792,7 +5798,7 @@ function initSmartFolders() {
       document.querySelectorAll('.smart-folder-item').forEach(el => el.classList.remove('selected'));
 
       // ツリー側の選択状態を解除
-      document.querySelectorAll('.tree-node-content').forEach(el => el.classList.remove('selected'));
+      document.querySelectorAll('#dir-tree .tree-item.selected').forEach(el => el.classList.remove('selected'));
 
       const fId = item.dataset.id;
       const f = appState.smartFolders.find(x => x.id === fId);
