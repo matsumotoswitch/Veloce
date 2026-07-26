@@ -561,6 +561,8 @@ async function renameSelectedFile() {
         // Rust側に変更を通知
         await window.veloceAPI.notifyFileChanged(file);
 
+        const oldUrl = appState.thumbnailUrls.get(oldPath);
+        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
         appState.thumbnailUrls.delete(oldPath);
         resetThumbnailPreloader();
         scheduleRefresh();
@@ -5902,6 +5904,8 @@ async function performUndo() {
       const result = await window.veloceAPI.renameFile(action.newPath, oldName);
       if (result.success) {
         uiManager.showToast(`ファイル名の変更を元に戻しました`, 3000, 'undo', 'success');
+        const oldUrl = appState.thumbnailUrls.get(action.newPath);
+        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
         appState.thumbnailUrls.delete(action.newPath);
         scheduleRefresh();
       }

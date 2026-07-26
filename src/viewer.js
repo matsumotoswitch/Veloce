@@ -1471,3 +1471,18 @@ function toggleVideoSeekBar() {
     }
   }
 }
+
+window.addEventListener('beforeunload', () => {
+  if (typeof videoSeekBarUpdateInterval !== 'undefined' && videoSeekBarUpdateInterval) {
+    clearInterval(videoSeekBarUpdateInterval);
+    videoSeekBarUpdateInterval = null;
+  }
+  if (typeof dragRafId !== 'undefined' && dragRafId) {
+    cancelAnimationFrame(dragRafId);
+    dragRafId = null;
+  }
+  if (typeof window._resizeRafId !== 'undefined' && window._resizeRafId) {
+    cancelAnimationFrame(window._resizeRafId);
+    window._resizeRafId = null;
+  }
+});

@@ -2895,7 +2895,7 @@ async fn open_viewer(
                     let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
                     unsafe {
                         use windows::Win32::UI::WindowsAndMessaging::{
-                            SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE,
+                            SetForegroundWindow, SetWindowPos, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE,
                             SWP_NOSIZE,
                         };
                         let _ = SetWindowPos(
@@ -2908,6 +2908,15 @@ async fn open_viewer(
                             SWP_NOMOVE | SWP_NOSIZE,
                         );
                         let _ = SetForegroundWindow(hwnd);
+                        let _ = SetWindowPos(
+                            hwnd,
+                            HWND_NOTOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE,
+                        );
                     }
                 }
             }
@@ -2986,27 +2995,7 @@ fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
 
     let _ = app.emit_all("viewers-arranged", ());
 
-    // Windows 8.1 強制前面化ハック
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(hwnd_ptr) = caller_window.hwnd() {
-            let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                unsafe {
-                    use windows::Win32::UI::WindowsAndMessaging::{
-                        SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,
-                    };
-                    let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                    let _ = SetForegroundWindow(hwnd);
-                }
-            });
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = caller_window.set_focus();
-    }
+    // メインウィンドウへの強制フォーカス移動は削除（ビューアーのフォーカスを奪うとタスクバーが前に出てしまうため）
 }
 
 // --- ファイル・システム操作コマンド ---
