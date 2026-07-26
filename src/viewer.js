@@ -122,10 +122,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     // 画像のロードイベントを初期化時に1度だけ設定
     if (viewerUI.elements.viewerImg) {
       viewerUI.elements.viewerImg.decoding = 'async'; // メインスレッドをブロックさせないため非同期でデコードする
-      viewerUI.elements.viewerImg.onload = () => {
+      viewerUI.elements.viewerImg.onload = async () => {
         setZoomState(viewerState.isZoomed);
         viewerUI.updateImageRendering();
         resizeWindowToFitImage();
+        if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
+          isViewerWindowShown = true;
+          await window.veloceAPI.showWindow();
+        }
       };
     }
 
@@ -156,10 +160,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             viewerUI.elements.viewerImg = video;
             currentViewerImg = video;
 
-            const onMeta = () => {
+            const onMeta = async () => {
               setZoomState(viewerState.isZoomed);
               viewerUI.updateImageRendering();
               resizeWindowToFitImage();
+              if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
+                isViewerWindowShown = true;
+                await window.veloceAPI.showWindow();
+              }
             };
             if (video.readyState >= 1) { // HAVE_METADATA
               onMeta();
