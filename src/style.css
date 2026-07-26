@@ -183,6 +183,7 @@ body.is-resizing .app-content {
   border: 1px solid var(--modal-border) !important;
   border-radius: var(--radius-lg) !important;
   padding: 24px;
+  min-width: 340px;
   max-width: 90vw;
   max-height: 90vh;
   display: flex;
@@ -208,7 +209,7 @@ body.is-resizing .app-content {
 }
 
 .dialog-message.has-input {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .dialog-path {
@@ -222,7 +223,7 @@ body.is-resizing .app-content {
 .dialog-input-group {
   display: flex;
   flex-direction: column;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 
 .dialog-buttons {
