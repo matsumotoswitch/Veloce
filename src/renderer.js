@@ -229,8 +229,10 @@ document.body.appendChild(tabListMenu);
  * メニューを特定の位置にアニメーション付きで表示します。
  */
 function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) {
+  // 1. サイズ計算のため、一旦 show を付与（scale(1) の正確なサイズを取得）
   menuElement.classList.add('show');
   const rect = menuElement.getBoundingClientRect();
+  
   let x = startX;
   let y = startY;
   let originX = 'left';
@@ -245,9 +247,21 @@ function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) 
     originY = 'bottom';
   }
 
+  // 位置とアニメーションの起点を設定
   menuElement.style.transformOrigin = `${originY} ${originX}`;
   menuElement.style.left = `${x}px`;
   menuElement.style.top = `${y}px`;
+
+  // 2. アニメーションを無効化し、瞬時に初期状態（非表示・縮小）へスナップさせる
+  menuElement.style.transition = 'none';
+  menuElement.classList.remove('show');
+
+  // 3. 強制リフローにより、ブラウザに初期状態を認識させる
+  void menuElement.offsetWidth;
+
+  // 4. アニメーションを有効に戻し、show を付与してフェードインを開始する
+  menuElement.style.transition = '';
+  menuElement.classList.add('show');
 }
 
 // ============================================================================
