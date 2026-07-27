@@ -2666,6 +2666,7 @@ function showEditSmartFolderModal(sf, isNew = false) {
 
     modal.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
+        if (e.target && e.target.tagName === 'BUTTON') return;
         e.preventDefault();
         e.stopPropagation();
         document.getElementById('smart-save-btn').click();
@@ -3316,6 +3317,7 @@ function handleItemDragStart(e, isGrid) {
   if (!appState.selection.has(index)) {
     appState.selection.clear();
     appState.selection.add(index);
+    appState.selectedIndex = index;
     uiManager.updateSelectionUI();
     // ドラッグ開始時のインスペクター更新によるカクつきを防ぐため、updateInspector() は呼ばない
   }
