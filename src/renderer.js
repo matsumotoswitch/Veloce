@@ -2663,6 +2663,14 @@ function showEditSmartFolderModal(sf, isNew = false) {
         }
       }
     });
+
+    modal.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        document.getElementById('smart-save-btn').click();
+      }
+    });
   }
 
   const saveBtn = document.getElementById('smart-save-btn');

@@ -319,8 +319,9 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
         END;", []
     ).map_err(|e| e.to_string())?;
 
+    let _ = conn.execute("DROP TRIGGER IF EXISTS cache_au", []);
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS cache_au AFTER UPDATE ON cache BEGIN
+        "CREATE TRIGGER cache_au AFTER UPDATE OF searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN
             DELETE FROM cache_fts WHERE hash_key = old.hash_key;
             INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
             VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
@@ -470,6 +471,25 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
     }
 }
 
+fn build_safe_fts_query(input: &str) -> String {
+    let terms: Vec<&str> = input.split(|c| c == ',' || c == '、' || c == '\n' || c == '\r')
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    if terms.is_empty() {
+        return String::new();
+    }
+
+    let mut fts_parts = Vec::new();
+    for term in terms {
+        let safe_term = term.replace("\"", "\"\"");
+        fts_parts.push(format!("\"{}\"", safe_term));
+    }
+
+    fts_parts.join(" AND ")
+}
+
 fn build_smart_folder_query(
     rule: &SmartFolderRule,
     is_count: bool,
@@ -541,9 +561,10 @@ fn build_smart_folder_query(
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else { clause = "1=1".to_string(); }
                 } else {
-                    let escaped_val = val_lower.replace("\"", "\"\"");
-                    let fts_query = format!("\"{}\"", escaped_val);
-                    if cond.operator == "contains" {
+                    let fts_query = build_safe_fts_query(&val_lower);
+                    if fts_query.is_empty() {
+                        clause = "1=1".to_string();
+                    } else if cond.operator == "contains" {
                         clause = "fts.searchable_prompt MATCH ?".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
@@ -563,9 +584,10 @@ fn build_smart_folder_query(
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else { clause = "1=1".to_string(); }
                 } else {
-                    let escaped_val = val_lower.replace("\"", "\"\"");
-                    let fts_query = format!("\"{}\"", escaped_val);
-                    if cond.operator == "contains" {
+                    let fts_query = build_safe_fts_query(&val_lower);
+                    if fts_query.is_empty() {
+                        clause = "1=1".to_string();
+                    } else if cond.operator == "contains" {
                         clause = "fts.searchable_negative_prompt MATCH ?".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
@@ -585,9 +607,10 @@ fn build_smart_folder_query(
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else { clause = "1=1".to_string(); }
                 } else {
-                    let escaped_val = val_lower.replace("\"", "\"\"");
-                    let fts_query = format!("\"{}\"", escaped_val);
-                    if cond.operator == "contains" {
+                    let fts_query = build_safe_fts_query(&val_lower);
+                    if fts_query.is_empty() {
+                        clause = "1=1".to_string();
+                    } else if cond.operator == "contains" {
                         clause = "fts.searchable_source MATCH ?".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
@@ -2998,7 +3021,7 @@ fn show_window(window: tauri::Window) {
 
 
 #[tauri::command]
-fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
+fn arrange_viewers(app: tauri::AppHandle, _caller_window: tauri::Window) {
     let windows = app.windows();
     let mut viewers: Vec<_> = windows
         .into_values()
@@ -4510,7 +4533,7 @@ mod tests {
             ],
         };
         
-        let (query, _params) = super::build_smart_folder_query(&rule, false, false);
+        let (query, params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
         assert!(
             query.contains("fts.searchable_prompt MATCH ?"),
@@ -5159,7 +5182,7 @@ mod fts_tests {
         
         // Triggers
         conn.execute("CREATE TRIGGER cache_ai AFTER INSERT ON cache BEGIN INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source); END;", []).unwrap();
-        conn.execute("CREATE TRIGGER cache_au AFTER UPDATE ON cache BEGIN DELETE FROM cache_fts WHERE hash_key = old.hash_key; INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source); END;", []).unwrap();
+        conn.execute("CREATE TRIGGER cache_au AFTER UPDATE OF searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN DELETE FROM cache_fts WHERE hash_key = old.hash_key; INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source); END;", []).unwrap();
         conn.execute("CREATE TRIGGER cache_ad AFTER DELETE ON cache BEGIN DELETE FROM cache_fts WHERE hash_key = old.hash_key; END;", []).unwrap();
         
         // Test Insert
