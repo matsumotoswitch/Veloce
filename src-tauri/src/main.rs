@@ -4091,17 +4091,14 @@ fn main() {
                 use std::sync::mpsc::channel;
 
                 let (tx, rx) = channel();
-                let mut watcher = match notify::recommended_watcher(tx) {
-                    Ok(w) => w,
-                    Err(e) => {
-                        eprintln!("Watcher init failed: {}", e);
-                        return; // Exit thread without aborting the app
-                    }
-                };
+                let mut watcher_opt = notify::recommended_watcher(tx).ok();
+
                 let mut current_watched_dir = String::new();
                 let mut current_watched_parent = String::new();
 
                 let mut last_dir = String::new();
+                let mut last_dir_mtime = 0;
+                let mut last_parent_mtime = 0;
                 let mut known_files: std::collections::HashMap<String, (u64, u64)> =
                     std::collections::HashMap::new();
                 let mut known_folders: std::collections::HashSet<String> =
@@ -4131,29 +4128,50 @@ fn main() {
 
                     let mut dir_changed = false;
                     if current_dir != current_watched_dir || parent_watch != current_watched_parent {
-                        if !current_watched_dir.is_empty() {
-                            let _ = watcher.unwatch(std::path::Path::new(&current_watched_dir));
-                        }
-                        if !current_watched_parent.is_empty() {
-                            let _ = watcher.unwatch(std::path::Path::new(&current_watched_parent));
-                        }
-                        if std::path::Path::new(&current_dir).exists() {
-                            let _ = watcher.watch(std::path::Path::new(&current_dir), RecursiveMode::NonRecursive);
-                            current_watched_dir = current_dir.clone();
-                        }
-                        if !parent_watch.is_empty() && std::path::Path::new(&parent_watch).exists() {
-                            let _ = watcher.watch(std::path::Path::new(&parent_watch), RecursiveMode::NonRecursive);
-                            current_watched_parent = parent_watch.clone();
+                        if let Some(watcher) = &mut watcher_opt {
+                            if !current_watched_dir.is_empty() {
+                                let _ = watcher.unwatch(std::path::Path::new(&current_watched_dir));
+                            }
+                            if !current_watched_parent.is_empty() {
+                                let _ = watcher.unwatch(std::path::Path::new(&current_watched_parent));
+                            }
+                            if std::path::Path::new(&current_dir).exists() {
+                                let _ = watcher.watch(std::path::Path::new(&current_dir), RecursiveMode::NonRecursive);
+                                current_watched_dir = current_dir.clone();
+                            }
+                            if !parent_watch.is_empty() && std::path::Path::new(&parent_watch).exists() {
+                                let _ = watcher.watch(std::path::Path::new(&parent_watch), RecursiveMode::NonRecursive);
+                                current_watched_parent = parent_watch.clone();
+                            }
                         }
                         dir_changed = true;
                     }
 
                     // Wait for events
                     let mut rx_ready = false;
-                    if let Ok(Ok(_)) = rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                    if let Ok(_) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
                         rx_ready = true;
                         std::thread::sleep(std::time::Duration::from_millis(100)); // Debounce
                         while let Ok(_) = rx.try_recv() {}
+                    }
+
+                    // Fallback: poll directory mtime
+                    if let Ok(meta) = std::fs::metadata(&current_dir) {
+                        let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                        if mtime != last_dir_mtime && last_dir_mtime != 0 {
+                            rx_ready = true;
+                        }
+                        last_dir_mtime = mtime;
+                    }
+
+                    if let Some(ref parent) = parent_dir {
+                        if let Ok(meta) = std::fs::metadata(parent) {
+                            let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                            if mtime != last_parent_mtime && last_parent_mtime != 0 {
+                                rx_ready = true;
+                            }
+                            last_parent_mtime = mtime;
+                        }
                     }
 
                     if !dir_changed && !rx_ready {
@@ -5173,8 +5191,31 @@ mod tests {
         // This should fall back to the OS API since ffmpeg will fail to extract a video frame from a png.
         let result = super::generate_video_thumbnail_sync(&test_img_path.to_string_lossy());
         
-        // The OS API should successfully extract a thumbnail.
         assert!(result.is_some(), "OS thumbnail fallback failed");
+    }
+
+    #[test]
+    fn test_directory_mtime_changes_on_file_add() {
+        let temp_dir = std::env::temp_dir().join("veloce_mtime_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let meta1 = std::fs::metadata(&temp_dir).unwrap();
+        let mtime1 = meta1.modified().unwrap();
+
+        // タイムスタンプの解像度のため、少し待つ
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let file_path = temp_dir.join("test_file.txt");
+        std::fs::write(&file_path, "test").unwrap();
+
+        let meta2 = std::fs::metadata(&temp_dir).unwrap();
+        let mtime2 = meta2.modified().unwrap();
+
+        assert!(mtime2 > mtime1, "Directory mtime should increase when a file is added");
+
+        // クリーンアップ
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 
