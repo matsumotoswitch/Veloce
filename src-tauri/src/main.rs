@@ -518,20 +518,7 @@ fn build_smart_folder_query(
 
     let join_type = if is_inner_join { "INNER JOIN" } else { "LEFT JOIN" };
     
-    // Check if FTS is needed
-    let mut uses_fts = false;
-    if !use_fallback {
-        for cond in &rule.conditions {
-            if cond.r#type == "prompt" || cond.r#type == "negative_prompt" || cond.r#type == "source" {
-                uses_fts = true;
-                break;
-            }
-        }
-    }
-    
-    let fts_join = if uses_fts { "INNER JOIN cache_fts fts ON c.hash_key = fts.hash_key" } else { "" };
-    
-    let mut query = format!("{} FROM cache c {} {} ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause, fts_join, join_type);
+    let mut query = format!("{} FROM cache c {} ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause, join_type);
     let mut params = Vec::new();
 
     if rule.conditions.is_empty() {
@@ -565,10 +552,10 @@ fn build_smart_folder_query(
                     if fts_query.is_empty() {
                         clause = "1=1".to_string();
                     } else if cond.operator == "contains" {
-                        clause = "fts.searchable_prompt MATCH ?".to_string();
+                        clause = "c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
+                        clause = "c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else { clause = "1=1".to_string(); }
                 }
@@ -588,10 +575,10 @@ fn build_smart_folder_query(
                     if fts_query.is_empty() {
                         clause = "1=1".to_string();
                     } else if cond.operator == "contains" {
-                        clause = "fts.searchable_negative_prompt MATCH ?".to_string();
+                        clause = "c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
+                        clause = "c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else { clause = "1=1".to_string(); }
                 }
@@ -611,10 +598,10 @@ fn build_smart_folder_query(
                     if fts_query.is_empty() {
                         clause = "1=1".to_string();
                     } else if cond.operator == "contains" {
-                        clause = "fts.searchable_source MATCH ?".to_string();
+                        clause = "c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "fts.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
+                        clause = "c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else { clause = "1=1".to_string(); }
                 }
@@ -2599,14 +2586,17 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
         use std::ffi::c_void;
 
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let should_uninit = hr.is_ok();
 
             let clean_path = path.replace("\\\\?\\", "");
             let hpath = HSTRING::from(clean_path);
             let item: windows::Win32::UI::Shell::IShellItem = match SHCreateItemFromParsingName(PCWSTR::from_raw(hpath.as_ptr()), None) {
                 Ok(item) => item,
                 Err(_e) => {
-                    let _ = CoUninitialize();
+                    if should_uninit {
+                        let _ = CoUninitialize();
+                    }
                     return None;
                 }
             };
@@ -2614,7 +2604,9 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
             let factory: IShellItemImageFactory = match item.cast() {
                 Ok(f) => f,
                 Err(_e) => {
-                    let _ = CoUninitialize();
+                    if should_uninit {
+                        let _ = CoUninitialize();
+                    }
                     return None;
                 }
             };
@@ -2623,7 +2615,9 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
             let hbitmap = match factory.GetImage(size, SIIGBF_THUMBNAILONLY) {
                 Ok(bmp) => bmp,
                 Err(_e) => {
-                    let _ = CoUninitialize();
+                    if should_uninit {
+                        let _ = CoUninitialize();
+                    }
                     return None;
                 }
             };
@@ -2631,7 +2625,9 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
             let mut bm = BITMAP::default();
             if GetObjectW(hbitmap, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut c_void)) == 0 {
                 let _ = DeleteObject(hbitmap);
-                let _ = CoUninitialize();
+                if should_uninit {
+                    let _ = CoUninitialize();
+                }
                 return None;
             }
 
@@ -2668,7 +2664,9 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
 
             let _ = DeleteDC(hdc);
             let _ = DeleteObject(hbitmap);
-            let _ = CoUninitialize();
+            if should_uninit {
+                let _ = CoUninitialize();
+            }
 
             if res == 0 {
                 return None;
@@ -4569,10 +4567,8 @@ mod tests {
         
         let (query, params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
-        assert!(
-            query.contains("fts.searchable_prompt MATCH ?"),
-            "prompt の contains 条件は FTS5 MATCH を使うべき。実際のクエリ: {}", query
-        );
+        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
+        assert!(query.contains(expected_query), "prompt の contains 条件は FTS5 IN サブクエリを使うべき。実際のクエリ: {}", query);
         // not_contains は NOT IN (SELECT ... MATCH ?) 形式
         assert!(
             query.contains("searchable_negative_prompt MATCH ?"),
@@ -5216,6 +5212,52 @@ mod tests {
 
         // クリーンアップ
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_fts5_or_bug() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE t USING fts5(a);
+             CREATE TABLE t2(id, a);
+             INSERT INTO t VALUES ('cat');
+             INSERT INTO t2 VALUES(1, 'cat');
+             INSERT INTO t VALUES ('dog');
+             INSERT INTO t2 VALUES(2, 'dog');"
+        ).unwrap();
+
+        // Testing the subquery approach which avoids the MATCH OR bug
+        let mut stmt = conn.prepare("SELECT t2.id FROM t INNER JOIN t2 ON t.a = t2.a WHERE t.rowid IN (SELECT rowid FROM t WHERE a MATCH 'cat') OR t2.id = 2;").unwrap();
+        let ids: Vec<i32> = stmt.query_map([], |row| row.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(ids.len(), 2, "SQLite failed to return both rows when using MATCH inside an OR clause with a subquery");
+    }
+
+    #[test]
+    fn test_com_initialization_safety() {
+        // This test ensures that if a thread already has COM initialized, 
+        // calling generate_video_thumbnail_sync does not uninitialize it and break the thread's COM state.
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED, COINIT_APARTMENTTHREADED};
+            unsafe {
+                // Force initialize COM for this thread in MTA mode
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                
+                // Call the function (it should get RPC_E_CHANGED_MODE internally since it tries STA)
+                // We pass a dummy path. It will fail to find the file, which is fine, but it MUST NOT uninitialize COM.
+                let _ = super::generate_video_thumbnail_sync("C:\\dummy_nonexistent_video_path.mp4");
+                
+                // If the bug existed, COM would be uninitialized by the function.
+                // We can verify COM is still initialized as MTA by trying to initialize as STA.
+                // If COM is still MTA, STA initialization will FAIL (RPC_E_CHANGED_MODE).
+                // If COM was uninitialized (bug!), STA initialization will SUCCEED.
+                let hr_sta = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                assert!(hr_sta.is_err(), "COM state was destroyed! generate_video_thumbnail_sync improperly called CoUninitialize, allowing STA to succeed.");
+                
+                // Clean up the initial MTA reference
+                let _ = CoUninitialize();
+            }
+        }
     }
 }
 
