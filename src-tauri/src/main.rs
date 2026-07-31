@@ -1266,12 +1266,9 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
         None
     };
 
-    let current_dir = state.current_dir.lock().unwrap().clone();
-    let skip_sort = current_dir.starts_with("smart://") && key == "name";
 
-    if !skip_sort {
-        use rayon::prelude::*;
-        filtered.par_sort_unstable_by(|a, b| {
+    use rayon::prelude::*;
+    filtered.par_sort_unstable_by(|a, b| {
             let cmp = match key.as_str() {
             "name" => natural_cmp(&a.name, &b.name),
             "ext" => a.ext.cmp(&b.ext),
@@ -1315,7 +1312,6 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             cmp
         }
     });
-    }
 
     let total = filtered.len();
     let paths: Vec<String> = filtered.iter().map(|f| f.path.clone()).collect();
@@ -5350,5 +5346,78 @@ mod viewer_tests {
         assert_eq!(hash_of(path1), hash_of(path2));
         // 異なるパスは異なるハッシュ → 新しいウィンドウが開かれる
         assert_ne!(hash_of(path1), hash_of(path3));
+    }
+
+    #[test]
+    fn test_apply_filters_and_sort_does_not_skip_smart_folder() {
+        use super::*;
+        use std::sync::Mutex;
+        use std::sync::Arc;
+
+        let db_conn = init_db().unwrap();
+        let state = AppState {
+            image_paths: Mutex::new(Vec::new()),
+            current_dir: Mutex::new("smart://fav_5".to_string()),
+            viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            all_files: Mutex::new(vec![
+                Arc::new(ImageFile {
+                    name: "b.jpg".to_string(),
+                    ext: ".jpg".to_string(),
+                    path: "C:\\b.jpg".to_string(),
+                    size: 100,
+                    mtime: 2000,
+                    ctime: 2000,
+                    has_thumbnail_cache: false,
+                    has_metadata_cache: false,
+                    width: 0,
+                    height: 0,
+                    prompt: "".to_string(),
+                    negative_prompt: "".to_string(),
+                    source: "".to_string(),
+                    meta_loaded: false,
+                    search_text: "".to_string(),
+                    unified_search_text: "".to_string(),
+                }),
+                Arc::new(ImageFile {
+                    name: "a.jpg".to_string(),
+                    ext: ".jpg".to_string(),
+                    path: "C:\\a.jpg".to_string(),
+                    size: 100,
+                    mtime: 1000,
+                    ctime: 1000,
+                    has_thumbnail_cache: false,
+                    has_metadata_cache: false,
+                    width: 0,
+                    height: 0,
+                    prompt: "".to_string(),
+                    negative_prompt: "".to_string(),
+                    source: "".to_string(),
+                    meta_loaded: false,
+                    search_text: "".to_string(),
+                    unified_search_text: "".to_string(),
+                }),
+            ]),
+            filtered_files: Mutex::new(Vec::new()),
+            sort_config: Mutex::new(super::SortConfig {
+                key: "name".to_string(),
+                asc: true,
+            }),
+            search_query: Mutex::new(String::new()),
+            ratings: Mutex::new(std::collections::HashMap::new()),
+            rating_filter_val: Mutex::new(0),
+            rating_filter_op: Mutex::new("gte".to_string()),
+            db_conn,
+            smart_folders: Mutex::new(Vec::new()),
+            video_server_port: 0,
+        };
+
+        // Call the function
+        let count = apply_filters_and_sort(None, &state);
+        assert_eq!(count, 2);
+
+        // Verify that the files were sorted by name despite being a smart folder
+        let filtered = state.filtered_files.lock().unwrap();
+        assert_eq!(filtered[0].name, "a.jpg");
+        assert_eq!(filtered[1].name, "b.jpg");
     }
 }
