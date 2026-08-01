@@ -903,6 +903,9 @@ class ThumbnailQueueManager {
     this.priorityQueue = [];
     this.preloadQueue = [];
     this.activeTasks.clear();
+    if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+      window.debouncedUpdateSmartFolderCounts();
+    }
   }
 
   unshiftPreload(paths) {
@@ -990,6 +993,16 @@ class ThumbnailQueueManager {
         this.activeTasks.add(targetFile);
         // 個別タスクを非同期で起動（完了次第 updateDOM → processNext を呼ぶ）
         this.runTask(targetFile);
+      }
+      
+      // キューが完全に空になり、かつ全件のフェッチも終了していれば「完了」とみなして件数を同期
+      if (this.priorityQueue.length === 0 && 
+          this.preloadQueue.length === 0 && 
+          this.activeTasks.size === 0 && 
+          appState.preloadCursor >= appState.totalCount) {
+        if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+          window.debouncedUpdateSmartFolderCounts();
+        }
       }
     } finally {
       this.isProcessing = false;

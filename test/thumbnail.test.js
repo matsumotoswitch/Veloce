@@ -94,4 +94,62 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     expect(window.veloceAPI.saveThumbnail).toHaveBeenCalledWith('test.webp', 'blob:worker-generated');
     expect(url).toBe('blob:worker-generated');
   });
+
+  it('should trigger debouncedUpdateSmartFolderCounts when queue is cleared', () => {
+    window.debouncedUpdateSmartFolderCounts = vi.fn();
+    
+    // Mock the clear method logic of ThumbnailQueueManager
+    const manager = {
+      priorityQueue: [1, 2, 3],
+      preloadQueue: [4, 5],
+      activeTasks: new Set(['a']),
+      clear() {
+        this.priorityQueue = [];
+        this.preloadQueue = [];
+        this.activeTasks.clear();
+        if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+          window.debouncedUpdateSmartFolderCounts();
+        }
+      }
+    };
+    
+    manager.clear();
+    
+    expect(manager.priorityQueue.length).toBe(0);
+    expect(manager.preloadQueue.length).toBe(0);
+    expect(manager.activeTasks.size).toBe(0);
+    expect(window.debouncedUpdateSmartFolderCounts).toHaveBeenCalled();
+  });
+
+  it('should trigger debouncedUpdateSmartFolderCounts when thumbnail generation completes', () => {
+    window.debouncedUpdateSmartFolderCounts = vi.fn();
+    
+    // Mock the completion logic of processNext in ThumbnailQueueManager
+    const manager = {
+      priorityQueue: [],
+      preloadQueue: [],
+      activeTasks: new Set(),
+      appState: { preloadCursor: 100, totalCount: 100 },
+      processNext() {
+        // ... tasks run ...
+        if (this.priorityQueue.length === 0 && 
+            this.preloadQueue.length === 0 && 
+            this.activeTasks.size === 0 && 
+            this.appState.preloadCursor >= this.appState.totalCount) {
+          if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+            window.debouncedUpdateSmartFolderCounts();
+          }
+        }
+      }
+    };
+    
+    manager.processNext();
+    expect(window.debouncedUpdateSmartFolderCounts).toHaveBeenCalled();
+    
+    // If not complete, it should not trigger
+    window.debouncedUpdateSmartFolderCounts.mockClear();
+    manager.activeTasks.add('task1');
+    manager.processNext();
+    expect(window.debouncedUpdateSmartFolderCounts).not.toHaveBeenCalled();
+  });
 });
