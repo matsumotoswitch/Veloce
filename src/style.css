@@ -239,7 +239,11 @@ body.is-resizing .app-content {
 }
 
 .dialog-btn {
-  padding: 8px 16px;
+  height: 32px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   border: none;
   border-radius: var(--radius-sm);
@@ -279,8 +283,9 @@ body.is-resizing .app-content {
 
 .dialog-input {
   width: 100%;
+  height: 32px;
   box-sizing: border-box;
-  padding: 8px;
+  padding: 0 8px;
   background-color: rgba(0, 0, 0, 0.2);
   color: var(--text-color);
   border: 1px solid var(--border-color);
@@ -2863,10 +2868,11 @@ kbd {
 .custom-select-arrow {
   color: var(--text-color);
   transition: transform 0.2s var(--transition-fast);
+  transform: scale(1.2);
 }
 
 .custom-select.open .custom-select-arrow {
-  transform: rotate(180deg);
+  transform: scale(1.2) rotate(180deg);
 }
 
 /* ドロップダウン・トグルボタン全般の矢印アニメーション統一表示 */

@@ -187,7 +187,7 @@
 
   <template id="sf-condition-template">
     <div class="sf-condition-row" style="display: flex; gap: 8px; align-items: center;">
-      <div class="custom-select cond-type-select" tabindex="0" style="width: 160px; height: 28px;">
+      <div class="custom-select cond-type-select" tabindex="0" style="width: 160px; height: 32px;">
         <span class="custom-select-label">レーティング</span>
         <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         <div class="custom-select-menu">
@@ -202,14 +202,14 @@
         </div>
         <input type="hidden" class="cond-type" value="rating">
       </div>
-      <div class="custom-select cond-op-select" tabindex="0" style="width: 130px; height: 28px;">
+      <div class="custom-select cond-op-select" tabindex="0" style="width: 130px; height: 32px;">
         <span class="custom-select-label">以上</span>
         <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         <div class="custom-select-menu"></div>
         <input type="hidden" class="cond-operator" value=">=">
       </div>
       <div class="cond-value-container" style="display: flex; flex: 1; gap: 4px; align-items: center;"></div>
-      <button type="button" class="btn-remove-cond dialog-btn" style="padding: 4px 8px;">✕</button>
+      <button type="button" class="btn-remove-cond dialog-btn" style="padding: 0 12px; font-size: 14px;">✕</button>
     </div>
   </template>
 

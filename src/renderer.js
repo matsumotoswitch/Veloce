@@ -2554,17 +2554,19 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
       { value: 'under_folder', label: 'サブフォルダ含む' }
     ]);
     valueContainer.innerHTML = `
-      <input type="text" class="cond-value-input dialog-input" style="flex:1">
-      <button type="button" class="btn-browse-path dialog-btn" style="padding: 8px 12px;">参照...</button>
+      <input type="text" class="cond-value-input dialog-input" style="flex:1; height: 32px;">
+      <button type="button" class="btn-browse-path dialog-btn" style="height: 32px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center;">参照...</button>
     `;
     valueContainer.querySelector('input').value = valVal;
   }
 }
 
 function showEditSmartFolderModal(sf, isNew = false) {
-  const modal = document.getElementById('edit-smart-folder-modal');
-  const container = document.getElementById('smart-icon-selector');
-  const getIconData = createFavoriteEditorUI(container, sf.icon || 'FAV_STAR', sf.color || 'orange');
+  try {
+    const modal = document.getElementById('edit-smart-folder-modal');
+    modal.style.display = ''; // Inline style のリセット
+    const container = document.getElementById('smart-icon-selector');
+    const getIconData = createFavoriteEditorUI(container, sf.icon || 'FAV_STAR', sf.color || 'orange');
 
   const nameInput = document.getElementById('smart-name-input');
   nameInput.value = sf.name || '';
@@ -2757,6 +2759,10 @@ function showEditSmartFolderModal(sf, isNew = false) {
   });
 
   modal.classList.add('show');
+  } catch (err) {
+    console.error("showEditSmartFolderModal error:", err);
+    if (window.uiManager) window.uiManager.showToast("Error: " + err.message, 5000, "error");
+  }
 }
 
 const menuAddSmartFolder = createMenuItem('スマートフォルダを追加...', UIManager.ICONS.FOLDER_PLUS, () => {
