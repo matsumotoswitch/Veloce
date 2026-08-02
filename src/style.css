@@ -3179,3 +3179,14 @@ input[type="range"]:active~.slider-tooltip {
     transform: scale(1);
   }
 }
+
+.prompt-tag {
+  cursor: pointer;
+  display: inline-block;
+  transition: opacity 0.2s, background-color 0.2s, transform 0.1s;
+}
+
+.prompt-tag:hover {
+  opacity: 0.8;
+  transform: scale(1.02);
+}

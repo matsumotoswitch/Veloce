@@ -2052,6 +2052,8 @@ async function renderMetadata(file) {
         const tags = section.isParam ? [String(section.value)] : String(section.value).split(/[,\n\r]+/).map(t => t.trim()).filter(t => t);
         for (const t of tags) {
           const tagEl = getInspectorTag();
+
+
           if (terms.length > 0) {
             const isMatch = terms.some(term => t.toLowerCase().includes(term));
             if (isMatch) {
@@ -2062,11 +2064,19 @@ async function renderMetadata(file) {
               tagEl.style.fontWeight = 'bold';
               tagEl.style.boxShadow = '0 0 8px rgba(255,204,0,0.3)';
             } else {
-              tagEl.style.cssText = '';
+              tagEl.style.border = '';
+              tagEl.style.backgroundColor = '';
+              tagEl.style.color = '';
+              tagEl.style.fontWeight = '';
+              tagEl.style.boxShadow = '';
             }
             tagEl.innerHTML = highlightSearchTerms(t, terms);
           } else {
-            tagEl.style.cssText = '';
+            tagEl.style.border = '';
+            tagEl.style.backgroundColor = '';
+            tagEl.style.color = '';
+            tagEl.style.fontWeight = '';
+            tagEl.style.boxShadow = '';
             tagEl.textContent = t;
           }
           secEl.box.appendChild(tagEl);
@@ -5615,6 +5625,59 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   setupCustomSelect('custom-rating-val-container', 'ratingFilterVal');
   setupCustomSelect('custom-rating-op-container', 'ratingFilterOp');
+
+  // ----------------------------------------------------------------------------
+  // GLOBAL TAG LISTENER & CSS INJECTION (covers diff-tag)
+  // ----------------------------------------------------------------------------
+  const globalTagStyle = document.createElement('style');
+  globalTagStyle.textContent = `
+    .prompt-tag, .diff-tag {
+      cursor: pointer !important;
+      display: inline-block !important;
+      transition: all 0.2s !important;
+    }
+    .prompt-tag:hover, .diff-tag:hover {
+      opacity: 0.7 !important;
+      transform: scale(1.05) !important;
+      background-color: rgba(255, 255, 255, 0.1) !important;
+    }
+  `;
+  document.head.appendChild(globalTagStyle);
+
+  document.body.addEventListener('click', async (e) => {
+    const tagEl = e.target.closest('.diff-tag');
+    if (tagEl) {
+      try {
+        const text = tagEl.textContent;
+        if (text) {
+          await navigator.clipboard.writeText(text);
+          const displayTxt = text.length > 20 ? text.substring(0, 20) + '...' : text;
+          if (typeof uiManager !== 'undefined' && uiManager) {
+            uiManager.showToast('コピーしました: ' + displayTxt, 3000, null, 'success');
+            uiManager.applyGlowEffect(tagEl);
+          } else if (typeof showNotification === 'function') {
+            showNotification('コピーしました: ' + displayTxt, 'success');
+          }
+        }
+      } catch(err) {
+        if (typeof uiManager !== 'undefined' && uiManager) uiManager.showToast('Error: ' + err, 3000, null, 'error');
+      }
+    }
+  }, true);
+
+  document.body.addEventListener('mousemove', (e) => {
+    const tagEl = e.target.closest('.diff-tag');
+    if (tagEl) {
+      if (typeof uiManager !== 'undefined' && uiManager) uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
+    }
+  }, true);
+
+  document.body.addEventListener('mouseleave', (e) => {
+    const tagEl = e.target.closest('.diff-tag');
+    if (tagEl) {
+      if (typeof uiManager !== 'undefined' && uiManager) uiManager.hideCustomTooltip();
+    }
+  }, true);
 
   document.addEventListener('click', () => {
     document.querySelectorAll('.custom-select.open').forEach(el => {
