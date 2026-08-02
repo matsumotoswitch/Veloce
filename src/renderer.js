@@ -1335,6 +1335,38 @@ function updateSortIndicators() {
       }
     }
   });
+
+  // ソートドロップダウンの表示も同期する
+  updateSortSelectDropdown();
+}
+
+/**
+ * #sort-select-container のラベルと選択状態を appState.sortConfig に同期する
+ */
+function updateSortSelectDropdown() {
+  const container = document.getElementById('sort-select-container');
+  const label = document.getElementById('sort-select-label');
+  if (!container || !label) return;
+
+  const { key, asc } = appState.sortConfig;
+  const items = container.querySelectorAll('.custom-select-item');
+  let matched = null;
+
+  items.forEach(item => {
+    const itemKey = item.dataset.sortKey;
+    const itemAsc = item.dataset.sortAsc === 'true';
+    const isMatch = itemKey === key && itemAsc === asc;
+    item.classList.toggle('selected', isMatch);
+    if (isMatch) matched = item;
+  });
+
+  if (matched) {
+    label.textContent = matched.textContent;
+  } else {
+    // 完全一致がない場合はキー名だけ表示
+    const keyLabel = TABLE_HEADERS[key] || key;
+    label.textContent = keyLabel + (asc ? ' (昇順)' : ' (降順)');
+  }
 }
 
 async function selectImage(index, event = null) {
@@ -5625,6 +5657,59 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   setupCustomSelect('custom-rating-val-container', 'ratingFilterVal');
   setupCustomSelect('custom-rating-op-container', 'ratingFilterOp');
+
+  // ----------------------------------------------------------------------------
+  // ソートドロップダウン (#sort-select-container) の初期化
+  // ----------------------------------------------------------------------------
+  (function setupSortSelect() {
+    const container = document.getElementById('sort-select-container');
+    if (!container) return;
+
+    // 開閉トグル
+    container.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = container.classList.contains('open');
+
+      document.querySelectorAll('.custom-select.open').forEach(el => {
+        if (el !== container) {
+          el.classList.remove('open');
+          el.classList.remove('open-up');
+        }
+      });
+
+      if (!isOpen) {
+        container.classList.add('open');
+        const rect = container.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        if (spaceBelow < 260 && rect.top > 260) {
+          container.classList.add('open-up');
+        } else {
+          container.classList.remove('open-up');
+        }
+      } else {
+        container.classList.remove('open');
+        container.classList.remove('open-up');
+      }
+    });
+
+    // 各アイテムのクリック
+    container.querySelectorAll('.custom-select-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const key = item.dataset.sortKey;
+        const asc = item.dataset.sortAsc === 'true';
+        appState.sortConfig.key = key;
+        appState.sortConfig.asc = asc;
+        localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+        updateSortIndicators();
+        scheduleRefresh();
+        container.classList.remove('open');
+      });
+    });
+
+    // 初期表示を現在のソートに同期
+    updateSortSelectDropdown();
+  })();
 
   // ----------------------------------------------------------------------------
   // GLOBAL TAG LISTENER & CSS INJECTION (covers diff-tag)

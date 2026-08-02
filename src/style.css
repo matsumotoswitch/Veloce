@@ -974,6 +974,41 @@ table#file-table {
   color: var(--text-color);
 }
 
+/* Thumbnail controls 内のドロップダウンは周囲に合わせて小型化 */
+#thumbnail-controls .custom-select {
+  height: 20px;
+  font-size: var(--font-size-xs);
+  padding: 0 6px;
+  background-color: transparent;
+  border: 1px solid var(--border-color);
+  width: 120px !important;
+}
+
+#thumbnail-controls .custom-select-label {
+  font-size: var(--font-size-xs);
+  margin-right: 4px;
+}
+
+#thumbnail-controls .custom-select-arrow {
+  width: 14px;
+  height: 14px;
+  transform: scale(1);
+}
+
+#thumbnail-controls .custom-select.open .custom-select-arrow {
+  transform: scale(1) rotate(180deg);
+}
+
+#thumbnail-controls .custom-select-item {
+  font-size: var(--font-size-xs);
+  padding: 3px 8px;
+}
+
+#thumbnail-controls .custom-select-menu {
+  max-height: none;
+  overflow-y: visible;
+}
+
 
 
 /* Custom Checkbox Styles */
@@ -2946,12 +2981,14 @@ th[data-sort] .sort-arrow.desc {
   top: calc(100% + 4px);
   left: 0;
   min-width: 100%;
+  max-height: 250px;
   background-color: var(--modal-bg);
   border: 1px solid var(--modal-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--popup-shadow);
   z-index: 1000;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .custom-select.open .custom-select-menu {
