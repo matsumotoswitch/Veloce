@@ -1137,6 +1137,19 @@ const scheduleRefresh = debounce(async () => {
   } else if (appState.files[appState.selectedIndex]) {
     renderMetadata(appState.files[appState.selectedIndex]);
   }
+
+  // 追加: 描画が完了したタイミングでスクロール位置を復元
+  requestAnimationFrame(() => {
+    if (uiManager.elements.thumbnailGrid && appState.savedScrollTopGrid) {
+      uiManager.elements.thumbnailGrid.scrollTop = appState.savedScrollTopGrid;
+      appState.savedScrollTopGrid = 0;
+    }
+    const listContainer = document.getElementById('center-top');
+    if (listContainer && appState.savedScrollTopList) {
+      listContainer.scrollTop = appState.savedScrollTopList;
+      appState.savedScrollTopList = 0;
+    }
+  });
 }, CONFIG.REFRESH_DELAY);
 
 function createTreeNode(folder, isRoot = false) {
@@ -4761,18 +4774,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       appState.thumbnailCounted.clear();
       await scheduleRefresh();
       
-      // 追加: 描画が完了したタイミングでスクロール位置を復元
-      requestAnimationFrame(() => {
-        if (uiManager.elements.thumbnailGrid && appState.savedScrollTopGrid) {
-          uiManager.elements.thumbnailGrid.scrollTop = appState.savedScrollTopGrid;
-        }
-        const listContainer = document.getElementById('center-top');
-        if (listContainer && appState.savedScrollTopList) {
-          listContainer.scrollTop = appState.savedScrollTopList;
-        }
-        appState.savedScrollTopGrid = 0;
-        appState.savedScrollTopList = 0;
-      });
       setTimeout(() => {
         const t = document.getElementById('toast-dir-load-progress');
         if (t) {

@@ -104,6 +104,9 @@ export function initTabHandlers(ctx) {
       clearMetadataUI();
       uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
 
+      // 次に読み込まれるディレクトリ描画後に復元するスクロール位置をセット
+      appState.savedScrollTopGrid = tab.scrollTop || 0;
+
       updateNavButtons();
 
       window.veloceAPI.loadDirectory(tab.path);
@@ -224,6 +227,9 @@ export function initTabHandlers(ctx) {
           uiManager.renderAll(true);
           clearMetadataUI();
           updateNavButtons();
+          
+          appState.savedScrollTopGrid = nextTab.scrollTop || 0;
+          
           window.veloceAPI.loadDirectory(nextTab.path);
           expandTreeToPath(appState.currentDirectory);
         }, 230);
