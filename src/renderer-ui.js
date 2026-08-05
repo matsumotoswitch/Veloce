@@ -8,6 +8,14 @@ const CHUNK_SIZE = 100;
 
 let dragCache = { element: null, midX: 0 };
 
+/**
+ * 最大公約数を返す（リストビューのアスペクト比計算用）
+ * @param {number} a
+ * @param {number} b
+ * @returns {number}
+ */
+function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+
 export function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return '-';
   return bytes.toLocaleString();
@@ -1234,7 +1242,6 @@ class UIManager {
       
       let ratioStr = '-';
       if (file.width && file.height) {
-        const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
         const d = gcd(file.width, file.height);
         const rw = file.width / d;
         const rh = file.height / d;
@@ -1422,8 +1429,9 @@ class UIManager {
       if (!file) continue;
 
       const wrapper = content.children[i - startIndex];
-      const img = wrapper.querySelector('.thumbnail-img');
-      const label = wrapper.querySelector('.thumbnail-label');
+      // children[] 固定インデックスで直アクセス（querySelector廃止でO(subtree)走査を排除）
+      const img   = wrapper.children[0]; // .thumbnail-img
+      const label = wrapper.children[1]; // .thumbnail-label
       const isSelected = appState.selection.has(i);
 
       if (isSelected) {
@@ -1432,8 +1440,12 @@ class UIManager {
         wrapper.classList.remove('selected');
       }
 
-      wrapper.style.height = `${itemSize}px`;
-      img.style.height = `${itemSize}px`;
+      // サイズが変化したときのみ style を書き込む（無条件書き込みによる Reflow 予約を排除）
+      if (wrapper._cachedItemSize !== itemSize) {
+        wrapper._cachedItemSize = itemSize;
+        wrapper.style.height = `${itemSize}px`;
+        img.style.height = `${itemSize}px`;
+      }
 
       // パスが変わった場合のみ内容を更新する
       if (wrapper.dataset.filepath !== file.path || wrapper.dataset.index != i) {
@@ -1450,10 +1462,11 @@ class UIManager {
         }
 
         const rating = appState.ratings[file.path];
-        let badge = wrapper.querySelector('.rating-badge');
+        // children[2] は .rating-badge（固定インデックス直アクセス）
+        const badge = wrapper.children[2];
         if (badge) {
           if (rating && rating > 0) {
-            badge.querySelector('.rating-value').textContent = rating;
+            badge.children[1].textContent = rating; // .rating-value は badge の2番目の子
             badge.classList.add('show');
           } else {
             badge.classList.remove('show');

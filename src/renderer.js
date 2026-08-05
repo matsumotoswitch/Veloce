@@ -881,16 +881,20 @@ class ThumbnailQueueManager {
   constructor(concurrency) {
     this.concurrency = concurrency;
     this.activeTasks = new Set();
+    // priorityQueue: 重複チェックをO(1)にするため Set＋配列のペアで管理
     this.priorityQueue = [];
+    this.priorityQueueSet = new Set();
     this.preloadQueue = [];
     this.isProcessing = false;
   }
 
   enqueuePriority(filePath) {
     if (!this.activeTasks.has(filePath) && !appState.thumbnailUrls.has(filePath)) {
-      const idx = this.priorityQueue.findIndex(req => req.filePath === filePath);
-      if (idx > -1) this.priorityQueue.splice(idx, 1);
-      this.priorityQueue.push({ filePath });
+      // SetでO(1)重複チェック（旧: findIndex O(N) + splice O(N)）
+      if (!this.priorityQueueSet.has(filePath)) {
+        this.priorityQueueSet.add(filePath);
+        this.priorityQueue.push({ filePath });
+      }
       this.processNext();
     }
   }
@@ -901,6 +905,7 @@ class ThumbnailQueueManager {
 
   clear() {
     this.priorityQueue = [];
+    this.priorityQueueSet.clear();
     this.preloadQueue = [];
     this.activeTasks.clear();
     if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
@@ -916,6 +921,7 @@ class ThumbnailQueueManager {
 
   remove(filePath) {
     this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
+    this.priorityQueueSet.delete(filePath);
     this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
   }
 
@@ -937,6 +943,7 @@ class ThumbnailQueueManager {
           if (targetIndex === -1) targetIndex = 0;
 
           const req = this.priorityQueue.splice(targetIndex, 1)[0];
+          this.priorityQueueSet.delete(req.filePath); // Set との整合性を維持
           
           if (appState.thumbnailUrls.has(req.filePath)) {
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(req.filePath);

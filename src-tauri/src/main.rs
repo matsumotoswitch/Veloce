@@ -2340,7 +2340,8 @@ async fn generate_thumbnail(
 ) -> Result<String, String> {
     let db_conn = state.db_conn.clone();
     
-    // Fast path: get mtime from memory to avoid disk I/O
+    // 単一ファイル検索のため iter().find() で十分（1件ならO(N)のコストは最小限）
+    // batch版は mtime_map HashMap を構築してO(1)に最適化している
     let (mem_mtime, is_valid) = if let Ok(lock) = state.filtered_files.lock() {
         let found = lock.iter().find(|f| f.path == file_path);
         (found.map(|f| f.mtime), found.is_some())
@@ -2394,12 +2395,15 @@ async fn generate_thumbnail_batch(
 ) -> Result<Vec<ThumbnailResult>, String> {
     let db_conn = state.db_conn.clone();
     
-    // Fast path: get mtimes from memory to avoid disk I/O
+    // Fast path: get mtimes from memory via O(1) HashMap lookup (avoid O(N) iter().find() per path)
     let mut files_to_process = Vec::new();
     if let Ok(lock) = state.filtered_files.lock() {
+        // HashMap<path, mtime> を一度だけ構築して全パスをO(1)でルックアップ
+        let mtime_map: std::collections::HashMap<&str, u64> =
+            lock.iter().map(|f| (f.path.as_str(), f.mtime)).collect();
         for file_path in &file_paths {
-            if let Some(f) = lock.iter().find(|f| f.path == *file_path) {
-                files_to_process.push((file_path.clone(), f.mtime));
+            if let Some(&mtime) = mtime_map.get(file_path.as_str()) {
+                files_to_process.push((file_path.clone(), mtime));
             }
         }
     }
@@ -2434,12 +2438,14 @@ async fn get_cached_thumbnail_batch(
 ) -> Result<Vec<ThumbnailResult>, String> {
     let db_conn = state.db_conn.clone();
 
-    // filtered_files から mtime を取得
+    // filtered_files から mtime を O(1) HashMap ルックアップで取得（旧: iter().find() O(N)）
     let mut files_with_mtime: Vec<(String, u64)> = Vec::new();
     if let Ok(lock) = state.filtered_files.lock() {
+        let mtime_map: std::collections::HashMap<&str, u64> =
+            lock.iter().map(|f| (f.path.as_str(), f.mtime)).collect();
         for file_path in &file_paths {
-            if let Some(f) = lock.iter().find(|f| f.path == *file_path) {
-                files_with_mtime.push((file_path.clone(), f.mtime));
+            if let Some(&mtime) = mtime_map.get(file_path.as_str()) {
+                files_with_mtime.push((file_path.clone(), mtime));
             }
         }
     }
