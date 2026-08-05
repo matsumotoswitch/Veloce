@@ -5737,19 +5737,36 @@ window.addEventListener('DOMContentLoaded', async () => {
   `;
   document.head.appendChild(globalTagStyle);
 
+  let _lastCopiedTags = "";
   document.body.addEventListener('click', async (e) => {
     const tagEl = e.target.closest('.diff-tag');
     if (tagEl) {
       try {
         const text = tagEl.textContent;
         if (text) {
-          await navigator.clipboard.writeText(text);
-          const displayTxt = text.length > 20 ? text.substring(0, 20) + '...' : text;
+          let textToCopy = text;
+          let isAppended = false;
+          // Ctrl+Click の場合は内部キャッシュをもとにカンマ区切りで追記する
+          // (navigator.clipboard.readText は権限プロンプトが出るため使用しない)
+          if (e.ctrlKey && _lastCopiedTags) {
+            isAppended = true;
+            const currentTags = _lastCopiedTags.split(',').map(t => t.trim()).filter(t => t);
+            if (!currentTags.includes(text)) {
+              textToCopy = _lastCopiedTags + ', ' + text;
+            } else {
+              textToCopy = _lastCopiedTags; // 既に含まれている場合はそのまま
+            }
+          }
+          _lastCopiedTags = textToCopy;
+          
+          await navigator.clipboard.writeText(textToCopy);
+          const displayTxt = textToCopy.length > 20 ? textToCopy.substring(0, 20) + '...' : textToCopy;
+          const prefix = isAppended ? '追加コピーしました: ' : 'コピーしました: ';
           if (typeof uiManager !== 'undefined' && uiManager) {
-            uiManager.showToast('コピーしました: ' + displayTxt, 3000, null, 'success');
+            uiManager.showToast(prefix + displayTxt, 3000, null, 'success');
             uiManager.applyGlowEffect(tagEl);
           } else if (typeof showNotification === 'function') {
-            showNotification('コピーしました: ' + displayTxt, 'success');
+            showNotification(prefix + displayTxt, 'success');
           }
         }
       } catch(err) {
