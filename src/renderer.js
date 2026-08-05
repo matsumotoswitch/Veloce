@@ -4370,7 +4370,14 @@ window.addEventListener('keydown', async (e) => {
           };
 
           // 現在の表示モードに応じた要素にエフェクトを適用
-          applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${idx}"]`));
+          const file = appState.files[idx];
+          if (file && uiManager._domByPath) {
+            const thumb = uiManager._domByPath.get(file.path);
+            if (thumb) applyFlash(thumb);
+          } else {
+            // fallback (just in case)
+            applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${idx}"]`));
+          }
           applyFlash(uiManager.elements.fileListBody.querySelector(`tr[data-index="${idx}"]`));
         }
       });
@@ -5825,14 +5832,17 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
 
       if (uiManager.elements.thumbnailGrid) {
-        // Use double backslashes in querySelector attribute selector for file paths
-        const safePath = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        const thumb = uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-filepath="${safePath}"]`);
+        // querySelector による O(N) ツリー探索を回避し、O(1) で DOM を取得する
+        const thumb = uiManager._domByPath ? uiManager._domByPath.get(path) : null;
         if (thumb) {
-          let badge = thumb.querySelector('.rating-badge');
+          // index 2: rating-badge (レンダラ側の仕様に依存。もし無ければフォールバック)
+          let badge = thumb.children[2];
+          if (!badge || !badge.classList.contains('rating-badge')) {
+             badge = thumb.querySelector('.rating-badge');
+          }
           if (badge) {
             if (rating > 0) {
-              badge.querySelector('.rating-value').textContent = rating;
+              badge.children[1].textContent = rating;
               badge.classList.add('show');
             } else {
               badge.classList.remove('show');

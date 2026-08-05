@@ -1461,18 +1461,6 @@ class UIManager {
           label.title = '';
         }
 
-        const rating = appState.ratings[file.path];
-        // children[2] は .rating-badge（固定インデックス直アクセス）
-        const badge = wrapper.children[2];
-        if (badge) {
-          if (rating && rating > 0) {
-            badge.children[1].textContent = rating; // .rating-value は badge の2番目の子
-            badge.classList.add('show');
-          } else {
-            badge.classList.remove('show');
-          }
-        }
-
         if (appState.thumbnailUrls.has(file.path)) {
             img.src = appState.thumbnailUrls.get(file.path);
             if (img.complete) {
@@ -1537,6 +1525,22 @@ class UIManager {
             if (window.thumbnailManager && !file.hasThumbnailCache) {
               filesToEnqueue.push(file.path);
             }
+        }
+      }
+
+      // レーティングの同期（パスやインデックスが変わらなくてもショートカット操作に追従させる）
+      // _cachedRating を用いることで O(1) かつ変更時のみの DOM アクセスに限定
+      const rating = appState.ratings[file.path] || 0;
+      if (wrapper._cachedRating !== rating) {
+        wrapper._cachedRating = rating;
+        const badge = wrapper.children[2];
+        if (badge) {
+          if (rating > 0) {
+            badge.children[1].textContent = rating;
+            badge.classList.add('show');
+          } else {
+            badge.classList.remove('show');
+          }
         }
       }
     }
