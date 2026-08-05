@@ -1193,7 +1193,9 @@ class UIManager {
     const rowHeight = 28; 
     const totalRows = appState.totalCount;
     
-    const scrollTop = container.scrollTop;
+    const scrollTop = (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) 
+      ? appState.savedScrollTopList 
+      : container.scrollTop;
     const containerHeight = container.clientHeight || window.innerHeight;
 
     const startRow = Math.floor(Math.max(0, scrollTop) / rowHeight);
@@ -1279,6 +1281,11 @@ class UIManager {
 
     tbody.innerHTML = '';
     tbody.appendChild(fragment);
+
+    if (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) {
+      container.scrollTop = appState.savedScrollTopList;
+      appState.savedScrollTopList = 0;
+    }
   }
 
   async updateVirtualGrid(force = false) {
@@ -1352,6 +1359,12 @@ class UIManager {
     const totalHeight = rows * rowHeight + (padding * 2);
 
     spacer.style.height = `${totalHeight}px`;
+
+    // 描画サイクル中にスクロール位置を復元し、以降の計算で正しい startIndex を利用する（二重レンダリングと遅延を防止）
+    if (appState.savedScrollTopGrid) {
+      container.scrollTop = appState.savedScrollTopGrid;
+      appState.savedScrollTopGrid = 0;
+    }
 
     const scrollTop = container.scrollTop;
     const containerHeight = container.clientHeight || window.innerHeight;
