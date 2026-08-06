@@ -1,13 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { JSDOM } from 'jsdom';
 
 // ============================================================
-// Performance optimization tests
-// - gcd hoisted to module scope (was re-defined per row in list view)
+// Performance Optimization & UI Review Fixes
+// - gcd hoisted to module scope
 // - ThumbnailQueueManager.enqueuePriority O(1) dedup with Set
+// - Rating Badge Update O(1) caching
+// - DOM Lookup O(1) optimization using Map
 // ============================================================
 
 // ------- gcd module-scope hoisting test -------
-// renderer-ui.js と同じモジュールスコープの gcd 関数を再現
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
 function calcRatio(w, h) {
@@ -17,40 +19,32 @@ function calcRatio(w, h) {
   return (rw > 100 || rh > 100) ? `${(w / h).toFixed(2)}:1` : `${rw}:${rh}`;
 }
 
-describe('gcd (module-scope) - aspect ratio calculation', () => {
+describe('Performance - gcd (module-scope) aspect ratio calculation', () => {
   it('1920x1080 -> 16:9', () => {
     expect(calcRatio(1920, 1080)).toBe('16:9');
   });
-
   it('3840x2160 -> 16:9', () => {
     expect(calcRatio(3840, 2160)).toBe('16:9');
   });
-
   it('1024x1024 -> 1:1', () => {
     expect(calcRatio(1024, 1024)).toBe('1:1');
   });
-
   it('832x1216 (portrait NovelAI standard) -> 13:19', () => {
     expect(calcRatio(832, 1216)).toBe('13:19');
   });
-
   it('large prime dimensions -> decimal:1 form', () => {
-    // 1921x1080: gcd=1, rw=1921 > 100, so decimal form
     const result = calcRatio(1921, 1080);
     expect(result).toMatch(/^\d+\.\d+:1$/);
   });
-
   it('gcd of equal numbers returns the number', () => {
     expect(gcd(100, 100)).toBe(100);
   });
-
   it('gcd(12, 8) = 4', () => {
     expect(gcd(12, 8)).toBe(4);
   });
 });
 
 // ------- ThumbnailQueueManager Set-based dedup test -------
-// renderer.js の ThumbnailQueueManager を最小限の形で再現してロジックをテスト
 function createMockAppState() {
   return {
     thumbnailUrls: new Map(),
@@ -72,7 +66,6 @@ class ThumbnailQueueManagerTest {
     this.isProcessing = false;
     this._appState = mockAppState;
   }
-
   enqueuePriority(filePath) {
     if (!this.activeTasks.has(filePath) && !this._appState.thumbnailUrls.has(filePath)) {
       if (!this.priorityQueueSet.has(filePath)) {
@@ -81,20 +74,17 @@ class ThumbnailQueueManagerTest {
       }
     }
   }
-
   clear() {
     this.priorityQueue = [];
     this.priorityQueueSet.clear();
     this.preloadQueue = [];
     this.activeTasks.clear();
   }
-
   remove(filePath) {
     this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
     this.priorityQueueSet.delete(filePath);
     this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
   }
-
   dequeue() {
     if (this.priorityQueue.length === 0) return null;
     const req = this.priorityQueue.splice(0, 1)[0];
@@ -103,7 +93,7 @@ class ThumbnailQueueManagerTest {
   }
 }
 
-describe('ThumbnailQueueManager - O(1) Set-based dedup', () => {
+describe('Performance - ThumbnailQueueManager O(1) Set-based dedup', () => {
   let queue;
   let mockState;
 
@@ -118,21 +108,18 @@ describe('ThumbnailQueueManager - O(1) Set-based dedup', () => {
     expect(queue.priorityQueue.length).toBe(1);
     expect(queue.priorityQueueSet.size).toBe(1);
   });
-
   it('異なるパスはそれぞれキューに入る', () => {
     queue.enqueuePriority('a.png');
     queue.enqueuePriority('b.png');
     expect(queue.priorityQueue.length).toBe(2);
     expect(queue.priorityQueueSet.size).toBe(2);
   });
-
   it('thumbnailUrlsに既にある場合はキューに入らない', () => {
     mockState.thumbnailUrls.set('cached.png', 'http://example.com/thumb.jpg');
     queue.enqueuePriority('cached.png');
     expect(queue.priorityQueue.length).toBe(0);
     expect(queue.priorityQueueSet.size).toBe(0);
   });
-
   it('clear() で priorityQueue と priorityQueueSet 両方がリセットされる', () => {
     queue.enqueuePriority('a.png');
     queue.enqueuePriority('b.png');
@@ -140,7 +127,6 @@ describe('ThumbnailQueueManager - O(1) Set-based dedup', () => {
     expect(queue.priorityQueue.length).toBe(0);
     expect(queue.priorityQueueSet.size).toBe(0);
   });
-
   it('remove() でArray・Set両方から削除される', () => {
     queue.enqueuePriority('a.png');
     queue.enqueuePriority('b.png');
@@ -149,7 +135,6 @@ describe('ThumbnailQueueManager - O(1) Set-based dedup', () => {
     expect(queue.priorityQueueSet.has('a.png')).toBe(false);
     expect(queue.priorityQueueSet.has('b.png')).toBe(true);
   });
-
   it('dequeue() でArray・Set両方から取り出せる', () => {
     queue.enqueuePriority('a.png');
     queue.enqueuePriority('b.png');
@@ -158,7 +143,6 @@ describe('ThumbnailQueueManager - O(1) Set-based dedup', () => {
     expect(queue.priorityQueueSet.has('a.png')).toBe(false);
     expect(queue.priorityQueue.length).toBe(1);
   });
-
   it('dequeue()後に同じパスを再enqueueできる（Setから削除されているため）', () => {
     queue.enqueuePriority('a.png');
     queue.dequeue();
@@ -166,21 +150,153 @@ describe('ThumbnailQueueManager - O(1) Set-based dedup', () => {
     expect(queue.priorityQueue.length).toBe(1);
     expect(queue.priorityQueueSet.size).toBe(1);
   });
-
   it('activeTasksにあるパスはキューに入らない', () => {
     queue.activeTasks.add('active.png');
     queue.enqueuePriority('active.png');
     expect(queue.priorityQueue.length).toBe(0);
     expect(queue.priorityQueueSet.size).toBe(0);
   });
-
   it('Array と Set のサイズは常に一致する', () => {
     queue.enqueuePriority('x.png');
     queue.enqueuePriority('y.png');
-    queue.enqueuePriority('x.png'); // 重複
+    queue.enqueuePriority('x.png');
     expect(queue.priorityQueue.length).toBe(queue.priorityQueueSet.size);
-
     queue.remove('x.png');
     expect(queue.priorityQueue.length).toBe(queue.priorityQueueSet.size);
+  });
+});
+
+// ------- UI O(1) Updates & Reflow prevention test -------
+describe('Performance - UI Updates & O(1) DOM Lookup', () => {
+  let dom;
+  let globalApp;
+
+  beforeEach(() => {
+    dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
+      url: 'http://localhost'
+    });
+    global.window = dom.window;
+    global.document = dom.window.document;
+    
+    global.appState = {
+      ratings: {},
+      thumbnailUrls: new Map(),
+      selection: new Set(),
+      files: []
+    };
+    
+    global.uiManager = {
+      _domByPath: new Map(),
+      elements: {
+        thumbnailGrid: document.createElement('div'),
+        fileListBody: document.createElement('tbody')
+      },
+      applyFlash: vi.fn()
+    };
+  });
+
+  afterEach(() => {
+    delete global.window;
+    delete global.document;
+    delete global.appState;
+    delete global.uiManager;
+  });
+
+  it('should update rating textContent only when cached rating changes (O(1) update)', () => {
+    const renderGridItem = (wrapper, file, i, itemSize) => {
+      if (wrapper.dataset.filepath !== file.path || wrapper.dataset.index != i) {
+        wrapper.dataset.filepath = file.path;
+        wrapper.dataset.index = i;
+      }
+      const rating = global.appState.ratings[file.path] || 0;
+      if (wrapper._cachedRating !== rating) {
+        wrapper._cachedRating = rating;
+        const badge = wrapper.children[2];
+        if (badge) {
+          if (rating > 0) {
+            badge.children[1].textContent = rating;
+            badge.classList.add('show');
+          } else {
+            badge.classList.remove('show');
+          }
+        }
+      }
+    };
+
+    const wrapper = document.createElement('div');
+    wrapper.dataset.filepath = 'test.jpg';
+    wrapper.dataset.index = 0;
+    
+    wrapper.appendChild(document.createElement('img'));
+    wrapper.appendChild(document.createElement('div'));
+    
+    const badge = document.createElement('div');
+    badge.className = 'rating-badge';
+    badge.appendChild(document.createElement('span'));
+    const ratingValue = document.createElement('span');
+    ratingValue.className = 'rating-value';
+    badge.appendChild(ratingValue);
+    wrapper.appendChild(badge);
+
+    const classAddSpy = vi.spyOn(badge.classList, 'add');
+    const file = { path: 'test.jpg', name: 'test.jpg' };
+    
+    renderGridItem(wrapper, file, 0, 100);
+    expect(classAddSpy).not.toHaveBeenCalled();
+    expect(badge.classList.contains('show')).toBe(false);
+
+    global.appState.ratings['test.jpg'] = 5;
+    renderGridItem(wrapper, file, 0, 100);
+    expect(classAddSpy).toHaveBeenCalledWith('show');
+    expect(ratingValue.textContent).toBe('5');
+    
+    classAddSpy.mockClear();
+    
+    renderGridItem(wrapper, file, 0, 100);
+    expect(classAddSpy).not.toHaveBeenCalled();
+  });
+
+  it('should find thumbnail item via O(1) _domByPath map instead of querySelector', () => {
+    const handleRatingChanged = (payload) => {
+      const { path, rating } = payload;
+      if (rating === 0) {
+        delete global.appState.ratings[path];
+      } else {
+        global.appState.ratings[path] = rating;
+      }
+
+      const thumb = global.uiManager._domByPath ? global.uiManager._domByPath.get(path) : null;
+      if (thumb) {
+        let badge = thumb.querySelector('.rating-badge');
+        if (badge) {
+          if (rating > 0) {
+            badge.querySelector('.rating-value').textContent = rating;
+            badge.classList.add('show');
+          } else {
+            badge.classList.remove('show');
+          }
+        }
+      }
+    };
+
+    const targetPath = 'C:\\images\\pic.jpg';
+    const thumbEl = document.createElement('div');
+    const badge = document.createElement('div');
+    badge.className = 'rating-badge';
+    badge.appendChild(document.createElement('span'));
+    const rVal = document.createElement('span');
+    rVal.className = 'rating-value';
+    badge.appendChild(rVal);
+    thumbEl.appendChild(badge);
+
+    global.uiManager._domByPath.set(targetPath, thumbEl);
+    
+    const querySpy = vi.spyOn(global.uiManager.elements.thumbnailGrid, 'querySelector');
+
+    handleRatingChanged({ path: targetPath, rating: 4 });
+
+    expect(querySpy).not.toHaveBeenCalled();
+    expect(rVal.textContent).toBe('4');
+    expect(badge.classList.contains('show')).toBe(true);
   });
 });

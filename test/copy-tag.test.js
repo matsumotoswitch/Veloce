@@ -109,6 +109,8 @@ describe('Tag Copy Functionality', () => {
 
     // 追加コピーされていることを確認
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('existing-tag1, new-tag');
+    // readTextが呼び出されていないことを確認（WebView制約回避）
+    expect(navigator.clipboard.readText).not.toHaveBeenCalled();
     expect(uiManager.showToast).toHaveBeenCalledWith('追加コピーしました: existing-tag1, new-t...', 3000, null, 'success');
   });
 
