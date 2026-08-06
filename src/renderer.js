@@ -4359,13 +4359,9 @@ window.addEventListener('keydown', async (e) => {
           // 現在の表示モードに応じた要素にエフェクトを適用
           const file = appState.files[idx];
           if (file && uiManager._domByPath) {
-            const thumb = uiManager._domByPath.get(file.path);
-            if (thumb) applyFlash(thumb);
-          } else {
-            // fallback (just in case)
-            applyFlash(uiManager.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${idx}"]`));
+            const domItem = uiManager._domByPath.get(file.path);
+            if (domItem) applyFlash(domItem);
           }
-          applyFlash(uiManager.elements.fileListBody.querySelector(`tr[data-index="${idx}"]`));
         }
       });
     }
@@ -4451,9 +4447,29 @@ document.addEventListener('contextmenu', (e) => {
   if (typeof closeAllMenus === 'function') closeAllMenus(e);
 });
 
-// ツリービューのキーボード操作ハンドラ
 async function handleTreeNavigation(key) {
-  const visibleItems = Array.from(document.querySelectorAll('#dir-tree .tree-item')).filter(el => el.offsetParent !== null);
+  const getVisibleTreeItems = (root) => {
+    let items = [];
+    const walk = (ul) => {
+      for (const li of ul.children) {
+        if (li.tagName.toLowerCase() !== 'li') continue;
+        const item = li.firstElementChild; // .tree-item is the first child
+        if (item && item.classList.contains('tree-item')) items.push(item);
+        const childrenUl = li.children[1]; // .tree-children is the second child
+        if (childrenUl && childrenUl.classList.contains('tree-children') && childrenUl.classList.contains('expanded')) {
+          walk(childrenUl);
+        }
+      }
+    };
+    for (const ul of root.children) {
+       if (ul.tagName.toLowerCase() === 'ul') walk(ul);
+    }
+    return items;
+  };
+
+  const rootEl = document.getElementById('dir-tree');
+  if (!rootEl) return;
+  const visibleItems = getVisibleTreeItems(rootEl);
   if (visibleItems.length === 0) return;
 
   const currentSelected = document.querySelector('#dir-tree .tree-item.selected');
@@ -5818,37 +5834,34 @@ window.addEventListener('DOMContentLoaded', async () => {
         appState.ratings[path] = rating;
       }
 
-      if (uiManager.elements.thumbnailGrid) {
+      if (uiManager.elements.thumbnailGrid || uiManager.elements.fileListBody) {
         // querySelector による O(N) ツリー探索を回避し、O(1) で DOM を取得する
-        const thumb = uiManager._domByPath ? uiManager._domByPath.get(path) : null;
-        if (thumb) {
-          // index 2: rating-badge (レンダラ側の仕様に依存。もし無ければフォールバック)
-          let badge = thumb.children[2];
-          if (!badge || !badge.classList.contains('rating-badge')) {
-             badge = thumb.querySelector('.rating-badge');
-          }
-          if (badge) {
-            if (rating > 0) {
-              badge.children[1].textContent = rating;
-              badge.classList.add('show');
-            } else {
-              badge.classList.remove('show');
+        const domItem = uiManager._domByPath ? uiManager._domByPath.get(path) : null;
+        if (domItem) {
+          if (domItem.classList.contains('thumbnail-item')) {
+            // index 2: rating-badge (レンダラ側の仕様に依存。もし無ければフォールバック)
+            let badge = domItem.children[2];
+            if (!badge || !badge.classList.contains('rating-badge')) {
+               badge = domItem.querySelector('.rating-badge');
             }
-          }
-        }
-      }
-
-      if (uiManager.elements.fileListBody) {
-        const safePath = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        const tr = uiManager.elements.fileListBody.querySelector(`tr[data-filepath="${safePath}"]`);
-        if (tr) {
-          const td = tr.querySelectorAll('td')[7];
-          if (td) {
-            if (rating > 0) {
-              const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-              td.innerHTML = starSvg + rating;
-            } else {
-              td.innerHTML = '-';
+            if (badge) {
+              if (rating > 0) {
+                badge.children[1].textContent = rating;
+                badge.classList.add('show');
+              } else {
+                badge.classList.remove('show');
+              }
+            }
+          } else if (domItem.tagName.toLowerCase() === 'tr') {
+            // index 7: rating column
+            const td = domItem.children[7];
+            if (td) {
+              if (rating > 0) {
+                const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+                td.innerHTML = starSvg + rating;
+              } else {
+                td.textContent = '-';
+              }
             }
           }
         }

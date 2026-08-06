@@ -1213,17 +1213,41 @@ class UIManager {
     this.lastListStartIndex = safeStartRow;
     this.lastListEndIndex = endRow;
 
+    let topSpacer = tbody.querySelector('.list-top-spacer');
+    let bottomSpacer = tbody.querySelector('.list-bottom-spacer');
+
+    if (!topSpacer || !bottomSpacer) {
+      tbody.innerHTML = `
+        <tr class="list-top-spacer" style="border: none; padding: 0;"><td colspan="8" style="padding: 0; border: none;"></td></tr>
+        <tr class="list-bottom-spacer" style="border: none; padding: 0;"><td colspan="8" style="padding: 0; border: none;"></td></tr>
+      `;
+      topSpacer = tbody.querySelector('.list-top-spacer');
+      bottomSpacer = tbody.querySelector('.list-bottom-spacer');
+    }
+
+    const targetCount = endRow - safeStartRow + 1;
+
+    // 足りない要素を追加
+    while (tbody.children.length - 2 < targetCount) {
+      const tr = document.createElement('tr');
+      tr.className = 'list-item-row';
+      tr.draggable = true;
+      for (let i = 0; i < 8; i++) {
+        tr.appendChild(document.createElement('td'));
+      }
+      tbody.insertBefore(tr, bottomSpacer);
+    }
+
+    // 余分な要素を削除
+    while (tbody.children.length - 2 > targetCount) {
+      tbody.removeChild(tbody.children[tbody.children.length - 2]);
+    }
+
     const topSpacerHeight = safeStartRow * rowHeight;
     const bottomSpacerHeight = (totalRows - 1 - endRow) * rowHeight;
 
-    const fragment = document.createDocumentFragment();
-
-    if (topSpacerHeight > 0) {
-      const tr = document.createElement('tr');
-      tr.style.height = `${topSpacerHeight}px`;
-      tr.innerHTML = `<td colspan="8" style="padding: 0; border: none;"></td>`;
-      fragment.appendChild(tr);
-    }
+    topSpacer.style.height = `${topSpacerHeight}px`;
+    bottomSpacer.style.height = `${bottomSpacerHeight}px`;
 
     const items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
 
@@ -1233,54 +1257,66 @@ class UIManager {
     }
 
     for (let i = safeStartRow; i <= endRow; i++) {
-        const file = items[i - safeStartRow];
+      const file = items[i - safeStartRow];
       if (!file) continue;
-      const isSelected = appState.selection.has(i);
-      const tr = document.createElement('tr');
-      if (isSelected) tr.classList.add('selected');
-      tr.dataset.index = i;
-      tr.dataset.filepath = file.path;
-      tr.style.height = `${rowHeight}px`;
+
+      const tr = tbody.children[i - safeStartRow + 1]; // +1 for topSpacer
       
-      let ratioStr = '-';
-      if (file.width && file.height) {
-        const d = gcd(file.width, file.height);
-        const rw = file.width / d;
-        const rh = file.height / d;
-        ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
+      const isSelected = appState.selection.has(i);
+      if (isSelected) tr.classList.add('selected');
+      else tr.classList.remove('selected');
+
+      if (tr.dataset.filepath !== file.path || tr.dataset.index != i) {
+        if (tr.dataset.filepath && this._domByPath && this._domByPath.get(tr.dataset.filepath) === tr) {
+          this._domByPath.delete(tr.dataset.filepath);
+        }
+
+        tr.dataset.index = i;
+        tr.dataset.filepath = file.path;
+        
+        if (!this._domByPath) this._domByPath = new Map();
+        this._domByPath.set(file.path, tr);
+        
+        tr.style.height = `${rowHeight}px`;
+
+        const tds = tr.children;
+        tds[0].textContent = file.name;
+        tds[1].textContent = file.ext;
+        
+        tds[2].style.textAlign = 'right';
+        tds[2].textContent = file.width ? file.width.toLocaleString() : '-';
+        
+        tds[3].style.textAlign = 'right';
+        tds[3].textContent = file.height ? file.height.toLocaleString() : '-';
+        
+        let ratioStr = '-';
+        if (file.width && file.height) {
+          const d = gcd(file.width, file.height);
+          const rw = file.width / d;
+          const rh = file.height / d;
+          ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
+        }
+        tds[4].style.textAlign = 'right';
+        tds[4].textContent = ratioStr;
+
+        tds[5].style.textAlign = 'right';
+        tds[5].textContent = formatSize(file.size);
+        
+        tds[6].textContent = formatDate(file.mtime);
+
+        const rating = appState.ratings[file.path] || 0;
+        if (rating > 0) {
+          const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+          tds[7].innerHTML = starSvg + rating;
+        } else {
+          tds[7].textContent = '-';
+        }
+      } else {
+        // Just update selection and _domByPath registration if path matches but state might have refreshed
+        if (!this._domByPath) this._domByPath = new Map();
+        this._domByPath.set(file.path, tr);
       }
-
-      let ratingStr = '-';
-      const rating = appState.ratings[file.path] || 0;
-      if (rating > 0) {
-        const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-        ratingStr = starSvg + rating;
-      }
-
-      const escapedName = escapeHtml(file.name);
-      tr.innerHTML = `
-        <td>${escapedName}</td>
-        <td>${file.ext}</td>
-        <td style="text-align: right;">${file.width ? file.width.toLocaleString() : '-'}</td>
-        <td style="text-align: right;">${file.height ? file.height.toLocaleString() : '-'}</td>
-        <td style="text-align: right;">${ratioStr}</td>
-        <td style="text-align: right;">${formatSize(file.size)}</td>
-        <td>${formatDate(file.mtime)}</td>
-        <td>${ratingStr}</td>
-      `;
-      tr.draggable = true;
-      fragment.appendChild(tr);
     }
-
-    if (bottomSpacerHeight > 0) {
-      const tr = document.createElement('tr');
-      tr.style.height = `${bottomSpacerHeight}px`;
-      tr.innerHTML = `<td colspan="8" style="padding: 0; border: none;"></td>`;
-      fragment.appendChild(tr);
-    }
-
-    tbody.innerHTML = '';
-    tbody.appendChild(fragment);
 
     if (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) {
       container.scrollTop = appState.savedScrollTopList;
