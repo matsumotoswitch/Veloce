@@ -4,8 +4,6 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::io::Read; // flate2のread_to_stringやバイナリ解析用
 
 use std::sync::Mutex;
@@ -920,31 +918,21 @@ fn load_directory(
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
             // 未解析パスのみを抽出し、インデックスマップを構築する（O(N²) → O(N) 化）
-            let (paths_to_process, all_index_map, filtered_index_map) = {
+            let paths_to_process = {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
-                    let all_map: std::collections::HashMap<String, usize> = if let Ok(lock) = state.all_files.lock() {
-                        lock.iter().enumerate().map(|(i, f)| (f.path.clone(), i)).collect()
-                    } else {
-                        std::collections::HashMap::new()
-                    };
-                    let filtered_map: std::collections::HashMap<String, usize> = if let Ok(lock) = state.filtered_files.lock() {
-                        lock.iter().enumerate().map(|(i, f)| (f.path.clone(), i)).collect()
-                    } else {
-                        std::collections::HashMap::new()
-                    };
-                    let unloaded: Vec<String> = all_map.iter()
-                        .filter_map(|(path, _)| {
-                            if let Ok(lock) = state.all_files.lock() {
-                                if lock.get(*all_map.get(path)?).map(|f| !f.meta_loaded).unwrap_or(false) {
-                                    return Some(path.clone());
-                                }
+                    if let Ok(lock) = state.all_files.lock() {
+                        lock.iter().enumerate().filter_map(|(i, f)| {
+                            if !f.meta_loaded {
+                                Some((i, f.path.clone(), f.mtime, f.ctime, f.size))
+                            } else {
+                                None
                             }
-                            None
-                        })
-                        .collect();
-                    (unloaded, all_map, filtered_map)
+                        }).collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    }
                 } else {
-                    (Vec::new(), std::collections::HashMap::new(), std::collections::HashMap::new())
+                    Vec::new()
                 }
             };
 
@@ -959,14 +947,17 @@ fn load_directory(
                         }
                     }
 
-                    let chunk_paths: Vec<String> = chunk.to_vec();
+                    let chunk_paths = chunk.to_vec();
                     let db_conn_clone = state.db_conn.clone();
                     
                     let metadata_results = tokio::task::spawn_blocking(move || {
                         use rayon::prelude::*;
-                        chunk_paths.into_par_iter().map(|p| {
-                            let (meta, mtime, size) = get_full_metadata_for_path(&p, &db_conn_clone);
-                            (p, meta, mtime, size)
+                        chunk_paths.into_par_iter().map(|(idx, p, mtime, ctime, size)| {
+                            // mtime and ctime are already in millis
+                            let mtime_millis = mtime;
+                            let ctime_millis = ctime;
+                            let (meta, fetched_mtime, fetched_size) = get_full_metadata_for_path_with_stat(&p, mtime_millis, ctime_millis, size, &db_conn_clone);
+                            (idx, p, meta, fetched_mtime, fetched_size)
                         }).collect::<Vec<_>>()
                     }).await.unwrap_or_default();
 
@@ -975,40 +966,39 @@ fn load_directory(
                     let mut all_files_lock = state.all_files.lock().unwrap();
                     let mut filtered_files_lock = state.filtered_files.lock().unwrap();
 
-                    for (path, full_meta, meta_mtime, meta_size) in metadata_results {
-                        if let Some(&idx) = all_index_map.get(&path) {
-                            if let Some(f_arc) = all_files_lock.get_mut(idx) {
-                                if f_arc.path == path {
-                                    let f = std::sync::Arc::make_mut(f_arc);
-                                    f.width = full_meta.width;
-                                    f.height = full_meta.height;
-                                    f.prompt = full_meta.prompt.clone();
-                                    f.negative_prompt = full_meta.negative_prompt.clone();
-                                    f.source = full_meta.source.clone();
-                                    f.search_text = extract_searchable_text(&full_meta.params);
-                                    f.unified_search_text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
-                                    if f.size == 0 { f.size = meta_size; }
-                                    if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
-                                    f.meta_loaded = true;
-                                }
+                    // Filtered files are updated efficiently using a sorted list of updates for O(N + M log N) without HashMap
+                    let mut chunk_updates: Vec<(String, std::sync::Arc<ImageFile>)> = Vec::with_capacity(metadata_results.len());
+
+                    for (idx, path, full_meta, meta_mtime, meta_size) in metadata_results {
+                        let mut new_arc: Option<std::sync::Arc<ImageFile>> = None;
+                        if let Some(f_arc) = all_files_lock.get_mut(idx) {
+                            if f_arc.path == path {
+                                let f = std::sync::Arc::make_mut(f_arc);
+                                f.width = full_meta.width;
+                                f.height = full_meta.height;
+                                f.prompt = full_meta.prompt.clone();
+                                f.negative_prompt = full_meta.negative_prompt.clone();
+                                f.source = full_meta.source.clone();
+                                f.search_text = extract_searchable_text(&full_meta.params);
+                                f.unified_search_text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
+                                if f.size == 0 { f.size = meta_size; }
+                                if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
+                                f.meta_loaded = true;
+                                new_arc = Some(f_arc.clone());
                             }
                         }
                         
-                        if let Some(&idx) = filtered_index_map.get(&path) {
-                            if let Some(f_arc) = filtered_files_lock.get_mut(idx) {
-                                if f_arc.path == path {
-                                    let f = std::sync::Arc::make_mut(f_arc);
-                                    f.width = full_meta.width;
-                                    f.height = full_meta.height;
-                                    f.prompt = full_meta.prompt.clone();
-                                    f.negative_prompt = full_meta.negative_prompt.clone();
-                                    f.source = full_meta.source.clone();
-                                    f.search_text = extract_searchable_text(&full_meta.params);
-                                    f.unified_search_text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
-                                    if f.size == 0 { f.size = meta_size; }
-                                    if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
-                                    f.meta_loaded = true;
-                                }
+                        if let Some(arc) = new_arc {
+                            chunk_updates.push((path, arc));
+                        }
+                    }
+
+                    chunk_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+                    if !chunk_updates.is_empty() {
+                        for f_arc in filtered_files_lock.iter_mut() {
+                            if let Ok(update_idx) = chunk_updates.binary_search_by(|(p, _)| p.cmp(&f_arc.path)) {
+                                *f_arc = chunk_updates[update_idx].1.clone();
                             }
                         }
                     }
@@ -1599,7 +1589,16 @@ fn get_full_metadata_for_path(
             (mt, ct, s)
         })
         .unwrap_or((0, 0, 0));
+    get_full_metadata_for_path_with_stat(file_path, mtime_millis, ctime_millis, file_size, db_conn)
+}
 
+fn get_full_metadata_for_path_with_stat(
+    file_path: &str,
+    mtime_millis: u64,
+    ctime_millis: u64,
+    file_size: u64,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) -> (FullMetadata, u64, u64) {
     let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime_millis).as_bytes());
     let hash_key = format!("{:016x}", digest);
 
@@ -2907,9 +2906,8 @@ async fn open_viewer(
     }
 
     let hash_str = if let Some(path) = &target_path {
-        let mut hasher = DefaultHasher::new();
-        path.hash(&mut hasher);
-        format!("{}", hasher.finish())
+        let digest = xxhash_rust::xxh3::xxh3_64(path.as_bytes());
+        format!("{}", digest)
     } else {
         "none".to_string()
     };
@@ -5335,17 +5333,14 @@ mod viewer_tests {
     #[test]
     fn test_viewer_existing_window_reuse_logic() {
         // 同じ画像パスのハッシュが一致する場合、同じラベル末尾（hash_str）を持つこと
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
 
         let path1 = "C:\\images\\test.png";
         let path2 = "C:\\images\\test.png";
         let path3 = "C:\\images\\other.png";
 
         let hash_of = |p: &str| -> String {
-            let mut hasher = DefaultHasher::new();
-            p.hash(&mut hasher);
-            format!("{}", hasher.finish())
+            let digest = xxhash_rust::xxh3::xxh3_64(p.as_bytes());
+            format!("{}", digest)
         };
 
         // 同じパスは同じハッシュ → 既存ウィンドウが再利用される
