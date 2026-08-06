@@ -759,15 +759,20 @@ function clampTranslate() {
     return;
   }
 
-  const img = viewerUI.elements.viewerImg;
-  const rect = img.getBoundingClientRect();
   const winW = window.innerWidth;
   const winH = window.innerHeight;
+  const { width: natW, height: natH } = getNaturalDimensions();
+  const comp = viewerState.compensateScale || 1.0;
+  
+  const scaledW = natW * viewerState.currentScale * comp;
+  const scaledH = natH * viewerState.currentScale * comp;
 
-  const baseLeft = rect.left - viewerState.currentTranslateX;
-  const baseTop = rect.top - viewerState.currentTranslateY;
-  const baseRight = rect.right - viewerState.currentTranslateX;
-  const baseBottom = rect.bottom - viewerState.currentTranslateY;
+  const baseLeft = (winW - scaledW) / 2;
+  const baseTop = (winH - scaledH) / 2;
+  const baseRight = baseLeft + scaledW;
+  const baseBottom = baseTop + scaledH;
+  
+  const rect = { width: scaledW, height: scaledH };
 
   // X軸の制約：縮小時は画面内に収まる範囲で自由に移動、拡大時ははみ出さない範囲で移動
   if (rect.width <= winW) {
@@ -929,7 +934,6 @@ window.addEventListener('mousemove', (e) => {
       viewerState.imageDragStartY = e.clientY;
 
       // 一旦DOMに仮反映してから境界をチェックし、最終結果を適用する
-      viewerUI.updateImageRendering();
       clampTranslate();
       viewerUI.updateImageRendering();
     }
@@ -1028,7 +1032,6 @@ window.addEventListener('wheel', (e) => {
     }
 
     // 一旦スケールを適用し、縮小時にはみ出しを補正して再適用
-    viewerUI.updateImageRendering();
     clampTranslate();
     viewerUI.updateImageRendering();
     updateFullscreenStyles(); // マージンの再計算
