@@ -1377,6 +1377,10 @@ function updateSortSelectDropdown() {
 }
 
 async function selectImage(index, event = null) {
+  window.getSelection().removeAllRanges();
+  if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+    document.activeElement.blur();
+  }
   if (event && event.ctrlKey) {
     // Ctrlキーで個別に選択/解除
     if (appState.selection.has(index)) {
@@ -4357,7 +4361,6 @@ window.addEventListener('keydown', async (e) => {
           };
 
           // 現在の表示モードに応じた要素にエフェクトを適用
-          const file = appState.files[idx];
           if (file && uiManager._domByPath) {
             const domItem = uiManager._domByPath.get(file.path);
             if (domItem) applyFlash(domItem);
