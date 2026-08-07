@@ -1,5 +1,15 @@
 import { vi } from 'vitest';
 
+global.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
+if (typeof window !== 'undefined') {
+  window.URL.createObjectURL = vi.fn();
+}
+
 // モック用のグローバルオブジェクト
 window.__TAURI__ = {
   invoke: vi.fn(),

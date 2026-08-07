@@ -1376,7 +1376,7 @@ function updateSortSelectDropdown() {
   }
 }
 
-async function selectImage(index, event = null) {
+export async function selectImage(index, event = null) {
   window.getSelection().removeAllRanges();
   if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
     document.activeElement.blur();
@@ -4088,7 +4088,7 @@ document.querySelectorAll('th').forEach(th => {
   });
 });
 
-window.addEventListener('keydown', async (e) => {
+export const globalKeydownHandler = async (e) => {
   if (e._isAggressiveFallback) return;
 
   const activeTagName = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
@@ -4443,7 +4443,8 @@ window.addEventListener('keydown', async (e) => {
       }
     }
   }
-});
+};
+window.addEventListener('keydown', globalKeydownHandler);
 
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
