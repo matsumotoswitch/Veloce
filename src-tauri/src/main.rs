@@ -480,7 +480,7 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         size,
         mtime,
         ctime,
-        has_thumbnail_cache: false,
+        has_thumbnail_cache: true,
         has_metadata_cache: false,
         width: item.width,
         height: item.height,
@@ -4633,7 +4633,7 @@ mod tests {
         
         let (query, params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
-        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
+        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, c.metadata FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
         assert!(query.contains(expected_query), "prompt の contains 条件は FTS5 IN サブクエリを使うべき。実際のクエリ: {}", query);
         // not_contains は NOT IN (SELECT ... MATCH ?) 形式
         assert!(
@@ -5203,6 +5203,7 @@ mod tests {
             ctime: 0,
             width: 0,
             height: 0,
+            metadata: None,
         };
 
         let img = super::create_image_file_from_smart_item(item);
@@ -5210,7 +5211,7 @@ mod tests {
         // パフォーマンス上の理由から、size や mtime が 0 の場合でも同期的にはファイルシステムから補完されないこと（遅延読み込みで対応）
         assert_eq!(img.size, 0);
         assert_eq!(img.mtime, 0);
-        assert!(!img.has_thumbnail_cache);
+        assert!(img.has_thumbnail_cache);
         assert!(!img.has_metadata_cache);
 
         let _ = std::fs::remove_file(file_path);
