@@ -437,6 +437,7 @@ pub struct SmartFolderItem {
     pub ctime: u64,
     pub width: u32,
     pub height: u32,
+    pub metadata: Option<String>,
 }
 
 fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
@@ -449,6 +450,29 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
     let mtime = item.mtime;
     let ctime = item.ctime;
 
+    let mut prompt = String::new();
+    let mut negative_prompt = String::new();
+    let mut source = String::new();
+    let mut meta_loaded = false;
+
+    if let Some(meta_str) = item.metadata {
+        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&meta_str) {
+            if let Some(p) = meta_json.get("prompt").and_then(|v| v.as_str()) {
+                prompt = p.to_string();
+            }
+            if let Some(n) = meta_json.get("negative_prompt").and_then(|v| v.as_str()) {
+                negative_prompt = n.to_string();
+            }
+            if let Some(s) = meta_json.get("source").and_then(|v| v.as_str()) {
+                source = s.to_string();
+            }
+        }
+        meta_loaded = true; // メタデータ取得済みとしてマーク
+    }
+
+    let search_text = format!("{} {} {}", item.path, prompt, negative_prompt).to_lowercase();
+    let unified_search_text = build_safe_fts_query(&search_text);
+
     ImageFile {
         name: file_name,
         ext: if ext.is_empty() { String::new() } else { format!(".{}", ext) },
@@ -460,12 +484,12 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         has_metadata_cache: false,
         width: item.width,
         height: item.height,
-        prompt: String::new(),
-        negative_prompt: String::new(),
-        source: String::new(),
-        meta_loaded: false,
-        search_text: String::new(),
-            unified_search_text: String::new(),
+        prompt,
+        negative_prompt,
+        source,
+        meta_loaded,
+        search_text,
+        unified_search_text,
     }
 }
 
@@ -496,7 +520,7 @@ fn build_smart_folder_query(
     let select_clause = if is_count {
         "SELECT COUNT(c.path)"
     } else {
-        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height"
+        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, c.metadata"
     };
 
     let mut is_inner_join = false;
@@ -708,6 +732,7 @@ fn get_smart_folder_paths(
                         ctime: row.get(3)?,
                         width: row.get(4)?,
                         height: row.get(5)?,
+                        metadata: row.get(6)?,
                     })
                 }) {
                     for r in rows {
@@ -730,28 +755,31 @@ fn get_smart_folder_paths(
             
             if !paths.is_empty() {
                 if let Ok(conn) = db_conn.get() {
-                    let placeholders = vec!["?"; paths.len()].join(",");
-                    let query = format!("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path IN ({})", placeholders);
-                    if let Ok(mut stmt) = conn.prepare(&query) {
-                        let params: Vec<&dyn rusqlite::ToSql> = paths.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
-                        if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-                            Ok(SmartFolderItem {
-                                path: row.get(0)?,
-                                size: row.get(1)?,
-                                mtime: row.get(2)?,
-                                ctime: row.get(3)?,
-                                width: row.get(4)?,
-                                height: row.get(5)?,
-                            })
-                        }) {
-                            target_paths = rows.flatten().collect();
+                    for chunk in paths.chunks(900) {
+                        let placeholders = vec!["?"; chunk.len()].join(",");
+                        let query = format!("SELECT path, size, mtime, ctime, width, height, metadata FROM cache WHERE path IN ({})", placeholders);
+                        if let Ok(mut stmt) = conn.prepare(&query) {
+                            let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+                            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                                Ok(SmartFolderItem {
+                                    path: row.get(0)?,
+                                    size: row.get(1)?,
+                                    mtime: row.get(2)?,
+                                    ctime: row.get(3)?,
+                                    width: row.get(4)?,
+                                    height: row.get(5)?,
+                                    metadata: row.get(6)?,
+                                })
+                            }) {
+                                target_paths.extend(rows.flatten());
+                            }
                         }
                     }
                 }
             }
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
-                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
+                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height, metadata FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
                 if let Ok(rows) = stmt.query_map([], |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
@@ -760,6 +788,7 @@ fn get_smart_folder_paths(
                         ctime: row.get(3)?,
                         width: row.get(4)?,
                         height: row.get(5)?,
+                        metadata: row.get(6)?,
                     })
                 }) {
                     for r in rows {
@@ -889,6 +918,14 @@ fn load_directory(
 
         // Rust側のAppStateに全ファイルを格納（Source of Truth）
         if let Some(state) = app_clone.try_state::<AppState>() {
+            // タブ切り替えによるキャンセルチェック
+            // 処理中に別のタブ（ディレクトリ）に切り替わっていた場合は、結果を破棄して終了する
+            if let Ok(dir_lock) = state.current_dir.lock() {
+                if *dir_lock != path_clone {
+                    return;
+                }
+            }
+
             let total_count = files.len();
             let sorted_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
 
@@ -939,7 +976,7 @@ fn load_directory(
             let total_paths = paths_to_process.len();
             let mut processed_count = 0;
 
-            for chunk in paths_to_process.chunks(200) {
+            for chunk in paths_to_process.chunks(50) {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
                     if let Ok(dir_lock) = state.current_dir.lock() {
                         if *dir_lock != path_for_bg {
@@ -2905,33 +2942,58 @@ async fn open_viewer(
         win_height = (win_height as f64 * scale) as u32;
     }
 
-    let hash_str = if let Some(path) = &target_path {
-        let digest = xxhash_rust::xxh3::xxh3_64(path.as_bytes());
-        format!("{}", digest)
-    } else {
-        "none".to_string()
-    };
-
-    // 既に同じ画像（ハッシュ値が一致）のビューアーが開いている場合は、フォーカスを当てるだけで終了
-    let existing_window = app.windows().into_values().find(|w| {
-        let l = w.label();
-        l.starts_with("viewer_") && l.ends_with(&format!("_{}", hash_str))
-    });
-
-    if let Some(window) = existing_window {
-        let _ = window.set_focus();
-        return Ok(());
-    }
-
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-
-    let label = format!("viewer_{:016}_{}", now_ms, hash_str);
+    let label = "viewer_main".to_string();
 
     if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
         viewer_paths.insert(label.clone(), current_paths);
+    }
+
+    // 単一ウィンドウ（Window Pool）の再利用ロジック
+    // 既存の viewer_main があれば、イベントを発火して前面化するだけで終了
+    if let Some(window) = app.get_window(&label) {
+        let _ = window.emit("viewer-load-image", current_index);
+        let _ = window.set_focus();
+        let _ = window.show();
+
+        #[cfg(target_os = "windows")]
+        {
+            let label_clone = label.clone();
+            let app_clone = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if let Some(win) = app_clone.get_window(&label_clone) {
+                    if let Ok(hwnd_ptr) = win.hwnd() {
+                        let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
+                        unsafe {
+                            use windows::Win32::UI::WindowsAndMessaging::{
+                                SetForegroundWindow, SetWindowPos, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE,
+                                SWP_NOSIZE,
+                            };
+                            let _ = SetWindowPos(
+                                hwnd,
+                                HWND_TOPMOST,
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE,
+                            );
+                            let _ = SetForegroundWindow(hwnd);
+                            let _ = SetWindowPos(
+                                hwnd,
+                                HWND_NOTOPMOST,
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE,
+                            );
+                        }
+                    }
+                }
+            });
+        }
+        return Ok(());
     }
 
     let data_dir = get_veloce_data_dir().unwrap_or_default();
@@ -4030,21 +4092,25 @@ fn main() {
             video_server_port: video_port,
         })
         .setup(move |app| {
-            // SQLite からレーティング情報をメモリにロード
-            let state = app.state::<AppState>();
-            if let Ok(conn) = state.db_conn.get() {
-                if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
-                    if let Ok(rows) = stmt.query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
-                    }) {
-                        if let Ok(mut lock) = state.ratings.lock() {
-                            for r in rows.flatten() {
-                                lock.insert(r.0, r.1);
+            // SQLite からレーティング情報を非同期でメモリにロード（起動高速化のため）
+            let app_handle = app.handle();
+            
+            std::thread::spawn(move || {
+                let state = app_handle.state::<AppState>();
+                if let Ok(conn) = state.db_conn.get() {
+                    if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
+                        if let Ok(rows) = stmt.query_map([], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
+                        }) {
+                            if let Ok(mut lock) = state.ratings.lock() {
+                                for r in rows.flatten() {
+                                    lock.insert(r.0, r.1);
+                                }
                             }
                         }
                     }
                 }
-            }
+            });
 
             let data_dir = get_veloce_data_dir().unwrap_or_default();
 

@@ -98,6 +98,17 @@ window.addEventListener('DOMContentLoaded', async () => {
       }).catch(() => {});
     }
 
+    if (window.__TAURI__) {
+      window.__TAURI__.event.listen('viewer-load-image', async (event) => {
+        const newIndex = event.payload;
+        viewerState.currentIndex = parseInt(newIndex, 10);
+        
+        // Single Window Mode (DOM Pool): clear cache and load new image
+        viewerState.preloadCache.clear();
+        await loadImage();
+      });
+    }
+
     const pathsJson = localStorage.getItem('viewerPaths');
     let initialTotal = 0;
     if (pathsJson) {

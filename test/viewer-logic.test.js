@@ -218,4 +218,26 @@ describe('Viewer Core Logic & Hotkeys', () => {
     expect(global.viewerRatings['C:/images/1.jpg']).toBe(3);
     expect(global.updateRatingDisplay).not.toHaveBeenCalled(); // 表示中ではないので呼ばれない
   });
+
+  it('should reload image and clear cache on viewer-load-image IPC event (Single Window Mode)', async () => {
+    global.clearPreloadCache = vi.fn(() => global.viewerState.preloadCache.clear());
+    global.loadImage = vi.fn();
+    
+    // Simulate viewer-load-image IPC listener setup
+    const onViewerLoadImage = async (event) => {
+      const newIndex = event.payload;
+      global.viewerState.currentIndex = parseInt(newIndex, 10);
+      global.viewerState.preloadCache.clear();
+      await global.loadImage();
+    };
+
+    global.viewerState.preloadCache.set(2, { img: {}, path: 'C:/images/3.jpg' });
+    expect(global.viewerState.preloadCache.size).toBe(1);
+
+    await onViewerLoadImage({ payload: 2 });
+
+    expect(global.viewerState.currentIndex).toBe(2);
+    expect(global.viewerState.preloadCache.size).toBe(0);
+    expect(global.loadImage).toHaveBeenCalled();
+  });
 });
