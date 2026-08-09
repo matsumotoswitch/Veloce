@@ -646,7 +646,7 @@ async function loadImage() {
     }
 
     if (!targetImg) {
-      if (targetSrc.toLowerCase().endsWith('.mp4')) {
+      if (targetSrc.toLowerCase().endsWith('.mp4') || targetSrc.toLowerCase().endsWith('.webm') || targetSrc.toLowerCase().endsWith('.avi') || targetSrc.toLowerCase().endsWith('.mkv')) {
         targetImg = document.createElement('video');
         targetImg.autoplay = true;
         targetImg.loop = true;
@@ -656,6 +656,7 @@ async function loadImage() {
         targetImg.decoding = 'async';
       }
       targetImg.src = targetSrc;
+      viewerState.preloadCache.set(viewerState.currentIndex, { img: targetImg, path: viewerState.currentImagePath });
     }
 
     try {
@@ -699,7 +700,7 @@ async function preloadAdjacentImages() {
       if (path) {
         const url = getStreamUrl(path, window.veloceAPI.convertFileSrc(path));
         let img;
-        if (path.toLowerCase().endsWith('.mp4')) {
+        if (path.toLowerCase().endsWith('.mp4') || path.toLowerCase().endsWith('.webm') || path.toLowerCase().endsWith('.avi') || path.toLowerCase().endsWith('.mkv')) {
           img = document.createElement('video');
           img.autoplay = true;
           img.loop = true;
@@ -710,6 +711,10 @@ async function preloadAdjacentImages() {
         }
         img.src = url;
         viewerState.preloadCache.set(idx, { img: img, path: path });
+
+        if (img.tagName === 'IMG') {
+          img.decode().catch(e => { /* ignore */ });
+        }
       }
     }
   }
