@@ -3595,7 +3595,8 @@ async fn audit_cache(
             }
         }
         
-        let _ = conn.execute("VACUUM", []); // Optional optimization after deletion
+        let _ = conn.execute("VACUUM", []);
+        let _ = conn.execute("ANALYZE", []);
     });
     
     Ok(())
@@ -5514,5 +5515,21 @@ mod viewer_tests {
         let count_files = target_entries.iter().filter(|e| e.path().is_file()).count();
         assert_eq!(count_files, 2);
     }
-}
 
+    #[test]
+    fn test_audit_cache_optimizations() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, size INTEGER)", []).unwrap();
+        
+        for i in 0..10 {
+            conn.execute("INSERT INTO cache (hash_key, size) VALUES (?1, 100)", [format!("hash_{}", i)]).unwrap();
+        }
+
+        let vacuum_res = conn.execute("VACUUM", []);
+        assert!(vacuum_res.is_ok(), "VACUUM failed");
+
+        let analyze_res = conn.execute("ANALYZE", []);
+        assert!(analyze_res.is_ok(), "ANALYZE failed");
+    }
+}
