@@ -4482,7 +4482,6 @@ dependencies = [
  "tokio",
  "trash",
  "urlencoding",
- "walkdir",
  "windows 0.52.0",
  "xxhash-rust",
 ]

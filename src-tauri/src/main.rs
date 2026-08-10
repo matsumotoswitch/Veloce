@@ -2832,7 +2832,8 @@ async fn precache_directory_recursively(
 ) -> Result<(), String> {
     let db_conn = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
-        let entries: Vec<_> = walkdir::WalkDir::new(&target_path)
+        let entries: Vec<_> = jwalk::WalkDir::new(&target_path)
+            .skip_hidden(false)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| {
@@ -3153,12 +3154,13 @@ fn collect_cache_paths_to_remove(target_path: &std::path::Path) -> Vec<std::path
         if target_path.is_file() {
             collect_single_file_cache(target_path, &mut cache_dir, &mut cache_paths);
         } else if target_path.is_dir() {
-            for entry in walkdir::WalkDir::new(target_path)
+            for entry in jwalk::WalkDir::new(target_path)
+                .skip_hidden(false)
                 .into_iter()
                 .filter_map(|e| e.ok())
             {
                 if entry.path().is_file() {
-                    collect_single_file_cache(entry.path(), &mut cache_dir, &mut cache_paths);
+                    collect_single_file_cache(&entry.path(), &mut cache_dir, &mut cache_paths);
                 }
             }
         }
