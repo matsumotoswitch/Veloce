@@ -5789,20 +5789,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }, true);
 
-  document.body.addEventListener('mousemove', (e) => {
-    const tagEl = e.target.closest('.diff-tag');
-    if (tagEl) {
-      if (typeof uiManager !== 'undefined' && uiManager) uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
-    }
-  }, true);
-
-  document.body.addEventListener('mouseleave', (e) => {
-    const tagEl = e.target.closest('.diff-tag');
-    if (tagEl) {
-      if (typeof uiManager !== 'undefined' && uiManager) uiManager.hideCustomTooltip();
-    }
-  }, true);
-
   document.addEventListener('click', () => {
     document.querySelectorAll('.custom-select.open').forEach(el => {
       el.classList.remove('open');
