@@ -562,53 +562,58 @@ function swapImageElement(newImg, sequenceId) {
     document.body.appendChild(newImg);
   }
 
-  if (currentViewerImg && currentViewerImg.parentNode) {
-    if (currentViewerImg.tagName === 'VIDEO') {
-      currentViewerImg.pause();
-    }
-    currentViewerImg.remove();
+  if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
+    window.veloceAPI.showWindow();
+    isViewerWindowShown = true;
   }
-  
+
+  const oldImg = currentViewerImg;
   currentViewerImg = newImg;
 
-  const onImageReady = async () => {
-    // 古い画像ロード要求の完了イベントであればスキップする
-    if (sequenceId !== imageLoadSequence) return;
+  const cleanupOldImg = () => {
+    if (oldImg && oldImg.parentNode) {
+      if (oldImg.tagName === 'VIDEO') {
+        oldImg.pause();
+        oldImg.src = '';
+        oldImg.load();
+      }
+      oldImg.remove();
+    }
+  };
 
+  const onImageReady = async () => {
+    if (sequenceId !== imageLoadSequence) return;
     setZoomState(viewerState.isZoomed);
     viewerUI.updateImageRendering();
     resizeWindowToFitImage();
-
-    try {
-      // Rust側へウィンドウの表示命令を出す（毎回呼ぶとちらつくため初回のみ）
-      if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
-        await window.veloceAPI.showWindow();
-        isViewerWindowShown = true;
-      }
-    } catch (e) {}
   };
 
   if (newImg.tagName === 'VIDEO') {
-    if (newImg.readyState >= 1) { // HAVE_METADATA
+    if (newImg.readyState >= 1) {
+      cleanupOldImg();
       onImageReady();
       newImg.play().catch(e => console.warn('Video play failed:', e));
     } else {
       newImg.addEventListener('loadedmetadata', () => {
+        cleanupOldImg();
         onImageReady();
         newImg.play().catch(e => console.warn('Video play failed:', e));
       }, { once: true });
-      newImg.addEventListener('error', onImageReady, { once: true });
+      newImg.addEventListener('error', () => {
+        cleanupOldImg();
+        onImageReady();
+      }, { once: true });
     }
   } else {
-    if (newImg.complete) {
+    newImg.decode().then(() => {
+      cleanupOldImg();
       onImageReady();
-    } else {
-      newImg.addEventListener('load', onImageReady, { once: true });
-      newImg.addEventListener('error', onImageReady, { once: true });
-    }
+    }).catch((e) => {
+      cleanupOldImg();
+      onImageReady();
+    });
   }
 
-  // 動画以外の画像に切り替わった場合はシークバーを隠す
   if (newImg.tagName !== 'VIDEO' && typeof videoSeekBarContainer !== 'undefined' && videoSeekBarContainer) {
     videoSeekBarContainer.style.display = 'none';
     if (typeof videoSeekBarUpdateInterval !== 'undefined' && videoSeekBarUpdateInterval) {
@@ -658,21 +663,6 @@ async function loadImage() {
       targetImg.src = targetSrc;
       viewerState.preloadCache.set(viewerState.currentIndex, { img: targetImg, path: viewerState.currentImagePath });
     }
-
-    try {
-      if (targetImg.tagName === 'IMG') {
-        await targetImg.decode();
-      } else if (targetImg.tagName === 'VIDEO' && targetImg.readyState === 0) {
-        await new Promise(res => {
-          targetImg.addEventListener('loadedmetadata', res, { once: true });
-          targetImg.addEventListener('error', res, { once: true });
-        });
-      }
-    } catch (err) {
-      console.warn("Background decode failed:", err);
-    }
-
-    if (currentSeq !== imageLoadSequence) return;
 
     swapImageElement(targetImg, currentSeq);
     preloadAdjacentImages();

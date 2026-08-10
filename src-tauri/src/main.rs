@@ -851,9 +851,10 @@ fn load_directory(
                 
                 smart_items.into_par_iter().map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i))).collect()
             } else {
-                let target_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&path_for_spawn)
+                let target_entries: Vec<_> = jwalk::WalkDir::new(&path_for_spawn)
+                    .max_depth(1)
+                    .skip_hidden(false)
                     .into_iter()
-                    .flat_map(|d| d)
                     .filter_map(|e| e.ok())
                     .collect();
 
@@ -5488,4 +5489,28 @@ mod viewer_tests {
         assert_eq!(filtered[0].name, "a.jpg");
         assert_eq!(filtered[1].name, "b.jpg");
     }
+
+    #[test]
+    fn test_jwalk_directory_reading() {
+        use std::fs;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file1 = temp_dir.path().join("a.jpg");
+        let file2 = temp_dir.path().join("b.png");
+        fs::write(&file1, "dummy").unwrap();
+        fs::write(&file2, "dummy").unwrap();
+
+        let target_entries: Vec<_> = jwalk::WalkDir::new(temp_dir.path())
+            .max_depth(1)
+            .skip_hidden(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .collect();
+
+        // One for the directory itself, two for the files
+        assert_eq!(target_entries.len(), 3);
+        
+        let count_files = target_entries.iter().filter(|e| e.path().is_file()).count();
+        assert_eq!(count_files, 2);
+    }
 }
+
