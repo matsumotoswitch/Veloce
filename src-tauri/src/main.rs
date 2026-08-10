@@ -3909,6 +3909,12 @@ fn start_local_video_server() -> u16 {
 }
 
 fn main() {
+    // Attach to parent console if running from command line (for debug logs)
+    #[cfg(windows)]
+    unsafe {
+        let _ = windows::Win32::System::Console::AttachConsole(windows::Win32::System::Console::ATTACH_PARENT_PROCESS);
+    }
+
     let video_port = start_local_video_server();
 
     let mut context = tauri::generate_context!();

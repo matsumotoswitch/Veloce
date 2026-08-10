@@ -55,7 +55,7 @@ jwalk = "0.9.0"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.52"
-features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"]
+features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Console"]
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
