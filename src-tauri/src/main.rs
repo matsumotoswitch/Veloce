@@ -844,6 +844,8 @@ fn load_directory(
         let path_for_spawn = path_clone.clone();
         // 非同期ランタイムのワーカースレッドをブロックしないよう、spawn_blockingでラップする
         let files_result = tokio::task::spawn_blocking(move || {
+            let t_load_start = std::time::Instant::now();
+            println!("[Veloce: INFO] load_directory task started for: {}", path_for_spawn);
             use rayon::prelude::*;
 
             let mut files: Vec<std::sync::Arc<ImageFile>> = if path_for_spawn.starts_with("smart://") {
@@ -908,6 +910,7 @@ fn load_directory(
                 files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
             }
             
+            println!("[Veloce: PERF] load_directory for {} completed in {}ms (total files: {})", path_for_spawn, t_load_start.elapsed().as_millis(), files.len());
             files
 
         }).await;
@@ -1423,12 +1426,15 @@ async fn get_items(
     offset: usize,
     limit: usize,
 ) -> Result<Vec<std::sync::Arc<ImageFile>>, String> {
+    let t_start = std::time::Instant::now();
     let lock = state.filtered_files.lock().unwrap();
     let end = std::cmp::min(offset + limit, lock.len());
     if offset >= lock.len() {
         return Ok(Vec::new());
     }
-    Ok(lock[offset..end].to_vec())
+    let res = lock[offset..end].to_vec();
+    println!("[Veloce: PERF] get_items (offset={}, limit={}) took {}ms", offset, limit, t_start.elapsed().as_millis());
+    Ok(res)
 }
 
 /// selectImage用: 単一のImageFileを取得
@@ -3482,6 +3488,8 @@ async fn audit_cache(
 ) -> Result<(), String> {
     let db_conn = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
+        let t_audit_start = std::time::Instant::now();
+        println!("[Veloce: INFO] audit_cache started");
         let conn = match db_conn.get() {
             Ok(c) => c,
             Err(_) => return,
@@ -3597,6 +3605,7 @@ async fn audit_cache(
         
         let _ = conn.execute("VACUUM", []);
         let _ = conn.execute("ANALYZE", []);
+        println!("[Veloce: PERF] audit_cache completed in {}ms", t_audit_start.elapsed().as_millis());
     });
     
     Ok(())
