@@ -3506,6 +3506,8 @@ where
     let mut deleted = 0;
     let mut fixed = 0;
     let mut seen_paths = std::collections::HashSet::new();
+    let mut missing_thumbnails = Vec::new();
+    let total_records = records.len();
     
     let tx = match conn.transaction() {
         Ok(t) => t,
@@ -3597,24 +3599,7 @@ where
         }
 
         if !has_thumbnail {
-            let lower_path = path_str.to_lowercase();
-            let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-                generate_video_thumbnail_sync(&path_str)
-            } else {
-                generate_image_thumbnail_sync(&path_str)
-            };
-            
-            if let Some(bytes) = generated {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                if let Err(e) = tx.execute(
-                    "UPDATE cache SET thumbnail=?, last_accessed=? WHERE hash_key=?",
-                    rusqlite::params![&bytes, now, &hash_key]
-                ) {
-                    println!("[Veloce: ERROR] update thumbnail failed: {}", e);
-                } else if !needs_update {
-                    fixed += 1;
-                }
-            }
+            missing_thumbnails.push((hash_key.clone(), path_str.clone(), needs_update));
         }
     }
     
@@ -3622,7 +3607,35 @@ where
         println!("[Veloce: ERROR] audit_cache: failed to commit transaction: {}", e);
         return Err(e.to_string());
     } else {
-        println!("[Veloce: INFO] audit_cache: committed changes (deleted: {}, fixed: {})", deleted, fixed);
+        println!("[Veloce: INFO] audit_cache: committed fast changes (deleted: {}, fixed: {})", deleted, fixed);
+    }
+    
+    // サムネイル生成は重い処理（CPUバウンド・デコード・エンコード）のため、
+    // DBのWrite Lock（トランザクション）を解放した後に1件ずつ実行し、UIのブロックを防ぐ
+    for (i, (hash_key, path_str, needs_update)) in missing_thumbnails.into_iter().enumerate() {
+        if i % 10 == 0 {
+            // サムネイル生成中でも定期的に進捗を報告
+            on_progress(total_records, total_records, deleted, fixed);
+        }
+        
+        let lower_path = path_str.to_lowercase();
+        let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+            generate_video_thumbnail_sync(&path_str)
+        } else {
+            generate_image_thumbnail_sync(&path_str)
+        };
+        
+        if let Some(bytes) = generated {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            if let Err(e) = conn.execute(
+                "UPDATE cache SET thumbnail=?, last_accessed=? WHERE hash_key=?",
+                rusqlite::params![&bytes, now, &hash_key]
+            ) {
+                println!("[Veloce: ERROR] update thumbnail failed: {}", e);
+            } else if !needs_update {
+                fixed += 1;
+            }
+        }
     }
     
     Ok((deleted, fixed))
