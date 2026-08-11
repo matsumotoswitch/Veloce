@@ -3461,31 +3461,26 @@ fn open_cache_folder() -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-async fn audit_cache(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let db_conn = state.db_conn.clone();
-    tokio::task::spawn_blocking(move || {
-        let t_audit_start = std::time::Instant::now();
-        println!("[Veloce: INFO] audit_cache started");
-        let conn = match db_conn.get() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        
-        let total: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
-        if total == 0 {
-            return;
-        }
+fn perform_audit_cache<F>(conn: &mut rusqlite::Connection, mut on_progress: F) -> Result<(usize, usize), String>
+where
+    F: FnMut(usize, usize, usize, usize)
+{
+    let total: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
+    if total == 0 {
+        println!("[Veloce: INFO] audit_cache: cache is empty");
+        return Ok((0, 0));
+    }
 
-        let mut stmt = match conn.prepare("SELECT hash_key, path, width, height, size, mtime, ctime, (thumbnail IS NOT NULL) FROM cache") {
+    let records = {
+        let mut stmt = match conn.prepare("SELECT hash_key, path, width, height, size, mtime, ctime, (thumbnail IS NOT NULL) FROM cache ORDER BY (thumbnail IS NOT NULL) DESC, last_accessed DESC") {
             Ok(s) => s,
-            Err(_) => return,
+            Err(e) => {
+                println!("[Veloce: ERROR] audit_cache: prepare failed: {}", e);
+                return Err(e.to_string());
+            }
         };
         
-        let records = match stmt.query_map([], |row| {
+        let res = match stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0).unwrap_or_default(),
                 row.get::<_, Option<String>>(1).unwrap_or(None),
@@ -3498,90 +3493,167 @@ async fn audit_cache(
             ))
         }) {
             Ok(m) => m.filter_map(|r| r.ok()).collect::<Vec<_>>(),
-            Err(_) => return,
-        };
-
-        let mut deleted = 0;
-        let mut fixed = 0;
-        
-        for (i, (hash_key, path_opt, width_opt, height_opt, size_opt, mtime_opt, ctime_opt, has_thumbnail)) in records.into_iter().enumerate() {
-            if i % 100 == 0 || i == total - 1 {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-                let _ = app.emit_all("audit-progress", AuditProgress {
-                    current: i + 1,
-                    total,
-                    deleted,
-                    fixed,
-                });
+            Err(e) => {
+                println!("[Veloce: ERROR] audit_cache: query_map failed: {}", e);
+                return Err(e.to_string());
             }
-            
-            let path_str = match path_opt {
-                Some(p) => p,
-                None => {
-                    let _ = conn.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]);
+        };
+        res
+    };
+
+    println!("[Veloce: INFO] audit_cache: processing {} records", records.len());
+
+    let mut deleted = 0;
+    let mut fixed = 0;
+    let mut seen_paths = std::collections::HashSet::new();
+    
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => {
+            println!("[Veloce: ERROR] audit_cache: failed to start transaction: {}", e);
+            return Err(e.to_string());
+        }
+    };
+
+    for (i, (hash_key, path_opt, width_opt, height_opt, size_opt, mtime_opt, ctime_opt, has_thumbnail)) in records.into_iter().enumerate() {
+        if i % 100 == 0 || i == total - 1 {
+            on_progress(i + 1, total, deleted, fixed);
+        }
+        
+        let path_str = match path_opt {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => {
+                if let Err(e) = tx.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]) {
+                    println!("[Veloce: ERROR] delete empty path failed: {}", e);
+                } else {
                     deleted += 1;
-                    continue;
                 }
-            };
-            
-            let path = std::path::Path::new(&path_str);
-            if !path.exists() {
-                let _ = conn.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]);
-                deleted += 1;
                 continue;
             }
+        };
+        
+        // より堅牢な正規化処理（/ を \ に変換、末尾の \ を削除、UNCパスプレフィックスの除去、小文字化）
+        let mut normalized = path_str.replace("/", "\\");
+        if normalized.starts_with("\\\\?\\") {
+            normalized = normalized[4..].to_string();
+        }
+        normalized = normalized.trim_end_matches('\\').to_lowercase();
 
-            let mut needs_update = false;
-            let mut new_width = width_opt.unwrap_or(0);
-            let mut new_height = height_opt.unwrap_or(0);
-            let mut new_size = size_opt.unwrap_or(0);
-            let mut new_mtime = mtime_opt.unwrap_or(0);
-            let mut new_ctime = ctime_opt.unwrap_or(0);
-
-            if new_size == 0 || new_mtime == 0 {
-                if let Ok(metadata) = std::fs::metadata(&path) {
-                    new_size = metadata.len();
-                    new_mtime = metadata.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                    new_ctime = metadata.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                    needs_update = true;
-                }
+        if !seen_paths.insert(normalized) {
+            // すでにこのパスのより良い条件（サムネイルあり等）のレコードを見たため、重複として削除
+            if let Err(e) = tx.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]) {
+                println!("[Veloce: ERROR] delete duplicate path failed: {}", e);
+            } else {
+                println!("[Veloce: INFO] Deleted duplicate cache for file: {}", path_str);
+                deleted += 1;
             }
+            continue;
+        }
 
-            if new_width == 0 || new_height == 0 {
-                if let Ok(dim) = image::image_dimensions(&path) {
-                    new_width = dim.0;
-                    new_height = dim.1;
-                    needs_update = true;
-                }
+        let path = std::path::Path::new(&path_str);
+        if !path.exists() {
+            if let Err(e) = tx.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]) {
+                println!("[Veloce: ERROR] delete non-existent path failed: {}", e);
+            } else {
+                println!("[Veloce: INFO] Deleted cache for non-existent file: {}", path_str);
+                deleted += 1;
             }
+            continue;
+        }
 
-            if needs_update {
-                let _ = conn.execute(
-                    "UPDATE cache SET width=?, height=?, size=?, mtime=?, ctime=? WHERE hash_key=?",
-                    rusqlite::params![new_width, new_height, new_size, new_mtime, new_ctime, hash_key]
-                );
+        let mut needs_update = false;
+        let mut new_width = width_opt.unwrap_or(0);
+        let mut new_height = height_opt.unwrap_or(0);
+        let mut new_size = size_opt.unwrap_or(0);
+        let mut new_mtime = mtime_opt.unwrap_or(0);
+        let mut new_ctime = ctime_opt.unwrap_or(0);
+
+        if new_size == 0 || new_mtime == 0 {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                new_size = metadata.len();
+                new_mtime = metadata.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                new_ctime = metadata.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                needs_update = true;
+            }
+        }
+
+        if new_width == 0 || new_height == 0 {
+            if let Ok(dim) = image::image_dimensions(&path) {
+                new_width = dim.0;
+                new_height = dim.1;
+                needs_update = true;
+            }
+        }
+
+        if needs_update {
+            if let Err(e) = tx.execute(
+                "UPDATE cache SET width=?, height=?, size=?, mtime=?, ctime=? WHERE hash_key=?",
+                rusqlite::params![new_width, new_height, new_size, new_mtime, new_ctime, hash_key]
+            ) {
+                println!("[Veloce: ERROR] update properties failed: {}", e);
+            } else {
                 fixed += 1;
             }
+        }
 
-            // Thumbnail recreation for existing files without thumbnail
-            if !has_thumbnail {
-                let lower_path = path_str.to_lowercase();
-                let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-                    generate_video_thumbnail_sync(&path_str)
-                } else {
-                    generate_image_thumbnail_sync(&path_str)
-                };
-                
-                if let Some(bytes) = generated {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                    let _ = conn.execute(
-                        "UPDATE cache SET thumbnail=?, last_accessed=? WHERE hash_key=?",
-                        rusqlite::params![&bytes, now, &hash_key]
-                    );
-                    if !needs_update { fixed += 1; }
+        if !has_thumbnail {
+            let lower_path = path_str.to_lowercase();
+            let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+                generate_video_thumbnail_sync(&path_str)
+            } else {
+                generate_image_thumbnail_sync(&path_str)
+            };
+            
+            if let Some(bytes) = generated {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                if let Err(e) = tx.execute(
+                    "UPDATE cache SET thumbnail=?, last_accessed=? WHERE hash_key=?",
+                    rusqlite::params![&bytes, now, &hash_key]
+                ) {
+                    println!("[Veloce: ERROR] update thumbnail failed: {}", e);
+                } else if !needs_update {
+                    fixed += 1;
                 }
             }
         }
+    }
+    
+    if let Err(e) = tx.commit() {
+        println!("[Veloce: ERROR] audit_cache: failed to commit transaction: {}", e);
+        return Err(e.to_string());
+    } else {
+        println!("[Veloce: INFO] audit_cache: committed changes (deleted: {}, fixed: {})", deleted, fixed);
+    }
+    
+    Ok((deleted, fixed))
+}
+
+#[tauri::command]
+async fn audit_cache(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db_conn = state.db_conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let t_audit_start = std::time::Instant::now();
+        println!("[Veloce: INFO] audit_cache started");
+        
+        let mut conn = match db_conn.get() {
+            Ok(c) => c,
+            Err(e) => {
+                println!("[Veloce: ERROR] audit_cache: failed to get db conn: {}", e);
+                return;
+            }
+        };
+        
+        let _ = perform_audit_cache(&mut conn, |current, total, deleted, fixed| {
+            let _ = app.emit_all("audit-progress", AuditProgress {
+                current,
+                total,
+                deleted,
+                fixed,
+            });
+        });
         
         let _ = conn.execute("VACUUM", []);
         let _ = conn.execute("ANALYZE", []);
@@ -5544,5 +5616,76 @@ mod viewer_tests {
         
         let hash1_again = get_viewer_hash_str(Some(&path1));
         assert_eq!(hash1, hash1_again);
+    }
+
+    #[test]
+    fn test_perform_audit_cache_deletes_non_existent_and_updates_empty() {
+        use crate::perform_audit_cache;
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER
+            )", []
+        ).unwrap();
+
+        // 存在しないファイルのダミーパス
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, thumbnail) VALUES (?1, ?2, 0, 0, 0, NULL)",
+            ["hash_missing", "C:\\non_existent_fake_file_999.png"]
+        ).unwrap();
+        
+        // 存在するファイル (例: Cargo.toml)
+        let cargo_toml_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let cargo_toml_str = cargo_toml_path.to_string_lossy().to_string();
+        
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, thumbnail) VALUES (?1, ?2, 0, 0, 0, NULL)",
+            ["hash_exists", &cargo_toml_str]
+        ).unwrap();
+
+        // 存在するファイルの重複キャッシュ (同じパスだが大文字小文字違いなど、異なるハッシュとして登録されてしまった場合)
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, thumbnail) VALUES (?1, ?2, 0, 0, 0, NULL)",
+            ["hash_duplicate", &cargo_toml_str.to_uppercase()]
+        ).unwrap();
+        
+        // さらにスラッシュ違い・UNCプレフィックス違いの重複キャッシュ
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, thumbnail) VALUES (?1, ?2, 0, 0, 0, NULL)",
+            ["hash_duplicate_2", &format!("\\\\?\\{}", cargo_toml_str.replace("\\", "/"))]
+        ).unwrap();
+        
+        let (deleted, fixed) = perform_audit_cache(&mut conn, |_, _, _, _| {}).unwrap();
+        
+        assert_eq!(deleted, 3, "Should delete the non-existent file and the 2 duplicates");
+        
+        // hash_missing should be removed
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_missing'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+
+        // hash_duplicate should be removed
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_duplicate'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0, "Duplicate should be removed");
+
+        // hash_duplicate_2 should be removed
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_duplicate_2'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0, "Duplicate 2 should be removed");
+        
+        // hash_exists should be updated with correct size/mtime (since width/height will fail on Cargo.toml as it's not an image)
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_exists'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 1);
+        
+        let size: i64 = conn.query_row("SELECT size FROM cache WHERE hash_key = 'hash_exists'", [], |row| row.get(0)).unwrap();
+        assert!(size > 0, "Size should be updated to > 0");
     }
 }
