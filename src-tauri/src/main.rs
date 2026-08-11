@@ -2910,6 +2910,16 @@ fn get_viewer_image(
     None
 }
 
+
+fn get_viewer_hash_str(target_path: Option<&String>) -> String {
+    if let Some(path) = target_path {
+        let digest = xxhash_rust::xxh3::xxh3_64(path.as_bytes());
+        format!("{}", digest)
+    } else {
+        "none".to_string()
+    }
+}
+
 #[tauri::command]
 async fn open_viewer(
     app: tauri::AppHandle,
@@ -2950,58 +2960,28 @@ async fn open_viewer(
         win_height = (win_height as f64 * scale) as u32;
     }
 
-    let label = "viewer_main".to_string();
+    let hash_str = get_viewer_hash_str(target_path.as_ref());
+
+    // 既に同じ画像（ハッシュ値が一致）のビューアーが開いている場合は、フォーカスを当てるだけで終了
+    let existing_window = app.windows().into_values().find(|w| {
+        let l = w.label();
+        l.starts_with("viewer_") && l.ends_with(&format!("_{}", hash_str))
+    });
+
+    if let Some(window) = existing_window {
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let label = format!("viewer_{:016}_{}", now_ms, hash_str);
 
     if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
         viewer_paths.insert(label.clone(), current_paths);
-    }
-
-    // 単一ウィンドウ（Window Pool）の再利用ロジック
-    // 既存の viewer_main があれば、イベントを発火して前面化するだけで終了
-    if let Some(window) = app.get_window(&label) {
-        let _ = window.emit("viewer-load-image", current_index);
-        let _ = window.set_focus();
-        let _ = window.show();
-
-        #[cfg(target_os = "windows")]
-        {
-            let label_clone = label.clone();
-            let app_clone = app.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                if let Some(win) = app_clone.get_window(&label_clone) {
-                    if let Ok(hwnd_ptr) = win.hwnd() {
-                        let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
-                        unsafe {
-                            use windows::Win32::UI::WindowsAndMessaging::{
-                                SetForegroundWindow, SetWindowPos, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE,
-                                SWP_NOSIZE,
-                            };
-                            let _ = SetWindowPos(
-                                hwnd,
-                                HWND_TOPMOST,
-                                0,
-                                0,
-                                0,
-                                0,
-                                SWP_NOMOVE | SWP_NOSIZE,
-                            );
-                            let _ = SetForegroundWindow(hwnd);
-                            let _ = SetWindowPos(
-                                hwnd,
-                                HWND_NOTOPMOST,
-                                0,
-                                0,
-                                0,
-                                0,
-                                SWP_NOMOVE | SWP_NOSIZE,
-                            );
-                        }
-                    }
-                }
-            });
-        }
-        return Ok(());
     }
 
     let data_dir = get_veloce_data_dir().unwrap_or_default();
@@ -5546,5 +5526,23 @@ mod viewer_tests {
 
         let analyze_res = conn.execute("ANALYZE", []);
         assert!(analyze_res.is_ok(), "ANALYZE failed");
+    }
+    #[test]
+    fn test_viewer_hash_generation() {
+        use super::get_viewer_hash_str;
+        let none_res = get_viewer_hash_str(None);
+        assert_eq!(none_res, "none");
+
+        let path1 = "C:\\images\\test1.png".to_string();
+        let path2 = "C:\\images\\test2.png".to_string();
+        
+        let hash1 = get_viewer_hash_str(Some(&path1));
+        let hash2 = get_viewer_hash_str(Some(&path2));
+        
+        assert_ne!(hash1, hash2);
+        assert_ne!(hash1, "none");
+        
+        let hash1_again = get_viewer_hash_str(Some(&path1));
+        assert_eq!(hash1, hash1_again);
     }
 }
