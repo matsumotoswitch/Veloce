@@ -210,7 +210,7 @@ appState.activeTabIndex = -1;
 
 
 // サムネイル生成の並列数（v1.7.0と同等の8に戻す）
-const THUMBNAIL_BATCH_SIZE = 4;
+const THUMBNAIL_BATCH_SIZE = 8;
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -1030,10 +1030,11 @@ class ThumbnailQueueManager {
         evictThumbnailCache();
         this.updateDOM(filePath, base64Url);
 
-        // バックグラウンドでRustに保存後、BlobURLなどがあれば差し替え
-        window.veloceAPI.saveThumbnail(filePath, base64Url).then(async () => {
-          const lightUrl = await window.veloceAPI.getThumbnail(filePath);
-          if (lightUrl && appState.thumbnailUrls.get(filePath) === base64Url) {
+        // バックグラウンドでRustに保存。saveThumbnailが返すURLをそのまま使い、
+        // getThumbnailの2回目のIPC呼び出しを排除 (BN-3修正)
+        window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
+          const lightUrl = savedUrl || base64Url;
+          if (lightUrl && lightUrl !== base64Url && appState.thumbnailUrls.get(filePath) === base64Url) {
             appState.thumbnailUrls.set(filePath, lightUrl);
             evictThumbnailCache();
             this.updateDOM(filePath, lightUrl);

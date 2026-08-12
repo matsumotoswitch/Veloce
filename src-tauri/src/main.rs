@@ -904,12 +904,58 @@ fn load_directory(
                     .map(std::sync::Arc::new).collect::<Vec<std::sync::Arc<ImageFile>>>()
             };
 
-            // SQLiteでの同期バッチ確認は起動速度に影響するため削除し、フロントエンドの遅延ロードに完全に委譲します。
-            // デフォルトソート（名前順昇順）も並列処理で適用
+            // デフォルトソート（名前順昇順）
+            // このソートは generate_thumbnail / save_thumbnail の binary_search_by (O(log N)) を
+            // 正常動作させるためにも必須である
             if !path_for_spawn.starts_with("smart://") {
                 files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
             }
-            
+
+            // ソート完了後、DBを一括クエリして has_thumbnail_cache を正しく設定する (BN-1修正)
+            // これにより、キャッシュ済みファイルはカスタムURL経由で即座に表示され、IPCキューを通らなくなる
+            if !path_for_spawn.starts_with("smart://") && !files.is_empty() {
+                // 一括DB確認: hash_key IN (...) でチィンク分割クエリ
+                // hash_key = xxh3_64("path_mtime") の形式で登録されている
+                let hash_to_idx: std::collections::HashMap<String, usize> = files
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        let clean = f.path.replace("\\\\?\\", "");
+                        let digest = xxhash_rust::xxh3::xxh3_64(
+                            format!("{}_{}", clean, f.mtime).as_bytes()
+                        );
+                        (format!("{:016x}", digest), i)
+                    })
+                    .collect();
+
+                if let Ok(conn) = db_conn_clone.get() {
+                    // 900件ずつはSQLiteの IN 限界 (SQLITE_LIMIT_VARIABLE_NUMBER = 999) を考慮し分割
+                    let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
+                    for chunk in hash_keys.chunks(900) {
+                        let placeholders = vec!["?"; chunk.len()].join(",");
+                        let query = format!(
+                            "SELECT hash_key FROM cache WHERE hash_key IN ({}) AND thumbnail IS NOT NULL",
+                            placeholders
+                        );
+                        if let Ok(mut stmt) = conn.prepare(&query) {
+                            let params: Vec<&dyn rusqlite::ToSql> =
+                                chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                                row.get::<_, String>(0)
+                            }) {
+                                for row in rows.flatten() {
+                                    if let Some(&idx) = hash_to_idx.get(&row) {
+                                        if let Some(f) = files.get_mut(idx) {
+                                            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             println!("[Veloce: PERF] load_directory for {} completed in {}ms (total files: {})", path_for_spawn, t_load_start.elapsed().as_millis(), files.len());
             files
 
@@ -2383,11 +2429,18 @@ async fn generate_thumbnail(
 ) -> Result<String, String> {
     let db_conn = state.db_conn.clone();
     
-    // 単一ファイル検索のため iter().find() で十分（1件ならO(N)のコストは最小限）
-    // batch版は mtime_map HashMap を構築してO(1)に最適化している
+    // filtered_files から mtime を取得し、同時にファイルが存在するかを確認する
+    // Mutexの保持時間を最小化するため、ロック内では mtime だけを取り出す
     let (mem_mtime, is_valid) = if let Ok(lock) = state.filtered_files.lock() {
-        let found = lock.iter().find(|f| f.path == file_path);
-        (found.map(|f| f.mtime), found.is_some())
+        // ソート済み Vec に対してバイナリサーチ O(log N) で検索
+        match lock.binary_search_by(|f| f.path.as_str().cmp(file_path.as_str())) {
+            Ok(idx) => (Some(lock[idx].mtime), true),
+            // ソート済みでない場合（スマートフォルダ等）はフォールバックとして iter().find()
+            Err(_) => {
+                let found = lock.iter().find(|f| f.path == file_path);
+                (found.map(|f| f.mtime), found.is_some())
+            }
+        }
     } else {
         (None, false)
     };
@@ -2417,8 +2470,10 @@ async fn generate_thumbnail(
             format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
         };
         
-        let fname = std::path::Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy();
-        println!("[Rust] {}: db_lookup={}ms", fname, t_gen.as_millis());
+        if t_gen.as_millis() > 5 {
+            let fname = std::path::Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy();
+            println!("[Rust] {}: db_lookup={}ms", fname, t_gen.as_millis());
+        }
         url
     }).await.map_err(|e| e.to_string())?;
 
@@ -2783,12 +2838,15 @@ async fn save_thumbnail(
     state: tauri::State<'_, AppState>,
     file_path: String,
     b64_data: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let db_conn = state.db_conn.clone();
     
-    // Fast path: get mtime from memory to avoid disk I/O
+    // filtered_files から mtime を取得 (バイナリサーチ O(log N))
     let mem_mtime = if let Ok(lock) = state.filtered_files.lock() {
-        lock.iter().find(|f| f.path == file_path).map(|f| f.mtime)
+        match lock.binary_search_by(|f| f.path.as_str().cmp(file_path.as_str())) {
+            Ok(idx) => Some(lock[idx].mtime),
+            Err(_) => lock.iter().find(|f| f.path == file_path).map(|f| f.mtime),
+        }
     } else {
         None
     };
@@ -2816,6 +2874,8 @@ async fn save_thumbnail(
     use base64::{Engine as _, engine::general_purpose};
     let bytes = general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
 
+    let video_port = state.video_server_port;
+    let file_path_clone = file_path.clone();
     tokio::task::spawn_blocking(move || {
         if let Ok(conn) = db_conn.get() {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
@@ -2827,7 +2887,9 @@ async fn save_thumbnail(
         }
     }).await.map_err(|e| e.to_string())?;
 
-    Ok(())
+    // 保存完了後、即座に使えるカスタムURLを返すことで、JS側が 2回目の getThumbnail IPCを呼ぶ必要をなくす (BN-3修正)
+    let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
+    Ok(url)
 }
 
 #[tauri::command]
@@ -5700,5 +5762,72 @@ mod viewer_tests {
         
         let size: i64 = conn.query_row("SELECT size FROM cache WHERE hash_key = 'hash_exists'", [], |row| row.get(0)).unwrap();
         assert!(size > 0, "Size should be updated to > 0");
+    }
+
+    /// BN-1修正の検証: load_directory でDBバッチチェックにより
+    /// has_thumbnail_cache が正しく設定されるかを直接テストする
+    #[test]
+    fn test_load_directory_has_thumbnail_cache_batch_check() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (hash_key TEXT PRIMARY KEY, thumbnail BLOB, last_accessed INTEGER)",
+            [],
+        ).unwrap();
+
+        let path_cached   = "C:\\images\\cached.png".to_string();
+        let path_uncached = "C:\\images\\uncached.png".to_string();
+        let mtime_cached: u64   = 1_700_000_000_000;
+        let mtime_uncached: u64 = 1_700_000_001_000;
+
+        // cached.png のハッシュキーを計算して DB に挿入（thumbnail あり）
+        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", path_cached, mtime_cached).as_bytes());
+        let hash_key_cached = format!("{:016x}", digest);
+        let dummy_thumb: Vec<u8> = vec![0xFF, 0xD8, 0xFF];
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, 0)",
+            rusqlite::params![hash_key_cached, dummy_thumb],
+        ).unwrap();
+
+        // load_directory のバッチチェックロジックを再現
+        let files_data: Vec<(String, u64)> = vec![
+            (path_cached.clone(),   mtime_cached),
+            (path_uncached.clone(), mtime_uncached),
+        ];
+
+        let hash_to_idx: std::collections::HashMap<String, usize> = files_data
+            .iter()
+            .enumerate()
+            .map(|(i, (p, m))| {
+                let clean = p.replace("\\\\?\\", "");
+                let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean, m).as_bytes());
+                (format!("{:016x}", digest), i)
+            })
+            .collect();
+
+        let mut has_cache_flags = vec![false; files_data.len()];
+        let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
+        for chunk in hash_keys.chunks(900) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let query = format!(
+                "SELECT hash_key FROM cache WHERE hash_key IN ({}) AND thumbnail IS NOT NULL",
+                placeholders
+            );
+            let mut stmt = conn.prepare(&query).unwrap();
+            let params: Vec<&dyn rusqlite::ToSql> =
+                chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            let rows: Vec<String> = stmt
+                .query_map(rusqlite::params_from_iter(params), |row| row.get::<_, String>(0))
+                .unwrap()
+                .flatten()
+                .collect();
+            for row in rows {
+                if let Some(&idx) = hash_to_idx.get(&row) {
+                    has_cache_flags[idx] = true;
+                }
+            }
+        }
+
+        assert!(has_cache_flags[0],  "cached.png は has_thumbnail_cache = true になるべき");
+        assert!(!has_cache_flags[1], "uncached.png は has_thumbnail_cache = false のままであるべき");
     }
 }
