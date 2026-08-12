@@ -3297,8 +3297,9 @@ async fn clear_metadata_cache(
 }
 
 #[tauri::command]
-async fn trash_file(file_path: String) -> Result<bool, String> {
-    Ok(tokio::task::spawn_blocking(move || {
+async fn trash_file(state: tauri::State<'_, AppState>, file_path: String) -> Result<bool, String> {
+    let file_path_clone = file_path.clone();
+    let result = tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&file_path);
         let cache_paths = collect_cache_paths_to_remove(path);
 
@@ -3310,12 +3311,26 @@ async fn trash_file(file_path: String) -> Result<bool, String> {
         }
     })
     .await
-    .unwrap_or(false))
+    .unwrap_or(false);
+    
+    if result {
+        if let Ok(conn) = state.db_conn.get() {
+            let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&file_path_clone]);
+            let clean_path = file_path_clone.replace("\\\\?\\", "");
+            let _ = conn.execute("DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE", rusqlite::params![&file_path_clone, &clean_path]);
+        }
+        if let Ok(mut lock) = state.ratings.lock() {
+            lock.remove(&file_path_clone);
+        }
+    }
+    
+    Ok(result)
 }
 
 #[tauri::command]
-async fn trash_folder(folder_path: String) -> Result<FolderOperationResult, String> {
-    Ok(tokio::task::spawn_blocking(move || {
+async fn trash_folder(state: tauri::State<'_, AppState>, folder_path: String) -> Result<FolderOperationResult, String> {
+    let folder_path_clone = folder_path.clone();
+    let result = tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&folder_path);
         let cache_paths = collect_cache_paths_to_remove(path);
 
@@ -3340,7 +3355,32 @@ async fn trash_folder(folder_path: String) -> Result<FolderOperationResult, Stri
         success: false,
         path: None,
         error: Some(e.to_string()),
-    }))
+    });
+    
+    if result.success {
+        let old_dir_prefix = format!("{}\\", folder_path_clone);
+        let like_query = format!("{}%", old_dir_prefix);
+        let clean_path = folder_path_clone.replace("\\\\?\\", "");
+        let clean_like_query = format!("{}\\%", clean_path);
+        
+        if let Ok(conn) = state.db_conn.get() {
+            let _ = conn.execute("DELETE FROM ratings WHERE path = ?1 OR path LIKE ?2", rusqlite::params![&folder_path_clone, &like_query]);
+            let _ = conn.execute("DELETE FROM cache WHERE path = ?1 COLLATE NOCASE OR path LIKE ?2 COLLATE NOCASE OR path = ?3 COLLATE NOCASE OR path LIKE ?4 COLLATE NOCASE", rusqlite::params![&folder_path_clone, &like_query, &clean_path, &clean_like_query]);
+        }
+        if let Ok(mut lock) = state.ratings.lock() {
+            let mut keys_to_remove = Vec::new();
+            for p in lock.keys() {
+                if p == &folder_path_clone || p.starts_with(&old_dir_prefix) || p.starts_with(&format!("{}/", folder_path_clone)) {
+                    keys_to_remove.push(p.clone());
+                }
+            }
+            for k in keys_to_remove {
+                lock.remove(&k);
+            }
+        }
+    }
+    
+    Ok(result)
 }
 
 #[tauri::command]
@@ -3413,6 +3453,24 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
             "UPDATE ratings SET path = ?1 WHERE path = ?2",
             rusqlite::params![&new_path_str, &old_path_clone],
         );
+        
+        // キャッシュも新しいパスに引き継ぐ
+        if let Ok(mut stmt) = conn.prepare("SELECT mtime, hash_key FROM cache WHERE path = ? COLLATE NOCASE") {
+            if let Ok(mut rows) = stmt.query([&old_path_clone]) {
+                if let Ok(Some(row)) = rows.next() {
+                    let mtime: u64 = row.get(0).unwrap_or(0);
+                    let old_hash_key: String = row.get(1).unwrap_or_default();
+                    
+                    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", new_path_str, mtime).as_bytes());
+                    let new_hash_key = format!("{:016x}", digest);
+                    
+                    let _ = conn.execute(
+                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
+                        rusqlite::params![&new_path_str, &new_hash_key, &old_hash_key],
+                    );
+                }
+            }
+        }
     }
     if let Ok(mut lock) = state.ratings.lock() {
         if let Some(rating) = lock.remove(&old_path_clone) {
@@ -3487,6 +3545,48 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
             lock.insert(new_p.clone(), rating);
             if let Ok(conn) = state.db_conn.get() {
                 let _ = conn.execute("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![&new_p, rating]);
+            }
+        }
+    }
+    
+    // キャッシュテーブルも再帰的に更新する
+    if let Ok(conn) = state.db_conn.get() {
+        let old_dir_prefix = format!("{}\\", old_path_clone);
+        let like_query = format!("{}%", old_dir_prefix);
+        
+        let mut updates = Vec::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT hash_key, path, mtime FROM cache WHERE path = ? COLLATE NOCASE OR path LIKE ? COLLATE NOCASE") {
+            if let Ok(mut rows) = stmt.query(rusqlite::params![&old_path_clone, &like_query]) {
+                while let Ok(Some(row)) = rows.next() {
+                    let old_hash_key: String = row.get(0).unwrap_or_default();
+                    let old_path: String = row.get(1).unwrap_or_default();
+                    let mtime: u64 = row.get(2).unwrap_or(0);
+                    
+                    let new_path = if old_path == old_path_clone {
+                        new_path_str.clone()
+                    } else if old_path.starts_with(&old_dir_prefix) {
+                        format!("{}\\{}", new_path_str, &old_path[old_dir_prefix.len()..])
+                    } else {
+                        continue;
+                    };
+                    
+                    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", new_path, mtime).as_bytes());
+                    let new_hash_key = format!("{:016x}", digest);
+                    
+                    updates.push((new_path, new_hash_key, old_hash_key));
+                }
+            }
+        }
+        
+        if !updates.is_empty() {
+            if let Ok(tx) = conn.unchecked_transaction() {
+                for (new_path, new_hash_key, old_hash_key) in updates {
+                    let _ = tx.execute(
+                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
+                        rusqlite::params![&new_path, &new_hash_key, &old_hash_key],
+                    );
+                }
+                let _ = tx.commit();
             }
         }
     }
