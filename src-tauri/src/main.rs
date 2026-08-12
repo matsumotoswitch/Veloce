@@ -1763,6 +1763,8 @@ fn get_full_metadata_for_path_with_stat(
                 raw_parameters = prompt_json.clone();
             }
         }
+
+
     } else {
         let exif_data = if lower_path.ends_with(".webp") {
             parse_webp_exif(file_path)
@@ -2051,6 +2053,7 @@ fn update_metadata_cache(
     }
 }
 
+
 fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
     let mut chunks = std::collections::HashMap::new();
     if let Ok(mut f) = std::fs::File::open(path) {
@@ -2243,7 +2246,8 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
 }
 
 fn extract_stealth_pnginfo(path: &str) -> Option<String> {
-    if !path.to_lowercase().ends_with(".png") {
+    let lower_path = path.to_lowercase();
+    if !lower_path.ends_with(".png") && !lower_path.ends_with(".webp") {
         return None;
     }
 
