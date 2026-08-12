@@ -3279,26 +3279,15 @@ async fn clear_metadata_cache(
         let conn = db_conn_clone.get().unwrap();
 
         for file_path in file_paths {
-            let mtime = std::fs::metadata(&file_path)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH)
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
 
             let clean_path = file_path.replace("\\\\?\\", "");
-            let digest_raw =
-                xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
-            let digest_clean =
-                xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-
-            let hash_key_raw = format!("{:016x}", digest_raw);
-            let hash_key_clean = format!("{:016x}", digest_clean);
 
             let _ = conn.execute(
-                "DELETE FROM cache WHERE hash_key IN (?, ?)",
-                rusqlite::params![&hash_key_raw, &hash_key_clean],
+                "DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE",
+                rusqlite::params![&file_path, &clean_path],
             );
+
+
             messages.push(format!("Cleared cache for {}", file_path));
         }
         Ok(messages)
