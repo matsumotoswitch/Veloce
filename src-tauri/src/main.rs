@@ -298,31 +298,71 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT ''", []);
 
     // --- FTS5 Setup ---
+    let mut needs_fts_rebuild = false;
+    if let Ok(mut stmt) = conn.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='cache_ad'") {
+        if let Ok(mut rows) = stmt.query([]) {
+            if let Ok(Some(row)) = rows.next() {
+                let sql: String = row.get(0).unwrap_or_default();
+                if !sql.contains("rowid = old.rowid") {
+                    needs_fts_rebuild = true;
+                }
+            } else {
+                needs_fts_rebuild = true;
+            }
+        }
+    }
+
+    // FTSの行数が一致しない場合は強制再構築（以前のアップデートで失敗したユーザーの救済）
+    if !needs_fts_rebuild {
+        let cache_count: i64 = conn.query_row("SELECT count(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
+        let fts_count: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
+        if cache_count != fts_count {
+            needs_fts_rebuild = true;
+        }
+    }
+
+    if needs_fts_rebuild {
+        let _ = conn.execute("DROP TABLE IF EXISTS cache_fts", []);
+        let _ = conn.execute("DROP TRIGGER IF EXISTS cache_ai", []);
+        let _ = conn.execute("DROP TRIGGER IF EXISTS cache_ad", []);
+        let _ = conn.execute("DROP TRIGGER IF EXISTS cache_au", []);
+    }
+
     conn.execute(
         "CREATE VIRTUAL TABLE IF NOT EXISTS cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source)",
         [],
     ).map_err(|e| e.to_string())?;
 
-    // Triggers to keep FTS in sync
+    if needs_fts_rebuild {
+        // バックフィル: cacheテーブルのすべての行をcache_ftsに同期する（rowidを維持）
+        if let Err(e) = conn.execute("INSERT OR REPLACE INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) SELECT rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache", []) {
+            eprintln!("[Veloce: ERROR] Failed to rebuild cache_fts: {}", e);
+        }
+    }
+
+    // Triggers to keep FTS in sync (O(1) updates using rowid)
     conn.execute(
         "CREATE TRIGGER IF NOT EXISTS cache_ai AFTER INSERT ON cache BEGIN
-            INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
-            VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
+            INSERT INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+            VALUES (new.rowid, new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
         END;", []
     ).map_err(|e| e.to_string())?;
 
     conn.execute(
         "CREATE TRIGGER IF NOT EXISTS cache_ad AFTER DELETE ON cache BEGIN
-            DELETE FROM cache_fts WHERE hash_key = old.hash_key;
+            DELETE FROM cache_fts WHERE rowid = old.rowid;
         END;", []
     ).map_err(|e| e.to_string())?;
 
     let _ = conn.execute("DROP TRIGGER IF EXISTS cache_au", []);
     conn.execute(
-        "CREATE TRIGGER cache_au AFTER UPDATE OF searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN
-            DELETE FROM cache_fts WHERE hash_key = old.hash_key;
-            INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
-            VALUES (new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
+        "CREATE TRIGGER cache_au AFTER UPDATE OF hash_key, searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN
+            UPDATE cache_fts SET
+                hash_key = new.hash_key,
+                searchable_prompt = new.searchable_prompt,
+                searchable_negative_prompt = new.searchable_negative_prompt,
+                searchable_source = new.searchable_source
+            WHERE rowid = old.rowid;
         END;", []
     ).map_err(|e| e.to_string())?;
     
@@ -368,10 +408,11 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
             
             // FTSバックフィル
             let fts_count: i64 = bg_conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
-            if fts_count == 0 {
+            let cache_count: i64 = bg_conn.query_row("SELECT count(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
+            if fts_count != cache_count {
                 let _ = bg_conn.execute(
-                    "INSERT INTO cache_fts(hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
-                     SELECT hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache",
+                    "INSERT OR REPLACE INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+                     SELECT rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache",
                     []
                 );
             }
@@ -5518,6 +5559,35 @@ mod tests {
 
         // クリーンアップ
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_fts_query() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
+                searchable_prompt TEXT
+            )",
+            [],
+        ).unwrap();
+        
+        conn.execute(
+            "CREATE VIRTUAL TABLE cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt)",
+            [],
+        ).unwrap();
+
+        conn.execute("INSERT INTO cache (hash_key, path, searchable_prompt) VALUES ('h1', 'p1', '1girl outdoors')", []).unwrap();
+        
+        conn.execute(
+            "INSERT INTO cache_fts(rowid, hash_key, searchable_prompt) SELECT rowid, hash_key, searchable_prompt FROM cache",
+            [],
+        ).unwrap();
+
+        let mut stmt = conn.prepare("SELECT c.path FROM cache c WHERE c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH '\"1girl\"')").unwrap();
+        let paths: Vec<String> = stmt.query_map([], |row| row.get(0)).unwrap().map(|r: Result<String, _>| r.unwrap()).collect();
+        assert_eq!(paths, vec!["p1"]);
     }
 
     #[test]
