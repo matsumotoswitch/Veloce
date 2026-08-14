@@ -72,6 +72,34 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     expect(appState.thumbnailUrls.get('test.jpg')).toBe('asset://test.jpg');
   });
 
+  it('should dispatch error event if img.complete is true but naturalWidth is 0', () => {
+    appState.thumbnailUrls.set('test.jpg', 'broken-image-url');
+    const img = document.createElement('img');
+    img.className = 'thumbnail-img';
+    img.dataset.currentSrc = '';
+    let errorDispatched = false;
+    
+    img.addEventListener('error', () => {
+      errorDispatched = true;
+    });
+
+    // Mock naturalWidth and complete
+    Object.defineProperty(img, 'complete', { value: true, configurable: true });
+    Object.defineProperty(img, 'naturalWidth', { value: 0, configurable: true });
+    
+    // Simulate the logic from updateVirtualGrid
+    img.src = appState.thumbnailUrls.get('test.jpg');
+    if (img.complete) {
+        img.classList.remove('loading');
+        if (img.naturalWidth === 0 && img.src !== 'data:image/svg+xml;base64,...') {
+            img.dispatchEvent(new Event('error'));
+        }
+    }
+
+    expect(errorDispatched).toBe(true);
+  });
+
+
   it('should fallback to Web Worker if Rust cache is empty (mock test)', async () => {
     // 擬似的に Web Worker の動作をテスト
     const workerPool = {

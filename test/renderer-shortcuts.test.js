@@ -171,6 +171,21 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       expect(selectSpy).toHaveBeenCalled();
     });
 
+    it('should open viewer on Enter', async () => {
+      appState.selectedIndex = 0;
+      appState.selection.add(0);
+      window.veloceAPI.getFileByIndex = vi.fn().mockResolvedValue({ path: '/test.jpg', width: 100, height: 100 });
+      window.veloceAPI.openViewer = vi.fn();
+      
+      const event = new window.KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+      await globalKeydownHandler(event);
+      
+      // wait for promises (openViewer is async)
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(window.veloceAPI.openViewer).toHaveBeenCalledWith(expect.objectContaining({ currentIndex: 0 }));
+    });
+
     it('should call renameSelectedFile on F2', async () => {
       appState.selectedIndex = 0;
       appState.selection.add(0);

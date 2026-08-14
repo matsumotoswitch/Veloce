@@ -1514,6 +1514,10 @@ class UIManager {
             img.src = appState.thumbnailUrls.get(file.path);
             if (img.complete) {
                 img.classList.remove('loading');
+                if (img.naturalWidth === 0 && img.src !== 'data:image/svg+xml;base64,...') {
+                    // Force onerror logic if broken
+                    img.dispatchEvent(new Event('error'));
+                }
             } else {
                 img.classList.add('loading');
                 img.onload = function() { this.classList.remove('loading'); };
