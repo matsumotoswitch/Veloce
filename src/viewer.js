@@ -32,6 +32,7 @@ window.addEventListener('focus', () => {
 });
 
 let currentViewerImg = document.getElementById('viewer-img');
+let currentlyVisibleImg = currentViewerImg;
 if (currentViewerImg) currentViewerImg.classList.add('mode-default');
 
 /**
@@ -170,6 +171,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             viewerUI.elements.viewerImg.parentNode.replaceChild(video, viewerUI.elements.viewerImg);
             viewerUI.elements.viewerImg = video;
             currentViewerImg = video;
+            currentlyVisibleImg = video;
 
             const onMeta = async () => {
               setZoomState(viewerState.isZoomed);
@@ -553,6 +555,7 @@ function swapImageElement(newImg, sequenceId) {
   }
   
   newImg.id = 'viewer-img';
+  newImg.style.display = 'none'; // Initially hide it to prevent pushing the visible image
   viewerUI.elements.viewerImg = newImg;
   
   const borderOverlay = document.getElementById('border-overlay');
@@ -567,22 +570,36 @@ function swapImageElement(newImg, sequenceId) {
     isViewerWindowShown = true;
   }
 
-  const oldImg = currentViewerImg;
   currentViewerImg = newImg;
 
-  const cleanupOldImg = () => {
-    if (oldImg && oldImg.parentNode) {
-      if (oldImg.tagName === 'VIDEO') {
-        oldImg.pause();
-        oldImg.src = '';
-        oldImg.load();
+  // Clean up any stray viewer-img elements that are NOT currentlyVisibleImg and not newImg
+  const allViewerImgs = document.querySelectorAll('#viewer-img');
+  allViewerImgs.forEach(img => {
+    if (img !== currentlyVisibleImg && img !== newImg) {
+      if (img.tagName === 'VIDEO') {
+        img.pause();
+        img.removeAttribute('src');
+        img.load();
       }
-      oldImg.remove();
+      img.remove();
     }
-  };
+  });
 
-  const onImageReady = async () => {
+  const makeVisible = () => {
     if (sequenceId !== imageLoadSequence) return;
+    
+    // Clean up the currently visible image since the new one is ready
+    if (currentlyVisibleImg && currentlyVisibleImg !== newImg) {
+      if (currentlyVisibleImg.tagName === 'VIDEO') {
+        currentlyVisibleImg.pause();
+        currentlyVisibleImg.removeAttribute('src');
+        currentlyVisibleImg.load();
+      }
+      currentlyVisibleImg.remove();
+    }
+    currentlyVisibleImg = newImg;
+    newImg.style.display = '';
+
     setZoomState(viewerState.isZoomed);
     viewerUI.updateImageRendering();
     resizeWindowToFitImage();
@@ -590,27 +607,22 @@ function swapImageElement(newImg, sequenceId) {
 
   if (newImg.tagName === 'VIDEO') {
     if (newImg.readyState >= 1) {
-      cleanupOldImg();
-      onImageReady();
+      makeVisible();
       newImg.play().catch(e => console.warn('Video play failed:', e));
     } else {
       newImg.addEventListener('loadedmetadata', () => {
-        cleanupOldImg();
-        onImageReady();
+        makeVisible();
         newImg.play().catch(e => console.warn('Video play failed:', e));
       }, { once: true });
       newImg.addEventListener('error', () => {
-        cleanupOldImg();
-        onImageReady();
+        makeVisible();
       }, { once: true });
     }
   } else {
     newImg.decode().then(() => {
-      cleanupOldImg();
-      onImageReady();
+      makeVisible();
     }).catch((e) => {
-      cleanupOldImg();
-      onImageReady();
+      makeVisible();
     });
   }
 
