@@ -4285,6 +4285,13 @@ export const globalKeydownHandler = async (e) => {
     }
   }
 
+  if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    e.preventDefault();
+    if (appState.selectedIndex > -1) {
+      openViewer(appState.selectedIndex);
+    }
+  }
+
   if (e.key === 'Delete') {
     if (appState.selection.size > 0) {
       deleteSelectedFiles();
