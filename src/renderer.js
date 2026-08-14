@@ -4341,24 +4341,23 @@ export const globalKeydownHandler = async (e) => {
             flash.style.left = left + 'px';
             flash.style.width = width + 'px';
             flash.style.height = height + 'px';
-            flash.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
+            flash.style.backgroundColor = 'rgba(255, 255, 255, 0.5)';
             flash.style.pointerEvents = 'none';
             flash.style.zIndex = '10005';
             flash.style.borderRadius = window.getComputedStyle(el).borderRadius || '0px';
-            flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
             document.body.appendChild(flash);
 
-            flash.style.opacity = '0.5';
-
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                flash.style.opacity = '0';
-              });
+            const animation = flash.animate([
+              { opacity: 1 },
+              { opacity: 0 }
+            ], {
+              duration: 600,
+              easing: 'cubic-bezier(0.16, 1, 0.3, 1)'
             });
 
-            setTimeout(() => {
+            animation.onfinish = () => {
               if (flash.parentNode) flash.remove();
-            }, 600);
+            };
           };
 
           // 現在の表示モードに応じた要素にエフェクトを適用
