@@ -180,6 +180,14 @@ pub struct SmartFolderRule {
     pub conditions: Vec<SmartFolderCondition>,
 }
 
+pub enum DbMsg {
+    SaveThumbnail {
+        hash_key: String,
+        bytes: Vec<u8>,
+        now: i64,
+    },
+}
+
 // --- 状態管理 ---
 pub struct AppState {
     image_paths: Mutex<Vec<String>>,
@@ -195,6 +203,7 @@ pub struct AppState {
     rating_filter_op: Mutex<String>,
     db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     smart_folders: Mutex<Vec<SmartFolderRule>>,
+    db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     video_server_port: u16,
 }
 
@@ -615,10 +624,10 @@ fn build_smart_folder_query(
                     if fts_query.is_empty() {
                         clause = "1=1".to_string();
                     } else if cond.operator == "contains" {
-                        clause = "c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
+                        clause = "c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
+                        clause = "c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else { clause = "1=1".to_string(); }
                 }
@@ -638,10 +647,10 @@ fn build_smart_folder_query(
                     if fts_query.is_empty() {
                         clause = "1=1".to_string();
                     } else if cond.operator == "contains" {
-                        clause = "c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
+                        clause = "c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
+                        clause = "c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else { clause = "1=1".to_string(); }
                 }
@@ -661,10 +670,10 @@ fn build_smart_folder_query(
                     if fts_query.is_empty() {
                         clause = "1=1".to_string();
                     } else if cond.operator == "contains" {
-                        clause = "c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
+                        clause = "c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
+                        clause = "c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else { clause = "1=1".to_string(); }
                 }
@@ -2884,8 +2893,6 @@ async fn save_thumbnail(
     file_path: String,
     b64_data: String,
 ) -> Result<String, String> {
-    let db_conn = state.db_conn.clone();
-    
     // filtered_files から mtime を取得 (バイナリサーチ O(log N))
     let mem_mtime = if let Ok(lock) = state.filtered_files.lock() {
         match lock.binary_search_by(|f| f.path.as_str().cmp(file_path.as_str())) {
@@ -2921,16 +2928,13 @@ async fn save_thumbnail(
 
     let video_port = state.video_server_port;
     let file_path_clone = file_path.clone();
-    tokio::task::spawn_blocking(move || {
-        if let Ok(conn) = db_conn.get() {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-            let _ = conn.execute(
-                "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                rusqlite::params![&hash_key, &bytes, now],
-            );
-        }
-    }).await.map_err(|e| e.to_string())?;
+    
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let _ = state.db_tx.send(DbMsg::SaveThumbnail {
+        hash_key,
+        bytes,
+        now,
+    }).await;
 
     // 保存完了後、即座に使えるカスタムURLを返すことで、JS側が 2回目の getThumbnail IPCを呼ぶ必要をなくす (BN-3修正)
     let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
@@ -4193,7 +4197,7 @@ fn main() {
     let window_configs = context.config_mut().tauri.windows.clone();
     context.config_mut().tauri.windows.clear();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .register_uri_scheme_protocol("stream", move |_app_handle, request| {
             let uri = request.uri();
             let mut path_str = String::new();
@@ -4263,8 +4267,9 @@ fn main() {
                 }
             }
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
-        })
-        .register_uri_scheme_protocol("veloce", move |app_handle, request| {
+        });
+        
+    let builder = builder.register_uri_scheme_protocol("veloce", move |app_handle, request| {
             let uri = request.uri();
             let mut path_str = String::new();
             if let Some(query) = uri.split('?').nth(1) {
@@ -4352,7 +4357,25 @@ fn main() {
             }
 
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
-        })
+        });
+        
+    let db_conn = init_db().expect("Failed to initialize SQLite database");
+    let db_conn_worker = db_conn.clone();
+    let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(4096);
+
+    std::thread::spawn(move || {
+        while let Some(DbMsg::SaveThumbnail { hash_key, bytes, now }) = db_rx.blocking_recv() {
+            if let Ok(conn) = db_conn_worker.get() {
+                let _ = conn.execute(
+                    "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                    rusqlite::params![&hash_key, &bytes, now],
+                );
+            }
+        }
+    });
+
+    builder
         .manage(AppState {
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
@@ -4367,8 +4390,9 @@ fn main() {
             ratings: Mutex::new(std::collections::HashMap::new()),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn: init_db().expect("Failed to initialize SQLite database"),
+            db_conn,
             smart_folders: Mutex::new(Vec::new()),
+            db_tx,
             video_server_port: video_port,
         })
         .setup(move |app| {
@@ -4913,7 +4937,7 @@ mod tests {
         
         let (query, params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
-        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, c.metadata FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.hash_key IN (SELECT hash_key FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.hash_key NOT IN (SELECT hash_key FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
+        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, c.metadata FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
         assert!(query.contains(expected_query), "prompt の contains 条件は FTS5 IN サブクエリを使うべき。実際のクエリ: {}", query);
         // not_contains は NOT IN (SELECT ... MATCH ?) 形式
         assert!(
@@ -5785,6 +5809,7 @@ mod viewer_tests {
             rating_filter_op: Mutex::new("gte".to_string()),
             db_conn,
             smart_folders: Mutex::new(Vec::new()),
+            db_tx: tokio::sync::mpsc::channel(1).0,
             video_server_port: 0,
         };
 
@@ -5903,7 +5928,7 @@ mod viewer_tests {
             ["hash_duplicate_2", &format!("\\\\?\\{}", cargo_toml_str.replace("\\", "/"))]
         ).unwrap();
         
-        let (deleted, fixed) = perform_audit_cache(&mut conn, |_, _, _, _| {}).unwrap();
+        let (deleted, _fixed) = perform_audit_cache(&mut conn, |_, _, _, _| {}).unwrap();
         
         assert_eq!(deleted, 3, "Should delete the non-existent file and the 2 duplicates");
         

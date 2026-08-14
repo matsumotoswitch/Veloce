@@ -66,7 +66,13 @@ custom-protocol = ["tauri/custom-protocol"]
 opt-level = 2
 
 [profile.release]
+# samplyを使うときは以下2行を有効にする
+# strip = false
+# debug = true
+
+# samplyを使うときは以下1行を無効にする
 strip = true
+
 opt-level = 3
 lto = "fat"
 codegen-units = 1

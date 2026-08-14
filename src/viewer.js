@@ -578,8 +578,6 @@ function swapImageElement(newImg, sequenceId) {
     if (img !== currentlyVisibleImg && img !== newImg) {
       if (img.tagName === 'VIDEO') {
         img.pause();
-        img.removeAttribute('src');
-        img.load();
       }
       img.remove();
     }
