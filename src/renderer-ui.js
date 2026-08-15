@@ -155,6 +155,69 @@ class UIManager {
 
     // スクロール時にツールチップを強制的に隠す
     window.addEventListener('scroll', () => this.hideCustomTooltip(), true);
+
+    // ファイル一覧 / サムネイル一覧のホイールスクロールを制御する。
+    // #center-top と #center-bottom が実際のスクロールコンテナであるため、それらに直接バインドする。
+    // Windows の慣性スクロールで deltaY が高速連続発火しても MAX_LOOKAHEAD で目標値を制限し、
+    // 「止まらない」現象を防ぐ。
+    const SCROLL_PER_NOTCH = 100; // 1ノッチあたりのスクロール量(px)
+    const MAX_LOOKAHEAD = SCROLL_PER_NOTCH * 3; // 先読み上限(px)
+    const smoothWheel = (e) => {
+      if (e.ctrlKey || e.shiftKey || e.metaKey) return;
+
+      let delta;
+      if (e.deltaMode === 1) {
+        // 行単位 (deltaMode=1): 1行 = SCROLL_PER_NOTCH px
+        delta = e.deltaY * SCROLL_PER_NOTCH;
+      } else if (e.deltaMode === 2) {
+        // ページ単位 (deltaMode=2)
+        delta = e.deltaY * e.currentTarget.clientHeight;
+      } else {
+        // ピクセル単位 (deltaMode=0): Windows/WebView2 では通常 120/-120 px/ノッチ
+        delta = e.deltaY;
+      }
+
+      e.preventDefault();
+      const el = e.currentTarget;
+      const maxScroll = el.scrollHeight - el.clientHeight;
+
+      // アニメーション中でなければ現在位置を起点にする
+      if (!el._scrollAnim) {
+        el._scrollTarget = el.scrollTop;
+      }
+
+      // 慣性スクロール等で delta が連続発火しても、現在位置から MAX_LOOKAHEAD 以内に収める
+      const currentTop = el.scrollTop;
+      const rawTarget = el._scrollTarget + delta;
+      const clampedTarget = delta > 0
+        ? Math.min(rawTarget, currentTop + MAX_LOOKAHEAD)
+        : Math.max(rawTarget, currentTop - MAX_LOOKAHEAD);
+      el._scrollTarget = Math.max(0, Math.min(clampedTarget, maxScroll));
+
+      if (!el._scrollAnim) {
+        el._scrollAnim = true;
+        let prevScrollTop = -1;
+        const step = () => {
+          const diff = el._scrollTarget - el.scrollTop;
+          if (Math.abs(diff) < 1 || el.scrollTop === prevScrollTop) {
+            el.scrollTop = el._scrollTarget;
+            el._scrollAnim = false;
+          } else {
+            prevScrollTop = el.scrollTop;
+            el.scrollTop += diff * 0.25;
+            requestAnimationFrame(step);
+          }
+        };
+        requestAnimationFrame(step);
+      }
+    };
+
+    // 実際のスクロールコンテナ（#center-top, #center-bottom）にバインドする
+    const centerTop = document.getElementById('center-top');
+    const centerBottom = document.getElementById('center-bottom');
+    if (centerTop) centerTop.addEventListener('wheel', smoothWheel, { passive: false });
+    if (centerBottom) centerBottom.addEventListener('wheel', smoothWheel, { passive: false });
+
   }
 
   // タブのスクロール状態をチェックし、グラデーションの表示/非表示を切り替える
