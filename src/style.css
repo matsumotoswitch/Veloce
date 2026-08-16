@@ -828,6 +828,7 @@ input:-webkit-autofill:focus {
   /* flexコンテナ内ではheightよりもflex-basisでサイズ指定する方が確実 */
   flex: 0 0 var(--top-height, 50%);
   overflow-y: auto;
+  overflow-anchor: none;
   scrollbar-gutter: stable;
   overflow-x: hidden;
   min-height: 0;
