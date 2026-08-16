@@ -1405,7 +1405,7 @@ class UIManager {
       spacer.style.height = '0px';
       const emptyContainer = container.querySelector('.empty-state-container');
       if (emptyContainer) {
-        emptyContainer.classList.add('show');
+        emptyContainer.style.display = 'flex';
         emptyContainer.innerHTML = appState.searchQuery 
           ? `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><div style="font-size: 14px; letter-spacing: 0.5px;">検索結果が見つかりません</div>`
           : `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div style="font-size: 14px; letter-spacing: 0.5px;">このフォルダには画像がありません</div>`;
@@ -1415,7 +1415,7 @@ class UIManager {
       return;
     } else {
       const emptyContainer = container.querySelector('.empty-state-container');
-      if (emptyContainer) emptyContainer.classList.remove('show');
+      if (emptyContainer) emptyContainer.style.display = 'none';
     }
 
     const itemSize = parseFloat(this.elements.thumbnailSizeSlider?.value) || 120;
