@@ -982,7 +982,7 @@ table#file-table {
   padding: 0 6px;
   background-color: transparent;
   border: 1px solid var(--border-color);
-  width: 120px !important;
+  width: 160px !important;
 }
 
 #thumbnail-controls .custom-select-label {
@@ -994,6 +994,7 @@ table#file-table {
   width: 14px;
   height: 14px;
   transform: scale(1);
+  flex-shrink: 0;
 }
 
 #thumbnail-controls .custom-select.open .custom-select-arrow {
