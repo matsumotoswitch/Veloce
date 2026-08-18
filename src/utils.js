@@ -61,11 +61,20 @@ export function applyGlowEffect(el) {
  * 開発者ツールのショートカットをブロックします。
  */
 export function blockDevtoolsShortcuts() {
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I'))) {
+  const blockHandler = (e) => {
+    if (
+      e.key === 'F12' || e.code === 'F12' || 
+      (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I' || e.code === 'KeyI' || e.key.toLowerCase() === 'i'))
+    ) {
       e.preventDefault();
+      e.stopPropagation();
     }
-  });
+  };
+  
+  window.addEventListener('keydown', blockHandler, { capture: true });
+  window.addEventListener('keyup', blockHandler, { capture: true });
+  window.addEventListener('keypress', blockHandler, { capture: true });
+  document.addEventListener('keydown', blockHandler, { capture: true });
 }
 
 export function getStreamUrl(filePath, baseSrc) {

@@ -4723,10 +4723,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (window.veloceAPI.onDirectoryLoaded) {
     window.veloceAPI.onDirectoryLoaded(async (payload) => {
-      console.log('directory-loaded received:', payload.path, 'currentDirectory:', appState.currentDirectory);
       if (payload.path !== appState.currentDirectory) return;
       appState.totalCount = payload.totalCount;
-      console.log('totalCount updated to:', appState.totalCount);
       if (payload.initialChunk) {
         appState.initialChunk = payload.initialChunk;
       }
