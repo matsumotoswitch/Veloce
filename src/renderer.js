@@ -56,8 +56,20 @@ class ThumbnailWorkerPool {
             ctx.fillRect(0, 0, width, height);
             ctx.drawImage(img, 0, 0, width, height);
             
-            const outUrl = canvas.toDataURL('image/jpeg', 0.85);
-            resolve(outUrl);
+            canvas.toBlob((blob) => {
+              if (!blob) {
+                reject(new Error("Canvas toBlob failed"));
+                return;
+              }
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                resolve(reader.result);
+              };
+              reader.onerror = () => {
+                reject(new Error("FileReader failed"));
+              };
+              reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.85);
           } else {
             reject(new Error("Canvas 2D context not available"));
           }

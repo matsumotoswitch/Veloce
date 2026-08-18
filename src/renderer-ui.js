@@ -1332,37 +1332,49 @@ class UIManager {
         tds[1].textContent = file.ext;
         
         tds[2].style.textAlign = 'right';
-        tds[2].textContent = file.width ? file.width.toLocaleString() : '-';
-        
         tds[3].style.textAlign = 'right';
-        tds[3].textContent = file.height ? file.height.toLocaleString() : '-';
-        
-        let ratioStr = '-';
-        if (file.width && file.height) {
-          const d = gcd(file.width, file.height);
-          const rw = file.width / d;
-          const rh = file.height / d;
-          ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
-        }
         tds[4].style.textAlign = 'right';
-        tds[4].textContent = ratioStr;
-
         tds[5].style.textAlign = 'right';
-        tds[5].textContent = formatSize(file.size);
-        
-        tds[6].textContent = formatDate(file.mtime);
-
-        const rating = appState.ratings[file.path] || 0;
-        if (rating > 0) {
-          const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-          tds[7].innerHTML = starSvg + rating;
-        } else {
-          tds[7].textContent = '-';
-        }
       } else {
         // Just update selection and _domByPath registration if path matches but state might have refreshed
         if (!this._domByPath) this._domByPath = new Map();
         this._domByPath.set(file.path, tr);
+      }
+
+      // Always check and update dynamic metadata (they may arrive asynchronously)
+      const tds = tr.children;
+      
+      const newWidth = file.width ? file.width.toLocaleString() : '-';
+      if (tds[2].textContent !== newWidth) tds[2].textContent = newWidth;
+      
+      const newHeight = file.height ? file.height.toLocaleString() : '-';
+      if (tds[3].textContent !== newHeight) tds[3].textContent = newHeight;
+      
+      let ratioStr = '-';
+      if (file.width && file.height) {
+        const d = gcd(file.width, file.height);
+        const rw = file.width / d;
+        const rh = file.height / d;
+        ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
+      }
+      if (tds[4].textContent !== ratioStr) tds[4].textContent = ratioStr;
+
+      const newSize = formatSize(file.size);
+      if (tds[5].textContent !== newSize) tds[5].textContent = newSize;
+      
+      const newMtime = formatDate(file.mtime);
+      if (tds[6].textContent !== newMtime) tds[6].textContent = newMtime;
+
+      const rating = appState.ratings[file.path] || 0;
+      if (rating > 0) {
+        const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+        const newHtml = starSvg + rating;
+        if (tds[7].innerHTML !== newHtml) tds[7].innerHTML = newHtml;
+      } else {
+        if (tds[7].textContent !== '-') {
+          tds[7].innerHTML = '';
+          tds[7].textContent = '-';
+        }
       }
     }
 
