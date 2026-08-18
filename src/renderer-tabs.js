@@ -100,6 +100,7 @@ export function initTabHandlers(ctx) {
       localStorage.setItem('currentDirectory', appState.currentDirectory);
       appState.totalCount = 0;
       appState.selection.clear();
+      appState.selectedIndex = -1;
       uiManager.renderAll(true);
       clearMetadataUI();
       uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
@@ -224,6 +225,7 @@ export function initTabHandlers(ctx) {
           localStorage.setItem('currentDirectory', appState.currentDirectory);
           appState.totalCount = 0;
           appState.selection.clear();
+          appState.selectedIndex = -1;
           uiManager.renderAll(true);
           clearMetadataUI();
           updateNavButtons();

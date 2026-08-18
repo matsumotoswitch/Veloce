@@ -1060,8 +1060,10 @@ const scheduleRefresh = debounce(async () => {
   uiManager.updateSelectionUI();
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
-  } else if (appState.files[appState.selectedIndex]) {
-    renderMetadata(appState.files[appState.selectedIndex]);
+  } else {
+    window.veloceAPI.getFileByIndex(appState.selectedIndex).then(file => {
+      if (file) renderMetadata(file);
+    });
   }
 }, CONFIG.REFRESH_DELAY);
 
@@ -4721,8 +4723,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (window.veloceAPI.onDirectoryLoaded) {
     window.veloceAPI.onDirectoryLoaded(async (payload) => {
+      console.log('directory-loaded received:', payload.path, 'currentDirectory:', appState.currentDirectory);
       if (payload.path !== appState.currentDirectory) return;
       appState.totalCount = payload.totalCount;
+      console.log('totalCount updated to:', appState.totalCount);
       if (payload.initialChunk) {
         appState.initialChunk = payload.initialChunk;
       }
