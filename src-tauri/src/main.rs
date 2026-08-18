@@ -194,6 +194,7 @@ pub struct AppState {
     image_paths: Mutex<Vec<String>>,
     current_dir: Mutex<String>,
     viewer_paths: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    viewer_hashes: Mutex<std::collections::HashMap<String, String>>,
     // Source of Truth: 全ファイルとフィルタリング済みファイルをRust側で保持
     all_files: Mutex<Vec<std::sync::Arc<ImageFile>>>,
     filtered_files: Mutex<Vec<std::sync::Arc<ImageFile>>>,
@@ -3074,14 +3075,59 @@ async fn open_viewer(
     let hash_str = get_viewer_hash_str(target_path.as_ref());
 
     // 既に同じ画像（ハッシュ値が一致）のビューアーが開いている場合は、フォーカスを当てるだけで終了
-    let existing_window = app.windows().into_values().find(|w| {
-        let l = w.label();
-        l.starts_with("viewer_") && l.ends_with(&format!("_{}", hash_str))
-    });
+    let mut found_existing = false;
+    if let Ok(hashes) = state.viewer_hashes.lock() {
+        for (label, hash) in hashes.iter() {
+            if hash == &hash_str {
+                if let Some(window) = app.get_window(label) {
+                    if window.is_visible().unwrap_or(false) {
+                        let _ = window.set_focus();
+                        found_existing = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // 従来のラベルベースの検索（互換性のため残す）
+    if !found_existing {
+        let existing_window = app.windows().into_values().find(|w| {
+            let l = w.label();
+            l.starts_with("viewer_") && l.ends_with(&format!("_{}", hash_str))
+        });
+        if let Some(window) = existing_window {
+            let _ = window.set_focus();
+            found_existing = true;
+        }
+    }
 
-    if let Some(window) = existing_window {
-        let _ = window.set_focus();
+    if found_existing {
         return Ok(());
+    }
+
+    // viewer_pool_0 が非表示であればそれを再利用する
+    if let Some(pool_win) = app.get_window("viewer_pool_0") {
+        if !pool_win.is_visible().unwrap_or(false) {
+            if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+                viewer_paths.insert("viewer_pool_0".to_string(), current_paths.clone());
+            }
+            if let Ok(mut hashes) = state.viewer_hashes.lock() {
+                hashes.insert("viewer_pool_0".to_string(), hash_str.clone());
+            }
+
+            // JS側に新しい画像のロードを指示
+            let _ = pool_win.emit("viewer-init-session", current_index);
+            
+            let _ = pool_win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: win_width,
+                height: win_height,
+            }));
+            let _ = pool_win.center();
+            let _ = pool_win.show();
+            let _ = pool_win.set_focus();
+            return Ok(());
+        }
     }
 
     let now_ms = std::time::SystemTime::now()
@@ -4380,6 +4426,7 @@ fn main() {
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new(String::new()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
             all_files: Mutex::new(Vec::new()),
             filtered_files: Mutex::new(Vec::new()),
             sort_config: Mutex::new(SortConfig {
@@ -4427,6 +4474,20 @@ fn main() {
                     .min_inner_size(800.0, 600.0)
                     .build()?;
             }
+
+            // プール用の非表示ビューアウィンドウを生成
+            let _ = tauri::WindowBuilder::new(
+                app,
+                "viewer_pool_0",
+                tauri::WindowUrl::App("viewer.html".into()),
+            )
+            .title("Veloce Viewer")
+            .data_directory(data_dir.clone())
+            .visible(false)
+            .decorations(false)
+            .transparent(true)
+            .min_inner_size(300.0, 300.0)
+            .build();
 
             // 古いサムネイルキャッシュの自動クリーンアップをバックグラウンドで実行
             std::thread::spawn(|| {
@@ -4794,7 +4855,7 @@ fn main() {
         })
         .on_window_event(|event| {
             match event.event() {
-                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
                     let label = event.window().label().to_string();
                     if label == "main" {
                         // アプリ終了時にWALファイルを切り詰める
@@ -4803,6 +4864,17 @@ fn main() {
                             let _ = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);", []);
                         }
                         std::process::exit(0);
+                    } else if label == "viewer_pool_0" {
+                        // プール用のウィンドウは破棄せず非表示にする
+                        api.prevent_close();
+                        let _ = event.window().hide();
+                        let state = event.window().state::<AppState>();
+                        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+                            viewer_paths.remove(&label);
+                        };
+                        if let Ok(mut hashes) = state.viewer_hashes.lock() {
+                            hashes.remove(&label);
+                        };
                     } else if label.starts_with("viewer_") {
                         let _ = event.window().set_always_on_top(false);
                         // ビューアウィンドウが閉じられた際にキャッシュを破棄
@@ -4810,8 +4882,12 @@ fn main() {
                         if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
                             viewer_paths.remove(&label);
                         };
+                        if let Ok(mut hashes) = state.viewer_hashes.lock() {
+                            hashes.remove(&label);
+                        };
                     }
                 }
+                tauri::WindowEvent::Destroyed => {}
                 _ => {}
             }
         })

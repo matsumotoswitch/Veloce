@@ -108,6 +108,22 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.preloadCache.clear();
         await loadImage();
       });
+
+      // Window Poolパターン用の初期化セッションイベント
+      window.__TAURI__.event.listen('viewer-init-session', async (event) => {
+        const newIndex = event.payload;
+        viewerState.currentIndex = parseInt(newIndex, 10);
+        
+        // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
+        viewerState.preloadCache.clear();
+        viewerState.paths = null;
+        viewerState.currentImagePath = null;
+        viewerState.totalImages = 0;
+        isViewerWindowShown = false; // 強制的にshowWindowを呼ぶためのフラグ
+        
+        // リセット後、loadImageが再度Rust(IPC)からパスを取得しにいく
+        await loadImage();
+      });
     }
 
     const pathsJson = localStorage.getItem('viewerPaths');
