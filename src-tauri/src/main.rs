@@ -95,6 +95,7 @@ pub struct DirectoryChunkPayload {
 pub struct DirectoryLoadedPayload {
     path: String,
     total_count: usize,
+    initial_chunk: Option<Vec<ImageFile>>,
 }
 
 /// JS側から受け取るソート・検索条件
@@ -321,14 +322,8 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
         }
     }
 
-    // FTSの行数が一致しない場合は強制再構築（以前のアップデートで失敗したユーザーの救済）
-    if !needs_fts_rebuild {
-        let cache_count: i64 = conn.query_row("SELECT count(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
-        let fts_count: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
-        if cache_count != fts_count {
-            needs_fts_rebuild = true;
-        }
-    }
+    // FTSの行数が一致しない場合の再構築（バックフィル）はバックグラウンドスレッドで行うため、
+    // メインスレッドでの同期的な count(*) チェックは削除しました。
 
     if needs_fts_rebuild {
         let _ = conn.execute("DROP TABLE IF EXISTS cache_fts", []);
@@ -342,12 +337,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
         [],
     ).map_err(|e| e.to_string())?;
 
-    if needs_fts_rebuild {
-        // バックフィル: cacheテーブルのすべての行をcache_ftsに同期する（rowidを維持）
-        if let Err(e) = conn.execute("INSERT OR REPLACE INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) SELECT rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache", []) {
-            eprintln!("[Veloce: ERROR] Failed to rebuild cache_fts: {}", e);
-        }
-    }
+    // バックフィルはバックグラウンドスレッド（pool_clone.get()）に委譲します。
 
     // Triggers to keep FTS in sync (O(1) updates using rowid)
     conn.execute(
@@ -377,6 +367,9 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     
     let pool_clone = pool.clone();
     std::thread::spawn(move || {
+        // 起動直後のディレクトリ読み込み等のI/Oと競合しないよう、バックグラウンド処理を数秒遅延させる
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        
         if let Ok(mut bg_conn) = pool_clone.get() {
             // 既存データのバックフィル (width, height, path)
             let _ = bg_conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
@@ -1026,25 +1019,32 @@ fn load_directory(
                 }
             }
 
-            let total_count = files.len();
-            let sorted_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
-
             if let Ok(mut lock) = state.all_files.lock() {
                 *lock = files.clone();
             }
             if let Ok(mut lock) = state.filtered_files.lock() {
-                *lock = files;
+                *lock = files.clone();
             }
             if let Ok(mut lock) = state.image_paths.lock() {
-                *lock = sorted_paths;
+                *lock = files.iter().map(|f| f.path.clone()).collect();
             }
 
-            // JS側には総件数のみを通知（ファイルデータ自体はIPCで送らない）
+            // 初回表示のサムネイル順序がおかしくなるのを防ぐため、送信前に一度ソートとフィルタを適用する
+            let total_count = apply_filters_and_sort(None, &state);
+
+            let initial_chunk = {
+                let lock = state.filtered_files.lock().unwrap();
+                let chunk_size = std::cmp::min(lock.len(), 100);
+                Some(lock[..chunk_size].iter().map(|f| (**f).clone()).collect())
+            };
+
+            // JS側には総件数と初回描画用の100件を通知し、IPC往復を削減する
             let _ = window.emit(
                 "directory-loaded",
                 DirectoryLoadedPayload {
                     path: path_clone.clone(),
                     total_count,
+                    initial_chunk,
                 },
             );
         }
@@ -4400,6 +4400,8 @@ fn main() {
             let app_handle = app.handle();
             
             std::thread::spawn(move || {
+                // 初回のディレクトリロードI/Oを優先するため、少し遅延させる
+                std::thread::sleep(std::time::Duration::from_secs(3));
                 let state = app_handle.state::<AppState>();
                 if let Ok(conn) = state.db_conn.get() {
                     if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
@@ -4428,6 +4430,9 @@ fn main() {
 
             // 古いサムネイルキャッシュの自動クリーンアップをバックグラウンドで実行
             std::thread::spawn(|| {
+                // アプリの起動直後のI/Oを回避するため、大幅に遅延させる
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                
                 if let Some(mut cache_dir) = get_veloce_data_dir() {
                     cache_dir.push("Thumbnails");
                     if let Ok(entries) = std::fs::read_dir(&cache_dir) {

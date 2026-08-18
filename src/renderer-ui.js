@@ -1278,7 +1278,11 @@ class UIManager {
 
     // 余分な要素を削除
     while (tbody.children.length - 2 > targetCount) {
-      tbody.removeChild(tbody.children[tbody.children.length - 2]);
+      const last = tbody.children[tbody.children.length - 2];
+      if (last.dataset && last.dataset.filepath && this._domByPath && this._domByPath.get(last.dataset.filepath) === last) {
+        this._domByPath.delete(last.dataset.filepath);
+      }
+      tbody.removeChild(last);
     }
 
     const topSpacerHeight = safeStartRow * rowHeight;
@@ -1287,7 +1291,13 @@ class UIManager {
     topSpacer.style.height = `${topSpacerHeight}px`;
     bottomSpacer.style.height = `${bottomSpacerHeight}px`;
 
-    const items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
+    let items;
+    if (appState.initialChunk && safeStartRow === 0 && (endRow - safeStartRow + 1) <= appState.initialChunk.length) {
+      items = appState.initialChunk.slice(0, endRow - safeStartRow + 1);
+      appState.initialChunk = null; // 一度使用したら破棄
+    } else {
+      items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
+    }
 
     // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策）
     if (this.lastListStartIndex !== safeStartRow) {
@@ -1465,7 +1475,13 @@ class UIManager {
     const offsetY = (safeStartRow * rowHeight) + padding;
     content.style.transform = `translate3d(0, ${offsetY}px, 0)`;
 
-    const items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
+    let items;
+    if (appState.initialChunk && startIndex === 0 && (endIndex - startIndex + 1) <= appState.initialChunk.length) {
+      items = appState.initialChunk.slice(0, endIndex - startIndex + 1);
+      appState.initialChunk = null; // 一度使用したら破棄
+    } else {
+      items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
+    }
 
     // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策）
     if (this.lastGridStartIndex !== startIndex) {
@@ -1502,7 +1518,11 @@ class UIManager {
 
     // 余分な要素を削除
     while (content.children.length > targetCount) {
-      content.removeChild(content.lastChild);
+      const last = content.lastChild;
+      if (last.dataset && last.dataset.filepath && this._domByPath && this._domByPath.get(last.dataset.filepath) === last) {
+        this._domByPath.delete(last.dataset.filepath);
+      }
+      content.removeChild(last);
     }
 
     // (getCachedThumbnailBatch has been removed in favor of native custom protocol streaming)
@@ -1533,9 +1553,16 @@ class UIManager {
 
       // パスが変わった場合のみ内容を更新する
       if (wrapper.dataset.filepath !== file.path || wrapper.dataset.index != i) {
+        if (wrapper.dataset.filepath && this._domByPath && this._domByPath.get(wrapper.dataset.filepath) === wrapper) {
+          this._domByPath.delete(wrapper.dataset.filepath);
+        }
+
         wrapper.dataset.filepath = file.path;
         wrapper.dataset.index = i;
         img.dataset.currentSrc = file.path;
+
+        if (!this._domByPath) this._domByPath = new Map();
+        this._domByPath.set(file.path, wrapper);
 
         if (file.name) {
           label.textContent = file.name;

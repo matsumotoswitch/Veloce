@@ -17,148 +17,58 @@ import {
 
 
 // --- Thumbnail Web Worker Pool ---
-const workerCode = `
-self.onmessage = async (e) => {
-  const { id, assetUrl, filePath } = e.data;
-  try {
-    const response = await fetch(assetUrl);
-    if (!response.ok) throw new Error("Fetch failed");
-    const blob = await response.blob();
-    const sourceElement = await createImageBitmap(blob);
-    
-    let width = sourceElement.width;
-    let height = sourceElement.height;
-    if (width > 384 || height > 384) {
-      const ratio = Math.min(384 / width, 384 / height);
-      width = Math.round(width * ratio);
-      height = Math.round(height * ratio);
-    }
-    width = Math.max(1, width);
-    height = Math.max(1, height);
-    
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.fillStyle = '#1e1e1e';
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(sourceElement, 0, 0, width, height);
-    
-    const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
-    sourceElement.close();
-    
-    const reader = new FileReader();
-    reader.onload = () => {
-      self.postMessage({ id, filePath, success: true, base64Url: reader.result });
-    };
-    reader.onerror = () => {
-      self.postMessage({ id, filePath, success: false, error: "FileReader failed" });
-    };
-    reader.readAsDataURL(outBlob);
-  } catch (err) {
-    self.postMessage({ id, filePath, success: false, error: err.message });
-  }
-};
-`;
+// 注意: Tauri v1環境ではWeb Worker内からasset://プロトコルが直接呼べないため、
+// メインスレッドでfetchしてからBlobをpostMessageで渡す必要がありましたが、
+// 数十MBの画像を大量に転送するとメインスレッドがシリアライズ処理で数秒間ブロックし、完全にフリーズしてしまいます。
+// createImageBitmap は仕様上、メインスレッドで呼んでも「画像デコード処理自体はC++側のバックグラウンドスレッドで実行される」ため、
+// Web Workerを使わずともUIスレッドはブロックされません。そのため、Web Workerを完全に廃止し、すべてメインスレッドの非同期処理に一本化しました。
 
-  class ThumbnailWorkerPool {
-    constructor(size = 4) {
-      this.workers = [];
-      this.queue = [];
-      this.callbacks = new Map();
-      this.nextId = 1;
-      this.activeCount = 0;
-      this.initialized = false;
-
-      try {
-        const blob = new Blob([workerCode], { type: 'application/javascript' });
-        const workerUrl = URL.createObjectURL(blob);
-
-        for (let i = 0; i < size; i++) {
-          const worker = new Worker(workerUrl);
-          worker.onmessage = (e) => this.onMessage(e);
-          this.workers.push(worker);
-        }
-        this.initialized = true;
-      } catch (err) {
-        console.warn("Failed to initialize Web Workers. Falling back to main thread thumbnail generation.", err);
-        this.initialized = false;
-      }
-    }
-
-  onMessage(e) {
-    this.activeCount--;
-    const { id, success, base64Url, error } = e.data;
-    const callbacks = this.callbacks.get(id);
-    if (callbacks) {
-      this.callbacks.delete(id);
-      if (success) callbacks.resolve(base64Url);
-      else callbacks.reject(new Error(error));
-    }
-    this.processQueue();
+class ThumbnailWorkerPool {
+  constructor() {
+    this.initialized = true;
   }
 
-    processQueue() {
-      if (this.queue.length === 0 || this.activeCount >= this.workers.length || !this.initialized) return;
-
-      const task = this.queue.shift();
-      const worker = this.workers[this.activeCount % this.workers.length];
-      this.activeCount++;
-      worker.postMessage(task.msg);
-    }
-
-    generate(filePath, assetUrl) {
-      if (!this.initialized || this.workers.length === 0) {
-        return this.generateMainThread(filePath, assetUrl);
+  async generate(filePath, assetUrl) {
+    try {
+      const response = await fetch(assetUrl);
+      if (!response.ok) throw new Error("Fetch failed");
+      const blob = await response.blob();
+      const sourceElement = await createImageBitmap(blob);
+      
+      let width = sourceElement.width;
+      let height = sourceElement.height;
+      if (width > 384 || height > 384) {
+        const ratio = Math.min(384 / width, 384 / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
       }
+      width = Math.max(1, width);
+      height = Math.max(1, height);
+      
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.fillStyle = '#1e1e1e';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(sourceElement, 0, 0, width, height);
+      
+      const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+      sourceElement.close();
+      
       return new Promise((resolve, reject) => {
-        const id = this.nextId++;
-        this.callbacks.set(id, { resolve, reject });
-        this.queue.push({ msg: { id, filePath, assetUrl } });
-        this.processQueue();
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("FileReader failed"));
+        reader.readAsDataURL(outBlob);
       });
-    }
-
-    async generateMainThread(filePath, assetUrl) {
-      try {
-        const response = await fetch(assetUrl);
-        if (!response.ok) throw new Error("Fetch failed");
-        const blob = await response.blob();
-        const sourceElement = await createImageBitmap(blob);
-        
-        let width = sourceElement.width;
-        let height = sourceElement.height;
-        if (width > 384 || height > 384) {
-          const ratio = Math.min(384 / width, 384 / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        width = Math.max(1, width);
-        height = Math.max(1, height);
-        
-        const canvas = new OffscreenCanvas(width, height);
-        const ctx = canvas.getContext('2d');
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.fillStyle = '#1e1e1e';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(sourceElement, 0, 0, width, height);
-        
-        const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
-        sourceElement.close();
-        
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(new Error("FileReader failed"));
-          reader.readAsDataURL(outBlob);
-        });
-      } catch (err) {
-        throw new Error(err.message || "Main thread generation failed");
-      }
+    } catch (err) {
+      throw new Error(err.message || "Main thread generation failed");
     }
   }
-const thumbnailWorkerPool = new ThumbnailWorkerPool(4);
+}
+
+const thumbnailWorkerPool = new ThumbnailWorkerPool();
 
 // Phase 4: Context Cleanup Strictness
 export function cleanupContext() {
@@ -349,6 +259,9 @@ async function refreshFileList(showToast = false) {
     updateNavButtons();
     // Rust側のバックグラウンド処理をキックする
     // ※結果は await せず、onDirectoryLoaded リスナー側で随時受け取る
+    if (window.veloceAPI.setViewParams) {
+      await appState.setViewParams();
+    }
     await window.veloceAPI.loadDirectory(appState.currentDirectory);
   } catch (error) {
     console.error('Failed to start loading directory:', error);
@@ -1031,13 +944,13 @@ class ThumbnailQueueManager {
         this.updateDOM(filePath, base64Url);
 
         // バックグラウンドでRustに保存。saveThumbnailが返すURLをそのまま使い、
-        // getThumbnailの2回目のIPC呼び出しを排除 (BN-3修正)
+        // メモリ上のキャッシュのみ軽量なURLに差し替える。
+        // ※この時点で DOM の src を差し替えると DB の INSERT 完了前に HTTP リクエストが飛んで 404 になるため DOM は差し替えない。
         window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
           const lightUrl = savedUrl || base64Url;
           if (lightUrl && lightUrl !== base64Url && appState.thumbnailUrls.get(filePath) === base64Url) {
             appState.thumbnailUrls.set(filePath, lightUrl);
-            evictThumbnailCache();
-            this.updateDOM(filePath, lightUrl);
+            if (window.evictThumbnailCache) window.evictThumbnailCache();
           }
         }).catch(err => console.warn('Cache save error:', err));
         
@@ -3013,6 +2926,9 @@ const menuReloadFolder = createMenuItem('フォルダを再読み込み', UIMana
       if (typeof refreshFileList === 'function') {
         await refreshFileList(true);
       } else if (window.veloceAPI && window.veloceAPI.loadDirectory) {
+        if (window.veloceAPI.setViewParams) {
+          await appState.setViewParams();
+        }
         await window.veloceAPI.loadDirectory(currentTab.path);
       }
     }
@@ -3514,6 +3430,9 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
 
   const path = itemDiv.dataset.path;
   if (window.veloceAPI.loadDirectory) {
+    if (window.veloceAPI.setViewParams) {
+      await appState.setViewParams();
+    }
     // アクティブなタブの内容を更新する
     const activeTab = appState.tabs[appState.activeTabIndex];
     if (activeTab) {
@@ -4509,6 +4428,9 @@ async function handleTreeNavigation(key) {
 
     const path = item.dataset.path;
     if (window.veloceAPI.loadDirectory) {
+      if (window.veloceAPI.setViewParams) {
+        await appState.setViewParams();
+      }
       const activeTab = appState.tabs[appState.activeTabIndex];
       if (activeTab && activeTab.path !== path) {
         activeTab.path = path;
@@ -4631,6 +4553,9 @@ window.addEventListener('DOMContentLoaded', async () => {
           bookmarkOverflowMenu.classList.remove('show');
 
           if (window.veloceAPI.loadDirectory) {
+            if (window.veloceAPI.setViewParams) {
+              await appState.setViewParams();
+            }
             const activeTab = appState.tabs[appState.activeTabIndex];
             if (activeTab) {
               activeTab.path = fav.path;
@@ -4793,6 +4718,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onDirectoryLoaded(async (payload) => {
       if (payload.path !== appState.currentDirectory) return;
       appState.totalCount = payload.totalCount;
+      if (payload.initialChunk) {
+        appState.initialChunk = payload.initialChunk;
+      }
       if (payload.path.startsWith("smart://")) {
         appState.thumbnailTotalRequested = 0;
       } else {
@@ -5523,6 +5451,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       uiManager.updateSelectionUI();
 
       if (window.veloceAPI.loadDirectory) {
+        if (window.veloceAPI.setViewParams) {
+          await appState.setViewParams();
+        }
         const activeTab = appState.tabs[appState.activeTabIndex];
         if (activeTab) {
           activeTab.path = path;
@@ -5816,6 +5747,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     updateNavButtons();
 
+    // 起動時のディレクトリ読み込み前にソート条件をバックエンドへ同期させ、initialChunkが正しくソートされるようにする
+    if (window.veloceAPI.setViewParams) {
+      await appState.setViewParams();
+    }
     window.veloceAPI.loadDirectory(currentTab.path);
 
     await expandTreeToPath(appState.currentDirectory);
@@ -6024,6 +5959,9 @@ function initSmartFolders() {
       uiManager.updateSelectionUI();
 
       if (window.veloceAPI.loadDirectory) {
+        if (window.veloceAPI.setViewParams) {
+          await appState.setViewParams();
+        }
         const activeTab = appState.tabs[appState.activeTabIndex];
         if (activeTab) {
           activeTab.path = path;
