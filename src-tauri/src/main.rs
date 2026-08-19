@@ -494,28 +494,18 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
     let mtime = item.mtime;
     let ctime = item.ctime;
 
-    let mut prompt = String::new();
-    let mut negative_prompt = String::new();
-    let mut source = String::new();
     let mut meta_loaded = false;
 
-    if let Some(meta_str) = item.metadata {
-        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&meta_str) {
-            if let Some(p) = meta_json.get("prompt").and_then(|v| v.as_str()) {
-                prompt = p.to_string();
-            }
-            if let Some(n) = meta_json.get("negative_prompt").and_then(|v| v.as_str()) {
-                negative_prompt = n.to_string();
-            }
-            if let Some(s) = meta_json.get("source").and_then(|v| v.as_str()) {
-                source = s.to_string();
-            }
-        }
-        meta_loaded = true; // メタデータ取得済みとしてマーク
+    if item.metadata.is_some() {
+        meta_loaded = true;
     }
 
-    let search_text = format!("{} {} {}", item.path, prompt, negative_prompt).to_lowercase();
-    let unified_search_text = build_safe_fts_query(&search_text);
+    let search_text = if let Some(meta_str) = &item.metadata {
+        format!("{} {}", item.path, meta_str).to_lowercase()
+    } else {
+        item.path.to_lowercase()
+    };
+    let unified_search_text = search_text.clone();
 
     ImageFile {
         name: file_name,
@@ -528,9 +518,9 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         has_metadata_cache: false,
         width: item.width,
         height: item.height,
-        prompt,
-        negative_prompt,
-        source,
+        prompt: String::new(),
+        negative_prompt: String::new(),
+        source: String::new(),
         meta_loaded,
         search_text,
         unified_search_text,
@@ -564,7 +554,7 @@ fn build_smart_folder_query(
     let select_clause = if is_count {
         "SELECT COUNT(c.path)"
     } else {
-        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, c.metadata"
+        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height"
     };
 
     let mut is_inner_join = false;
@@ -776,7 +766,7 @@ fn get_smart_folder_paths(
                         ctime: row.get(3)?,
                         width: row.get(4)?,
                         height: row.get(5)?,
-                        metadata: row.get(6)?,
+                        metadata: None,
                     })
                 }) {
                     for r in rows {
@@ -801,7 +791,7 @@ fn get_smart_folder_paths(
                 if let Ok(conn) = db_conn.get() {
                     for chunk in paths.chunks(900) {
                         let placeholders = vec!["?"; chunk.len()].join(",");
-                        let query = format!("SELECT path, size, mtime, ctime, width, height, metadata FROM cache WHERE path IN ({})", placeholders);
+                        let query = format!("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path IN ({})", placeholders);
                         if let Ok(mut stmt) = conn.prepare(&query) {
                             let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
                             if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
@@ -812,7 +802,7 @@ fn get_smart_folder_paths(
                                     ctime: row.get(3)?,
                                     width: row.get(4)?,
                                     height: row.get(5)?,
-                                    metadata: row.get(6)?,
+                                    metadata: None,
                                 })
                             }) {
                                 target_paths.extend(rows.flatten());
@@ -823,7 +813,7 @@ fn get_smart_folder_paths(
             }
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
-                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height, metadata FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
+                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
                 if let Ok(rows) = stmt.query_map([], |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
@@ -832,7 +822,7 @@ fn get_smart_folder_paths(
                         ctime: row.get(3)?,
                         width: row.get(4)?,
                         height: row.get(5)?,
-                        metadata: row.get(6)?,
+                        metadata: None,
                     })
                 }) {
                     for r in rows {
@@ -5018,7 +5008,7 @@ mod tests {
         
         let (query, params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
-        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, c.metadata FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
+        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
         assert!(query.contains(expected_query), "prompt の contains 条件は FTS5 IN サブクエリを使うべき。実際のクエリ: {}", query);
         // not_contains は NOT IN (SELECT ... MATCH ?) 形式
         assert!(
@@ -5841,6 +5831,7 @@ mod viewer_tests {
             image_paths: Mutex::new(Vec::new()),
             current_dir: Mutex::new("smart://fav_5".to_string()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            viewer_hashes: Mutex::new(std::collections::HashMap::new()), // Trigger refresh
             all_files: Mutex::new(vec![
                 Arc::new(ImageFile {
                     name: "b.jpg".to_string(),

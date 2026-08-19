@@ -1177,12 +1177,12 @@ class UIManager {
       if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
     }
 
-    if (typeof this.updateVirtualList === 'function') {
-      this.updateVirtualList(true);
-    }
-
     if (typeof this.updateVirtualGrid === 'function') {
       this.updateVirtualGrid(true);
+    }
+
+    if (typeof this.updateVirtualList === 'function') {
+      this.updateVirtualList(true);
     }
 
     // バックグラウンド生成の再スタート
