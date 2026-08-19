@@ -4174,11 +4174,18 @@ fn start_local_video_server() -> u16 {
                                 if range.starts_with("bytes=") {
                                     is_range = true;
                                     let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
-                                    if !parts.is_empty() && !parts[0].is_empty() {
-                                        start = parts[0].parse::<u64>().unwrap_or(0);
-                                    }
-                                    if parts.len() > 1 && !parts[1].is_empty() {
-                                        end = parts[1].parse::<u64>().unwrap_or(end);
+                                    if parts.len() == 2 && parts[0].is_empty() && !parts[1].is_empty() {
+                                        // Suffix byte range: e.g. "bytes=-500"
+                                        let suffix_len = parts[1].parse::<u64>().unwrap_or(0);
+                                        start = file_size.saturating_sub(suffix_len);
+                                        end = file_size.saturating_sub(1);
+                                    } else {
+                                        if !parts.is_empty() && !parts[0].is_empty() {
+                                            start = parts[0].parse::<u64>().unwrap_or(0);
+                                        }
+                                        if parts.len() > 1 && !parts[1].is_empty() {
+                                            end = parts[1].parse::<u64>().unwrap_or(end);
+                                        }
                                     }
                                 }
                             }
@@ -4187,13 +4194,16 @@ fn start_local_video_server() -> u16 {
                             let chunk_size = std::cmp::min(end.saturating_sub(start) + 1, max_chunk);
 
                             let mut headers = String::new();
-                            if is_range {
-                                headers.push_str("HTTP/1.1 206 Partial Content\r\n");
-                                headers.push_str(&format!("Content-Range: bytes {}-{}/{}\r\n", start, start + chunk_size - 1, file_size));
-                            } else {
-                                headers.push_str("HTTP/1.1 200 OK\r\n");
-                            }
-                            headers.push_str("Content-Type: video/mp4\r\n");
+                            // Always return 206 Partial Content to safely limit memory to chunk_size
+                            headers.push_str("HTTP/1.1 206 Partial Content\r\n");
+                            headers.push_str(&format!("Content-Range: bytes {}-{}/{}\r\n", start, start + chunk_size - 1, file_size));
+                            let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                            let content_type = match ext.as_str() {
+                                "webm" => "video/webm",
+                                "gif" => "image/gif",
+                                _ => "video/mp4",
+                            };
+                            headers.push_str(&format!("Content-Type: {}\r\n", content_type));
                             headers.push_str("Accept-Ranges: bytes\r\n");
                             headers.push_str("Access-Control-Allow-Origin: *\r\n");
                             headers.push_str(&format!("Content-Length: {}\r\n", chunk_size));
