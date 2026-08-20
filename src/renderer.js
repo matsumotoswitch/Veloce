@@ -29,59 +29,46 @@ class ThumbnailWorkerPool {
   }
 
   async generate(filePath, assetUrl) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.decoding = 'async';
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        try {
-          let width = img.width;
-          let height = img.height;
-          if (width > 384 || height > 384) {
-            const ratio = Math.min(384 / width, 384 / height);
-            width = Math.round(width * ratio);
-            height = Math.round(height * ratio);
-          }
-          width = Math.max(1, width);
-          height = Math.max(1, height);
-          
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.fillStyle = '#1e1e1e';
-            ctx.fillRect(0, 0, width, height);
-            ctx.drawImage(img, 0, 0, width, height);
-            
-            canvas.toBlob((blob) => {
-              if (!blob) {
-                reject(new Error("Canvas toBlob failed"));
-                return;
-              }
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                resolve(reader.result);
-              };
-              reader.onerror = () => {
-                reject(new Error("FileReader failed"));
-              };
-              reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.85);
-          } else {
-            reject(new Error("Canvas 2D context not available"));
-          }
-        } catch (err) {
-          reject(err);
-        }
-      };
-      img.onerror = () => {
-        reject(new Error("Image load failed in ThumbnailWorkerPool"));
-      };
-      img.src = assetUrl;
-    });
+    try {
+      const response = await fetch(assetUrl);
+      if (!response.ok) throw new Error("Fetch failed: " + response.status);
+      const blob = await response.blob();
+      const sourceElement = await createImageBitmap(blob);
+      
+      let width = sourceElement.width;
+      let height = sourceElement.height;
+      if (width > 384 || height > 384) {
+        const ratio = Math.min(384 / width, 384 / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      width = Math.max(1, width);
+      height = Math.max(1, height);
+      
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.fillStyle = '#1e1e1e';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(sourceElement, 0, 0, width, height);
+      
+      const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+      sourceElement.close();
+      
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve(reader.result);
+        };
+        reader.onerror = () => {
+          reject(new Error("FileReader failed"));
+        };
+        reader.readAsDataURL(outBlob);
+      });
+    } catch (err) {
+      throw new Error(err.message || "Main thread generation failed");
+    }
   }
 }
 

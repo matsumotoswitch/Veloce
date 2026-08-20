@@ -1573,9 +1573,6 @@ class UIManager {
         wrapper.dataset.index = i;
         img.dataset.currentSrc = file.path;
 
-        if (!this._domByPath) this._domByPath = new Map();
-        this._domByPath.set(file.path, wrapper);
-
         if (file.name) {
           label.textContent = file.name;
           label.title = file.name;
@@ -1653,7 +1650,25 @@ class UIManager {
               filesToEnqueue.push(file.path);
             }
         }
+      } else {
+        // パスもインデックスも変わっていないが、サムネイルURLが新たに利用可能になった場合に反映する
+        if (img.classList.contains('loading') && appState.thumbnailUrls.has(file.path)) {
+          const cachedUrl = appState.thumbnailUrls.get(file.path);
+          if (img.src !== cachedUrl) {
+            img.src = cachedUrl;
+            if (img.complete) {
+              img.classList.remove('loading');
+            } else {
+              img.onload = function() { this.classList.remove('loading'); };
+            }
+            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+          }
+        }
       }
+
+      // _domByPath は常に最新の状態を維持する（仮想スクロールでの再利用に対応）
+      if (!this._domByPath) this._domByPath = new Map();
+      this._domByPath.set(file.path, wrapper);
 
       // レーティングの同期（パスやインデックスが変わらなくてもショートカット操作に追従させる）
       // _cachedRating を用いることで O(1) かつ変更時のみの DOM アクセスに限定
