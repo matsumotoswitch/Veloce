@@ -642,10 +642,6 @@ function swapImageElement(newImg, sequenceId) {
 
   if (newImg.tagName !== 'VIDEO' && typeof videoSeekBarContainer !== 'undefined' && videoSeekBarContainer) {
     videoSeekBarContainer.style.display = 'none';
-    if (typeof videoSeekBarUpdateInterval !== 'undefined' && videoSeekBarUpdateInterval) {
-      clearInterval(videoSeekBarUpdateInterval);
-      videoSeekBarUpdateInterval = null;
-    }
   }
 }
 
@@ -1392,7 +1388,6 @@ function updateInfoContainerVisibility() {
 window.updateScaleDisplay = updateScaleDisplay;
 
 let videoSeekBarContainer = null;
-let videoSeekBarUpdateInterval = null;
 
 function toggleVideoSeekBar() {
   const img = viewerUI.elements.viewerImg;
@@ -1433,6 +1428,26 @@ function toggleVideoSeekBar() {
     ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'dblclick', 'contextmenu'].forEach(event => {
       videoSeekBarContainer.addEventListener(event, stopPropagation);
     });
+
+    // グローバルキャプチャリングフェーズでのメディアイベント監視
+    // DOMに追加される各video要素にリスナーを個別にバインドするコストを削減
+    document.addEventListener('timeupdate', (e) => {
+      if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === viewerUI.elements.viewerImg) {
+        videoSeekBarContainer.updateProgress();
+      }
+    }, true);
+
+    document.addEventListener('play', (e) => {
+      if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === viewerUI.elements.viewerImg) {
+        videoSeekBarContainer.updatePlayStateIcon();
+      }
+    }, true);
+
+    document.addEventListener('pause', (e) => {
+      if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === viewerUI.elements.viewerImg) {
+        videoSeekBarContainer.updatePlayStateIcon();
+      }
+    }, true);
 
     let isSeeking = false;
 
@@ -1497,21 +1512,12 @@ function toggleVideoSeekBar() {
 
   if (videoSeekBarContainer.style.display === 'none' || !videoSeekBarContainer.style.display) {
     videoSeekBarContainer.style.display = 'flex';
-    videoSeekBarUpdateInterval = setInterval(videoSeekBarContainer.updateProgress, 100);
   } else {
     videoSeekBarContainer.style.display = 'none';
-    if (videoSeekBarUpdateInterval) {
-      clearInterval(videoSeekBarUpdateInterval);
-      videoSeekBarUpdateInterval = null;
-    }
   }
 }
 
 window.addEventListener('beforeunload', () => {
-  if (typeof videoSeekBarUpdateInterval !== 'undefined' && videoSeekBarUpdateInterval) {
-    clearInterval(videoSeekBarUpdateInterval);
-    videoSeekBarUpdateInterval = null;
-  }
   if (typeof dragRafId !== 'undefined' && dragRafId) {
     cancelAnimationFrame(dragRafId);
     dragRafId = null;
