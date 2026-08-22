@@ -4315,10 +4315,15 @@ fn main() {
     let builder = builder.register_uri_scheme_protocol("veloce", move |app_handle, request| {
             let uri = request.uri();
             let mut path_str = String::new();
+            let mut query_mtime: Option<u64> = None;
             if let Some(query) = uri.split('?').nth(1) {
                 for pair in query.split('&') {
                     if pair.starts_with("path=") {
                         path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                    } else if pair.starts_with("mtime=") {
+                        if let Ok(m) = pair[6..].parse::<u64>() {
+                            query_mtime = Some(m);
+                        }
                     }
                 }
             }
@@ -4329,14 +4334,28 @@ fn main() {
 
             use tauri::Manager;
             let state = app_handle.state::<AppState>();
-            let mtime = std::fs::metadata(&path_str)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH)
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
+            
+            let mtime = query_mtime.unwrap_or_else(|| {
+                let mem_mtime = if let Ok(lock) = state.filtered_files.lock() {
+                    match lock.binary_search_by(|f| f.path.as_str().cmp(path_str.as_str())) {
+                        Ok(idx) => Some(lock[idx].mtime),
+                        Err(_) => lock.iter().find(|f| f.path == path_str).map(|f| f.mtime),
+                    }
+                } else {
+                    None
+                };
+                mem_mtime.unwrap_or_else(|| {
+                    std::fs::metadata(&path_str)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::UNIX_EPOCH)
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64
+                })
+            });
 
-            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", path_str, mtime).as_bytes());
+            let clean_path = path_str.replace("\\\\?\\", "");
+            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
             let hash_key = format!("{:016x}", digest);
 
             let cached_bytes: Option<Vec<u8>> = {
