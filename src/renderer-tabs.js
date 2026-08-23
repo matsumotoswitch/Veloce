@@ -223,6 +223,15 @@ export function initTabHandlers(ctx) {
 
           appState.currentDirectory = nextTab.path;
           localStorage.setItem('currentDirectory', appState.currentDirectory);
+          
+          appState.searchQuery = nextTab.searchQuery || '';
+          if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;
+          if (nextTab.sortConfig) {
+            appState.sortConfig = JSON.parse(JSON.stringify(nextTab.sortConfig));
+            localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+            updateSortIndicators();
+          }
+
           appState.totalCount = 0;
           appState.selection.clear();
           appState.selectedIndex = -1;
