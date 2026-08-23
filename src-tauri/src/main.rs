@@ -4395,27 +4395,25 @@ fn main() {
                     .body(bytes);
             }
 
+            // キャッシュミス時: 動画のみRust側で同期生成。画像はJS側の thumbnailManager に委譲するため 404 を返す。
+            // 画像の同期生成はUIスレッドをブロックし、他の全サムネイル読み込みを停滞させるため廃止。
             let lower_path = path_str.to_lowercase();
-            let generated_bytes = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-                generate_video_thumbnail_sync(&path_str)
-            } else {
-                generate_image_thumbnail_sync(&path_str)
-            };
-
-            if let Some(bytes) = generated_bytes {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                if let Ok(conn) = state.db_conn.get() {
-                    let _ = conn.execute(
-                        "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                         ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                        rusqlite::params![&hash_key, &bytes, now],
-                    );
+            if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+                if let Some(bytes) = generate_video_thumbnail_sync(&path_str) {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                    if let Ok(conn) = state.db_conn.get() {
+                        let _ = conn.execute(
+                            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
+                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
+                            rusqlite::params![&hash_key, &bytes, now],
+                        );
+                    }
+                    return tauri::http::ResponseBuilder::new()
+                        .mimetype("image/jpeg")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .status(200)
+                        .body(bytes);
                 }
-                return tauri::http::ResponseBuilder::new()
-                    .mimetype("image/jpeg")
-                    .header("Access-Control-Allow-Origin", "*")
-                    .status(200)
-                    .body(bytes);
             }
 
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())

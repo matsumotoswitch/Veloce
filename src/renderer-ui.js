@@ -1622,18 +1622,9 @@ class UIManager {
                 img.onload = function() { this.classList.remove('loading'); };
                 img.onerror = function() {
                   this.classList.remove('loading');
-                  let fallback;
-                  if (file.path.toLowerCase().endsWith('.mp4')) {
-                    fallback = 'data:image/svg+xml;base64,' + btoa(UIManager.ICONS.FILE_X.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"').replace(/currentColor/g, '#aaa'));
-                  } else {
-                    fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
-                  }
-                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
-                    if (window.appState && window.appState.thumbnailUrls) {
-                      window.appState.thumbnailUrls.set(file.path, fallback);
-                      if (window.evictThumbnailCache) window.evictThumbnailCache();
-                    }
-                    this.src = fallback;
+                  // veloce:// URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
+                  if (window.appState && window.appState.thumbnailUrls) {
+                    window.appState.thumbnailUrls.delete(file.path);
                   }
                   if (window.thumbnailManager) {
                     window.thumbnailManager.enqueuePriority(file.path);
@@ -1687,16 +1678,11 @@ class UIManager {
       }
     }
 
-    // 表示パスのセットをキューに追加（優先順位付けのため） & O(1) DOM アクセス用
+    // visiblePathSet を _domByPath から構築（_domByPath はループ内 L1671 で既に最新化済み）
     const newVisibleSet = new Set();
-    if (!this._domByPath) this._domByPath = new Map();
-    this._domByPath.clear();
-    for (let i = 0; i < content.children.length; i++) {
-      const wrapper = content.children[i];
-      const fp = wrapper.dataset.filepath;
-      if (fp) {
+    if (this._domByPath) {
+      for (const fp of this._domByPath.keys()) {
         newVisibleSet.add(fp);
-        this._domByPath.set(fp, wrapper);
       }
     }
     appState.visiblePathSet = newVisibleSet;
