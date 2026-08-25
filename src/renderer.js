@@ -902,7 +902,19 @@ class ThumbnailQueueManager {
         if (this.priorityQueue.length > 0) {
           appState.isPreloadRunning = false;
           let targetIndex = this.priorityQueue.findIndex(req => visiblePaths.has(req.filePath));
-          if (targetIndex === -1) targetIndex = 0;
+          let isVisible = true;
+          
+          if (targetIndex === -1) {
+            targetIndex = 0;
+            isVisible = false;
+          }
+
+          // 表示中ではないアイテム（スクロールで通り過ぎたアイテム等）の処理時は、
+          // バックグラウンド枠（全体-4枠）を超えないように制限し、常に表示中アイテムのために即応枠を確保する
+          const bgLimit = Math.max(1, this.concurrency - 4);
+          if (!isVisible && this.activeTasks.size >= bgLimit) {
+            break;
+          }
 
           const req = this.priorityQueue.splice(targetIndex, 1)[0];
           this.priorityQueueSet.delete(req.filePath); // Set との整合性を維持
@@ -937,6 +949,10 @@ class ThumbnailQueueManager {
         }
         // 3. Preload Queue
         else if (this.preloadQueue.length > 0) {
+          const bgLimit = Math.max(1, this.concurrency - 4);
+          if (this.activeTasks.size >= bgLimit) {
+            break; // プリロードもバックグラウンド枠上限までとする
+          }
           appState.isPreloadRunning = true;
           let found = false;
           while (this.preloadQueue.length > 0) {
@@ -4789,6 +4805,11 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
       appState.thumbnailCompleted = 0;
       appState.thumbnailCounted.clear();
+      
+      // ソート順変更時などにもキューと現在実行中のタスクをリセットし、
+      // 画面に新たに表示されたアイテムが即座に生成枠を獲得できるようにする
+      if (window.thumbnailManager) window.thumbnailManager.clear();
+      
       await scheduleRefresh();
       
       setTimeout(() => {
