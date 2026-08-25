@@ -56,7 +56,9 @@ class ThumbnailWorkerPool {
       const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
       sourceElement.close();
       
-      return new Promise((resolve, reject) => {
+      const blobUrl = URL.createObjectURL(outBlob);
+      
+      const base64Promise = new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => {
           resolve(reader.result);
@@ -66,6 +68,8 @@ class ThumbnailWorkerPool {
         };
         reader.readAsDataURL(outBlob);
       });
+
+      return { url: blobUrl, base64Promise };
     } catch (err) {
       throw new Error(err.message || "Main thread generation failed");
     }
@@ -948,22 +952,22 @@ class ThumbnailQueueManager {
       // 2. キャッシュがない場合、Web Workerで非同期＆非ブロッキングで生成
       if (!url) {
         const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
-        const base64Url = await thumbnailWorkerPool.generate(filePath, assetUrl);
+        const { url: blobUrl, base64Promise } = await thumbnailWorkerPool.generate(filePath, assetUrl);
         
-        appState.thumbnailUrls.set(filePath, base64Url);
+        appState.thumbnailUrls.set(filePath, blobUrl);
         evictThumbnailCache();
-        this.updateDOM(filePath, base64Url);
+        this.updateDOM(filePath, blobUrl);
 
-        // バックグラウンドでRustに保存。saveThumbnailが返すURLをそのまま使い、
-        // メモリ上のキャッシュのみ軽量なURLに差し替える。
-        // ※この時点で DOM の src を差し替えると DB の INSERT 完了前に HTTP リクエストが飛んで 404 になるため DOM は差し替えない。
-        window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
-          const lightUrl = savedUrl || base64Url;
-          if (lightUrl && lightUrl !== base64Url && appState.thumbnailUrls.get(filePath) === base64Url) {
-            appState.thumbnailUrls.set(filePath, lightUrl);
-            if (window.evictThumbnailCache) window.evictThumbnailCache();
-          }
-        }).catch(err => console.warn('Cache save error:', err));
+        // バックグラウンドでBase64変換し、Rustに保存。
+        base64Promise.then(base64Url => {
+          window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
+            const lightUrl = savedUrl || blobUrl;
+            if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
+              appState.thumbnailUrls.set(filePath, lightUrl);
+              if (window.evictThumbnailCache) window.evictThumbnailCache();
+            }
+          }).catch(err => console.warn('Cache save error:', err));
+        }).catch(err => console.warn('Base64 conversion error:', err));
         
         return; // ここで早期リターン
       }
