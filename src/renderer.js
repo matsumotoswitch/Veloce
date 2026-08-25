@@ -28,51 +28,79 @@ class ThumbnailWorkerPool {
     this.initialized = true;
   }
 
-  async generate(filePath, assetUrl) {
-    try {
-      const response = await fetch(assetUrl);
-      if (!response.ok) throw new Error("Fetch failed: " + response.status);
-      const blob = await response.blob();
-      const sourceElement = await createImageBitmap(blob);
-      
-      let width = sourceElement.width;
-      let height = sourceElement.height;
-      if (width > 384 || height > 384) {
-        const ratio = Math.min(384 / width, 384 / height);
-        width = Math.round(width * ratio);
-        height = Math.round(height * ratio);
-      }
-      width = Math.max(1, width);
-      height = Math.max(1, height);
-      
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.fillStyle = '#1e1e1e';
-      ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(sourceElement, 0, 0, width, height);
-      
-      const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
-      sourceElement.close();
-      
-      const blobUrl = URL.createObjectURL(outBlob);
-      
-      const base64Promise = new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          resolve(reader.result);
-        };
-        reader.onerror = () => {
-          reject(new Error("FileReader failed"));
-        };
-        reader.readAsDataURL(outBlob);
-      });
+  async generate(filePath, assetUrl, abortSignal) {
+    return new Promise(async (resolve, reject) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(new Error("Thumbnail generation timed out (5s)"));
+      }, 5000);
 
-      return { url: blobUrl, base64Promise };
-    } catch (err) {
-      throw new Error(err.message || "Main thread generation failed");
-    }
+      const onGlobalAbort = () => {
+        controller.abort();
+        clearTimeout(timeoutId);
+        reject(new Error("Aborted by folder switch"));
+      };
+
+      if (abortSignal) {
+        if (abortSignal.aborted) return onGlobalAbort();
+        abortSignal.addEventListener('abort', onGlobalAbort);
+      }
+
+      try {
+        const response = await fetch(assetUrl, { signal: controller.signal });
+        if (!response.ok) throw new Error("Fetch failed: " + response.status);
+        const blob = await response.blob();
+        
+        // Chromium 109で createImageBitmap がハングするケースの対策
+        const sourceElement = await Promise.race([
+          createImageBitmap(blob),
+          new Promise((_, r) => setTimeout(() => r(new Error("createImageBitmap timed out")), 4000))
+        ]);
+        
+        let width = sourceElement.width;
+        let height = sourceElement.height;
+        if (width > 384 || height > 384) {
+          const ratio = Math.min(384 / width, 384 / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        width = Math.max(1, width);
+        height = Math.max(1, height);
+        
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.fillStyle = '#1e1e1e';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(sourceElement, 0, 0, width, height);
+        
+        const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+        sourceElement.close();
+        
+        const blobUrl = URL.createObjectURL(outBlob);
+        
+        const base64Promise = new Promise((resolveB64, rejectB64) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            resolveB64(reader.result);
+          };
+          reader.onerror = () => {
+            rejectB64(new Error("FileReader failed"));
+          };
+          reader.readAsDataURL(outBlob);
+        });
+
+        clearTimeout(timeoutId);
+        resolve({ url: blobUrl, base64Promise });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        reject(new Error(err.message || "Main thread generation failed"));
+      } finally {
+        if (abortSignal) abortSignal.removeEventListener('abort', onGlobalAbort);
+      }
+    });
   }
 }
 
@@ -814,6 +842,7 @@ class ThumbnailQueueManager {
     this.priorityQueueSet = new Set();
     this.preloadQueue = [];
     this.isProcessing = false;
+    this.abortController = new AbortController();
   }
 
   enqueuePriority(filePath) {
@@ -835,6 +864,11 @@ class ThumbnailQueueManager {
     this.priorityQueue = [];
     this.priorityQueueSet.clear();
     this.preloadQueue = [];
+    
+    // 現在実行中のタスクを強制キャンセルし、新しいコンテキストを開始する
+    this.abortController.abort();
+    this.abortController = new AbortController();
+    
     this.activeTasks.clear();
     if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
       window.debouncedUpdateSmartFolderCounts();
@@ -945,14 +979,19 @@ class ThumbnailQueueManager {
   }
 
   async runTask(filePath) {
+    const signal = this.abortController.signal;
     try {
       // 1. Rust にキャッシュ取得を依頼 (または動画のみRustで生成)
       let url = await window.veloceAPI.getThumbnail(filePath);
       
+      if (signal.aborted) return;
+
       // 2. キャッシュがない場合、Web Workerで非同期＆非ブロッキングで生成
       if (!url) {
         const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
-        const { url: blobUrl, base64Promise } = await thumbnailWorkerPool.generate(filePath, assetUrl);
+        const { url: blobUrl, base64Promise } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
+        
+        if (signal.aborted) return;
         
         appState.thumbnailUrls.set(filePath, blobUrl);
         evictThumbnailCache();
@@ -960,7 +999,9 @@ class ThumbnailQueueManager {
 
         // バックグラウンドでBase64変換し、Rustに保存。
         base64Promise.then(base64Url => {
+          if (signal.aborted) return;
           window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
+            if (signal.aborted) return;
             const lightUrl = savedUrl || blobUrl;
             if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
               appState.thumbnailUrls.set(filePath, lightUrl);
@@ -976,6 +1017,7 @@ class ThumbnailQueueManager {
       evictThumbnailCache();
       this.updateDOM(filePath, url);
     } catch (err) {
+      if (signal.aborted) return;
       console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
       let fallbackUrl;
       if (filePath.toLowerCase().endsWith('.mp4') || filePath.toLowerCase().endsWith('.webm') || filePath.toLowerCase().endsWith('.avi')) {
@@ -987,11 +1029,13 @@ class ThumbnailQueueManager {
       evictThumbnailCache();
       this.updateDOM(filePath, fallbackUrl);
     } finally {
-      this.activeTasks.delete(filePath);
-      if (typeof window.markThumbnailCompleted === 'function') {
-        window.markThumbnailCompleted(filePath);
+      if (!signal.aborted) {
+        this.activeTasks.delete(filePath);
+        if (typeof window.markThumbnailCompleted === 'function') {
+          window.markThumbnailCompleted(filePath);
+        }
+        this.processNext();
       }
-      this.processNext();
     }
   }
   updateDOM(filePath, url) {
