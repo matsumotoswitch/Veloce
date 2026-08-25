@@ -4336,22 +4336,12 @@ fn main() {
             let state = app_handle.state::<AppState>();
             
             let mtime = query_mtime.unwrap_or_else(|| {
-                let mem_mtime = if let Ok(lock) = state.filtered_files.lock() {
-                    match lock.binary_search_by(|f| f.path.as_str().cmp(path_str.as_str())) {
-                        Ok(idx) => Some(lock[idx].mtime),
-                        Err(_) => lock.iter().find(|f| f.path == path_str).map(|f| f.mtime),
-                    }
-                } else {
-                    None
-                };
-                mem_mtime.unwrap_or_else(|| {
-                    std::fs::metadata(&path_str)
-                        .and_then(|m| m.modified())
-                        .unwrap_or(std::time::UNIX_EPOCH)
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64
-                })
+                std::fs::metadata(&path_str)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH)
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
             });
 
             let clean_path = path_str.replace("\\\\?\\", "");

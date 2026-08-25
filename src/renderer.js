@@ -85,6 +85,10 @@ export function cleanupContext() {
     appState.thumbnailUrls.clear();
   }
   if (window.thumbnailManager) window.thumbnailManager.clear();
+  
+  // フォルダ切り替え時に古いマッピングを残さない
+  const uiMgr = window.uiManager;
+  if (uiMgr && uiMgr._domByPath) uiMgr._domByPath.clear();
 }
 
 blockDevtoolsShortcuts();
@@ -109,6 +113,9 @@ const evictThumbnailCache = debounce((maxSize = 2000) => {
   const toDelete = appState.thumbnailUrls.size - maxSize;
   let i = 0;
   for (const [key, val] of appState.thumbnailUrls) {
+    // 表示中のアイテムはスキップ
+    if (appState.visiblePathSet && appState.visiblePathSet.has(key)) continue;
+    
     if (val && val.startsWith('blob:')) {
       URL.revokeObjectURL(val);
     }
@@ -988,7 +995,7 @@ class ThumbnailQueueManager {
     const uiMgr = window.uiManager || uiManager;
     const wrapper = (uiMgr && uiMgr._domByPath) ? uiMgr._domByPath.get(filePath) : null;
     if (wrapper) {
-      const img = wrapper.querySelector('.thumbnail-img');
+      const img = wrapper.children[0]; // .thumbnail-img
       if (img) {
         img.src = url;
         if (img.complete) {
