@@ -1,4 +1,4 @@
-import { UIManager, ICON_SVGS, COLORS } from './renderer-ui.js';
+﻿import { UIManager, ICON_SVGS, COLORS } from './renderer-ui.js';
 
 /**
  * お気に入りまたはパスから表示名・アイコン・色を解決します。

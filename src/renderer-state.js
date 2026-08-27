@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @typedef {Object} ImageFile
  * @property {string} name - ファイル名
  * @property {string} ext - 拡張子

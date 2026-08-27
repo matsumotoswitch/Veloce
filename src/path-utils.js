@@ -1,4 +1,4 @@
-export const INVALID_FILENAME_RE = /[\\/:*?"<>|]/;
+﻿export const INVALID_FILENAME_RE = /[\\/:*?"<>|]/;
 
 /**
  * ファイル名・フォルダ名の妥当性を検証します。

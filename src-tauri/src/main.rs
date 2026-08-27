@@ -2894,14 +2894,16 @@ async fn save_thumbnail(
         None
     };
 
-    let mtime = mem_mtime.unwrap_or_else(|| {
-        std::fs::metadata(&file_path)
+    let mtime = if let Some(mt) = mem_mtime {
+        mt
+    } else {
+        tokio::fs::metadata(&file_path).await
             .and_then(|m| m.modified())
             .unwrap_or(std::time::UNIX_EPOCH)
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64
-    });
+    };
 
     let clean_path = file_path.replace("\\\\?\\", "");
     let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());

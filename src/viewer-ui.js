@@ -1,4 +1,4 @@
-import { viewerState } from './viewer-state.js';
+﻿import { viewerState } from './viewer-state.js';
 import { applyGlowEffect as glowElement } from './utils.js';
 
 /**

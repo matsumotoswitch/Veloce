@@ -1,4 +1,4 @@
-import { checkPathExists } from './path-utils.js';
+﻿import { checkPathExists } from './path-utils.js';
 
 /**
  * 現在のタブの状態を同期します。

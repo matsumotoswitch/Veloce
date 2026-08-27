@@ -1,4 +1,4 @@
-/**
+﻿/**
  * メタデータの数値を表示用にフォーマットします。
  * @param {number|string|null|undefined} num
  * @returns {string|null}

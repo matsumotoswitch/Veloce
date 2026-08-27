@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 共通ダイアログの DOM シェルを生成します。
  * @returns {{ overlay: HTMLDivElement, dialog: HTMLDivElement, cleanup: () => void, bindEscape: (resolve: Function, value: *) => void }}
  */
