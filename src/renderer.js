@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Veloce - Main Controller (renderer.js)
 // ============================================================================
 
@@ -5467,7 +5467,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       if (window.thumbnailManager) window.thumbnailManager.remove(newFile.path);
 
-      await window.veloceAPI.notifyFileChanged(newFile);
+      const newTotal = await window.veloceAPI.notifyFileChanged(newFile);
+      if (typeof newTotal === 'number') appState.totalCount = newTotal;
       scheduleRefresh();
       if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
         window.debouncedUpdateSmartFolderCounts();
@@ -5477,7 +5478,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (window.veloceAPI.onFileRemoved) {
     window.veloceAPI.onFileRemoved(async (path) => {
-      await window.veloceAPI.notifyFileRemoved(path);
+      const newTotal = await window.veloceAPI.notifyFileRemoved(path);
+      if (typeof newTotal === 'number') appState.totalCount = newTotal;
       scheduleRefresh();
       if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
         window.debouncedUpdateSmartFolderCounts();

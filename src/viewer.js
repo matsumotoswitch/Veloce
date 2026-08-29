@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Veloce - Viewer Controller (viewer.js)
 // ============================================================================
 
@@ -549,6 +549,9 @@ async function getImagePath(index) {
   }
   const result = await window.veloceAPI.getViewerImage(index);
   if (result) {
+    if (!viewerState.paths && result.total) {
+      viewerState.paths = new Array(result.total).fill(null);
+    }
     if (viewerState.paths) viewerState.paths[index] = result.path;
     return result.path;
   }
