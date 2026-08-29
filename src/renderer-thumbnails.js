@@ -1,4 +1,4 @@
-﻿import { appState } from './renderer-state.js';
+import { appState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
 import { getStreamUrl, debounce } from './utils.js';
 
@@ -223,6 +223,7 @@ export class ThumbnailQueueManager {
     this.abortController = new AbortController();
     
     this.activeTasks.clear();
+    if (this._dirtyTasks) this._dirtyTasks.clear();
     if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
       window.debouncedUpdateSmartFolderCounts();
     }
@@ -238,6 +239,17 @@ export class ThumbnailQueueManager {
     this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
     this.priorityQueueSet.delete(filePath);
     this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
+
+    // リトライカウントをリセット（書き込み完了後の新規ファイルを正しく処理するため）
+    if (this._retryMap) {
+      this._retryMap.delete(filePath);
+    }
+
+    // 実行中のタスクがある場合、dirty フラグを立てて完了後に再キューさせる
+    if (this.activeTasks.has(filePath)) {
+      if (!this._dirtyTasks) this._dirtyTasks = new Set();
+      this._dirtyTasks.add(filePath);
+    }
   }
 
   async processNext() {
@@ -349,22 +361,31 @@ export class ThumbnailQueueManager {
 
   async runTask(filePath) {
     const signal = this.abortController.signal;
+    let fallbackToSvg = false;
+
     try {
       // 1. Rust からキャッシュ取得試行
       let url = await window.veloceAPI.getThumbnail(filePath);
       
       if (signal.aborted) return;
+      if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
+        throw new Error('Task invalidated by file-changed');
+      }
 
-      // 2. キャッシュがない場合、Web Workerで非同期に生成
+      // 2. キャッシュがない場合、非同期に生成
       if (!url) {
         const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
         const { url: blobUrl, base64Promise } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
         
         if (signal.aborted) return;
+        if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
+          URL.revokeObjectURL(blobUrl);
+          throw new Error('Task invalidated by file-changed');
+        }
         
         appState.thumbnailUrls.set(filePath, blobUrl);
         evictThumbnailCache();
-        document.title = 'SUCCESS: ' + filePath.split('\\').pop(); this.updateDOM(filePath, blobUrl);
+        this.updateDOM(filePath, blobUrl);
 
         // バックグラウンドでBase64変換しRustに保存。
         base64Promise.then(base64Url => {
@@ -387,20 +408,56 @@ export class ThumbnailQueueManager {
       this.updateDOM(filePath, url);
     } catch (err) {
       if (signal.aborted) return;
-      console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
-      // Chromiumの画像デコーダハングを誘発しないよう、元の画像ではなく軽量なSVGをフォールバックとして返す。
-      const BROKEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>';
-      const fallbackUrl = 'data:image/svg+xml;base64,' + btoa(BROKEN_SVG);
-      
-      // 注意: appState.thumbnailUrls にはセットしない。次回表示時に再試行させる。
-      document.title = 'ERROR: ' + err.message; this.updateDOM(filePath, fallbackUrl);
+
+      if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
+        // file-changed による中断。finally で再キューされるためリトライカウントは進めない。
+        console.info(`[Thumbnail] Task for ${filePath.split('\\').pop()} was dirtied by file-changed.`);
+      } else {
+        console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
+
+        // 書き込み中のファイルに対するレースコンディション対策:
+        // リトライカウントを管理し、最大3回まで遅延リトライする (1s, 2s, 3s)
+        const retryCount = (this._retryMap ? this._retryMap.get(filePath) : 0) || 0;
+        if (retryCount < 3) {
+          if (!this._retryMap) this._retryMap = new Map();
+          this._retryMap.set(filePath, retryCount + 1);
+          const delay = 1000 * (retryCount + 1);
+          console.info(`[Thumbnail] Retry ${retryCount + 1}/3 for ${filePath.split('\\').pop()} in ${delay}ms`);
+          setTimeout(() => {
+            if (!signal.aborted) {
+              this.enqueuePriority(filePath);
+            }
+          }, delay);
+        } else {
+          fallbackToSvg = true;
+        }
+      }
     } finally {
       if (!signal.aborted) {
         this.activeTasks.delete(filePath);
+
+        if (fallbackToSvg) {
+          // 3回失敗: SVGフォールバックを表示し、thumbnailUrlsにもセットして無限リトライを防ぐ
+          const BROKEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>';
+          const fallbackUrl = 'data:image/svg+xml;base64,' + btoa(BROKEN_SVG);
+          appState.thumbnailUrls.set(filePath, fallbackUrl);
+          if (window.evictThumbnailCache) window.evictThumbnailCache();
+          this.updateDOM(filePath, fallbackUrl);
+          if (this._retryMap) this._retryMap.delete(filePath);
+          console.warn(`[Thumbnail] Gave up after 3 retries: ${filePath.split('\\').pop()}`);
+        }
+
         if (typeof window.markThumbnailCompleted === 'function') {
           window.markThumbnailCompleted(filePath);
         }
-        this.processNext();
+
+        if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
+          this._dirtyTasks.delete(filePath);
+          // file-changed が来ていたので即座に再キュー
+          this.enqueuePriority(filePath);
+        } else {
+          this.processNext();
+        }
       }
     }
   }

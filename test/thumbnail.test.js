@@ -180,4 +180,106 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     manager.processNext();
     expect(window.debouncedUpdateSmartFolderCounts).not.toHaveBeenCalled();
   });
+
+  it('remove() should reset retry count so new files are not blocked by stale retries', () => {
+    // 不具合再現: file-changed イベントが連続発生した場合にリトライカウントが積み上がり
+    // SVGフォールバックになってしまう問題を検証
+    const manager = {
+      priorityQueue: [],
+      priorityQueueSet: new Set(),
+      preloadQueue: [],
+      activeTasks: new Set(),
+      _retryMap: new Map(),
+      _dirtyTasks: null,
+      remove(filePath) {
+        this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
+        this.priorityQueueSet.delete(filePath);
+        this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
+        if (this._retryMap) {
+          this._retryMap.delete(filePath);
+        }
+        if (this.activeTasks.has(filePath)) {
+          if (!this._dirtyTasks) this._dirtyTasks = new Set();
+          this._dirtyTasks.add(filePath);
+        }
+      }
+    };
+
+    const filePath = 'C:\\Users\\test\\new-image.png';
+
+    // リトライカウントが溜まった状態をシミュレート
+    manager._retryMap.set(filePath, 2);
+
+    // file-changed イベント → remove() 呼び出し
+    manager.remove(filePath);
+
+    // リトライカウントがリセットされること
+    expect(manager._retryMap.has(filePath)).toBe(false);
+  });
+
+  it('remove() should set _dirtyTasks flag when task is actively running', () => {
+    const manager = {
+      priorityQueue: [],
+      priorityQueueSet: new Set(),
+      preloadQueue: [],
+      activeTasks: new Set(),
+      _retryMap: null,
+      _dirtyTasks: null,
+      remove(filePath) {
+        this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
+        this.priorityQueueSet.delete(filePath);
+        this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
+        if (this._retryMap) {
+          this._retryMap.delete(filePath);
+        }
+        if (this.activeTasks.has(filePath)) {
+          if (!this._dirtyTasks) this._dirtyTasks = new Set();
+          this._dirtyTasks.add(filePath);
+        }
+      }
+    };
+
+    const filePath = 'C:\\Users\\test\\new-image.png';
+
+    // タスクが実行中の状態
+    manager.activeTasks.add(filePath);
+
+    // file-changed イベント → remove() 呼び出し
+    manager.remove(filePath);
+
+    // _dirtyTasks フラグが立っていること（後でrunTaskが再キューする）
+    expect(manager._dirtyTasks).not.toBeNull();
+    expect(manager._dirtyTasks.has(filePath)).toBe(true);
+  });
+
+  it('remove() should NOT set _dirtyTasks when task is not running', () => {
+    const manager = {
+      priorityQueue: [{ filePath: 'C:\\test.png' }],
+      priorityQueueSet: new Set(['C:\\test.png']),
+      preloadQueue: [],
+      activeTasks: new Set(), // タスクは実行中ではない
+      _retryMap: null,
+      _dirtyTasks: null,
+      remove(filePath) {
+        this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
+        this.priorityQueueSet.delete(filePath);
+        this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
+        if (this._retryMap) {
+          this._retryMap.delete(filePath);
+        }
+        if (this.activeTasks.has(filePath)) {
+          if (!this._dirtyTasks) this._dirtyTasks = new Set();
+          this._dirtyTasks.add(filePath);
+        }
+      }
+    };
+
+    const filePath = 'C:\\test.png';
+    manager.remove(filePath);
+
+    // キューからは削除されること
+    expect(manager.priorityQueue.length).toBe(0);
+    // _dirtyTasks は設定されないこと（タスク未実行のため）
+    expect(manager._dirtyTasks).toBeNull();
+  });
 });
