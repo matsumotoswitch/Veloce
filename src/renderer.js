@@ -5467,6 +5467,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       if (window.thumbnailManager) window.thumbnailManager.remove(newFile.path);
 
+      if (window.uiManager && window.uiManager._domByPath) {
+        const wrapper = window.uiManager._domByPath.get(newFile.path);
+        if (wrapper) {
+          wrapper.dataset.filepath = ''; // 意図的に空にして updateVirtualGrid での再描画を強制する
+          window.uiManager._domByPath.delete(newFile.path);
+        }
+      }
+
       const newTotal = await window.veloceAPI.notifyFileChanged(newFile);
       if (typeof newTotal === 'number') appState.totalCount = newTotal;
       scheduleRefresh();

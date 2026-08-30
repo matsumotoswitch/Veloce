@@ -498,3 +498,36 @@ window.processNextTask = () => window.thumbnailManager.processNext();
 
 
 window.resetThumbnailPreloader = resetThumbnailPreloader;
+
+// サムネイルの自己修復（Self-healing）監視プロセス
+// 画面に表示されている要素（_domByPath）を定期的に検査し、ロード中のままスタックしているか、
+// SVGフォールバックのエラー状態のまま放置されているサムネイルを検知して自動的に再キューする。
+setInterval(() => {
+  if (window.appState && window.appState.dragState && window.appState.dragState.isAppDragging) return;
+  if (!window.uiManager || !window.uiManager._domByPath) return;
+  if (!window.thumbnailManager) return;
+  
+  let retryCount = 0;
+  for (const [path, wrapper] of window.uiManager._domByPath.entries()) {
+    const img = wrapper.children[0];
+    if (!img) continue;
+    
+    const isStuckLoading = img.classList.contains('loading');
+    const isSvgFallback = img.src && img.src.startsWith('data:image/svg+xml');
+    
+    if (isStuckLoading || isSvgFallback) {
+      if (!window.thumbnailManager.activeTasks.has(path)) {
+        if (window.appState && window.appState.thumbnailUrls) {
+          window.appState.thumbnailUrls.delete(path);
+        }
+        window.thumbnailManager.enqueuePriority(path);
+        retryCount++;
+      }
+    }
+  }
+  
+  if (retryCount > 0 && typeof window.processNextTask === 'function') {
+    window.processNextTask();
+    console.info(`[Self-Healing] Automatically retried ${retryCount} missing/broken thumbnails on screen.`);
+  }
+}, 5000);
