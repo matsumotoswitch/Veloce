@@ -972,8 +972,6 @@ export async function selectImage(index, event = null) {
     return;
   }
 
-  const file = await window.veloceAPI.getFileByIndex(index);
-
   uiManager.updateSelectionUI();
 
   // 選択した画像が画面内に表示されるように自動スクロール (仮想スクロール対応)
@@ -1010,8 +1008,8 @@ export async function selectImage(index, event = null) {
     }
   }
 
-
-  // インスペクターの更新
+  // インスペクターの更新 (IPC呼び出しをUI更新後に遅延させてキーボード移動の遅延をなくす)
+  const file = await window.veloceAPI.getFileByIndex(index);
   if (file) renderMetadata(file);
 }
 

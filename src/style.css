@@ -1182,7 +1182,7 @@ input[type="range"]:focus {
   cursor: pointer;
   border-radius: var(--radius-xs);
   transform: translateZ(0) scale(1);
-  transition: transform 0.2s var(--transition-smooth), box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.1s var(--transition-smooth); /* 選択枠の遅延をなくすため色変化のアニメーションを削除 */
   position: relative;
   z-index: 1;
   display: flex;
@@ -1249,7 +1249,6 @@ body.show-thumbnail-names .thumbnail-label {
   border-color: var(--accent-color);
   box-shadow: 0 0 0 2px var(--accent-color);
   border-radius: var(--radius-xs);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   z-index: 2;
 }
 

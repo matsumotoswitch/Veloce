@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 //   deltaMode=2 (ページ): delta = deltaY * clientHeight
 // ============================================================
 
-const WHEEL_SCALE_FACTOR = 0.4;
+const WHEEL_SCALE_FACTOR = 1.5;
 const LINE_HEIGHT_PX = 24;
 
 function calcScrollDelta(deltaY, deltaMode, clientHeight) {
@@ -26,25 +26,25 @@ function calcScrollDelta(deltaY, deltaMode, clientHeight) {
 
 describe('Wheel scroll delta calculation', () => {
   describe('deltaMode=0 (px / WebView2)', () => {
-    it('1ノッチ分(100px)のdeltaYで40pxスクロール', () => {
-      expect(calcScrollDelta(100, 0, 600)).toBe(40);
+    it('1ノッチ分(100px)のdeltaYで150pxスクロール', () => {
+      expect(calcScrollDelta(100, 0, 600)).toBe(150);
     });
 
-    it('1ノッチ分(120px)のdeltaYで48pxスクロール', () => {
-      expect(calcScrollDelta(120, 0, 600)).toBe(48);
+    it('1ノッチ分(120px)のdeltaYで180pxスクロール', () => {
+      expect(calcScrollDelta(120, 0, 600)).toBe(180);
     });
 
     it('逆方向(下→上)のスクロールが正しく負値になる', () => {
-      expect(calcScrollDelta(-100, 0, 600)).toBe(-40);
+      expect(calcScrollDelta(-100, 0, 600)).toBe(-150);
     });
 
     it('delta=0のとき0になる', () => {
       expect(calcScrollDelta(0, 0, 600)).toBe(0);
     });
 
-    it('WHEEL_SCALE_FACTORが0.4であること', () => {
+    it('WHEEL_SCALE_FACTORが1.5であること', () => {
       // 係数の値を固定して誤って変更されたときに検知できるようにする
-      expect(WHEEL_SCALE_FACTOR).toBe(0.4);
+      expect(WHEEL_SCALE_FACTOR).toBe(1.5);
     });
   });
 
@@ -72,20 +72,20 @@ describe('Wheel scroll delta calculation', () => {
     });
   });
 
-  describe('アキュムレータ不使用の確認 (各イベントが独立)', () => {
-    it('連続3回のホイールイベントはそれぞれ独立してスケールされる', () => {
+  describe('アキュムレータ不使用の確認(各イベントが独立)', () => {
+    it('連続したホイールイベントがそれぞれ独立してスケールされる', () => {
       // アキュムレータ方式なら内部状態が累積されるが、
       // 減衰係数方式では毎回 deltaY * FACTOR で完結する
       const deltas = [100, 100, 100];
       const results = deltas.map(d => calcScrollDelta(d, 0, 600));
-      expect(results).toEqual([40, 40, 40]);
+      expect(results).toEqual([150, 150, 150]);
     });
 
     it('小さいdeltaYでも毎回スクロール量が計算される(閾値なし)', () => {
       // 旧アキュムレータ方式ではNOTCH_THRESHOLD未満だとスクロールしなかった
       // 新方式ではどんな微小値でも即時スクロールに変換される
       const smallDelta = 10;
-      expect(calcScrollDelta(smallDelta, 0, 600)).toBe(4); // 10 * 0.4
+      expect(calcScrollDelta(smallDelta, 0, 600)).toBe(15); // 10 * 1.5
     });
   });
 });

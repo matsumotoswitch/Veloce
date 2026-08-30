@@ -1,4 +1,4 @@
-﻿import { appState } from './renderer-state.js';
+import { appState } from './renderer-state.js';
 import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml } from './utils.js';
 import { validateFilename, INVALID_FILENAME_RE } from './path-utils.js';
 import { showAppDialog } from './dialog-base.js';
@@ -162,9 +162,73 @@ class UIManager {
   }
 
   initWheelControl() {
-    // 過去に e.deltaY * 0.3 とする独自制御があったが、
-    // 「マウスホイールの動きが極端（直感に合わない）」というフィードバックにより
-    // ネイティブのスクロール動作（ブラウザ/OS標準）に任せる。
+    const container = this.elements.thumbnailGrid;
+    if (!container) return;
+
+    let targetScroll = container.scrollTop;
+    let isAnimating = false;
+    
+    // 連続したホイール操作を1回のスムーズなアニメーションに統合（アキュムレート）する
+    const calcScrollDelta = (deltaY, deltaMode, clientHeight) => {
+      if (deltaMode === 1) {
+        return deltaY * 24; // LINE
+      } else if (deltaMode === 2) {
+        return deltaY * clientHeight; // PAGE
+      } else {
+        return deltaY * 1.5; // PIXEL (WHEEL_SCALE_FACTOR)
+      }
+    };
+
+    container.addEventListener('wheel', (e) => {
+      // 横スクロールはネイティブに任せる
+      if (e.deltaX !== 0) return;
+      // 修飾キーが押されている場合（ズーム等）も除外
+      if (e.ctrlKey || e.metaKey) return;
+
+      e.preventDefault();
+
+      const delta = calcScrollDelta(e.deltaY, e.deltaMode, container.clientHeight);
+
+      if (!isAnimating) {
+        targetScroll = container.scrollTop;
+      }
+      
+      targetScroll += delta;
+      
+      const maxScroll = container.scrollHeight - container.clientHeight;
+      targetScroll = Math.max(0, Math.min(maxScroll, targetScroll));
+
+      if (!isAnimating) {
+        isAnimating = true;
+        let expectedScrollTop = container.scrollTop;
+
+        const animate = () => {
+          // 外部要因（キーボード移動等）でscrollTopが変更された場合はアニメーションを中断
+          if (Math.abs(container.scrollTop - expectedScrollTop) > 2) {
+            isAnimating = false;
+            return;
+          }
+
+          const diff = targetScroll - container.scrollTop;
+          
+          if (Math.abs(diff) < 1.5) {
+            container.scrollTop = targetScroll;
+            isAnimating = false;
+            return;
+          }
+          
+          const step = diff * 0.45; // 減衰係数（高めにしてキビキビ動かす）
+          // 無限ループ防止のため、最低でも1pxは動かす
+          const actualStep = Math.abs(step) < 1 ? Math.sign(step) : step;
+          container.scrollTop += actualStep;
+          expectedScrollTop = container.scrollTop;
+
+          requestAnimationFrame(animate);
+        };
+        // ホイール入力から描画までの遅延（1フレーム分のラグ）をなくすため、即座に1回目を実行
+        animate();
+      }
+    }, { passive: false });
   }
 
   /**
@@ -1496,7 +1560,8 @@ class UIManager {
     }
 
     // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策）
-    if (this.lastGridStartIndex !== startIndex) {
+    // 以前の lastGridStartIndex 判定は _runWithUpdateLock 内で競合しないため機能していませんでした。
+    if (this._gridUpdatePending) {
       return;
     }
 
@@ -1528,14 +1593,7 @@ class UIManager {
       content.appendChild(wrapper);
     }
 
-    // 余分な要素を削除
-    while (content.children.length > targetCount) {
-      const last = content.lastChild;
-      if (last.dataset && last.dataset.filepath && this._domByPath && this._domByPath.get(last.dataset.filepath) === last) {
-        this._domByPath.delete(last.dataset.filepath);
-      }
-      content.removeChild(last);
-    }
+    // 余分な要素はループ終了後に display:none で隠して再利用（DOMプール）します。
 
     // (getCachedThumbnailBatch has been removed in favor of native custom protocol streaming)
     const filesToEnqueue = [];
@@ -1545,6 +1603,7 @@ class UIManager {
       if (!file) continue;
 
       const wrapper = content.children[i - startIndex];
+      wrapper.style.display = ''; // プールから復帰して確実に表示する
       // children[] 固定インデックスで直アクセス（querySelector廃止でO(subtree)走査を排除）
       const img   = wrapper.children[0]; // .thumbnail-img
       const label = wrapper.children[1]; // .thumbnail-label
@@ -1676,6 +1735,21 @@ class UIManager {
             badge.classList.remove('show');
           }
         }
+      }
+    }
+
+    // DOMプールの余分な要素を非表示にして使い回す（GCとReflowの発生を抑える）
+    const currentChildrenCount = content.children.length;
+    for (let i = targetCount; i < currentChildrenCount; i++) {
+      const unusedWrapper = content.children[i];
+      if (unusedWrapper.style.display !== 'none') {
+        unusedWrapper.style.display = 'none';
+        if (unusedWrapper.dataset.filepath && this._domByPath) {
+          this._domByPath.delete(unusedWrapper.dataset.filepath);
+          unusedWrapper.dataset.filepath = '';
+        }
+        // querySelectorの誤爆（古いindexがヒットする）を防ぐためクリア
+        unusedWrapper.dataset.index = '';
       }
     }
 
