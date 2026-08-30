@@ -203,8 +203,8 @@ class UIManager {
         let expectedScrollTop = container.scrollTop;
 
         const animate = () => {
-          // 外部要因（キーボード移動等）でscrollTopが変更された場合はアニメーションを中断
-          if (Math.abs(container.scrollTop - expectedScrollTop) > 2) {
+          // 外部要因（キーボード移動等）でscrollTopが大きく変更された場合はアニメーションを中断
+          if (Math.abs(container.scrollTop - expectedScrollTop) > 20) {
             isAnimating = false;
             return;
           }
@@ -1547,10 +1547,6 @@ class UIManager {
     this.lastGridStartIndex = startIndex;
     this.lastGridEndIndex = endIndex;
 
-    // コンテンツ領域をスクロール位置に合わせて移動 (Win8.1等のちらつき防止のため translate3d でハードウェアアクセラレーションを強制)
-    const offsetY = (safeStartRow * rowHeight) + padding;
-    content.style.transform = `translate3d(0, ${offsetY}px, 0)`;
-
     let items;
     if (appState.initialChunk && startIndex === 0 && (endIndex - startIndex + 1) <= appState.initialChunk.length) {
       items = appState.initialChunk.slice(0, endIndex - startIndex + 1);
@@ -1559,11 +1555,17 @@ class UIManager {
       items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
     }
 
-    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策）
-    // 以前の lastGridStartIndex 判定は _runWithUpdateLock 内で競合しないため機能していませんでした。
+    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（CPU負荷低減）
     if (this._gridUpdatePending) {
+      // 描画をスキップするため、状態をリセットして次回の処理に任せる
+      this.lastGridStartIndex = -1;
+      this.lastGridEndIndex = -1;
       return;
     }
+
+    // コンテンツ領域をスクロール位置に合わせて移動 (DOM更新の直前に行うことで、破棄時の表示崩れを防ぐ)
+    const offsetY = (safeStartRow * rowHeight) + padding;
+    content.style.transform = `translate3d(0, ${offsetY}px, 0)`;
 
     // DOMの再構築（要素の再利用）
     const targetCount = endIndex - startIndex + 1;
