@@ -168,10 +168,16 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (initialDataJson) {
         try {
           const initialData = JSON.parse(initialDataJson);
+          window.veloceAPI.debugLog(`[JS] applyViewerInitialData: ${JSON.stringify(initialData)}`);
           viewerState.currentImagePath = initialData.path;
           viewerState.totalImages = initialData.total;
+          if (typeof initialData.index === 'number') {
+            viewerState.currentIndex = initialData.index;
+          }
           
-          if (!viewerState.paths) viewerState.paths = new Array(initialData.total).fill(null);
+          if (!viewerState.paths || viewerState.paths.length !== initialData.total) {
+            viewerState.paths = new Array(initialData.total).fill(null);
+          }
           // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
           if (viewerState.paths && viewerState.currentIndex >= 0) {
             viewerState.paths[viewerState.currentIndex] = initialData.path;
@@ -204,6 +210,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.isImmersiveArranged = true;
         resetZoomAndFit();
       });
+      listen('close-viewer', () => {
+        viewerState.paths = [];
+        viewerState.currentImagePath = null;
+        viewerState.totalImages = 0;
+        viewerState.preloadCache.clear();
+      });
+
       listen('viewer-list-updated', (event) => {
         const newPaths = event.payload || []; // 更新されたファイルパスのリスト
         viewerState.paths = newPaths;
@@ -729,16 +742,26 @@ async function preloadAdjacentImages() {
  * 次の画像を表示する (Next)
  */
 function showNext() {
-  viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
-  loadImage();
+  if (viewerState.currentIndex < viewerState.totalImages - 1) {
+    window.veloceAPI.debugLog(`[JS] showNext: currentIndex ${viewerState.currentIndex} -> ${viewerState.currentIndex + 1}, totalImages: ${viewerState.totalImages}`);
+    viewerState.currentIndex++;
+    loadImage();
+  } else {
+    window.veloceAPI.debugLog(`[JS] showNext blocked: currentIndex ${viewerState.currentIndex} >= totalImages - 1 (${viewerState.totalImages - 1})`);
+  }
 }
 
 /**
  * 前の画像を表示する (Prev)
  */
 function showPrev() {
-  viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
-  loadImage();
+  if (viewerState.currentIndex > 0) {
+    window.veloceAPI.debugLog(`[JS] showPrev: currentIndex ${viewerState.currentIndex} -> ${viewerState.currentIndex - 1}, totalImages: ${viewerState.totalImages}`);
+    viewerState.currentIndex--;
+    loadImage();
+  } else {
+    window.veloceAPI.debugLog(`[JS] showPrev blocked: currentIndex ${viewerState.currentIndex} <= 0`);
+  }
 }
 
 function clampTranslate() {
@@ -1412,6 +1435,30 @@ function toggleVideoSeekBar() {
         videoSeekBarContainer.updateProgress();
       }
     }, true);
+
+    let wheelTimeout;
+    let wheelDeltaAccumulator = 0;
+
+    document.addEventListener('wheel', (e) => {
+      if (viewerState.isZoomed || viewerState.isImmersiveArranged || document.querySelector('.immersive-container')) return;
+      if (e.ctrlKey) return;
+      
+      wheelDeltaAccumulator += Math.sign(e.deltaY);
+      
+      clearTimeout(wheelTimeout);
+      wheelTimeout = setTimeout(() => {
+        if (wheelDeltaAccumulator !== 0) {
+          let steps = Math.abs(wheelDeltaAccumulator);
+          if (wheelDeltaAccumulator > 0) {
+            viewerState.currentIndex = Math.min(viewerState.currentIndex + steps, viewerState.totalImages - 1);
+          } else {
+            viewerState.currentIndex = Math.max(viewerState.currentIndex - steps, 0);
+          }
+          loadImage();
+          wheelDeltaAccumulator = 0;
+        }
+      }, 100);
+    }, { passive: true });
 
     document.addEventListener('play', (e) => {
       if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === viewerUI.elements.viewerImg) {

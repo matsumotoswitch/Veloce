@@ -2930,7 +2930,7 @@ async fn save_thumbnail(
     }).await;
 
     // 保存完了後、即座に使えるカスタムURLを返すことで、JS側が 2回目の getThumbnail IPCを呼ぶ必要をなくす (BN-3修正)
-    let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
+            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
     Ok(url)
 }
 
@@ -3041,6 +3041,14 @@ async fn open_viewer(
             (None, Vec::new())
         }
     };
+
+    println!("[Veloce DEBUG] open_viewer called with current_index: {}. current_paths.len(): {}", current_index, current_paths.len());
+    if current_paths.len() > current_index {
+        println!("[Veloce DEBUG] target_path at index {}: {:?}", current_index, current_paths[current_index]);
+    }
+    for (i, p) in current_paths.iter().take(10).enumerate() {
+        println!("[Veloce DEBUG] path[{}]: {}", i, p);
+    }
 
     let mut win_width = width;
     let mut win_height = height;
@@ -4227,6 +4235,11 @@ fn start_local_video_server() -> u16 {
     port
 }
 
+#[tauri::command]
+fn debug_log(msg: String) {
+    println!("[JS DEBUG] {}", msg);
+}
+
 fn main() {
     // Attach to parent console if running from command line (for debug logs)
     #[cfg(windows)]
@@ -4971,6 +4984,7 @@ fn main() {
             precache_directory_recursively,
             get_viewer_image,
             open_viewer,
+            debug_log,
             show_window,
             arrange_viewers,
             trash_file,

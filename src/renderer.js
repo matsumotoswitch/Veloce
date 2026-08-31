@@ -1020,7 +1020,8 @@ async function openViewer(index) {
   if (file) {
     localStorage.setItem('viewerInitialData', JSON.stringify({
       path: file.path,
-      total: appState.totalCount
+      total: appState.totalCount,
+      index: index
     }));
 
     // パス配列はRust側にあるため転送不要
