@@ -1373,6 +1373,7 @@ class UIManager {
       if (!file) continue;
 
       const tr = tbody.children[i - safeStartRow + 1]; // +1 for topSpacer
+      void tr.offsetHeight; // 強制リフロー (Chromium 109の描画バグ対策)
       
       const isSelected = appState.selection.has(i);
       if (isSelected) tr.classList.add('selected');
@@ -1606,6 +1607,7 @@ class UIManager {
 
       const wrapper = content.children[i - startIndex];
       wrapper.style.display = ''; // プールから復帰して確実に表示する
+      void wrapper.offsetHeight; // force reflow
       // children[] 固定インデックスで直アクセス（querySelector廃止でO(subtree)走査を排除）
       const img   = wrapper.children[0]; // .thumbnail-img
       const label = wrapper.children[1]; // .thumbnail-label
