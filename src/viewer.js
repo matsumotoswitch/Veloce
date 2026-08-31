@@ -588,6 +588,7 @@ function swapImageElement(newImg, sequenceId) {
     }
     currentlyVisibleImg = newImg;
     newImg.style.display = '';
+    void newImg.offsetHeight; // 強制リフロー (Chromium 109の描画バグ対策)
 
     setZoomState(viewerState.isZoomed);
     viewerUI.updateImageRendering();
