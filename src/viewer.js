@@ -742,12 +742,9 @@ async function preloadAdjacentImages() {
  * 次の画像を表示する (Next)
  */
 function showNext() {
-  if (viewerState.currentIndex < viewerState.totalImages - 1) {
-    window.veloceAPI.debugLog(`[JS] showNext: currentIndex ${viewerState.currentIndex} -> ${viewerState.currentIndex + 1}, totalImages: ${viewerState.totalImages}`);
-    viewerState.currentIndex++;
+  if (viewerState.totalImages > 0) {
+    viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
     loadImage();
-  } else {
-    window.veloceAPI.debugLog(`[JS] showNext blocked: currentIndex ${viewerState.currentIndex} >= totalImages - 1 (${viewerState.totalImages - 1})`);
   }
 }
 
@@ -755,12 +752,9 @@ function showNext() {
  * 前の画像を表示する (Prev)
  */
 function showPrev() {
-  if (viewerState.currentIndex > 0) {
-    window.veloceAPI.debugLog(`[JS] showPrev: currentIndex ${viewerState.currentIndex} -> ${viewerState.currentIndex - 1}, totalImages: ${viewerState.totalImages}`);
-    viewerState.currentIndex--;
+  if (viewerState.totalImages > 0) {
+    viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
     loadImage();
-  } else {
-    window.veloceAPI.debugLog(`[JS] showPrev blocked: currentIndex ${viewerState.currentIndex} <= 0`);
   }
 }
 
