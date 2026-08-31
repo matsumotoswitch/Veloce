@@ -119,7 +119,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.paths = null;
         viewerState.currentImagePath = null;
         viewerState.totalImages = 0;
-        isViewerWindowShown = false; // 強制的にshowWindowを呼ぶためのフラグ
+        
+        applyViewerInitialData();
         
         // リセット後、loadImageが再度Rust(IPC)からパスを取得しにいく
         await loadImage();
@@ -161,56 +162,27 @@ window.addEventListener('DOMContentLoaded', async () => {
       };
     }
 
-    // IPC通信のラグを隠蔽するため、LocalStorageから初期データを取得して即座に描画を開始する
-    const initialDataJson = localStorage.getItem('viewerInitialData');
-    if (initialDataJson) {
-      try {
-        const initialData = JSON.parse(initialDataJson);
-        viewerState.currentImagePath = initialData.path;
-        viewerState.totalImages = initialData.total;
-        
-        if (!initialTotal) viewerState.paths = new Array(initialData.total).fill(null); // フォールバック時の初期化
-        // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
-        if (viewerState.paths && viewerState.currentIndex >= 0) {
-          viewerState.paths[viewerState.currentIndex] = initialData.path;
-        }
-        const assetUrl = getStreamUrl(initialData.path, window.veloceAPI.convertFileSrc(initialData.path));
-        if (viewerUI.elements.viewerImg) {
-          if (initialData.path.toLowerCase().endsWith('.mp4')) {
-            const video = document.createElement('video');
-            video.autoplay = true;
-            video.loop = true;
-            video.muted = true;
-            video.id = 'viewer-img';
-            video.src = assetUrl;
-            
-            viewerUI.elements.viewerImg.parentNode.replaceChild(video, viewerUI.elements.viewerImg);
-            viewerUI.elements.viewerImg = video;
-            currentViewerImg = video;
-            currentlyVisibleImg = video;
-
-            const onMeta = async () => {
-              setZoomState(viewerState.isZoomed);
-              viewerUI.updateImageRendering();
-              resizeWindowToFitImage();
-              if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
-                isViewerWindowShown = true;
-                await window.veloceAPI.showWindow();
-              }
-            };
-            if (video.readyState >= 1) { // HAVE_METADATA
-              onMeta();
-            } else {
-              video.addEventListener('loadedmetadata', onMeta, { once: true });
-            }
-          } else {
-            viewerUI.elements.viewerImg.src = assetUrl;
+    function applyViewerInitialData() {
+      // IPC通信のラグを隠蔽するため、LocalStorageから初期データを取得して即座に描画を開始する
+      const initialDataJson = localStorage.getItem('viewerInitialData');
+      if (initialDataJson) {
+        try {
+          const initialData = JSON.parse(initialDataJson);
+          viewerState.currentImagePath = initialData.path;
+          viewerState.totalImages = initialData.total;
+          
+          if (!viewerState.paths) viewerState.paths = new Array(initialData.total).fill(null);
+          // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
+          if (viewerState.paths && viewerState.currentIndex >= 0) {
+            viewerState.paths[viewerState.currentIndex] = initialData.path;
           }
-        }
-        document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
-      } catch (e) {}
-      localStorage.removeItem('viewerInitialData');
+          document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
+        } catch (e) {}
+        localStorage.removeItem('viewerInitialData');
+      }
     }
+
+    applyViewerInitialData();
     
     loadImage();
 
