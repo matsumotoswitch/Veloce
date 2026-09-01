@@ -1557,14 +1557,6 @@ class UIManager {
       items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
     }
 
-    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（CPU負荷低減）
-    if (this._gridUpdatePending) {
-      // 描画をスキップするため、状態をリセットして次回の処理に任せる
-      this.lastGridStartIndex = -1;
-      this.lastGridEndIndex = -1;
-      return;
-    }
-
     // コンテンツ領域をスクロール位置に合わせて移動 (DOM更新の直前に行うことで、破棄時の表示崩れを防ぐ)
     const offsetY = (safeStartRow * rowHeight) + padding;
     content.style.transform = `translate3d(0, ${offsetY}px, 0)`;
@@ -1674,7 +1666,7 @@ class UIManager {
                 };
             }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else if (file.hasThumbnailCache) {
+        } else {
             const url = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}`;
             appState.thumbnailUrls.set(file.path, url);
             if (window.evictThumbnailCache) window.evictThumbnailCache();
@@ -1696,14 +1688,6 @@ class UIManager {
                 };
             }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else {
-            img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-            img.classList.add('loading');
-            img.onload = null;
-            img.onerror = null;
-            if (window.thumbnailManager && !file.hasThumbnailCache) {
-              filesToEnqueue.push(file.path);
-            }
         }
       } else {
         // パスもインデックスも変わっていないが、サムネイルURLが新たに利用可能になった場合に反映する
@@ -1770,8 +1754,12 @@ class UIManager {
 
     // --- ここでようやく enqueuePriority を呼ぶ ---
     if (filesToEnqueue.length > 0 && window.thumbnailManager) {
-      for (const fp of filesToEnqueue) {
-        window.thumbnailManager.enqueuePriority(fp);
+      if (typeof window.thumbnailManager.enqueuePriorityBatch === 'function') {
+        window.thumbnailManager.enqueuePriorityBatch(filesToEnqueue);
+      } else {
+        for (const fp of filesToEnqueue) {
+          window.thumbnailManager.enqueuePriority(fp);
+        }
       }
     }
 

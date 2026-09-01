@@ -121,7 +121,7 @@ export const evictThumbnailCache = debounce((maxSize = 2000) => {
 }, 100);
 window.evictThumbnailCache = evictThumbnailCache;
 
-const THUMBNAIL_BATCH_SIZE = 8;
+const THUMBNAIL_BATCH_SIZE = 4;
 
 export function resetThumbnailPreloader() {
   if (window.thumbnailManager) window.thumbnailManager.resetPreload();
@@ -205,6 +205,22 @@ export class ThumbnailQueueManager {
         this.priorityQueueSet.add(filePath);
         this.priorityQueue.unshift({ filePath });
       }
+      this.processNext();
+    }
+  }
+
+  enqueuePriorityBatch(filePaths) {
+    let added = false;
+    for (const filePath of filePaths) {
+      if (!this.activeTasks.has(filePath) && !appState.thumbnailUrls.has(filePath)) {
+        if (!this.priorityQueueSet.has(filePath)) {
+          this.priorityQueueSet.add(filePath);
+          this.priorityQueue.push({ filePath });
+          added = true;
+        }
+      }
+    }
+    if (added) {
       this.processNext();
     }
   }

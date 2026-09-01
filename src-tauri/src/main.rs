@@ -2862,7 +2862,7 @@ fn generate_thumbnail_inner(
     let generated_bytes = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
         generate_video_thumbnail_sync(file_path)
     } else {
-        None
+        generate_image_thumbnail_sync(file_path)
     };
     
     if let Some(bytes) = generated_bytes {
@@ -4366,33 +4366,8 @@ fn main() {
                     .unwrap_or_default()
                     .as_millis() as u64
             });
-
-            let clean_path = path_str.replace("\\\\?\\", "");
-            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-            let hash_key = format!("{:016x}", digest);
-
-            let cached_bytes: Option<Vec<u8>> = {
-                let mut result = None;
-                if let Ok(conn) = state.db_conn.get() {
-                    if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ?") {
-                        if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
-                            if !bytes.is_empty() {
-                                result = Some(bytes);
-                            }
-                        }
-                    }
-                }
-                result
-            };
-
-            if let Some(bytes) = cached_bytes {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                if let Ok(conn) = state.db_conn.get() {
-                    let _ = conn.execute(
-                        "UPDATE cache SET last_accessed = ? WHERE hash_key = ?",
-                        rusqlite::params![now, &hash_key]
-                    );
-                }
+            let bytes = generate_thumbnail_inner(&path_str, mtime, &state.db_conn);
+            if !bytes.is_empty() {
                 let mimetype = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
                     "image/png"
                 } else if bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
@@ -4404,29 +4379,9 @@ fn main() {
                 return tauri::http::ResponseBuilder::new()
                     .mimetype(mimetype)
                     .header("Access-Control-Allow-Origin", "*")
+                    .header("Cache-Control", "public, max-age=3600")
                     .status(200)
                     .body(bytes);
-            }
-
-            // キャッシュミス時: 動画のみRust側で同期生成。画像はJS側の thumbnailManager に委譲するため 404 を返す。
-            // 画像の同期生成はUIスレッドをブロックし、他の全サムネイル読み込みを停滞させるため廃止。
-            let lower_path = path_str.to_lowercase();
-            if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-                if let Some(bytes) = generate_video_thumbnail_sync(&path_str) {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                    if let Ok(conn) = state.db_conn.get() {
-                        let _ = conn.execute(
-                            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                            rusqlite::params![&hash_key, &bytes, now],
-                        );
-                    }
-                    return tauri::http::ResponseBuilder::new()
-                        .mimetype("image/jpeg")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .status(200)
-                        .body(bytes);
-                }
             }
 
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
@@ -4916,57 +4871,6 @@ fn main() {
                 }
                 tauri::WindowEvent::Destroyed => {}
                 _ => {}
-            }
-        })
-        .register_uri_scheme_protocol("veloce", move |app, request| {
-            let uri = request.uri();
-            let mut path = String::new();
-            let mut mtime: u64 = 0;
-            if let Ok(parsed) = tauri::Url::parse(uri) {
-                for (k, v) in parsed.query_pairs() {
-                    if k == "path" {
-                        path = v.into_owned();
-                    } else if k == "mtime" {
-                        mtime = v.parse().unwrap_or(0);
-                    }
-                }
-            }
-
-            let mut cache_bytes = Vec::new();
-            if !path.is_empty() {
-                let clean_path = path.replace("\\\\?\\", "");
-                let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-                let hash_key = format!("{:016x}", digest);
-
-                let state = app.state::<AppState>();
-                if let Ok(conn) = state.db_conn.get() {
-                    if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-                        if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
-                            cache_bytes = thumb;
-                        }
-                    }
-                }
-            }
-
-            if !cache_bytes.is_empty() {
-                let mimetype = if cache_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
-                    "image/png"
-                } else if cache_bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || cache_bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
-                    "image/svg+xml"
-                } else {
-                    "image/jpeg"
-                };
-
-                tauri::http::ResponseBuilder::new()
-                    .mimetype(mimetype)
-                    .header("Access-Control-Allow-Origin", "*")
-                    .header("Cache-Control", "public, max-age=3600")
-                    .status(200)
-                    .body(cache_bytes)
-            } else {
-                tauri::http::ResponseBuilder::new()
-                    .status(404)
-                    .body(Vec::new())
             }
         })
         .invoke_handler(tauri::generate_handler![
