@@ -1372,6 +1372,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     let mut filtered: Vec<std::sync::Arc<ImageFile>> = if search_query.trim().is_empty() {
         all_files.clone()
     } else {
+        use rayon::prelude::*;
         let terms: Vec<String> = search_query
             .to_lowercase()
             .split(',')
@@ -1379,7 +1380,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             .filter(|t| !t.is_empty())
             .collect();
         all_files
-            .iter()
+            .par_iter()
             .filter(|f| {
                 terms.iter().all(|term| f.unified_search_text.contains(term))
             })
@@ -1484,6 +1485,13 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     if let Some(app_handle) = app {
         use std::path::Path;
         use tauri::Manager;
+        let is_smart_folder = state
+            .current_dir
+            .lock()
+            .ok()
+            .map(|d| d.starts_with("smart://"))
+            .unwrap_or(false);
+
         let target_dir = if let Some(first_path) = paths.first() {
             Some(
                 Path::new(first_path)
@@ -1496,18 +1504,24 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             state.current_dir.lock().ok().map(|d| d.clone())
         };
 
-        if let Some(dir_str) = target_dir {
-            if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-                for (label, viewer_list) in viewer_paths.iter_mut() {
+        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
+            for (label, viewer_list) in viewer_paths.iter_mut() {
+                let should_update = if is_smart_folder {
+                    viewer_list.is_empty() || viewer_list.iter().any(|p| paths.contains(p))
+                } else if let Some(ref dir_str) = target_dir {
                     let v_dir = viewer_list
                         .first()
                         .and_then(|p| Path::new(p).parent())
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_default();
-                    if v_dir == dir_str {
-                        *viewer_list = paths.clone();
-                        let _ = app_handle.emit_to(&label, "viewer-list-updated", &paths);
-                    }
+                    v_dir == *dir_str
+                } else {
+                    false
+                };
+
+                if should_update {
+                    *viewer_list = paths.clone();
+                    let _ = app_handle.emit_to(&label, "viewer-list-updated", &paths);
                 }
             }
         }
@@ -6350,5 +6364,20 @@ mod viewer_tests {
         assert_eq!(all_files[1].height, 1024);
         assert_eq!(all_files[1].prompt, "masterpiece, 1girl");
         assert_eq!(all_files[1].source, "NovelAI");
+    }
+
+    #[test]
+    fn test_smart_folder_viewer_sync_detection() {
+        let is_smart_folder = true;
+        let viewer_list = vec!["C:\\dirA\\1.png".to_string(), "D:\\dirB\\2.png".to_string()];
+        let updated_paths = vec!["D:\\dirB\\2.png".to_string(), "C:\\dirA\\1.png".to_string()];
+
+        let should_update = if is_smart_folder {
+            viewer_list.is_empty() || viewer_list.iter().any(|p| updated_paths.contains(p))
+        } else {
+            false
+        };
+
+        assert!(should_update, "スマートフォルダ内の画像パスが含まれる場合、同期対象として判定されるべき");
     }
 }

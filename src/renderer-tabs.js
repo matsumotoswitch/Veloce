@@ -1,4 +1,4 @@
-﻿import { checkPathExists } from './path-utils.js';
+import { checkPathExists } from './path-utils.js';
 
 /**
  * 現在のタブの状態を同期します。
@@ -9,7 +9,7 @@ export function updateCurrentTabState(appState, uiManager) {
   if (appState.activeTabIndex >= 0 && appState.tabs[appState.activeTabIndex]) {
     const currentTab = appState.tabs[appState.activeTabIndex];
     if (typeof appState.searchQuery !== 'undefined') currentTab.searchQuery = appState.searchQuery;
-    if (appState.sortConfig) currentTab.sortConfig = JSON.parse(JSON.stringify(appState.sortConfig));
+    if (appState.sortConfig) currentTab.sortConfig = { ...appState.sortConfig };
     if (uiManager.elements.thumbnailGrid) {
       currentTab.scrollTop = uiManager.elements.thumbnailGrid.scrollTop || 0;
     }
@@ -90,7 +90,7 @@ export function initTabHandlers(ctx) {
     appState.searchQuery = tab.searchQuery || '';
     if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;
     if (tab.sortConfig) {
-      appState.sortConfig = JSON.parse(JSON.stringify(tab.sortConfig));
+      appState.sortConfig = { ...tab.sortConfig };
       localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
       updateSortIndicators();
     }

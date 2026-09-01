@@ -562,7 +562,7 @@ function swapImageElement(newImg, sequenceId) {
     return;
   }
   
-  newImg.id = 'viewer-img';
+  newImg.className = 'viewer-img-pending';
   newImg.style.display = 'none'; // Initially hide it to prevent pushing the visible image
   viewerUI.elements.viewerImg = newImg;
   
@@ -580,9 +580,9 @@ function swapImageElement(newImg, sequenceId) {
 
   currentViewerImg = newImg;
 
-  // Clean up any stray viewer-img elements that are NOT currentlyVisibleImg and not newImg
-  const allViewerImgs = document.querySelectorAll('#viewer-img');
-  allViewerImgs.forEach(img => {
+  // Clean up any stray elements that are NOT currentlyVisibleImg and not newImg
+  const strayImgs = document.querySelectorAll('.viewer-img-pending, #viewer-img');
+  strayImgs.forEach(img => {
     if (img !== currentlyVisibleImg && img !== newImg) {
       if (img.tagName === 'VIDEO') {
         img.pause();
@@ -604,6 +604,8 @@ function swapImageElement(newImg, sequenceId) {
       currentlyVisibleImg.remove();
     }
     currentlyVisibleImg = newImg;
+    newImg.id = 'viewer-img';
+    newImg.classList.remove('viewer-img-pending');
     newImg.style.display = '';
     void newImg.offsetHeight; // 強制リフロー (Chromium 109の描画バグ対策)
 
