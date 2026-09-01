@@ -1083,13 +1083,45 @@ fn load_directory(
                     
                     let metadata_results = tokio::task::spawn_blocking(move || {
                         use rayon::prelude::*;
-                        chunk_paths.into_par_iter().map(|(idx, p, mtime, ctime, size)| {
-                            // mtime and ctime are already in millis
-                            let mtime_millis = mtime;
-                            let ctime_millis = ctime;
-                            let (meta, fetched_mtime, fetched_size) = get_full_metadata_for_path_with_stat(&p, mtime_millis, ctime_millis, size, &db_conn_clone);
-                            (idx, p, meta, fetched_mtime, fetched_size)
-                        }).collect::<Vec<_>>()
+                        let results: Vec<_> = chunk_paths.into_par_iter().map(|(idx, p, mtime, ctime, size)| {
+                            let (meta, fetched_mtime, fetched_size, row) = get_full_metadata_for_path_with_stat_inner(&p, mtime, ctime, size, &db_conn_clone, false);
+                            (idx, p, meta, fetched_mtime, fetched_size, row)
+                        }).collect();
+
+                        // チャンク内の新規パース結果を1つのSQLiteトランザクションでまとめてコミット（ロック競合排除）
+                        if let Ok(mut conn) = db_conn_clone.get() {
+                            if let Ok(tx) = conn.transaction() {
+                                {
+                                    if let Ok(mut stmt) = tx.prepare_cached(
+                                        "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                         ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source"
+                                    ) {
+                                        for (_, _, _, _, _, ref opt_row) in &results {
+                                            if let Some(row) = opt_row {
+                                                let _ = stmt.execute(rusqlite::params![
+                                                    &row.hash_key,
+                                                    &row.json_str,
+                                                    row.width,
+                                                    row.height,
+                                                    &row.path,
+                                                    row.file_size,
+                                                    row.mtime,
+                                                    row.ctime,
+                                                    row.now,
+                                                    &row.sp,
+                                                    &row.snp,
+                                                    &row.ss,
+                                                ]);
+                                            }
+                                        }
+                                    }
+                                }
+                                let _ = tx.commit();
+                            }
+                        }
+
+                        let res: Vec<_> = results.into_iter().map(|(idx, p, meta, fm, fs, _)| (idx, p, meta, fm, fs)).collect();
+                        res
                     }).await.unwrap_or_default();
 
                     processed_count += metadata_results.len();
@@ -1381,58 +1413,59 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     let key = sort_config.key.clone();
     let asc = sort_config.asc;
     
-    let ratings_map_for_sort = if key == "rating" {
-        state.ratings.lock().ok().map(|guard| guard.clone())
-    } else {
-        None
-    };
-
-
     use rayon::prelude::*;
-    filtered.par_sort_unstable_by(|a, b| {
+    if key == "rating" {
+        let ratings_map = state.ratings.lock().ok();
+        let mut paired: Vec<(u8, std::sync::Arc<ImageFile>)> = filtered
+            .into_par_iter()
+            .map(|f| {
+                let r = ratings_map.as_ref().and_then(|m| m.get(&f.path).copied()).unwrap_or(0);
+                (r, f)
+            })
+            .collect();
+        paired.par_sort_unstable_by(|a: &(u8, std::sync::Arc<ImageFile>), b: &(u8, std::sync::Arc<ImageFile>)| {
+            let cmp = a.0.cmp(&b.0);
+            let cmp = if asc { cmp } else { cmp.reverse() };
+            if cmp == std::cmp::Ordering::Equal {
+                natural_cmp(&a.1.name, &b.1.name)
+            } else {
+                cmp
+            }
+        });
+        filtered = paired.into_par_iter().map(|(_, f)| f).collect();
+    } else {
+        filtered.par_sort_unstable_by(|a, b| {
             let cmp = match key.as_str() {
-            "name" => natural_cmp(&a.name, &b.name),
-            "ext" => a.ext.cmp(&b.ext),
-            "size" => a.size.cmp(&b.size),
-            "mtime" => a.mtime.cmp(&b.mtime),
-            "ctime" => a.ctime.cmp(&b.ctime),
-            "width" => a.width.cmp(&b.width),
-            "height" => a.height.cmp(&b.height),
-            "ratio" => {
-                let r_a = if a.height > 0 {
-                    a.width as f64 / a.height as f64
-                } else {
-                    0.0
-                };
-                let r_b = if b.height > 0 {
-                    b.width as f64 / b.height as f64
-                } else {
-                    0.0
-                };
-                r_a.partial_cmp(&r_b).unwrap_or(std::cmp::Ordering::Equal)
+                "name" => natural_cmp(&a.name, &b.name),
+                "ext" => a.ext.cmp(&b.ext),
+                "size" => a.size.cmp(&b.size),
+                "mtime" => a.mtime.cmp(&b.mtime),
+                "ctime" => a.ctime.cmp(&b.ctime),
+                "width" => a.width.cmp(&b.width),
+                "height" => a.height.cmp(&b.height),
+                "ratio" => {
+                    let r_a = if a.height > 0 {
+                        a.width as f64 / a.height as f64
+                    } else {
+                        0.0
+                    };
+                    let r_b = if b.height > 0 {
+                        b.width as f64 / b.height as f64
+                    } else {
+                        0.0
+                    };
+                    r_a.partial_cmp(&r_b).unwrap_or(std::cmp::Ordering::Equal)
+                }
+                _ => natural_cmp(&a.name, &b.name),
+            };
+            let cmp = if asc { cmp } else { cmp.reverse() };
+            if cmp == std::cmp::Ordering::Equal {
+                natural_cmp(&a.name, &b.name)
+            } else {
+                cmp
             }
-            "rating" => {
-                let r_a = if let Some(ref map) = ratings_map_for_sort {
-                    map.get(&a.path).copied().unwrap_or(0)
-                } else {
-                    0
-                };
-                let r_b = if let Some(ref map) = ratings_map_for_sort {
-                    map.get(&b.path).copied().unwrap_or(0)
-                } else {
-                    0
-                };
-                r_a.cmp(&r_b)
-            }
-            _ => natural_cmp(&a.name, &b.name),
-        };
-        let cmp = if asc { cmp } else { cmp.reverse() };
-        if cmp == std::cmp::Ordering::Equal {
-            natural_cmp(&a.name, &b.name)
-        } else {
-            cmp
-        }
-    });
+        });
+    }
 
     let total = filtered.len();
     let paths: Vec<String> = filtered.iter().map(|f| f.path.clone()).collect();
@@ -1733,6 +1766,18 @@ fn get_full_metadata_for_path_with_stat(
     file_size: u64,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) -> (FullMetadata, u64, u64) {
+    let (meta, mt, sz, _) = get_full_metadata_for_path_with_stat_inner(file_path, mtime_millis, ctime_millis, file_size, db_conn, true);
+    (meta, mt, sz)
+}
+
+fn get_full_metadata_for_path_with_stat_inner(
+    file_path: &str,
+    mtime_millis: u64,
+    ctime_millis: u64,
+    file_size: u64,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    auto_save: bool,
+) -> (FullMetadata, u64, u64, Option<MetadataCacheRow>) {
     let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime_millis).as_bytes());
     let hash_key = format!("{:016x}", digest);
 
@@ -1751,43 +1796,28 @@ fn get_full_metadata_for_path_with_stat(
                                 cached_meta.prompt = raw.to_string();
                             }
                         }
-                        return (cached_meta, mtime_millis, file_size);
+                        return (cached_meta, mtime_millis, file_size, None);
                     }
                 }
             }
         }
     }
 
-    let (mut width, mut height) = image::image_dimensions(file_path).unwrap_or((0, 0));
     let lower_path = file_path.to_lowercase();
-    
-    if width == 0 && height == 0 && lower_path.ends_with(".mp4") {
-        if let Some((w, h)) = parse_mp4_dimensions(file_path) {
-            width = w;
-            height = h;
-        }
-    }
-
-    let mut raw_description = String::new();
-    let mut raw_comment = String::new();
-    let mut raw_parameters = String::new();
-    let mut source = String::new();
-
-    let lower_path = file_path.to_lowercase();
-    if lower_path.ends_with(".png") {
-        let chunks = parse_png_chunks(file_path);
-        raw_description = chunks
+    let (raw_description, mut raw_comment, raw_parameters, mut source, width, height): (String, String, String, String, u32, u32) = if lower_path.ends_with(".png") {
+        let (chunks, w, h) = parse_png_chunks_with_dimensions(file_path);
+        let desc = chunks
             .get("Description")
             .or(chunks.get("ImageDescription"))
             .cloned()
             .unwrap_or_default();
-        raw_comment = chunks.get("Comment").cloned().unwrap_or_default();
-        raw_parameters = chunks
+        let mut comment = chunks.get("Comment").cloned().unwrap_or_default();
+        let mut params = chunks
             .get("parameters")
             .or(chunks.get("Parameters"))
             .cloned()
             .unwrap_or_default();
-        source = chunks
+        let src = chunks
             .get("Source")
             .or(chunks.get("Software"))
             .cloned()
@@ -1795,44 +1825,55 @@ fn get_full_metadata_for_path_with_stat(
 
         // ComfyUI metadata fallback
         if let Some(workflow) = chunks.get("workflow") {
-            if raw_comment.is_empty() {
-                raw_comment = workflow.clone();
-            } else if raw_parameters.is_empty() {
-                raw_parameters = workflow.clone();
+            if comment.is_empty() {
+                comment = workflow.clone();
+            } else if params.is_empty() {
+                params = workflow.clone();
             }
         } else if let Some(prompt_json) = chunks.get("prompt") {
-            if raw_comment.is_empty() {
-                raw_comment = prompt_json.clone();
-            } else if raw_parameters.is_empty() {
-                raw_parameters = prompt_json.clone();
+            if comment.is_empty() {
+                comment = prompt_json.clone();
+            } else if params.is_empty() {
+                params = prompt_json.clone();
+            }
+        }
+        (desc, comment, params, src, w, h)
+    } else {
+        let (mut w, mut h) = image::image_dimensions(file_path).unwrap_or((0, 0));
+        if w == 0 && h == 0 && lower_path.ends_with(".mp4") {
+            if let Some((vw, vh)) = parse_mp4_dimensions(file_path) {
+                w = vw;
+                h = vh;
             }
         }
 
-
-    } else {
         let exif_data = if lower_path.ends_with(".webp") {
             parse_webp_exif(file_path)
         } else {
             parse_jpeg_exif(file_path)
         };
 
-        if let Some(desc) = exif_data.get("ImageDescription") {
-            raw_description = decode_metadata_string(desc)
+        let mut desc = String::new();
+        let mut comment = String::new();
+        let mut src = String::new();
+
+        if let Some(d) = exif_data.get("ImageDescription") {
+            desc = decode_metadata_string(d)
                 .trim_end_matches('\0')
                 .to_string();
         }
-        if let Some(comment) = exif_data.get("UserComment") {
-            let mut content = comment.as_slice();
+        if let Some(c) = exif_data.get("UserComment") {
+            let mut content = c.as_slice();
             if content.starts_with(b"UNICODE\0") || content.starts_with(b"ASCII\0\0\0") {
                 content = &content[8..];
             }
-            raw_comment = decode_metadata_string(content)
+            comment = decode_metadata_string(content)
                 .trim_end_matches('\0')
                 .trim()
                 .to_string();
         }
         if let Some(sw) = exif_data.get("Software") {
-            source = decode_metadata_string(sw)
+            src = decode_metadata_string(sw)
                 .trim_end_matches('\0')
                 .to_string();
         }
@@ -1842,13 +1883,14 @@ fn get_full_metadata_for_path_with_stat(
                 .trim()
                 .to_string();
             if !make_str.is_empty() {
-                if !raw_comment.is_empty() {
-                    raw_comment.push_str("\n");
+                if !comment.is_empty() {
+                    comment.push_str("\n");
                 }
-                raw_comment.push_str(&make_str);
+                comment.push_str(&make_str);
             }
         }
-    }
+        (desc, comment, String::new(), src, w, h)
+    };
 
     // EXIF等でプロンプトが見つからなかった場合、Stealthメタデータを試行
     if raw_comment.trim().is_empty() && raw_description.trim().is_empty() {
@@ -2040,7 +2082,7 @@ fn get_full_metadata_for_path_with_stat(
         }
     }
 
-    let mut meta = FullMetadata {
+    let meta = FullMetadata {
         path: file_path.to_string(),
         prompt,
         negative_prompt,
@@ -2050,34 +2092,51 @@ fn get_full_metadata_for_path_with_stat(
         source: source.clone(),
     };
 
-    update_metadata_cache(
+    let row = build_metadata_cache_row(
         file_path,
         file_size,
         mtime_millis,
         ctime_millis,
-        db_conn,
-        &raw_description,
-        &raw_comment,
-        &raw_parameters,
-        &source,
-        &mut meta,
+        &meta,
     );
 
-    (meta, mtime_millis, file_size)
+    if auto_save {
+        if let Some(ref r) = row {
+            if let Ok(conn) = db_conn.get() {
+                let _ = conn.execute(
+                    "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source",
+                    rusqlite::params![&r.hash_key, &r.json_str, r.width, r.height, &r.path, r.file_size, r.mtime, r.ctime, r.now, &r.sp, &r.snp, &r.ss]
+                );
+            }
+        }
+    }
+
+    (meta, mtime_millis, file_size, row)
 }
 
-fn update_metadata_cache(
+struct MetadataCacheRow {
+    hash_key: String,
+    json_str: String,
+    width: u32,
+    height: u32,
+    path: String,
+    file_size: u64,
+    mtime: u64,
+    ctime: u64,
+    now: i64,
+    sp: String,
+    snp: String,
+    ss: String,
+}
+
+fn build_metadata_cache_row(
     file_path: &str,
     file_size: u64,
     mtime: u64,
     ctime: u64,
-    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-    _raw_desc: &str,
-    _raw_comment: &str,
-    _raw_params: &str,
-    _source: &str,
-    meta: &mut FullMetadata,
-) {
+    meta: &FullMetadata,
+) -> Option<MetadataCacheRow> {
     if let Ok(json_str) = serde_json::to_string(&meta) {
         let (sp, snp, ss) = extract_searchable_strings(&meta);
         let now = std::time::SystemTime::now()
@@ -2087,25 +2146,35 @@ fn update_metadata_cache(
         let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
         let hash_key = format!("{:016x}", digest);
 
-        if let Ok(conn) = db_conn.get() {
-            let _ = conn.execute(
-                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source",
-                rusqlite::params![&hash_key, &json_str, meta.width, meta.height, &meta.path, file_size, mtime, ctime, now, sp, snp, ss]
-            );
-        }
+        Some(MetadataCacheRow {
+            hash_key,
+            json_str,
+            width: meta.width,
+            height: meta.height,
+            path: meta.path.clone(),
+            file_size,
+            mtime,
+            ctime,
+            now,
+            sp,
+            snp,
+            ss,
+        })
+    } else {
+        None
     }
 }
 
-
-fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
+fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<String, String>, u32, u32) {
     let mut chunks = std::collections::HashMap::new();
+    let mut width = 0;
+    let mut height = 0;
     if let Ok(mut f) = std::fs::File::open(path) {
         let mut sig = [0; 8];
         if f.read_exact(&mut sig).is_err()
             || sig != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
         {
-            return chunks;
+            return (chunks, width, height);
         }
         loop {
             let mut len_bytes = [0; 4];
@@ -2122,7 +2191,20 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
                 break;
             }
 
-            if &chunk_type == b"tEXt" {
+            if &chunk_type == b"IHDR" && len >= 8 {
+                let mut dim_bytes = [0; 8];
+                if f.read_exact(&mut dim_bytes).is_ok() {
+                    width = u32::from_be_bytes([dim_bytes[0], dim_bytes[1], dim_bytes[2], dim_bytes[3]]);
+                    height = u32::from_be_bytes([dim_bytes[4], dim_bytes[5], dim_bytes[6], dim_bytes[7]]);
+                    let remaining = len.saturating_sub(8);
+                    if remaining > 0 {
+                        use std::io::{Seek, SeekFrom};
+                        let _ = f.seek(SeekFrom::Current(remaining as i64));
+                    }
+                } else {
+                    break;
+                }
+            } else if &chunk_type == b"tEXt" {
                 let mut data = vec![0; len];
                 if f.read_exact(&mut data).is_err() {
                     break;
@@ -2164,21 +2246,24 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
             } else if &chunk_type == b"IEND" {
                 break;
             } else {
-                // Skip the data for non-text chunks to avoid massive memory allocation and I/O
                 use std::io::{Seek, SeekFrom};
                 if f.seek(SeekFrom::Current(len as i64)).is_err() {
                     break;
                 }
             }
 
-            // Read 4 bytes for CRC to advance the file pointer to the next chunk
             let mut crc = [0; 4];
             if f.read_exact(&mut crc).is_err() {
                 break;
             }
         }
     }
-    chunks
+    (chunks, width, height)
+}
+
+#[allow(dead_code)]
+fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
+    parse_png_chunks_with_dimensions(path).0
 }
 
 fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>> {
@@ -5719,6 +5804,7 @@ mod fts_tests {
 
 #[cfg(test)]
 mod viewer_tests {
+    use super::*;
     /// open_viewer の Zオーダー制御ロジックのテスト。
     /// Win32 API 呼び出しそのものはユニットテストでは検証できないため、
     /// 「ウィンドウラベルの生成ロジック」と「遅延時間の妥当性」を検証する。
@@ -6056,5 +6142,125 @@ mod viewer_tests {
         assert_eq!(chunk_end_end, 100);
         assert_eq!(chunk_end_vec.len(), 34);
         assert_eq!(chunk_end_vec[idx_end - chunk_start_end], "image_98.png");
+    }
+
+    #[test]
+    fn test_png_ihdr_dimension_extraction_logic() {
+        // PNG シグネチャ + IHDR チャンク（width=1920, height=1080）
+        let mut png_bytes = Vec::new();
+        // PNG signature
+        png_bytes.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        // IHDR chunk: len=13
+        png_bytes.extend_from_slice(&13u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IHDR");
+        // width=1920 (0x00000780), height=1080 (0x00000438)
+        png_bytes.extend_from_slice(&1920u32.to_be_bytes());
+        png_bytes.extend_from_slice(&1080u32.to_be_bytes());
+        // bit_depth=8, color_type=6, comp=0, filter=0, interlace=0
+        png_bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+        // CRC dummy
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+        // IEND chunk: len=0
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IEND");
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_veloce_ihdr_dim.png");
+        std::fs::write(&test_file, &png_bytes).unwrap();
+
+        let (chunks, w, h): (std::collections::HashMap<String, String>, u32, u32) = parse_png_chunks_with_dimensions(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert_eq!(w, 1920);
+        assert_eq!(h, 1080);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_rating_sort_paired_logic() {
+        let mut ratings = std::collections::HashMap::new();
+        ratings.insert("img_a.png".to_string(), 5u8);
+        ratings.insert("img_b.png".to_string(), 1u8);
+        ratings.insert("img_c.png".to_string(), 4u8);
+
+        let files = vec![
+            std::sync::Arc::new(ImageFile {
+                name: "img_a.png".to_string(),
+                ext: ".png".to_string(),
+                path: "img_a.png".to_string(),
+                size: 100,
+                mtime: 100,
+                ctime: 100,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 100,
+                height: 100,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+            }),
+            std::sync::Arc::new(ImageFile {
+                name: "img_b.png".to_string(),
+                ext: ".png".to_string(),
+                path: "img_b.png".to_string(),
+                size: 100,
+                mtime: 100,
+                ctime: 100,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 100,
+                height: 100,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+            }),
+            std::sync::Arc::new(ImageFile {
+                name: "img_c.png".to_string(),
+                ext: ".png".to_string(),
+                path: "img_c.png".to_string(),
+                size: 100,
+                mtime: 100,
+                ctime: 100,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 100,
+                height: 100,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+            }),
+        ];
+
+        use rayon::prelude::*;
+        let mut paired: Vec<(u8, std::sync::Arc<ImageFile>)> = files
+            .into_par_iter()
+            .map(|f| {
+                let r = ratings.get(&f.path).copied().unwrap_or(0);
+                (r, f)
+            })
+            .collect();
+
+        // 降順ソート
+        paired.par_sort_unstable_by(|a: &(u8, std::sync::Arc<ImageFile>), b: &(u8, std::sync::Arc<ImageFile>)| {
+            let cmp = a.0.cmp(&b.0).reverse();
+            if cmp == std::cmp::Ordering::Equal {
+                natural_cmp(&a.1.name, &b.1.name)
+            } else {
+                cmp
+            }
+        });
+
+        let sorted: Vec<String> = paired.into_iter().map(|(_, f)| f.name.clone()).collect();
+        assert_eq!(sorted, vec!["img_a.png", "img_c.png", "img_b.png"]);
     }
 }
