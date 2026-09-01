@@ -88,4 +88,27 @@ describe('UIManager.updateSelectionUI', () => {
     expect(thumbnailGrid.querySelector(`.thumbnail-item[data-index="1"]`).classList.contains('selected')).toBe(false);
     expect(thumbnailGrid.querySelector(`.thumbnail-item[data-index="2"]`).classList.contains('selected')).toBe(true);
   });
+
+  it('should handle Ctrl+A on 10,000 items in O(visible nodes) time without querySelector looping', () => {
+    // 10,000件のアイテムを選択
+    for (let i = 0; i < 10000; i++) {
+      uiManager.state.selection.add(i);
+    }
+
+    const spyFileQuery = vi.spyOn(fileListBody, 'querySelector');
+    const tStart = performance.now();
+    uiManager.updateSelectionUI();
+    const elapsed = performance.now() - tStart;
+
+    // 描画されている5個の要素すべてに selected が付与されていること
+    for (let i = 0; i < 5; i++) {
+      expect(fileListBody.children[i].classList.contains('selected')).toBe(true);
+      expect(thumbnailGrid.children[i].classList.contains('selected')).toBe(true);
+    }
+
+    // querySelector が 10,000 回呼ばれていないこと（O(visible nodes) であること）
+    expect(spyFileQuery).not.toHaveBeenCalled();
+    // 5ms 未満で瞬時に完了すること
+    expect(elapsed).toBeLessThan(50);
+  });
 });

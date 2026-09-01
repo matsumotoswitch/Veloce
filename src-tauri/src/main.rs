@@ -1549,15 +1549,12 @@ async fn get_items(
     offset: usize,
     limit: usize,
 ) -> Result<Vec<std::sync::Arc<ImageFile>>, String> {
-    let t_start = std::time::Instant::now();
     let lock = state.filtered_files.lock().unwrap();
     let end = std::cmp::min(offset + limit, lock.len());
     if offset >= lock.len() {
         return Ok(Vec::new());
     }
-    let res = lock[offset..end].to_vec();
-    println!("[Veloce: PERF] get_items (offset={}, limit={}) took {}ms", offset, limit, t_start.elapsed().as_millis());
-    Ok(res)
+    Ok(lock[offset..end].to_vec())
 }
 
 /// selectImage用: 単一のImageFileを取得
@@ -1570,12 +1567,21 @@ async fn get_file_by_index(
     Ok(lock.get(index).cloned())
 }
 
-/// メタデータ読み込み結果をRust側のSource of Truthに反映する
+/// メタデータ読み込み結果をRust側のSource of Truthに反映する（HashMapによるO(N + M)一括更新）
 #[tauri::command]
 fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<FullMetadata>) {
+    if updates.is_empty() {
+        return;
+    }
+
+    let update_map: std::collections::HashMap<&str, &FullMetadata> = updates
+        .iter()
+        .map(|meta| (meta.path.as_str(), meta))
+        .collect();
+
     if let Ok(mut all_files) = state.all_files.lock() {
-        for meta in &updates {
-            if let Some(f_arc) = all_files.iter_mut().find(|f| f.path == meta.path) {
+        for f_arc in all_files.iter_mut() {
+            if let Some(meta) = update_map.get(f_arc.path.as_str()) {
                 let file = std::sync::Arc::make_mut(f_arc);
                 file.width = meta.width;
                 file.height = meta.height;
@@ -1589,8 +1595,8 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
         }
     }
     if let Ok(mut filtered) = state.filtered_files.lock() {
-        for meta in &updates {
-            if let Some(f_arc) = filtered.iter_mut().find(|f| f.path == meta.path) {
+        for f_arc in filtered.iter_mut() {
+            if let Some(meta) = update_map.get(f_arc.path.as_str()) {
                 let file = std::sync::Arc::make_mut(f_arc);
                 file.width = meta.width;
                 file.height = meta.height;
@@ -6262,5 +6268,87 @@ mod viewer_tests {
 
         let sorted: Vec<String> = paired.into_iter().map(|(_, f)| f.name.clone()).collect();
         assert_eq!(sorted, vec!["img_a.png", "img_c.png", "img_b.png"]);
+    }
+
+    #[test]
+    fn test_update_metadata_in_state_batch_logic() {
+        let mut all_files = vec![
+            std::sync::Arc::new(ImageFile {
+                name: "1.png".to_string(),
+                ext: ".png".to_string(),
+                path: "C:\\img\\1.png".to_string(),
+                size: 100,
+                mtime: 100,
+                ctime: 100,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+            }),
+            std::sync::Arc::new(ImageFile {
+                name: "2.png".to_string(),
+                ext: ".png".to_string(),
+                path: "C:\\img\\2.png".to_string(),
+                size: 200,
+                mtime: 200,
+                ctime: 200,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+            }),
+        ];
+
+        let updates = vec![
+            FullMetadata {
+                path: "C:\\img\\2.png".to_string(),
+                prompt: "masterpiece, 1girl".to_string(),
+                negative_prompt: "lowres".to_string(),
+                width: 1024,
+                height: 1024,
+                params: serde_json::Value::String("Steps: 28".to_string()),
+                source: "NovelAI".to_string(),
+            }
+        ];
+
+        let update_map: std::collections::HashMap<&str, &FullMetadata> = updates
+            .iter()
+            .map(|meta| (meta.path.as_str(), meta))
+            .collect();
+
+        for f_arc in all_files.iter_mut() {
+            if let Some(meta) = update_map.get(f_arc.path.as_str()) {
+                let file = std::sync::Arc::make_mut(f_arc);
+                file.width = meta.width;
+                file.height = meta.height;
+                file.prompt = meta.prompt.clone();
+                file.negative_prompt = meta.negative_prompt.clone();
+                file.source = meta.source.clone();
+                file.search_text = extract_searchable_text(&meta.params);
+                file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
+                file.meta_loaded = true;
+            }
+        }
+
+        assert!(!all_files[0].meta_loaded);
+        assert_eq!(all_files[0].width, 0);
+
+        assert!(all_files[1].meta_loaded);
+        assert_eq!(all_files[1].width, 1024);
+        assert_eq!(all_files[1].height, 1024);
+        assert_eq!(all_files[1].prompt, "masterpiece, 1girl");
+        assert_eq!(all_files[1].source, "NovelAI");
     }
 }

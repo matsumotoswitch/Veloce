@@ -920,44 +920,55 @@ class UIManager {
 
   /**
    * リストとサムネイルグリッドの選択状態を表すUIを一括で更新します。
+   * 仮想スクロールで実際に描画されているDOM子要素（約30〜60個）を直接走査することで、
+   * 数万件の選択（Ctrl+A等）時にも querySelector のDOM走査を一切行わず O(visible nodes) で即座に更新します。
    */
   updateSelectionUI() {
-    if (!this.elements.fileListBody || !this.elements.thumbnailGrid) {
+    if (!this.elements.fileListBody) {
       this.elements.fileListBody = document.getElementById('file-list-body');
+    }
+    if (!this.elements.thumbnailGrid) {
       this.elements.thumbnailGrid = document.getElementById('center-bottom');
-      if (!this.elements.fileListBody || !this.elements.thumbnailGrid) return;
     }
-
-    if (!this._lastRenderedSelection) {
-      this._lastRenderedSelection = new Set();
-    }
+    if (!this.elements.fileListBody && !this.elements.thumbnailGrid) return;
 
     const currentSelection = this.state.selection;
-    const oldSelection = this._lastRenderedSelection;
 
-    // 前回の選択状態から外れた要素のクラスを削除
-    for (const i of oldSelection) {
-      if (!currentSelection.has(i)) {
-        const row = this.elements.fileListBody.querySelector(`tr[data-index="${i}"]`);
-        if (row) row.classList.remove('selected');
-        
-        const thumb = this.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${i}"]`);
-        if (thumb) thumb.classList.remove('selected');
+    // 1. ファイルリストの同期 (tbodyの直接の子要素 tr を走査)
+    if (this.elements.fileListBody) {
+      const rows = this.elements.fileListBody.children;
+      for (let k = 0; k < rows.length; k++) {
+        const row = rows[k];
+        if (row.dataset && row.dataset.index !== undefined) {
+          const idx = parseInt(row.dataset.index, 10);
+          if (!isNaN(idx)) {
+            const isSelected = currentSelection.has(idx);
+            if (row.classList.contains('selected') !== isSelected) {
+              row.classList.toggle('selected', isSelected);
+            }
+          }
+        }
       }
     }
 
-    // 新たに選択された要素にクラスを付与
-    for (const i of currentSelection) {
-      if (!oldSelection.has(i)) {
-        const row = this.elements.fileListBody.querySelector(`tr[data-index="${i}"]`);
-        if (row) row.classList.add('selected');
-        
-        const thumb = this.elements.thumbnailGrid.querySelector(`.thumbnail-item[data-index="${i}"]`);
-        if (thumb) thumb.classList.add('selected');
+    // 2. サムネイルグリッドの同期 (thumbnail-grid-content または thumbnailGrid の直接の子要素を走査)
+    if (this.elements.thumbnailGrid) {
+      const gridContent = this.elements.thumbnailGrid.querySelector('.thumbnail-grid-content') || this.elements.thumbnailGrid;
+      const thumbs = gridContent.children;
+      for (let k = 0; k < thumbs.length; k++) {
+        const thumb = thumbs[k];
+        if (thumb.dataset && thumb.dataset.index !== undefined) {
+          const idx = parseInt(thumb.dataset.index, 10);
+          if (!isNaN(idx)) {
+            const isSelected = currentSelection.has(idx);
+            if (thumb.classList.contains('selected') !== isSelected) {
+              thumb.classList.toggle('selected', isSelected);
+            }
+          }
+        }
       }
     }
 
-    // 現在の選択状態をキャッシュ
     this._lastRenderedSelection = new Set(currentSelection);
   }
 
