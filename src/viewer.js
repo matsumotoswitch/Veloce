@@ -168,7 +168,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (initialDataJson) {
         try {
           const initialData = JSON.parse(initialDataJson);
-          window.veloceAPI.debugLog(`[JS] applyViewerInitialData: ${JSON.stringify(initialData)}`);
           viewerState.currentImagePath = initialData.path;
           viewerState.totalImages = initialData.total;
           if (typeof initialData.index === 'number') {
@@ -534,10 +533,15 @@ async function getImagePath(index) {
   }
   const result = await window.veloceAPI.getViewerImage(index);
   if (result) {
-    if (!viewerState.paths && result.total) {
+    if (!viewerState.paths || viewerState.paths.length !== result.total) {
       viewerState.paths = new Array(result.total).fill(null);
     }
-    if (viewerState.paths) viewerState.paths[index] = result.path;
+    if (result.chunk && typeof result.chunkStart === 'number') {
+      for (let i = 0; i < result.chunk.length; i++) {
+        viewerState.paths[result.chunkStart + i] = result.chunk[i];
+      }
+    }
+    viewerState.paths[index] = result.path;
     return result.path;
   }
   return null;
@@ -688,17 +692,23 @@ async function loadImage() {
 }
 
 async function preloadAdjacentImages() {
-  // ±2 までプリロード（±1 では大きい画像で次画像待ちが発生するため） (#7)
-  const indicesToPreload = [
-    viewerState.currentIndex + 1,
-    viewerState.currentIndex - 1,
-    viewerState.currentIndex + 2,
-    viewerState.currentIndex - 2,
-  ];
-  for (const idx of indicesToPreload) {
-    if (idx >= 0 && idx < viewerState.totalImages && !viewerState.preloadCache.has(idx)) {
+  const total = viewerState.totalImages;
+  if (total <= 1) return;
+
+  // ±2 までプリロード（循環対応・並列ロード） (#7)
+  const deltas = [1, -1, 2, -2];
+  const indicesToPreload = [];
+  for (const delta of deltas) {
+    const targetIdx = ((viewerState.currentIndex + delta) % total + total) % total;
+    if (!indicesToPreload.includes(targetIdx)) {
+      indicesToPreload.push(targetIdx);
+    }
+  }
+
+  await Promise.all(indicesToPreload.map(async (idx) => {
+    if (!viewerState.preloadCache.has(idx)) {
       const path = await getImagePath(idx);
-      if (path) {
+      if (path && !viewerState.preloadCache.has(idx)) {
         const url = getStreamUrl(path, window.veloceAPI.convertFileSrc(path));
         let img;
         if (path.toLowerCase().endsWith('.mp4') || path.toLowerCase().endsWith('.webm') || path.toLowerCase().endsWith('.avi') || path.toLowerCase().endsWith('.mkv')) {
@@ -718,10 +728,15 @@ async function preloadAdjacentImages() {
         }
       }
     }
-  }
+  }));
+
   // 不要になった古いキャッシュ（現在地から離れたもの）を削除してメモリを節約
   for (const cachedIdx of viewerState.preloadCache.keys()) {
-    if (Math.abs(cachedIdx - viewerState.currentIndex) > 3) {
+    let diff = Math.abs(cachedIdx - viewerState.currentIndex);
+    if (diff > total / 2) {
+      diff = total - diff;
+    }
+    if (diff > 3) {
       const cached = viewerState.preloadCache.get(cachedIdx);
       if (cached && cached.img) {
         if (cached.img.tagName === 'VIDEO') {

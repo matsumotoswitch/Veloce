@@ -150,11 +150,14 @@ pub struct MoveOrCopyResult {
     reason: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ViewerImageResult {
-    path: String,
-    total: usize,
-    index: usize,
+    pub path: String,
+    pub total: usize,
+    pub index: usize,
+    pub chunk_start: usize,
+    pub chunk: Vec<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -3003,10 +3006,15 @@ fn get_viewer_image(
     if let Ok(viewer_paths) = state.viewer_paths.lock() {
         if let Some(paths) = viewer_paths.get(label) {
             if let Some(path) = paths.get(index) {
+                let chunk_start = index.saturating_sub(32);
+                let chunk_end = std::cmp::min(paths.len(), index + 33);
+                let chunk = paths[chunk_start..chunk_end].to_vec();
                 return Some(ViewerImageResult {
                     path: path.clone(),
                     total: paths.len(),
                     index,
+                    chunk_start,
+                    chunk,
                 });
             }
         }
@@ -6119,5 +6127,30 @@ mod viewer_tests {
 
         assert!(has_cache_flags[0],  "cached.png は has_thumbnail_cache = true になるべき");
         assert!(!has_cache_flags[1], "uncached.png は has_thumbnail_cache = false のままであるべき");
+    }
+
+    #[test]
+    fn test_viewer_image_result_chunking_bounds() {
+        let paths: Vec<String> = (0..100).map(|i| format!("image_{}.png", i)).collect();
+        
+        // テスト1: 先頭付近（index=2）
+        let idx: usize = 2;
+        let chunk_start = idx.saturating_sub(32);
+        let chunk_end = std::cmp::min(paths.len(), idx + 33);
+        let chunk = paths[chunk_start..chunk_end].to_vec();
+        assert_eq!(chunk_start, 0);
+        assert_eq!(chunk_end, 35);
+        assert_eq!(chunk.len(), 35);
+        assert_eq!(chunk[idx - chunk_start], "image_2.png");
+
+        // テスト2: 末尾付近（index=98）
+        let idx_end: usize = 98;
+        let chunk_start_end = idx_end.saturating_sub(32);
+        let chunk_end_end = std::cmp::min(paths.len(), idx_end + 33);
+        let chunk_end_vec = paths[chunk_start_end..chunk_end_end].to_vec();
+        assert_eq!(chunk_start_end, 66);
+        assert_eq!(chunk_end_end, 100);
+        assert_eq!(chunk_end_vec.len(), 34);
+        assert_eq!(chunk_end_vec[idx_end - chunk_start_end], "image_98.png");
     }
 }
