@@ -1165,13 +1165,26 @@ export async function selectImage(index, event = null) {
   }
 }
 
-async function openViewer(index) {
-  const file = await window.veloceAPI.getFileByIndex(index);
+async function openViewer(index, filePath = null) {
+  if (index < 0 && !filePath) return;
+
+  let targetFilePath = filePath;
+  let file = null;
+
+  if (targetFilePath) {
+    file = await window.veloceAPI.getFileByIndex(index);
+    if (!file || file.path !== targetFilePath) {
+      file = { path: targetFilePath, width: 0, height: 0 };
+    }
+  } else {
+    file = await window.veloceAPI.getFileByIndex(index);
+    if (file) targetFilePath = file.path;
+  }
 
   // IPC通信の遅延を回避するため、初期表示用のデータを LocalStorage に保存して直接渡す
-  if (file) {
+  if (targetFilePath) {
     localStorage.setItem('viewerInitialData', JSON.stringify({
-      path: file.path,
+      path: targetFilePath,
       total: appState.totalCount,
       index: index
     }));
@@ -1183,6 +1196,7 @@ async function openViewer(index) {
 
   window.veloceAPI.openViewer({
     currentIndex: index,
+    filePath: targetFilePath,
     width: file ? file.width : 0,
     height: file ? file.height : 0,
     monitorWidth: window.screen.availWidth,
@@ -3105,8 +3119,13 @@ function handleItemClick(e, isGrid) {
 
 function handleItemDblClick(e, isGrid) {
   const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  if (!item || !item.dataset.index) return;
-  openViewer(parseInt(item.dataset.index, 10));
+  if (!item || item.dataset.index === undefined) return;
+  const idx = parseInt(item.dataset.index, 10);
+  const filePath = item.dataset.filepath || null;
+  if (!isNaN(idx)) {
+    selectImage(idx, e);
+    openViewer(idx, filePath);
+  }
 }
 
 function handleItemDragStart(e, isGrid) {
@@ -4021,7 +4040,12 @@ export const globalKeydownHandler = async (e) => {
   if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
     e.preventDefault();
     if (appState.selectedIndex > -1) {
-      openViewer(appState.selectedIndex);
+      let targetPath = null;
+      const selItem = document.querySelector('.thumbnail-item.selected, tr.selected');
+      if (selItem && selItem.dataset && selItem.dataset.filepath) {
+        targetPath = selItem.dataset.filepath;
+      }
+      openViewer(appState.selectedIndex, targetPath);
     }
   }
 

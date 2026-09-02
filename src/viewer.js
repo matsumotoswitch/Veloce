@@ -111,18 +111,31 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       // Window Poolパターン用の初期化セッションイベント
       window.__TAURI__.event.listen('viewer-init-session', async (event) => {
-        const newIndex = event.payload;
-        viewerState.currentIndex = parseInt(newIndex, 10);
+        const payload = event.payload;
+        let newIndex = 0;
+        let targetPath = null;
+        let total = 0;
+        if (typeof payload === 'number') {
+          newIndex = payload;
+        } else if (payload && typeof payload === 'object') {
+          newIndex = typeof payload.index === 'number' ? payload.index : 0;
+          targetPath = payload.path || null;
+          total = typeof payload.total === 'number' ? payload.total : 0;
+        }
+        viewerState.currentIndex = newIndex;
         
         // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
         viewerState.preloadCache.clear();
-        viewerState.paths = null;
-        viewerState.currentImagePath = null;
-        viewerState.totalImages = 0;
+        viewerState.paths = total > 0 ? new Array(total).fill(null) : null;
+        viewerState.currentImagePath = targetPath;
+        viewerState.totalImages = total;
+        if (viewerState.paths && targetPath && viewerState.currentIndex >= 0) {
+          viewerState.paths[viewerState.currentIndex] = targetPath;
+        }
         
         applyViewerInitialData();
         
-        // リセット後、loadImageが再度Rust(IPC)からパスを取得しにいく
+        // リセット後、loadImageが確実に新しい画像をロード
         await loadImage();
       });
     }
@@ -168,20 +181,23 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (initialDataJson) {
         try {
           const initialData = JSON.parse(initialDataJson);
-          viewerState.currentImagePath = initialData.path;
-          viewerState.totalImages = initialData.total;
-          if (typeof initialData.index === 'number') {
-            viewerState.currentIndex = initialData.index;
+          // indexが一致している場合のみ適用（別ウィンドウのstaleデータを防止）
+          if (typeof initialData.index !== 'number' || initialData.index === viewerState.currentIndex) {
+            viewerState.currentImagePath = initialData.path;
+            viewerState.totalImages = initialData.total;
+            if (typeof initialData.index === 'number') {
+              viewerState.currentIndex = initialData.index;
+            }
+            
+            if (!viewerState.paths || viewerState.paths.length !== initialData.total) {
+              viewerState.paths = new Array(initialData.total).fill(null);
+            }
+            // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
+            if (viewerState.paths && viewerState.currentIndex >= 0) {
+              viewerState.paths[viewerState.currentIndex] = initialData.path;
+            }
+            document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
           }
-          
-          if (!viewerState.paths || viewerState.paths.length !== initialData.total) {
-            viewerState.paths = new Array(initialData.total).fill(null);
-          }
-          // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
-          if (viewerState.paths && viewerState.currentIndex >= 0) {
-            viewerState.paths[viewerState.currentIndex] = initialData.path;
-          }
-          document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
         } catch (e) {}
         localStorage.removeItem('viewerInitialData');
       }

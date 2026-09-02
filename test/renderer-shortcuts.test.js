@@ -171,9 +171,14 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       expect(selectSpy).toHaveBeenCalled();
     });
 
-    it('should open viewer on Enter', async () => {
+    it('should open viewer on Enter with filePath', async () => {
       appState.selectedIndex = 0;
       appState.selection.add(0);
+      const sel = document.createElement('div');
+      sel.className = 'thumbnail-item selected';
+      sel.dataset.filepath = '/test.jpg';
+      document.body.appendChild(sel);
+
       window.veloceAPI.getFileByIndex = vi.fn().mockResolvedValue({ path: '/test.jpg', width: 100, height: 100 });
       window.veloceAPI.openViewer = vi.fn();
       
@@ -183,7 +188,8 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       // wait for promises (openViewer is async)
       await new Promise(resolve => setTimeout(resolve, 0));
 
-      expect(window.veloceAPI.openViewer).toHaveBeenCalledWith(expect.objectContaining({ currentIndex: 0 }));
+      expect(window.veloceAPI.openViewer).toHaveBeenCalledWith(expect.objectContaining({ currentIndex: 0, filePath: '/test.jpg' }));
+      sel.remove();
     });
 
     it('should call renameSelectedFile on F2', async () => {

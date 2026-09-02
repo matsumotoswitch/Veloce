@@ -3142,25 +3142,36 @@ async fn open_viewer(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     current_index: usize,
+    file_path: Option<String>,
     width: u32,
     height: u32,
     monitor_width: f64,
     monitor_height: f64,
 ) -> Result<(), String> {
-    let (target_path, current_paths) = {
+    let (target_path, resolved_index, current_paths) = {
         if let Ok(paths) = state.image_paths.lock() {
-            (paths.get(current_index).cloned(), paths.clone())
+            let mut resolved_idx = current_index;
+            let target = if let Some(ref fp) = file_path {
+                if paths.get(current_index).map(|p| p == fp).unwrap_or(false) {
+                    Some(fp.clone())
+                } else if let Some(pos) = paths.iter().position(|p| p == fp) {
+                    resolved_idx = pos;
+                    Some(fp.clone())
+                } else {
+                    Some(fp.clone())
+                }
+            } else {
+                paths.get(current_index).cloned()
+            };
+            (target, resolved_idx, paths.clone())
         } else {
-            (None, Vec::new())
+            (file_path.clone(), current_index, Vec::new())
         }
     };
 
-    println!("[Veloce DEBUG] open_viewer called with current_index: {}. current_paths.len(): {}", current_index, current_paths.len());
-    if current_paths.len() > current_index {
-        println!("[Veloce DEBUG] target_path at index {}: {:?}", current_index, current_paths[current_index]);
-    }
-    for (i, p) in current_paths.iter().take(10).enumerate() {
-        println!("[Veloce DEBUG] path[{}]: {}", i, p);
+    println!("[Veloce DEBUG] open_viewer called with current_index: {} (resolved: {}). current_paths.len(): {}", current_index, resolved_index, current_paths.len());
+    if current_paths.len() > resolved_index {
+        println!("[Veloce DEBUG] target_path at resolved_index {}: {:?}", resolved_index, current_paths[resolved_index]);
     }
 
     let mut win_width = width;
@@ -3230,7 +3241,21 @@ async fn open_viewer(
             }
 
             // JS側に新しい画像のロードを指示
-            let _ = pool_win.emit("viewer-init-session", current_index);
+            #[derive(Clone, serde::Serialize)]
+            struct ViewerInitSessionPayload {
+                index: usize,
+                path: Option<String>,
+                total: usize,
+            }
+
+            let _ = pool_win.emit(
+                "viewer-init-session",
+                ViewerInitSessionPayload {
+                    index: resolved_index,
+                    path: target_path.clone(),
+                    total: current_paths.len(),
+                },
+            );
             
             let _ = pool_win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
                 width: win_width,
@@ -3259,7 +3284,7 @@ async fn open_viewer(
     tauri::WindowBuilder::new(
         &app,
         label.clone(),
-        tauri::WindowUrl::App(format!("/viewer.html?index={}", current_index).into()),
+        tauri::WindowUrl::App(format!("/viewer.html?index={}", resolved_index).into()),
     )
     .title("Veloce Viewer")
     .inner_size(win_width as f64, win_height as f64)
@@ -5847,6 +5872,51 @@ mod viewer_tests {
         let delay_ms: u64 = 50;
         assert!(delay_ms >= 10, "遅延が短すぎる: OSのウィンドウ初期化が完了しない可能性がある");
         assert!(delay_ms <= 500, "遅延が長すぎる: ユーザーが不自然に感じる");
+    }
+
+    #[test]
+    fn test_viewer_resolved_index_matching() {
+        let paths = vec![
+            "C:/images/C_size_300.jpg".to_string(),
+            "C:/images/A_size_200.jpg".to_string(),
+            "C:/images/B_size_100.jpg".to_string(),
+        ];
+        
+        // 1. インデックスとパスが一致している場合
+        let target_file = Some("C:/images/A_size_200.jpg".to_string());
+        let mut resolved_idx = 1;
+        let target = if let Some(ref fp) = target_file {
+            if paths.get(resolved_idx).map(|p| p == fp).unwrap_or(false) {
+                Some(fp.clone())
+            } else if let Some(pos) = paths.iter().position(|p| p == fp) {
+                resolved_idx = pos;
+                Some(fp.clone())
+            } else {
+                Some(fp.clone())
+            }
+        } else {
+            paths.get(resolved_idx).cloned()
+        };
+        assert_eq!(target, Some("C:/images/A_size_200.jpg".to_string()));
+        assert_eq!(resolved_idx, 1);
+
+        // 2. ソート等によりインデックスがズレていた場合 (例: DOMではindex=0だったがpathsではindex=1)
+        let stale_idx = 0;
+        let mut resolved_idx2 = stale_idx;
+        let target2 = if let Some(ref fp) = target_file {
+            if paths.get(resolved_idx2).map(|p| p == fp).unwrap_or(false) {
+                Some(fp.clone())
+            } else if let Some(pos) = paths.iter().position(|p| p == fp) {
+                resolved_idx2 = pos;
+                Some(fp.clone())
+            } else {
+                Some(fp.clone())
+            }
+        } else {
+            paths.get(resolved_idx2).cloned()
+        };
+        assert_eq!(target2, Some("C:/images/A_size_200.jpg".to_string()));
+        assert_eq!(resolved_idx2, 1); // 正しい位置に補正されること
     }
 
     #[test]

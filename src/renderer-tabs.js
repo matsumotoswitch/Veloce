@@ -96,6 +96,9 @@ export function initTabHandlers(ctx) {
     }
 
     if (window.veloceAPI.loadDirectory) {
+      if (window.veloceAPI.setViewParams) {
+        await appState.setViewParams();
+      }
       appState.currentDirectory = tab.path;
       localStorage.setItem('currentDirectory', appState.currentDirectory);
       appState.totalCount = 0;
@@ -217,7 +220,7 @@ export function initTabHandlers(ctx) {
       if (window.veloceAPI?.loadDirectory) {
         // 重いDOM更新とIPC通信を遅延させ、タブが閉じるアニメーション（220ms）が
         // メインスレッドのブロックによってコマ落ち（フレームドロップ）しないようにする
-        setTimeout(() => {
+        setTimeout(async () => {
           // もし遅延中に別のタブがアクティブになっていたらキャンセル
           if (appState.activeTabIndex !== nextIndex) return;
 
@@ -239,6 +242,10 @@ export function initTabHandlers(ctx) {
           clearMetadataUI();
           updateNavButtons();
           
+          if (window.veloceAPI.setViewParams) {
+            await appState.setViewParams();
+          }
+
           appState.savedScrollTopGrid = nextTab.scrollTop || 0;
           
           window.veloceAPI.loadDirectory(nextTab.path);
