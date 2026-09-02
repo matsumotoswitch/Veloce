@@ -21,6 +21,13 @@ export function formatSize(bytes) {
   return bytes.toLocaleString();
 }
 
+export function formatBytesHuman(bytes) {
+  if (bytes === undefined || bytes === null || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
 export function formatDate(timestamp) {
   if (!timestamp) return '-';
   // Rust側のUnixタイムスタンプ(秒)とJSのミリ秒の違いを吸収
@@ -951,9 +958,9 @@ class UIManager {
       }
     }
 
-    // 2. サムネイルグリッドの同期 (thumbnail-grid-content または thumbnailGrid の直接の子要素を走査)
+    // 2. サムネイルグリッドの同期 (.virtual-content または thumbnailGrid の直接の子要素を走査)
     if (this.elements.thumbnailGrid) {
-      const gridContent = this.elements.thumbnailGrid.querySelector('.thumbnail-grid-content') || this.elements.thumbnailGrid;
+      const gridContent = this.elements.thumbnailGrid.querySelector('.virtual-content') || this.elements.thumbnailGrid;
       const thumbs = gridContent.children;
       for (let k = 0; k < thumbs.length; k++) {
         const thumb = thumbs[k];
@@ -1354,8 +1361,8 @@ class UIManager {
     // 余分な要素を削除
     while (tbody.children.length - 2 > targetCount) {
       const last = tbody.children[tbody.children.length - 2];
-      if (last.dataset && last.dataset.filepath && this._domByPath && this._domByPath.get(last.dataset.filepath) === last) {
-        this._domByPath.delete(last.dataset.filepath);
+      if (last.dataset && last.dataset.filepath && this._listDomByPath && this._listDomByPath.get(last.dataset.filepath) === last) {
+        this._listDomByPath.delete(last.dataset.filepath);
       }
       tbody.removeChild(last);
     }
@@ -1390,15 +1397,15 @@ class UIManager {
       else tr.classList.remove('selected');
 
       if (tr.dataset.filepath !== file.path || tr.dataset.index != i) {
-        if (tr.dataset.filepath && this._domByPath && this._domByPath.get(tr.dataset.filepath) === tr) {
-          this._domByPath.delete(tr.dataset.filepath);
+        if (tr.dataset.filepath && this._listDomByPath && this._listDomByPath.get(tr.dataset.filepath) === tr) {
+          this._listDomByPath.delete(tr.dataset.filepath);
         }
 
         tr.dataset.index = i;
         tr.dataset.filepath = file.path;
         
-        if (!this._domByPath) this._domByPath = new Map();
-        this._domByPath.set(file.path, tr);
+        if (!this._listDomByPath) this._listDomByPath = new Map();
+        this._listDomByPath.set(file.path, tr);
         
         tr.style.height = `${rowHeight}px`;
 
@@ -1411,9 +1418,9 @@ class UIManager {
         tds[4].style.textAlign = 'right';
         tds[5].style.textAlign = 'right';
       } else {
-        // Just update selection and _domByPath registration if path matches but state might have refreshed
-        if (!this._domByPath) this._domByPath = new Map();
-        this._domByPath.set(file.path, tr);
+        // Just update selection and _listDomByPath registration if path matches but state might have refreshed
+        if (!this._listDomByPath) this._listDomByPath = new Map();
+        this._listDomByPath.set(file.path, tr);
       }
 
       // Always check and update dynamic metadata (they may arrive asynchronously)

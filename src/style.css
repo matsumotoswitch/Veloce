@@ -812,6 +812,12 @@ input:-webkit-autofill:focus {
   opacity: 1;
 }
 
+#search-clear-btn.active {
+  color: var(--accent-hover);
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.6));
+}
+
 #search-bar {
   flex: 1;
   background: transparent;
@@ -1182,14 +1188,14 @@ input[type="range"]:focus {
   cursor: pointer;
   border-radius: var(--radius-xs);
   transform: translateZ(0) scale(1);
-  transition: transform 0.1s var(--transition-smooth); /* 選択枠の遅延をなくすため色変化のアニメーションを削除 */
+  transition: transform 0.1s var(--transition-smooth), border-color 0.1s, box-shadow 0.1s;
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  /* レイアウトの再計算をコンポーネント内に閉じ込め、高速化する */
-  contain: layout paint style;
+  overflow: visible;
+  /* レイアウトの再計算をコンポーネント内に閉じ込め、高速化する（paintのcontainを解除してグローを描画可能にする） */
+  contain: layout style;
 }
 
 .thumbnail-img {
@@ -1197,6 +1203,7 @@ input[type="range"]:focus {
   height: 100%;
   object-fit: contain;
   pointer-events: none;
+  border-radius: inherit;
 }
 
 .thumbnail-label {
@@ -1238,23 +1245,22 @@ body.show-thumbnail-names .thumbnail-label {
 }
 
 .thumbnail-item:hover {
-  border-color: var(--border-color);
+  border-color: var(--accent-hover);
   transform: translateY(-2px);
-  /* Scale instead of sub-pixel blur */
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 12px rgba(var(--accent-rgb), 0.4);
   z-index: 2;
 }
 
 .thumbnail-item.selected {
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-color), 0 0 12px rgba(var(--accent-rgb), 0.5);
   border-radius: var(--radius-xs);
   z-index: 2;
 }
 
 .thumbnail-item.selected:hover {
-  border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px var(--accent-color), 0 4px 12px rgba(0, 0, 0, 0.5);
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 0 2px var(--accent-hover), 0 6px 18px rgba(0, 0, 0, 0.6), 0 0 16px rgba(var(--accent-rgb), 0.6);
 }
 
 /* Right Pane: Inspector */
@@ -3121,6 +3127,24 @@ th[data-sort] .sort-arrow.desc {
   /* Gold/Yellow star */
   width: 12px;
   height: 12px;
+}
+
+@keyframes rating-pop {
+  0% {
+    transform: scale(0.85);
+  }
+  50% {
+    transform: scale(1.3);
+    filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.8));
+  }
+  100% {
+    transform: scale(1);
+    filter: none;
+  }
+}
+
+.rating-badge.rating-pop {
+  animation: rating-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .slider-tooltip {

@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { appState, SmartFolderStore } from './renderer-state.js';
-import { UIManager, uiManager, formatSize, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
+import { UIManager, uiManager, formatSize, formatBytesHuman, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
 import { ThumbnailQueueManager, thumbnailWorkerPool, evictThumbnailCache, cleanupContext, resetThumbnailPreloader } from './renderer-thumbnails.js';
 import { debounce, blockDevtoolsShortcuts, getStreamUrl } from './utils.js';
 import { validateFilename } from './path-utils.js';
@@ -690,6 +690,54 @@ function clearMetadataUI() {
   }
 }
 
+async function renderMultipleSelectionSummary() {
+  const container = document.getElementById('inspector-content');
+  const emptyInspectorMsg = document.getElementById('inspector-empty');
+  const headerPath = document.getElementById('inspector-header-path');
+  const staticTable = document.getElementById('static-file-info-table');
+  const emptyInfoMsg = document.getElementById('file-info-empty');
+
+  if (staticTable && emptyInfoMsg) {
+    staticTable.style.display = 'none';
+    emptyInfoMsg.style.display = 'flex';
+  }
+
+  if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
+  if (typeof resetInspectorPools === 'function') resetInspectorPools();
+
+  const count = appState.selection.size;
+  const total = appState.totalCount || count;
+  const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '100';
+
+  if (headerPath) {
+    headerPath.innerHTML = `<bdi dir="ltr" style="opacity: 0.95; font-weight: 600; color: var(--accent-hover);">${count} / ${total} 件選択中 (${pct}%)</bdi>`;
+    headerPath.removeAttribute('data-path');
+    headerPath.style.display = 'block';
+  }
+
+  if (typeof getInspectorSection === 'function') {
+    const sec1 = getInspectorSection();
+    sec1.title.textContent = '複数選択概要';
+    sec1.copyWrapper.innerHTML = '';
+    sec1.box.className = 'prompt-look';
+    sec1.box.style.whiteSpace = 'pre-wrap';
+    sec1.box.style.fontFamily = 'inherit';
+    sec1.box.style.fontSize = 'var(--font-size-sm)';
+    sec1.box.style.padding = '8px 10px';
+    sec1.box.innerHTML = `選択数: <strong>${count} 件</strong> (フォルダ内 ${total} 件中 ${pct}%)`;
+
+    const sec2 = getInspectorSection();
+    sec2.title.textContent = '一括ショートカット操作';
+    sec2.copyWrapper.innerHTML = '';
+    sec2.box.className = 'prompt-look';
+    sec2.box.style.whiteSpace = 'pre-wrap';
+    sec2.box.style.fontFamily = 'inherit';
+    sec2.box.style.fontSize = 'var(--font-size-xs)';
+    sec2.box.style.padding = '8px 10px';
+    sec2.box.innerHTML = `・<strong>1 〜 5</strong>: 選択した画像に一括レーティング<br>・<strong>Delete</strong>: 選択した画像を一括ゴミ箱移動<br>・<strong>Ctrl + C</strong>: 選択した画像のファイルパスをコピー<br>・<strong>Ctrl + A</strong>: すべて選択`;
+  }
+}
+
 const scheduleRefresh = debounce(async () => {
   appState.preloadCursor = 0;
   await appState.setViewParams();
@@ -697,6 +745,8 @@ const scheduleRefresh = debounce(async () => {
   uiManager.updateSelectionUI();
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
+  } else if (appState.selection.size > 1) {
+    renderMultipleSelectionSummary();
   } else {
     window.veloceAPI.getFileByIndex(appState.selectedIndex).then(file => {
       if (file) renderMetadata(file);
@@ -1009,8 +1059,12 @@ export async function selectImage(index, event = null) {
   }
 
   // インスペクターの更新 (IPC呼び出しをUI更新後に遅延させてキーボード移動の遅延をなくす)
-  const file = await window.veloceAPI.getFileByIndex(index);
-  if (file) renderMetadata(file);
+  if (appState.selection.size > 1) {
+    renderMultipleSelectionSummary();
+  } else {
+    const file = await window.veloceAPI.getFileByIndex(index);
+    if (file) renderMetadata(file);
+  }
 }
 
 async function openViewer(index) {
@@ -4732,11 +4786,35 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   updateThumbnailSize();
 
+  const updateFilterIndicator = () => {
+    if (!uiManager.elements.searchClearBtn) return;
+    const hasSearch = !!(uiManager.elements.searchBar && uiManager.elements.searchBar.value.trim() !== '');
+    const hasRatingFilter = appState.ratingFilterVal !== 0;
+    if (hasSearch || hasRatingFilter) {
+      uiManager.elements.searchClearBtn.classList.add('active');
+    } else {
+      uiManager.elements.searchClearBtn.classList.remove('active');
+    }
+  };
+
   if (uiManager.elements.searchBar) {
+    uiManager.elements.searchBar.addEventListener('input', (e) => {
+      updateFilterIndicator();
+    });
     uiManager.elements.searchBar.addEventListener('input', debounce((e) => {
       appState.searchQuery = e.target.value;
       scheduleRefresh();
     }, CONFIG.SEARCH_DELAY));
+    uiManager.elements.searchBar.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (uiManager.elements.searchClearBtn) {
+          uiManager.elements.searchClearBtn.click();
+        }
+        uiManager.elements.searchBar.blur();
+      }
+    });
   }
 
   if (uiManager.elements.searchClearBtn) {
@@ -4779,6 +4857,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         resetCustomSelectUI('custom-rating-op-container', 'gte');
         changed = true;
       }
+
+      updateFilterIndicator();
 
       if (changed) {
         scheduleRefresh();
@@ -5256,6 +5336,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           if (label) label.textContent = item.textContent;
           items.forEach(i => i.classList.remove('selected'));
           item.classList.add('selected');
+          updateFilterIndicator();
           scheduleRefresh();
         }
         container.classList.remove('open');
@@ -5415,26 +5496,34 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
 
       if (uiManager.elements.thumbnailGrid || uiManager.elements.fileListBody) {
-        // querySelector による O(N) ツリー探索を回避し、O(1) で DOM を取得する
-        const domItem = uiManager._domByPath ? uiManager._domByPath.get(path) : null;
-        if (domItem) {
-          if (domItem.classList.contains('thumbnail-item')) {
-            // index 2: rating-badge (レンダラ側の仕様に依存。もし無ければフォールバック)
+        // 1. サムネイルグリッドの更新 (O(1) 高速同期 & 星ポップアニメーション)
+        if (uiManager._domByPath) {
+          const domItem = uiManager._domByPath.get(path);
+          if (domItem) {
+            domItem._cachedRating = rating;
             let badge = domItem.children[2];
             if (!badge || !badge.classList.contains('rating-badge')) {
-               badge = domItem.querySelector('.rating-badge');
+              badge = domItem.querySelector('.rating-badge');
             }
             if (badge) {
               if (rating > 0) {
                 badge.children[1].textContent = rating;
                 badge.classList.add('show');
+                badge.classList.remove('rating-pop');
+                void badge.offsetWidth;
+                badge.classList.add('rating-pop');
               } else {
-                badge.classList.remove('show');
+                badge.classList.remove('show', 'rating-pop');
               }
             }
-          } else if (domItem.tagName.toLowerCase() === 'tr') {
-            // index 7: rating column
-            const td = domItem.children[7];
+          }
+        }
+
+        // 2. ファイルテーブル行の更新 (O(1) 高速同期)
+        if (uiManager._listDomByPath) {
+          const tr = uiManager._listDomByPath.get(path);
+          if (tr) {
+            const td = tr.children[7];
             if (td) {
               if (rating > 0) {
                 const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
