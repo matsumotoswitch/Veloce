@@ -778,7 +778,12 @@ export function applyRatingUI(path, rating, isOptimistic = false) {
         }
         if (badge) {
           if (rating > 0) {
+            if (badge._hideTimer) {
+              clearTimeout(badge._hideTimer);
+              badge._hideTimer = null;
+            }
             badge.children[1].textContent = rating;
+            badge.classList.remove('rating-hide');
             badge.classList.add('show');
             // すでにアニメーション中の場合は再起動によるカクつきを防ぐ
             if (isOptimistic || !badge.classList.contains('rating-pop')) {
@@ -787,7 +792,20 @@ export function applyRatingUI(path, rating, isOptimistic = false) {
               badge.classList.add('rating-pop');
             }
           } else {
-            badge.classList.remove('show', 'rating-pop');
+            // レーティング解除時: 膨らんでから徐々に縮小・消滅するアニメーション
+            if (badge.classList.contains('show')) {
+              badge.classList.remove('rating-pop');
+              badge.classList.remove('rating-hide');
+              void badge.offsetWidth;
+              badge.classList.add('rating-hide');
+              if (badge._hideTimer) clearTimeout(badge._hideTimer);
+              badge._hideTimer = setTimeout(() => {
+                badge.classList.remove('show', 'rating-hide');
+                badge._hideTimer = null;
+              }, 280);
+            } else {
+              badge.classList.remove('show', 'rating-pop', 'rating-hide');
+            }
           }
         }
       }

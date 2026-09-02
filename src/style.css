@@ -3175,8 +3175,29 @@ th[data-sort] .sort-arrow.desc {
   }
 }
 
+@keyframes rating-hide {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  30% {
+    transform: scale(1.25);
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.6));
+  }
+  100% {
+    transform: scale(0);
+    opacity: 0;
+    filter: none;
+  }
+}
+
 .rating-badge.rating-pop {
   animation: rating-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.rating-badge.rating-hide {
+  animation: rating-hide 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .slider-tooltip {
