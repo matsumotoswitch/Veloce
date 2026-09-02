@@ -1267,6 +1267,9 @@ class UIManager {
       this.updateVirtualList(true);
     }
 
+    // 初回描画（グリッドとリスト）が両方 initialChunk を参照し終えた後に破棄する
+    appState.initialChunk = null;
+
     // バックグラウンド生成の再スタート
     if (!this.state.isPreloadRunning) {
       this.state.isPreloadRunning = true;
@@ -1374,9 +1377,9 @@ class UIManager {
     bottomSpacer.style.height = `${bottomSpacerHeight}px`;
 
     let items;
-    if (appState.initialChunk && safeStartRow === 0 && (endRow - safeStartRow + 1) <= appState.initialChunk.length) {
-      items = appState.initialChunk.slice(0, endRow - safeStartRow + 1);
-      appState.initialChunk = null; // 一度使用したら破棄
+    if (appState.initialChunk && safeStartRow === 0) {
+      const needed = endRow - safeStartRow + 1;
+      items = appState.initialChunk.slice(0, needed);
     } else {
       items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
     }
@@ -1568,9 +1571,9 @@ class UIManager {
     this.lastGridEndIndex = endIndex;
 
     let items;
-    if (appState.initialChunk && startIndex === 0 && (endIndex - startIndex + 1) <= appState.initialChunk.length) {
-      items = appState.initialChunk.slice(0, endIndex - startIndex + 1);
-      appState.initialChunk = null; // 一度使用したら破棄
+    if (appState.initialChunk && startIndex === 0) {
+      const needed = endIndex - startIndex + 1;
+      items = appState.initialChunk.slice(0, needed);
     } else {
       items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
     }

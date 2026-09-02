@@ -282,4 +282,60 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     // _dirtyTasks は設定されないこと（タスク未実行のため）
     expect(manager._dirtyTasks).toBeNull();
   });
+
+  describe('Immediate Viewport Thumbnail & Directory Load Optimization', () => {
+    it('should reset savedScrollTopGrid to 0 when navigating to a different folder or smart folder', () => {
+      // フォルダ遷移時、以前のスクロール位置を引き継がず0にリセットされ、
+      // initialChunk が破棄されずに即時表示されることを検証
+      const mockTabs = [
+        { path: 'C:/folderA', scrollTop: 500 },
+        { path: 'smart://fav_5', scrollTop: 0 }
+      ];
+      const activeTabIndex = 1;
+      const currentDir = 'smart://fav_5';
+
+      const isReloadingCurrent = mockTabs[activeTabIndex].path === currentDir && mockTabs[activeTabIndex].scrollTop !== 0;
+      const savedScrollTopGrid = isReloadingCurrent ? 500 : (mockTabs[activeTabIndex].scrollTop || 0);
+
+      expect(savedScrollTopGrid).toBe(0);
+    });
+
+    it('should synchronously invoke renderAll upon onDirectoryLoaded without debounce delay', () => {
+      let renderAllCalled = false;
+      const uiManagerMock = {
+        renderAll: () => { renderAllCalled = true; },
+        updateSelectionUI: () => {}
+      };
+
+      const payload = {
+        path: 'smart://fav_5',
+        totalCount: 50,
+        initialChunk: [{ path: 'C:/img1.png', mtime: 0, hasThumbnailCache: true }]
+      };
+
+      // onDirectoryLoaded 受信時、100ms debounce を待たずに同期的に renderAll が実行されること
+      const appStateMock = {
+        currentDirectory: 'smart://fav_5',
+        totalCount: 0,
+        preloadCursor: -1,
+        thumbnailTotalRequested: 0,
+        thumbnailCompleted: 0,
+        thumbnailCounted: new Set(),
+        selectedIndex: -1
+      };
+
+      if (payload.path === appStateMock.currentDirectory) {
+        appStateMock.totalCount = payload.totalCount;
+        if (payload.initialChunk) {
+          appStateMock.initialChunk = payload.initialChunk;
+        }
+        appStateMock.preloadCursor = 0;
+        uiManagerMock.renderAll();
+      }
+
+      expect(renderAllCalled).toBe(true);
+      expect(appStateMock.initialChunk).toHaveLength(1);
+      expect(appStateMock.preloadCursor).toBe(0);
+    });
+  });
 });

@@ -154,11 +154,18 @@ async function refreshFileList(showToast = false) {
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
   }
 
-  // 追加: 現在のスクロール位置をキャッシュ
+  // スクロール位置のキャッシュ: 現在と同じフォルダの再読み込み（F5など）時のみスクロール位置を維持し、
+  // 別フォルダやスマートフォルダへの遷移時は 0（先頭）から即時描画する
+  const activeTab = appState.tabs && appState.tabs[appState.activeTabIndex];
+  const isReloadingCurrent = activeTab && activeTab.path === appState.currentDirectory && (activeTab.scrollTop !== 0);
   const gridContainer = uiManager.elements.thumbnailGrid;
   const listContainer = document.getElementById('center-top');
-  appState.savedScrollTopGrid = gridContainer ? gridContainer.scrollTop : 0;
-  appState.savedScrollTopList = listContainer ? listContainer.scrollTop : 0;
+  appState.savedScrollTopGrid = (typeof appState.savedScrollTopGrid === 'number' && appState.savedScrollTopGrid > 0)
+    ? appState.savedScrollTopGrid
+    : (isReloadingCurrent && gridContainer ? gridContainer.scrollTop : (activeTab ? activeTab.scrollTop || 0 : 0));
+  appState.savedScrollTopList = (typeof appState.savedScrollTopList === 'number' && appState.savedScrollTopList > 0)
+    ? appState.savedScrollTopList
+    : (isReloadingCurrent && listContainer ? listContainer.scrollTop : 0);
 
   // UIとデータの初期化
   appState.totalCount = 0;
@@ -186,9 +193,6 @@ async function refreshFileList(showToast = false) {
     updateNavButtons();
     // Rust側のバックグラウンド処理をキックする
     // ※結果は await せず、onDirectoryLoaded リスナー側で随時受け取る
-    if (window.veloceAPI.setViewParams) {
-      await appState.setViewParams();
-    }
     await window.veloceAPI.loadDirectory(appState.currentDirectory);
   } catch (error) {
     console.error('Failed to start loading directory:', error);
@@ -4571,7 +4575,21 @@ window.addEventListener('DOMContentLoaded', async () => {
       // 画面に新たに表示されたアイテムが即座に生成枠を獲得できるようにする
       if (window.thumbnailManager) window.thumbnailManager.clear();
       
-      await scheduleRefresh();
+      // ディレクトリ読み込み完了時はRust側ですでにソート・フィルタが適用され
+      // initialChunk (最大100件) が同梱されているため、100msのdebounce待機や
+      // 冗長な setViewParams（全件再ソート）を行わず、即座に画面へ同期的描画を開始する
+      appState.preloadCursor = 0;
+      uiManager.renderAll();
+      uiManager.updateSelectionUI();
+      if (appState.selectedIndex === -1) {
+        clearMetadataUI();
+      } else if (appState.selection.size > 1) {
+        renderMultipleSelectionSummary();
+      } else {
+        window.veloceAPI.getFileByIndex(appState.selectedIndex).then(file => {
+          if (file) renderMetadata(file);
+        });
+      }
       
       setTimeout(() => {
         const t = document.getElementById('toast-dir-load-progress');
@@ -5795,9 +5813,6 @@ function initSmartFolders() {
       uiManager.updateSelectionUI();
 
       if (window.veloceAPI.loadDirectory) {
-        if (window.veloceAPI.setViewParams) {
-          await appState.setViewParams();
-        }
         const activeTab = appState.tabs[appState.activeTabIndex];
         if (activeTab) {
           activeTab.path = path;

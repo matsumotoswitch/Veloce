@@ -560,8 +560,10 @@ fn build_smart_folder_query(
         "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height"
     };
 
+    let has_rating_cond = rule.conditions.iter().any(|c| c.r#type == "rating");
+
     let mut is_inner_join = false;
-    if rule.match_type == "all" {
+    if rule.match_type == "all" && has_rating_cond {
         is_inner_join = rule.conditions.iter().any(|c| {
             if c.r#type == "rating" {
                 let rating_val: i64 = c.value.parse().unwrap_or(0);
@@ -575,13 +577,17 @@ fn build_smart_folder_query(
         });
     }
 
-    let join_type = if is_inner_join { "INNER JOIN" } else { "LEFT JOIN" };
-    
-    let mut query = format!("{} FROM cache c {} ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause, join_type);
+    let mut query = if is_inner_join {
+        format!("{} FROM ratings r INNER JOIN cache c ON r.path = c.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause)
+    } else if has_rating_cond {
+        format!("{} FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL", select_clause)
+    } else {
+        format!("{} FROM cache c WHERE c.path != '' AND c.path IS NOT NULL", select_clause)
+    };
     let mut params = Vec::new();
 
     if rule.conditions.is_empty() {
-        if !is_count { query.push_str(" ORDER BY c.mtime DESC"); }
+        if !is_count { query.push_str(" ORDER BY +c.mtime DESC"); }
         return (query, params);
     }
 
@@ -729,7 +735,7 @@ fn build_smart_folder_query(
     query.push_str(")");
 
     if !is_count {
-        query.push_str(" ORDER BY c.mtime DESC");
+        query.push_str(" ORDER BY +c.mtime DESC");
     }
 
     (query, params)
@@ -1028,7 +1034,7 @@ fn load_directory(
 
             let initial_chunk = {
                 let lock = state.filtered_files.lock().unwrap();
-                let chunk_size = std::cmp::min(lock.len(), 100);
+                let chunk_size = std::cmp::min(lock.len(), 200);
                 Some(lock[..chunk_size].iter().map(|f| (**f).clone()).collect())
             };
 
@@ -1505,23 +1511,35 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
         };
 
         if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-            for (label, viewer_list) in viewer_paths.iter_mut() {
-                let should_update = if is_smart_folder {
-                    viewer_list.is_empty() || viewer_list.iter().any(|p| paths.contains(p))
-                } else if let Some(ref dir_str) = target_dir {
-                    let v_dir = viewer_list
-                        .first()
-                        .and_then(|p| Path::new(p).parent())
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    v_dir == *dir_str
+            if !viewer_paths.is_empty() {
+                let path_set: Option<std::collections::HashSet<&str>> = if is_smart_folder {
+                    Some(paths.iter().map(|s| s.as_str()).collect())
                 } else {
-                    false
+                    None
                 };
 
-                if should_update {
-                    *viewer_list = paths.clone();
-                    let _ = app_handle.emit_to(&label, "viewer-list-updated", &paths);
+                for (label, viewer_list) in viewer_paths.iter_mut() {
+                    let should_update = if is_smart_folder {
+                        if let Some(ref set) = path_set {
+                            viewer_list.is_empty() || viewer_list.iter().any(|p| set.contains(p.as_str()))
+                        } else {
+                            viewer_list.is_empty()
+                        }
+                    } else if let Some(ref dir_str) = target_dir {
+                        let v_dir = viewer_list
+                            .first()
+                            .and_then(|p| Path::new(p).parent())
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        v_dir == *dir_str
+                    } else {
+                        false
+                    };
+
+                    if should_update {
+                        *viewer_list = paths.clone();
+                        let _ = app_handle.emit_to(&label, "viewer-list-updated", &paths);
+                    }
                 }
             }
         }
@@ -2961,6 +2979,18 @@ fn generate_thumbnail_inner(
                 return thumb;
             }
         }
+
+        // フォールバック: パス一致でキャッシュ済みサムネイルをO(1)即時取得
+        // スマートフォルダ等でmtimeが0、またはパス区切り文字（/と\）の差異がある場合でも確実にキャッシュをヒットさせる
+        let norm_back = clean_path.replace('/', "\\");
+        let norm_fwd = clean_path.replace('\\', "/");
+        if let Ok(mut stmt) = conn.prepare_cached(
+            "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
+        ) {
+            if let Ok(thumb) = stmt.query_row([&clean_path, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
+                return thumb;
+            }
+        }
     }
     
     let lower_path = file_path.to_lowercase();
@@ -2974,9 +3004,9 @@ fn generate_thumbnail_inner(
         if let Ok(conn) = db_conn.get() {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
             let _ = conn.execute(
-                "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, last_accessed = excluded.last_accessed",
-                rusqlite::params![hash_key, bytes, now],
+                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+                rusqlite::params![hash_key, bytes, clean_path, now],
             );
         }
         return bytes;
@@ -5080,7 +5110,7 @@ mod tests {
         
         let (query, params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
-        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height FROM cache c LEFT JOIN ratings r ON c.path = r.path WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
+        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height FROM cache c WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY +c.mtime DESC";
         assert!(query.contains(expected_query), "prompt の contains 条件は FTS5 IN サブクエリを使うべき。実際のクエリ: {}", query);
         // not_contains は NOT IN (SELECT ... MATCH ?) 形式
         assert!(
@@ -6449,5 +6479,43 @@ mod viewer_tests {
         };
 
         assert!(should_update, "スマートフォルダ内の画像パスが含まれる場合、同期対象として判定されるべき");
+    }
+
+    #[test]
+    fn test_generate_thumbnail_inner_path_fallback() {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+
+            let dummy_png: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 1, 2, 3];
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)",
+                rusqlite::params!["dummy_hash_different", dummy_png, "C:\\photos\\img1.png", 1000],
+            ).unwrap();
+        }
+
+        // mtime=0 や hash_key 不一致の状況でも、パス完全一致フォールバックによりサムネイルが即時返却されること
+        let res1 = super::generate_thumbnail_inner("C:\\photos\\img1.png", 0, &pool);
+        assert_eq!(res1, vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3]);
+
+        // スラッシュ区切りの場合でもフォールバックで正常に取得できること
+        let res2 = super::generate_thumbnail_inner("C:/photos/img1.png", 0, &pool);
+        assert_eq!(res2, vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3]);
     }
 }
