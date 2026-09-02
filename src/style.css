@@ -635,6 +635,38 @@ input:-webkit-autofill:focus {
   padding-bottom: 0;
 }
 
+#inspector-header {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  color: var(--text-color);
+}
+
+#inspector-header-path {
+  color: var(--text-color);
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+}
+
+.inspector-section {
+  margin-bottom: 15px;
+}
+
+.inspector-section h3 {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  margin-top: 0;
+  margin-bottom: 4px;
+  min-height: 22px;
+  height: 22px;
+  line-height: 22px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-color);
+  user-select: none;
+}
+
 .smart-folder-item {
   display: flex;
   align-items: center;

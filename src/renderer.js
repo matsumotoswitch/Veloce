@@ -710,31 +710,52 @@ async function renderMultipleSelectionSummary() {
   const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '100';
 
   if (headerPath) {
-    headerPath.innerHTML = `<bdi dir="ltr" style="opacity: 0.95; font-weight: 600; color: var(--accent-hover);">${count} / ${total} 件選択中 (${pct}%)</bdi>`;
+    headerPath.innerHTML = `<bdi dir="ltr" style="opacity: 0.9;">${count} / ${total} 件選択中 (${pct}%)</bdi>`;
     headerPath.removeAttribute('data-path');
     headerPath.style.display = 'block';
   }
 
   if (typeof getInspectorSection === 'function') {
+    // 1. 複数選択概要 (モデル/バージョン等のパラメータボックスと完全同一のクラス・余白構成)
     const sec1 = getInspectorSection();
     sec1.title.textContent = '複数選択概要';
     sec1.copyWrapper.innerHTML = '';
-    sec1.box.className = 'prompt-look';
-    sec1.box.style.whiteSpace = 'pre-wrap';
-    sec1.box.style.fontFamily = 'inherit';
-    sec1.box.style.fontSize = 'var(--font-size-sm)';
-    sec1.box.style.padding = '8px 10px';
-    sec1.box.innerHTML = `選択数: <strong>${count} 件</strong> (フォルダ内 ${total} 件中 ${pct}%)`;
+    sec1.subLabel.textContent = '';
+    sec1.box.className = 'prompt-look param-box';
+    sec1.box.style.cssText = '';
 
+    const tag1 = getInspectorTag();
+    tag1.style.cssText = '';
+    tag1.className = 'diff-tag common';
+    tag1.textContent = `選択数: ${count} 件 (フォルダ内 ${total} 件中 ${pct}%)`;
+    sec1.box.appendChild(tag1);
+
+    if (sec1.root.parentNode !== container) container.appendChild(sec1.root);
+
+    // 2. 一括ショートカット操作
     const sec2 = getInspectorSection();
-    sec2.title.textContent = '一括ショートカット操作';
+    sec2.title.textContent = 'ショートカット操作';
     sec2.copyWrapper.innerHTML = '';
+    sec2.subLabel.textContent = '';
     sec2.box.className = 'prompt-look';
-    sec2.box.style.whiteSpace = 'pre-wrap';
-    sec2.box.style.fontFamily = 'inherit';
-    sec2.box.style.fontSize = 'var(--font-size-xs)';
-    sec2.box.style.padding = '8px 10px';
-    sec2.box.innerHTML = `・<strong>1 〜 5</strong>: 選択した画像に一括レーティング<br>・<strong>Delete</strong>: 選択した画像を一括ゴミ箱移動<br>・<strong>Ctrl + C</strong>: 選択した画像のファイルパスをコピー<br>・<strong>Ctrl + A</strong>: すべて選択`;
+    sec2.box.style.cssText = '';
+
+    const shortcuts = [
+      '1 〜 5 : 一括レーティング',
+      'Delete : 一括ゴミ箱移動',
+      'Ctrl + C : パスコピー',
+      'Ctrl + A : すべて選択'
+    ];
+
+    for (const sc of shortcuts) {
+      const tag = getInspectorTag();
+      tag.style.cssText = '';
+      tag.className = 'diff-tag common';
+      tag.textContent = sc;
+      sec2.box.appendChild(tag);
+    }
+
+    if (sec2.root.parentNode !== container) container.appendChild(sec2.root);
   }
 }
 
@@ -1556,6 +1577,10 @@ function getInspectorSection() {
   h3.style.fontWeight = 'normal';
   h3.style.marginTop = '0';
   h3.style.marginBottom = '4px';
+  h3.style.minHeight = '22px';
+  h3.style.height = '22px';
+  h3.style.lineHeight = '22px';
+  h3.style.boxSizing = 'border-box';
   h3.style.display = 'flex';
   h3.style.justifyContent = 'space-between';
   h3.style.alignItems = 'center';
@@ -1567,6 +1592,8 @@ function getInspectorSection() {
   titleWrapper.style.display = 'flex';
   titleWrapper.style.alignItems = 'center';
   titleWrapper.style.gap = '8px';
+  titleWrapper.style.minHeight = '22px';
+  titleWrapper.style.lineHeight = '22px';
 
   const titleSpan = document.createElement('span');
   const subLabelSpan = document.createElement('span');
@@ -1575,6 +1602,10 @@ function getInspectorSection() {
   titleWrapper.appendChild(subLabelSpan);
 
   const copyWrapper = document.createElement('div');
+  copyWrapper.style.display = 'flex';
+  copyWrapper.style.alignItems = 'center';
+  copyWrapper.style.minHeight = '22px';
+  copyWrapper.style.height = '22px';
 
   h3.appendChild(titleWrapper);
   h3.appendChild(copyWrapper);
@@ -1615,6 +1646,12 @@ function resetInspectorPools() {
   for (let i = 0; i < inspectorSectionIndex; i++) {
     inspectorSectionPool[i].root.style.display = 'none';
     inspectorSectionPool[i].box.replaceChildren();
+    inspectorSectionPool[i].title.style.color = '';
+    inspectorSectionPool[i].subLabel.innerHTML = '';
+    inspectorSectionPool[i].subLabel.textContent = '';
+    inspectorSectionPool[i].copyWrapper.innerHTML = '';
+    inspectorSectionPool[i].box.className = 'prompt-look';
+    inspectorSectionPool[i].box.style.cssText = '';
   }
   inspectorSectionIndex = 0;
   inspectorTagIndex = 0;
