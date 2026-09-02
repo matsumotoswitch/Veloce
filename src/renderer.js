@@ -759,6 +759,65 @@ async function renderMultipleSelectionSummary() {
   }
 }
 
+export function applyRatingUI(path, rating, isOptimistic = false) {
+  if (rating === 0) {
+    delete appState.ratings[path];
+  } else {
+    appState.ratings[path] = rating;
+  }
+
+  if (uiManager.elements.thumbnailGrid || uiManager.elements.fileListBody) {
+    // 1. サムネイルグリッドの更新 (O(1) 高速同期 & 星ポップアニメーション)
+    if (uiManager._domByPath) {
+      const domItem = uiManager._domByPath.get(path);
+      if (domItem) {
+        domItem._cachedRating = rating;
+        let badge = domItem.children[2];
+        if (!badge || !badge.classList.contains('rating-badge')) {
+          badge = domItem.querySelector('.rating-badge');
+        }
+        if (badge) {
+          if (rating > 0) {
+            badge.children[1].textContent = rating;
+            badge.classList.add('show');
+            // すでにアニメーション中の場合は再起動によるカクつきを防ぐ
+            if (isOptimistic || !badge.classList.contains('rating-pop')) {
+              badge.classList.remove('rating-pop');
+              void badge.offsetWidth;
+              badge.classList.add('rating-pop');
+            }
+          } else {
+            badge.classList.remove('show', 'rating-pop');
+          }
+        }
+      }
+    }
+
+    // 2. ファイルテーブル行の更新 (O(1) 高速同期)
+    if (uiManager._listDomByPath) {
+      const tr = uiManager._listDomByPath.get(path);
+      if (tr) {
+        const td = tr.children[7];
+        if (td) {
+          if (rating > 0) {
+            const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+            td.innerHTML = starSvg + rating;
+          } else {
+            td.textContent = '-';
+          }
+        }
+      }
+    }
+  }
+
+  if (appState.ratingFilterVal > 0 || appState.sortConfig.key === 'rating') {
+    scheduleRefresh();
+  }
+  if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+    window.debouncedUpdateSmartFolderCounts();
+  }
+}
+
 const scheduleRefresh = debounce(async () => {
   appState.preloadCursor = 0;
   await appState.setViewParams();
@@ -3805,20 +3864,23 @@ export const globalKeydownHandler = async (e) => {
       e.preventDefault();
       const rating = parseInt(e.key, 10);
 
-      const files = [];
-      for (const idx of targetIndices) {
-        const file = await window.veloceAPI.getFileByIndex(idx);
-        if (file) files.push(file);
-      }
+      // 並列でファイル情報を即座に取得 (高速化)
+      const files = (await Promise.all(
+        targetIndices.map(idx => window.veloceAPI.getFileByIndex(idx))
+      )).filter(Boolean);
 
       if (files.length > 0) {
         const allHaveSameRating = files.every(f => (appState.ratings[f.path] || 0) === rating);
         const newRating = allHaveSameRating ? 0 : rating;
 
+        // 1. IPC待機を待たずにUI側で即時（0ms）に星ポップアニメーションと表示更新を開始（楽観的UI更新）
         for (const file of files) {
-          if (window.veloceAPI.setRating) {
-            await window.veloceAPI.setRating(file.path, newRating);
-          }
+          applyRatingUI(file.path, newRating, true);
+        }
+
+        // 2. バックエンドへ並列非同期で永続化保存
+        if (window.veloceAPI.setRating) {
+          await Promise.all(files.map(file => window.veloceAPI.setRating(file.path, newRating)));
         }
       }
       return;
@@ -5526,59 +5588,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (window.veloceAPI.onRatingChanged) {
     window.veloceAPI.onRatingChanged((payload) => {
       const { path, rating } = payload;
-      if (rating === 0) {
-        delete appState.ratings[path];
-      } else {
-        appState.ratings[path] = rating;
-      }
-
-      if (uiManager.elements.thumbnailGrid || uiManager.elements.fileListBody) {
-        // 1. サムネイルグリッドの更新 (O(1) 高速同期 & 星ポップアニメーション)
-        if (uiManager._domByPath) {
-          const domItem = uiManager._domByPath.get(path);
-          if (domItem) {
-            domItem._cachedRating = rating;
-            let badge = domItem.children[2];
-            if (!badge || !badge.classList.contains('rating-badge')) {
-              badge = domItem.querySelector('.rating-badge');
-            }
-            if (badge) {
-              if (rating > 0) {
-                badge.children[1].textContent = rating;
-                badge.classList.add('show');
-                badge.classList.remove('rating-pop');
-                void badge.offsetWidth;
-                badge.classList.add('rating-pop');
-              } else {
-                badge.classList.remove('show', 'rating-pop');
-              }
-            }
-          }
-        }
-
-        // 2. ファイルテーブル行の更新 (O(1) 高速同期)
-        if (uiManager._listDomByPath) {
-          const tr = uiManager._listDomByPath.get(path);
-          if (tr) {
-            const td = tr.children[7];
-            if (td) {
-              if (rating > 0) {
-                const starSvg = '<svg viewBox="0 0 24 24" width="14" height="14" style="fill: var(--glow-gold, #ffd700); display: inline-block; vertical-align: text-bottom; margin-right: 1px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-                td.innerHTML = starSvg + rating;
-              } else {
-                td.textContent = '-';
-              }
-            }
-          }
-        }
-      }
-
-      if (appState.ratingFilterVal > 0 || appState.sortConfig.key === 'rating') {
-        scheduleRefresh();
-      }
-      if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
-        window.debouncedUpdateSmartFolderCounts();
-      }
+      applyRatingUI(path, rating, false);
     });
   }
 
