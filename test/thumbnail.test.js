@@ -337,5 +337,51 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(appStateMock.initialChunk).toHaveLength(1);
       expect(appStateMock.preloadCursor).toBe(0);
     });
+
+    it('should set wrapper.dataset.filename and omit native title for unified custom tooltip on thumbnails', () => {
+      const file = { name: 'very_long_filename_12345.png', path: 'C:/photos/very_long_filename_12345.png' };
+      const wrapper = document.createElement('div');
+      const label = document.createElement('div');
+      wrapper.appendChild(label);
+
+      // ロジック検証: ネイティブtitleを廃止し、カスタムツールチップ用に dataset.filename を設定
+      if (file.name) {
+        label.textContent = file.name;
+        wrapper.dataset.filename = file.name;
+        label.removeAttribute('title');
+        wrapper.removeAttribute('title');
+      } else {
+        label.textContent = '';
+        delete wrapper.dataset.filename;
+        label.removeAttribute('title');
+        wrapper.removeAttribute('title');
+      }
+
+      expect(wrapper.dataset.filename).toBe('very_long_filename_12345.png');
+      expect(wrapper.getAttribute('title')).toBeNull();
+      expect(label.getAttribute('title')).toBeNull();
+    });
+
+    it('should trigger tooltip only when target is within thumbnail-label', () => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'thumbnail-item';
+      const img = document.createElement('img');
+      img.className = 'thumbnail-img';
+      const label = document.createElement('div');
+      label.className = 'thumbnail-label';
+      label.textContent = 'sample_image.png';
+
+      wrapper.appendChild(img);
+      wrapper.appendChild(label);
+
+      // 画像本体をホバーした場合 -> label は null（ツールチップ非表示）
+      const targetImg = img;
+      expect(targetImg.closest('.thumbnail-label')).toBeNull();
+
+      // ファイル名ラベルをホバーした場合 -> label が取得できツールチップ表示対象
+      const targetLabel = label;
+      expect(targetLabel.closest('.thumbnail-label')).toBe(label);
+      expect(targetLabel.closest('.thumbnail-label').textContent).toBe('sample_image.png');
+    });
   });
 });

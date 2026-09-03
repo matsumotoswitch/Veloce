@@ -1651,10 +1651,14 @@ class UIManager {
 
         if (file.name) {
           label.textContent = file.name;
-          label.title = file.name;
+          wrapper.dataset.filename = file.name;
+          label.removeAttribute('title');
+          wrapper.removeAttribute('title');
         } else {
           label.textContent = '';
-          label.title = '';
+          delete wrapper.dataset.filename;
+          label.removeAttribute('title');
+          wrapper.removeAttribute('title');
         }
 
         if (appState.thumbnailUrls.has(file.path)) {

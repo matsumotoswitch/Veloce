@@ -3224,10 +3224,99 @@ uiManager.elements.thumbnailGrid.addEventListener('dblclick', (e) => handleItemD
 uiManager.elements.thumbnailGrid.addEventListener('dragstart', (e) => handleItemDragStart(e, true));
 uiManager.elements.thumbnailGrid.addEventListener('contextmenu', (e) => handleItemContextMenu(e, true));
 
+// サムネイル上のファイル名の箇所に来たときだけカスタムツールチップを表示
+let currentHoveredLabel = null;
+uiManager.elements.thumbnailGrid.addEventListener('mouseover', (e) => {
+  const label = e.target.closest('.thumbnail-label');
+  if (!label) {
+    if (currentHoveredLabel) {
+      uiManager.hideCustomTooltip();
+      currentHoveredLabel = null;
+    }
+    return;
+  }
+  if (label !== currentHoveredLabel) {
+    currentHoveredLabel = label;
+    const name = label.textContent;
+    if (name) {
+      uiManager.showCustomTooltip(name, e.clientX, e.clientY);
+    } else {
+      uiManager.hideCustomTooltip();
+    }
+  }
+});
+uiManager.elements.thumbnailGrid.addEventListener('mousemove', (e) => {
+  const label = e.target.closest('.thumbnail-label');
+  if (!label) {
+    if (currentHoveredLabel) {
+      uiManager.hideCustomTooltip();
+      currentHoveredLabel = null;
+    }
+    return;
+  }
+  const name = label.textContent;
+  if (name) {
+    uiManager.showCustomTooltip(name, e.clientX, e.clientY);
+  }
+});
+uiManager.elements.thumbnailGrid.addEventListener('mouseleave', () => {
+  if (currentHoveredLabel) {
+    uiManager.hideCustomTooltip();
+    currentHoveredLabel = null;
+  }
+});
+uiManager.elements.thumbnailGrid.addEventListener('mousedown', () => {
+  if (currentHoveredLabel) {
+    uiManager.hideCustomTooltip();
+    currentHoveredLabel = null;
+  }
+});
+
 uiManager.elements.fileListBody.addEventListener('click', (e) => handleItemClick(e, false));
 uiManager.elements.fileListBody.addEventListener('dblclick', (e) => handleItemDblClick(e, false));
 uiManager.elements.fileListBody.addEventListener('dragstart', (e) => handleItemDragStart(e, false));
 uiManager.elements.fileListBody.addEventListener('contextmenu', (e) => handleItemContextMenu(e, false));
+
+// ファイル一覧テーブルのカスタムツールチップ表示
+let currentHoveredListRow = null;
+uiManager.elements.fileListBody.addEventListener('mouseover', (e) => {
+  const tr = e.target.closest('tr');
+  if (!tr) {
+    if (currentHoveredListRow) {
+      uiManager.hideCustomTooltip();
+      currentHoveredListRow = null;
+    }
+    return;
+  }
+  const firstTd = tr.children[0];
+  if (firstTd && (e.target === firstTd || firstTd.contains(e.target))) {
+    const name = firstTd.textContent;
+    if (name && name !== currentHoveredListRow) {
+      currentHoveredListRow = name;
+      uiManager.showCustomTooltip(name, e.clientX, e.clientY);
+    }
+  } else if (currentHoveredListRow) {
+    uiManager.hideCustomTooltip();
+    currentHoveredListRow = null;
+  }
+});
+uiManager.elements.fileListBody.addEventListener('mousemove', (e) => {
+  if (currentHoveredListRow) {
+    uiManager.showCustomTooltip(currentHoveredListRow, e.clientX, e.clientY);
+  }
+});
+uiManager.elements.fileListBody.addEventListener('mouseleave', () => {
+  if (currentHoveredListRow) {
+    uiManager.hideCustomTooltip();
+    currentHoveredListRow = null;
+  }
+});
+uiManager.elements.fileListBody.addEventListener('mousedown', () => {
+  if (currentHoveredListRow) {
+    uiManager.hideCustomTooltip();
+    currentHoveredListRow = null;
+  }
+});
 
 // ============================================================================
 // Directory Tree Event Delegation

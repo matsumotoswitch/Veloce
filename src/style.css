@@ -1258,7 +1258,7 @@ input[type="range"]:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
-  pointer-events: none;
+  pointer-events: auto;
   opacity: 0.75;
   /* 透過度を少し上げて視認性を確保 */
   transition: opacity 0.2s ease, background 0.2s ease;
@@ -1793,6 +1793,8 @@ img.thumbnail-img.loading {
   font-size: var(--font-size-sm);
   line-height: 1.4;
   white-space: pre-wrap;
+  word-break: break-all;
+  max-width: min(500px, 80vw);
   opacity: 0;
   visibility: hidden;
   transform: translateY(4px) scale(0.95);
@@ -2049,7 +2051,7 @@ th[data-sort] svg path {
   border-radius: 8px 8px 0 0 !important;
   /* opacity は !important なしにする。CSS アニメーションが opacity を制御できるようにするため。
      ホバー・アクティブは詳細度が高いため !important なしでも正しく上書きできる */
-  opacity: 0.8;
+  opacity: 0.88;
   /* タブ間の隙間は gap で管理 */
   margin-bottom: 0 !important;
   /* 枠外へのめり込みを無くし、下線を確実に表示させる */
@@ -2779,6 +2781,10 @@ html.viewer-html,
   outline: none;
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.6);
   border-radius: var(--radius-xs);
+}
+
+.dialog-btn:focus-visible {
+  border-radius: var(--radius-sm);
 }
 
 /* ペイン等の非インタラクティブ要素のフォーカスリングを除外 */
