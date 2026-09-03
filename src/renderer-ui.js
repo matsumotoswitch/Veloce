@@ -1949,10 +1949,10 @@ export function createFavoriteEditorUI(containerElement, initialIcon = 'star', i
 
   containerElement.innerHTML = `
     <div class="favorite-icon-editor">
-      <div style="font-size: 14px; margin-bottom: 8px; color: var(--text-color);">アイコンを選択</div>
+      <div class="form-label">アイコンを選択</div>
       <div class="icon-grid" id="favIconGrid"></div>
       
-      <div style="font-size: 14px; margin-top: 16px; margin-bottom: 8px; color: var(--text-color);">カラーを選択</div>
+      <div class="form-label" style="margin-top: 16px;">カラーを選択</div>
       <div class="color-grid" id="favColorGrid"></div>
     </div>
   `;

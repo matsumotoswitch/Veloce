@@ -1788,7 +1788,7 @@ async function renderMetadata(file) {
         const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
         const escapedPath = dirPath.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         
-        headerPath.innerHTML = `<bdi dir="ltr" style="opacity: 0.9;">${escapedPath}</bdi>`;
+        headerPath.innerHTML = `<bdi dir="ltr">${escapedPath}</bdi>`;
         headerPath.setAttribute('data-path', file.path);
         headerPath.removeAttribute('title');
         headerPath.style.display = 'block';
@@ -2616,8 +2616,12 @@ const menuPrecacheFolder = createMenuItem('これ以下のファイル情報を�
 
 const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager.ICONS.EDIT, () => {
   if (!contextMenu.targetFavoriteId) return;
-  const fav = appState.favorites.find(f => f.id === contextMenu.targetFavoriteId);
+  const fav = appState.favorites.find(f => String(f.id) === String(contextMenu.targetFavoriteId));
   if (fav) {
+    const modal = document.getElementById('edit-favorite-modal');
+    if (modal) {
+      modal.style.display = ''; // Inline style のリセット（Escape等で付与された可能性のあるdisplay:noneを解除）
+    }
     const container = document.getElementById('fav-icon-selector');
 
     const getFavData = createFavoriteEditorUI(container, fav.icon, fav.color || 'default');
@@ -2635,7 +2639,11 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
 
     newCancelBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      document.getElementById('edit-favorite-modal').classList.remove('show');
+      const m = document.getElementById('edit-favorite-modal');
+      if (m) {
+        m.classList.remove('show');
+        m.style.display = '';
+      }
     });
 
     newSaveBtn.addEventListener('click', () => {
@@ -2656,14 +2664,20 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
       });
       if (tabUpdated) { saveTabsState(); uiManager.renderTabs(); }
 
-      document.getElementById('edit-favorite-modal').classList.remove('show');
+      const m = document.getElementById('edit-favorite-modal');
+      if (m) {
+        m.classList.remove('show');
+        m.style.display = '';
+      }
     });
 
     const nameInput = document.getElementById('fav-name-input');
     nameInput.value = fav.name;
     document.getElementById('fav-path-input').value = fav.path;
     contextMenu.editingFavoriteId = fav.id;
-    document.getElementById('edit-favorite-modal').classList.add('show');
+    if (modal) {
+      modal.classList.add('show');
+    }
     nameInput.focus();
     nameInput.select();
   }
@@ -4024,8 +4038,12 @@ export const globalKeydownHandler = async (e) => {
       e.preventDefault();
       dialogOverlays.forEach(overlay => {
         overlay.classList.remove('show');
-        // 要素自体の削除は呼び出し元の cleanup に任せるが、念のため非表示化を保証する
-        overlay.style.display = 'none';
+        // 要素自体の削除は呼び出し元の cleanup に任せるが、静的モーダル以外は非表示化を保証する
+        if (overlay.id !== 'edit-favorite-modal' && overlay.id !== 'edit-smart-folder-modal') {
+          overlay.style.display = 'none';
+        } else {
+          overlay.style.display = '';
+        }
         
         // Escapeキーのイベントをディスパッチして、元のハンドラ（Promiseの解決など）をトリガーする
         const escEvent = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
@@ -5470,7 +5488,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   document.getElementById('fav-cancel-btn')?.addEventListener('click', () => {
-    document.getElementById('edit-favorite-modal').classList.remove('show');
+    const m = document.getElementById('edit-favorite-modal');
+    if (m) {
+      m.classList.remove('show');
+      m.style.display = '';
+    }
   });
 
   const savedSort = localStorage.getItem('currentSort');

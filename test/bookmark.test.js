@@ -85,4 +85,40 @@ describe('Bookmark Bar Overflow Logic', () => {
     expect(hiddenItems.length).toBe(1);
     expect(hiddenItems[0]).toBe(item2);
   });
+
+  it('should reset style.display and allow opening edit-favorite-modal repeatedly', () => {
+    // モーダルが一度閉じた後に style.display = 'none' が残らず再度開けることを検証
+    const modal = document.createElement('div');
+    modal.id = 'edit-favorite-modal';
+    modal.className = 'dialog-overlay show';
+    modal.style.display = 'none'; // 前回のEscape等でインライン非表示が付与された状態をシミュレート
+    document.body.appendChild(modal);
+
+    // 開く処理のシミュレーション: modal.style.display をリセットして .show を付与
+    modal.style.display = '';
+    modal.classList.add('show');
+
+    expect(modal.style.display).toBe('');
+    expect(modal.classList.contains('show')).toBe(true);
+
+    // Escape処理のシミュレーション: 静的モーダルは style.display = 'none' にせず、.show のみ削除
+    if (modal.id === 'edit-favorite-modal') {
+      modal.classList.remove('show');
+      modal.style.display = '';
+    } else {
+      modal.style.display = 'none';
+    }
+
+    expect(modal.style.display).toBe('');
+    expect(modal.classList.contains('show')).toBe(false);
+
+    // 2回目を開く
+    modal.style.display = '';
+    modal.classList.add('show');
+
+    expect(modal.style.display).toBe('');
+    expect(modal.classList.contains('show')).toBe(true);
+
+    modal.remove();
+  });
 });

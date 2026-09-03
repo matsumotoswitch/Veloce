@@ -75,4 +75,24 @@ describe('Video Seek Bar', () => {
     
     window.removeEventListener('mousedown', windowListener);
   });
+
+  it('should define line-height: 1 and tabular-nums for video-time-display', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const cssContent = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+
+    expect(cssContent).toMatch(/#video-time-display\s*\{[^}]*line-height:\s*1;/);
+    expect(cssContent).toMatch(/#video-time-display\s*\{[^}]*font-variant-numeric:\s*tabular-nums;/);
+  });
+
+  it('should use form-label class for favorite and smart folder icon editor sections', async () => {
+    const { createFavoriteEditorUI } = await import('../src/renderer-ui.js');
+    const container = document.createElement('div');
+    createFavoriteEditorUI(container, 'star', 'default');
+
+    const labels = container.querySelectorAll('.form-label');
+    expect(labels.length).toBe(2);
+    expect(labels[0].textContent).toBe('アイコンを選択');
+    expect(labels[1].textContent).toBe('カラーを選択');
+  });
 });

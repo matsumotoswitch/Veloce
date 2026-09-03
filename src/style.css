@@ -645,6 +645,7 @@ input:-webkit-autofill:focus {
   color: var(--text-color);
   font-size: var(--font-size-xs);
   font-weight: normal;
+  opacity: 0.9;
 }
 
 .inspector-section {
@@ -3287,8 +3288,11 @@ input[type="range"]:active~.slider-tooltip {
   color: white;
   font-family: 'Consolas', monospace;
   font-size: var(--font-size-base);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   min-width: 80px;
   text-align: right;
+  user-select: none;
 }
 
 #video-play-btn {
