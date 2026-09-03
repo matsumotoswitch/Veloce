@@ -1390,15 +1390,20 @@ function toggleHelpOverlay(forceShow) {
   content.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-shrink: 0;">
       <h2 style="margin: 0; color: var(--glow-gold); font-size: 1.2em; border-bottom: none;">ヘルプ・ショートカット一覧</h2>
-      <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid var(--modal-border); border-radius: 20px; color: var(--text-color); font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(0, 0, 0, 0.2);"
-        onmouseover="this.style.backgroundColor='rgba(37, 126, 140, 0.15)'; this.style.borderColor='var(--accent-color)'; this.style.color='#fff';"
-        onmouseout="this.style.backgroundColor='rgba(0, 0, 0, 0.2)'; this.style.borderColor='var(--modal-border)'; this.style.color='var(--text-color)';">
-        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="8" r="7"></circle>
-          <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
-        </svg>
-        ライセンス ＆ クレジット
-      </span>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid var(--modal-border); border-radius: 20px; color: var(--text-color); font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(0, 0, 0, 0.2);"
+          onmouseover="this.style.backgroundColor='rgba(37, 126, 140, 0.15)'; this.style.borderColor='var(--accent-color)'; this.style.color='#fff';"
+          onmouseout="this.style.backgroundColor='rgba(0, 0, 0, 0.2)'; this.style.borderColor='var(--modal-border)'; this.style.color='var(--text-color)';">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8" r="7"></circle>
+            <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
+          </svg>
+          ライセンス ＆ クレジット
+        </span>
+        <button class="dialog-close-btn" id="help-close-btn" title="閉じる (Esc)">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
     </div>
 
     <div class="help-tabs">
@@ -1492,6 +1497,10 @@ function toggleHelpOverlay(forceShow) {
   });
 
   overlay.addEventListener('click', (e) => {
+    if (e.target.closest('#help-close-btn')) {
+      toggleHelpOverlay(false);
+      return;
+    }
     if (e.target.closest('#license-link')) {
       showLicenseDialog();
       return;
@@ -2361,6 +2370,10 @@ function showEditSmartFolderModal(sf, isNew = false) {
   try {
     const modal = document.getElementById('edit-smart-folder-modal');
     modal.style.display = ''; // Inline style のリセット
+    const titleEl = document.getElementById('smart-modal-title');
+    if (titleEl) {
+      titleEl.textContent = isNew ? '新規スマートフォルダ' : 'スマートフォルダを編集';
+    }
     const container = document.getElementById('smart-icon-selector');
     const getIconData = createFavoriteEditorUI(container, sf.icon || 'FAV_STAR', sf.color || 'orange');
 
@@ -5493,6 +5506,30 @@ window.addEventListener('DOMContentLoaded', async () => {
       m.classList.remove('show');
       m.style.display = '';
     }
+  });
+
+  document.getElementById('fav-modal-close-btn')?.addEventListener('click', () => {
+    const m = document.getElementById('edit-favorite-modal');
+    if (m) {
+      m.classList.remove('show');
+      m.style.display = '';
+    }
+  });
+
+  document.getElementById('smart-modal-close-btn')?.addEventListener('click', () => {
+    const m = document.getElementById('edit-smart-folder-modal');
+    if (m) {
+      m.classList.remove('show');
+      m.style.display = '';
+    }
+  });
+
+  document.getElementById('diff-close-btn')?.addEventListener('click', () => {
+    document.getElementById('diff-modal')?.classList.remove('show');
+  });
+
+  document.getElementById('diff-bottom-close-btn')?.addEventListener('click', () => {
+    document.getElementById('diff-modal')?.classList.remove('show');
   });
 
   const savedSort = localStorage.getItem('currentSort');

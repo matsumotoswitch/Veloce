@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
@@ -255,14 +255,27 @@
 
   <div id="diff-modal" class="modal">
     <div class="modal-content">
-      <h2>プロンプト差分比較</h2>
-      <div id="diff-container">
-        </div>
+      <div class="modal-header">
+        <h2>プロンプト差分比較</h2>
+        <button class="dialog-close-btn" id="diff-close-btn" title="閉じる (Esc)">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div id="diff-container"></div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; margin-top: 16px;">
+        <button id="diff-bottom-close-btn" class="dialog-btn">閉じる</button>
+      </div>
     </div>
   </div>
 
   <div id="edit-favorite-modal" class="dialog-overlay">
     <div class="dialog-box">
+      <div class="dialog-header">
+        <h2>お気に入りを編集</h2>
+        <button class="dialog-close-btn" id="fav-modal-close-btn" title="閉じる (Esc)">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
       <div class="form-group">
         <div id="fav-icon-selector"></div>
       </div>
@@ -282,6 +295,12 @@
   </div>
   <div id="edit-smart-folder-modal" class="dialog-overlay">
     <div class="dialog-box">
+      <div class="dialog-header">
+        <h2 id="smart-modal-title">スマートフォルダを編集</h2>
+        <button class="dialog-close-btn" id="smart-modal-close-btn" title="閉じる (Esc)">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
       <div class="form-group">
         <div id="smart-icon-selector"></div>
       </div>
