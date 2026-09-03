@@ -379,7 +379,7 @@ input:-webkit-autofill:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #3a454a;
+  background-color: var(--border-color);
   border-radius: 8px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -1403,11 +1403,12 @@ body.show-thumbnail-names .thumbnail-label {
 
 /* トグルアイコンのベース色とホバー連動 */
 .toggle-icon {
-  transition: transform 0.2s var(--transition-fast);
+  transition: transform 0.2s var(--transition-fast), color 0.2s, opacity 0.2s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #888;
+  color: var(--text-color);
+  opacity: 0.5;
   margin-right: 8px;
   cursor: pointer;
 }
@@ -1419,6 +1420,7 @@ body.show-thumbnail-names .thumbnail-label {
 .tree-item:hover .toggle-icon,
 .tree-item.selected .toggle-icon {
   color: var(--text-light);
+  opacity: 1;
 }
 
 /* アイコンのホバー・選択時の色反転処理 */
@@ -2604,7 +2606,7 @@ html.viewer-html,
 }
 
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:hover {
-  background-color: #e05263;
+  background-color: var(--danger-red);
 }
 
 .window-ctrl-btn--min,
@@ -3192,7 +3194,7 @@ th[data-sort] .sort-arrow.desc {
 }
 
 .rating-badge svg {
-  fill: #ffd700;
+  fill: var(--glow-gold);
   /* Gold/Yellow star */
   width: 12px;
   height: 12px;
@@ -3204,7 +3206,7 @@ th[data-sort] .sort-arrow.desc {
   }
   50% {
     transform: scale(1.3);
-    filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.8));
+    filter: drop-shadow(0 0 6px rgba(230, 199, 98, 0.8));
   }
   100% {
     transform: scale(1);
@@ -3220,7 +3222,7 @@ th[data-sort] .sort-arrow.desc {
   30% {
     transform: scale(1.25);
     opacity: 1;
-    filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.6));
+    filter: drop-shadow(0 0 6px rgba(230, 199, 98, 0.6));
   }
   100% {
     transform: scale(0);
