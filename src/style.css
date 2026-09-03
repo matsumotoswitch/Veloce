@@ -2470,6 +2470,7 @@ html.viewer-html,
   right: 0;
   left: 0;
   display: flex;
+  align-items: flex-start;
   justify-content: flex-end;
   /* Keep buttons on right even if filename is hidden */
   z-index: 9999;
@@ -2497,6 +2498,7 @@ html.viewer-html,
 .window-filename {
   flex: 1;
   height: 32px;
+  line-height: 32px;
   background-color: transparent;
   /* ベタ塗りを廃止 */
   color: rgba(255, 255, 255, 0.9);
@@ -2513,7 +2515,33 @@ html.viewer-html,
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: auto;
+  box-sizing: border-box;
   /* ドラッグ操作を受け付ける */
+}
+
+.window-info-container {
+  height: 32px;
+  line-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.viewer-rating-display {
+  height: 32px;
+  line-height: 32px;
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  box-sizing: border-box;
 }
 
 .window-ctrl-btn {
@@ -2539,16 +2567,18 @@ html.viewer-html,
 
 .window-scale-display {
   height: 32px;
+  line-height: 32px;
   color: rgba(255, 255, 255, 0.9);
-  font-size: var(--font-size-xs);
-  padding: 0 12px;
+  font-size: var(--font-size-base);
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  font-weight: 500;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  box-sizing: border-box;
 }
 
 .viewer-body #window-controls:not(.has-gradient).showing-scale .window-scale-display {

@@ -132,4 +132,24 @@ describe('Viewer UI Visibility', () => {
     await import('../src/viewer.js');
     expect(typeof window.updateScaleDisplay).toBe('function');
   });
+
+  it('should unify font-size and baseline height between window-filename and window-scale-display in style.css', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const cssContent = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+    const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
+
+    // CSSで window-filename と window-scale-display の font-size が同一（var(--font-size-base)）であること
+    expect(cssContent).toMatch(/\.window-filename\s*\{[^}]*font-size:\s*var\(--font-size-base\);/);
+    expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*font-size:\s*var\(--font-size-base\);/);
+
+    // 高さ（height）と行の高さ（line-height）がともに 32px で統一されていること
+    expect(cssContent).toMatch(/\.window-filename\s*\{[^}]*height:\s*32px;/);
+    expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*height:\s*32px;/);
+    expect(cssContent).toMatch(/\.window-info-container\s*\{[^}]*height:\s*32px;/);
+
+    // #window-controls で上揃え（align-items: flex-start）され、30pxのインライン直書きが存在しないこと
+    expect(cssContent).toMatch(/\.viewer-body #window-controls\s*\{[^}]*align-items:\s*flex-start;/);
+    expect(viewerJsContent).not.toContain("infoContainer.style.height = '30px'");
+  });
 });

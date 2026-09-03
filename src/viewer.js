@@ -896,29 +896,18 @@ function createWindowControls() {
   controlsContainer.appendChild(filenameDisplay);
   const infoContainer = document.createElement('div');
   infoContainer.id = 'window-info-container';
+  infoContainer.className = 'window-info-container';
   infoContainer.style.display = 'none';
-  infoContainer.style.alignItems = 'center';
-  infoContainer.style.justifyContent = 'center';
-  infoContainer.style.height = '30px';
-  infoContainer.style.padding = '0 12px';
 
   const ratingDisplay = document.createElement('div');
   ratingDisplay.id = 'viewer-rating-display';
+  ratingDisplay.className = 'viewer-rating-display';
   ratingDisplay.style.display = 'none';
-  ratingDisplay.style.alignItems = 'center';
-  ratingDisplay.style.marginRight = '8px';
-  ratingDisplay.style.color = 'rgba(255, 255, 255, 0.9)';
-  ratingDisplay.style.fontSize = 'var(--font-size-xs)';
-  ratingDisplay.style.fontWeight = '600';
-  ratingDisplay.style.fontVariantNumeric = 'tabular-nums';
-  ratingDisplay.style.textShadow = '0 1px 2px rgba(0,0,0,0.8)';
 
   const scaleDisplay = document.createElement('div');
   scaleDisplay.id = 'window-scale-display';
   scaleDisplay.className = 'window-scale-display';
   scaleDisplay.style.display = 'none';
-  // padding をリセット（親で持つため）
-  scaleDisplay.style.padding = '0';
 
   infoContainer.appendChild(ratingDisplay);
   infoContainer.appendChild(scaleDisplay);
