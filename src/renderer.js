@@ -68,7 +68,7 @@ document.body.appendChild(tabListMenu);
  * @param {number} startY - クリック位置のY座標
  * @param {boolean} [isDropdown=false] - ドロップダウン形式フラグ (右端マージン調整用)
  */
-function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) {
+export function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) {
   // 1. サイズ計算のため、一旦 show クラスを付与（scale(1) の正確な寸法を取得）
   menuElement.classList.add('show');
   const rect = menuElement.getBoundingClientRect();
@@ -2598,7 +2598,7 @@ const menuEditSmartFolder = createMenuItem('スマートフォルダを編集...
   }
 });
 
-const menuDuplicateSmartFolder = createMenuItem('スマートフォルダを複製...', UIManager.ICONS.COPY || '📋', () => {
+const menuDuplicateSmartFolder = createMenuItem('スマートフォルダを複製...', UIManager.ICONS.COPY || '', () => {
   if (!contextMenu.targetSmartFolderId) return;
   const sf = appState.smartFolders.find(f => f.id === contextMenu.targetSmartFolderId);
   if (sf) {

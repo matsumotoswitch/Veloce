@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @typedef {Object} ImageFile
  * @property {string} name - ファイル名
  * @property {string} ext - 拡張子
@@ -18,8 +18,8 @@
  */
 
 const DEFAULT_SMART_FOLDERS = [
-  { id: 'fav_5', name: 'お気に入り (★5)', icon: 'FAV_STAR', color: 'orange', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '5' }] },
-  { id: 'fav_4_plus', name: '高評価 (★4以上)', icon: 'FAV_STAR', color: 'yellow', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '4' }] }
+  { id: 'fav_5', name: 'お気に入り (星5)', icon: 'FAV_STAR', color: 'orange', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '5' }] },
+  { id: 'fav_4_plus', name: '高評価 (星4以上)', icon: 'FAV_STAR', color: 'yellow', matchType: 'all', conditions: [{ type: 'rating', operator: '>=', value: '4' }] }
 ];
 
 export const SmartFolderStore = {

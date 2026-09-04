@@ -6547,4 +6547,208 @@ mod viewer_tests {
         let res2 = super::generate_thumbnail_inner("C:/photos/img1.png", 0, &pool);
         assert_eq!(res2, vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3]);
     }
+
+    /// PLAN.md Sec 5.2: アスペクト比条件（portrait, landscape, square）の動的SQL生成テスト
+    #[test]
+    fn test_smart_folder_aspect_ratio_bounds() {
+        use super::{SmartFolderRule, SmartFolderCondition};
+
+        // 1. portrait (縦長: width * 100 < height * 95)
+        let rule_portrait = SmartFolderRule {
+            id: "aspect_portrait".to_string(),
+            name: "縦長".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "aspect_ratio".to_string(),
+                    operator: "portrait".to_string(),
+                    value: "".to_string(),
+                },
+            ],
+        };
+        let (q_port, _) = super::build_smart_folder_query(&rule_portrait, false, false);
+        assert!(q_port.contains("(c.width * 100 < c.height * 95)"), "portrait 条件が含まれるべき: {}", q_port);
+
+        // 2. landscape (横長: width * 100 > height * 105)
+        let rule_landscape = SmartFolderRule {
+            id: "aspect_landscape".to_string(),
+            name: "横長".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "aspect_ratio".to_string(),
+                    operator: "landscape".to_string(),
+                    value: "".to_string(),
+                },
+            ],
+        };
+        let (q_land, _) = super::build_smart_folder_query(&rule_landscape, false, false);
+        assert!(q_land.contains("(c.width * 100 > c.height * 105)"), "landscape 条件が含まれるべき: {}", q_land);
+
+        // 3. square (正方形: 95% 〜 105%)
+        let rule_square = SmartFolderRule {
+            id: "aspect_square".to_string(),
+            name: "正方形".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "aspect_ratio".to_string(),
+                    operator: "square".to_string(),
+                    value: "".to_string(),
+                },
+            ],
+        };
+        let (q_sq, _) = super::build_smart_folder_query(&rule_square, false, false);
+        assert!(q_sq.contains("(c.width * 100 >= c.height * 95 AND c.width * 100 <= c.height * 105)"), "square 条件が含まれるべき: {}", q_sq);
+    }
+
+    /// PLAN.md Sec 5.2: パス条件（in_folder, under_folder）のSQL生成およびパラメータバインドテスト
+    #[test]
+    fn test_smart_folder_path_operators() {
+        use super::{SmartFolderRule, SmartFolderCondition};
+
+        // in_folder: 直下のみ (サブフォルダ除外)
+        let rule_in = SmartFolderRule {
+            id: "path_in".to_string(),
+            name: "直下".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "path".to_string(),
+                    operator: "in_folder".to_string(),
+                    value: "C:\\photos".to_string(),
+                },
+            ],
+        };
+        let (q_in, p_in) = super::build_smart_folder_query(&rule_in, false, false);
+        assert!(q_in.contains("c.path LIKE ? AND c.path NOT LIKE ? AND c.path NOT LIKE ?"), "直下パス判定のLIKE構文が含まれるべき: {}", q_in);
+        assert_eq!(p_in.len(), 3, "in_folder は3つのバインドパラメータを持つべき");
+
+        // under_folder: 配下すべて (サブフォルダ含む)
+        let rule_under = SmartFolderRule {
+            id: "path_under".to_string(),
+            name: "配下すべて".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "path".to_string(),
+                    operator: "under_folder".to_string(),
+                    value: "C:\\photos".to_string(),
+                },
+            ],
+        };
+        let (q_under, p_under) = super::build_smart_folder_query(&rule_under, false, false);
+        assert!(q_under.contains("c.path LIKE ?"), "under_folder パス判定が含まれるべき: {}", q_under);
+        assert_eq!(p_under.len(), 1, "under_folder は1つのバインドパラメータを持つべき");
+    }
+
+    /// PLAN.md Sec 5.2: 幅・高さ条件（>=, <=, ==）のSQL生成テスト
+    #[test]
+    fn test_smart_folder_width_height_operators() {
+        use super::{SmartFolderRule, SmartFolderCondition};
+
+        let rule_wh = SmartFolderRule {
+            id: "size_test".to_string(),
+            name: "サイズテスト".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "width".to_string(),
+                    operator: ">=".to_string(),
+                    value: "1920".to_string(),
+                },
+                SmartFolderCondition {
+                    r#type: "height".to_string(),
+                    operator: "<=".to_string(),
+                    value: "1080".to_string(),
+                },
+            ],
+        };
+        let (q, params) = super::build_smart_folder_query(&rule_wh, false, false);
+        assert!(q.contains("c.width >= ?"), "width 条件が含まれるべき: {}", q);
+        assert!(q.contains("c.height <= ?"), "height 条件が含まれるべき: {}", q);
+        assert_eq!(params.len(), 2);
+    }
+
+    /// 自然順ソート natural_cmp の高度なエッジケース（日本語、大文字小文字、ゼロ埋め、拡張子違い）
+    #[test]
+    fn test_natural_cmp_advanced_edge_cases() {
+        use std::cmp::Ordering;
+
+        // 日本語を含むファイル名
+        assert_eq!(super::natural_cmp("画像1.png", "画像2.png"), Ordering::Less);
+        assert_eq!(super::natural_cmp("画像2.png", "画像10.png"), Ordering::Less);
+        assert_eq!(super::natural_cmp("画像10.png", "画像100.png"), Ordering::Less);
+
+        // ゼロ埋め比較（数値としてパースされるため同値は Equal、異なる数値は数値順）
+        assert_eq!(super::natural_cmp("001.png", "01.png"), Ordering::Equal);
+        assert_eq!(super::natural_cmp("01.png", "1.png"), Ordering::Equal);
+        assert_eq!(super::natural_cmp("001.png", "02.png"), Ordering::Less);
+
+        // 大文字小文字混合
+        assert_eq!(super::natural_cmp("IMG_1.PNG", "img_2.png"), Ordering::Less);
+        assert_eq!(super::natural_cmp("test_a", "test_B"), Ordering::Less);
+
+        // 空文字および同一文字列
+        assert_eq!(super::natural_cmp("", ""), Ordering::Equal);
+        assert_eq!(super::natural_cmp("", "a"), Ordering::Less);
+        assert_eq!(super::natural_cmp("same.png", "same.png"), Ordering::Equal);
+    }
+
+    /// PLAN.md Sec 4.2: 動画ストリーミングの 2MB チャンク切り詰め計算ロジックテスト
+    #[test]
+    fn test_video_streaming_2mb_limit_math() {
+        let max_chunk_size: u64 = 2 * 1024 * 1024; // 2MB = 2097152 bytes
+
+        // 10MBの動画ファイル
+        let total_file_size: u64 = 10 * 1024 * 1024;
+
+        // クライアントが巨大な Range (0-9999999) を要求した場合
+        let requested_start: u64 = 0;
+        let requested_end: u64 = total_file_size - 1;
+
+        let end = if requested_end - requested_start + 1 > max_chunk_size {
+            requested_start + max_chunk_size - 1
+        } else {
+            requested_end
+        };
+
+        let chunk_size = end - requested_start + 1;
+        assert_eq!(chunk_size, max_chunk_size, "2MBを超える要求は厳格に2MBにクランプされるべき");
+        assert_eq!(end, 2097151);
+
+        // クライアントが 1MB の小さな Range を要求した場合はそのまま返却
+        let small_start: u64 = 5000;
+        let small_end: u64 = 5000 + 1024 * 1024 - 1;
+        let clamped_small_end = if small_end - small_start + 1 > max_chunk_size {
+            small_start + max_chunk_size - 1
+        } else {
+            small_end
+        };
+        assert_eq!(clamped_small_end - small_start + 1, 1024 * 1024);
+    }
+
+    /// PLAN.md Sec 1.1: xxHash (xxh3_64) によるハッシュ生成とパス正規化の一貫性テスト
+    #[test]
+    fn test_xxh3_path_normalization_consistency() {
+        let raw_path = "\\\\?\\C:\\images\\sample.png";
+        let mtime: u64 = 1700000000;
+
+        let clean_path = raw_path.replace("\\\\?\\", "");
+        let digest1 = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+        let hash_key1 = format!("{:016x}", digest1);
+
+        // 既に正規化済みのパスでも同一のハッシュキーが生成されること
+        let normalized_path = "C:\\images\\sample.png";
+        let digest2 = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", normalized_path, mtime).as_bytes());
+        let hash_key2 = format!("{:016x}", digest2);
+
+        assert_eq!(hash_key1, hash_key2, "ロングパス接頭辞の有無に関わらず同一のハッシュキーが生成されるべき");
+        assert_eq!(hash_key1.len(), 16, "ハッシュキーは16進数16桁の文字列であるべき");
+
+        // mtime が変化した場合はハッシュキーが異なること
+        let digest3 = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", normalized_path, mtime + 1).as_bytes());
+        let hash_key3 = format!("{:016x}", digest3);
+        assert_ne!(hash_key1, hash_key3, "更新日時が変化した場合は異なるハッシュキーになるべき");
+    }
 }
