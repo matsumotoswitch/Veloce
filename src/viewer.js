@@ -1,5 +1,20 @@
 // ============================================================================
-// Veloce - Viewer Controller (viewer.js)
+// Veloce - Independent Image Viewer Controller (viewer.js)
+// ============================================================================
+// 本モジュールは、軽量・高速な独立画像ビューアーウィンドウの表示制御を担う。
+//
+// コア最適化アーキテクチャ:
+// 1. Window Pool (ウィンドウの再利用):
+//    ウィンドウ生成・破棄に伴うGCおよびWebView2初期化遅延を排除するため、
+//    非表示状態で待機しているプールウィンドウを再利用し、'viewer-init-session' で初期化。
+// 2. 二重バッファリング DOM Swap:
+//    画像切り替え時の黒画面やチラつき（フリッカー）を防止するため、
+//    次画像のデコード完了まで旧画像を表示し続け、完了と同時にO(1)でDOM置換。
+// 3. 先行プリロード (Preload Pipeline):
+//    前後画像のオフスクリーンImageオブジェクトをバックグラウンド生成し、
+//    ページ送り時の遅延ゼロを実現。
+// 4. SVGアンシャープマスクフィルター:
+//    小数倍率ズーム時でもボケを抑制し、ディテールを保った鮮明なレンダリングを提供。
 // ============================================================================
 
 import { viewerState } from './viewer-state.js';
@@ -623,7 +638,8 @@ function swapImageElement(newImg, sequenceId) {
     newImg.id = 'viewer-img';
     newImg.classList.remove('viewer-img-pending');
     newImg.style.display = '';
-    void newImg.offsetHeight; // 強制リフロー (Chromium 109の描画バグ対策)
+    // DOM置換直後にスタイルの適用とバウンディングボックスの同期計算を確定させ、次行のリサイズ処理へ渡す
+    void newImg.offsetHeight;
 
     setZoomState(viewerState.isZoomed);
     viewerUI.updateImageRendering();
@@ -853,7 +869,7 @@ let hasMoved = false; // ドラッグ中に実際にマウスが移動したか
 let startX = 0, startY = 0; // ドラッグ開始時の座標
 let windowX = 0, windowY = 0; // ウィンドウ移動用の座標
 
-// OS標準のタイトルバーのホバーバグを回避するため、HTMLで自前のコントロールを右上に描画する
+// Windows 8.1 / 10 のボーダーレスウィンドウにおいて、ネイティブタイトルバー制御のホバー判定不整合を防ぎ統一した外観を提供するためカスタムコントロールを構築
 function createWindowControls() {
   const controlsContainer = document.createElement('div');
   controlsContainer.id = 'window-controls';
@@ -1126,7 +1142,8 @@ window.addEventListener('keydown', async (e) => {
       viewerState.currentRotation += 90;
       applyFitState();
       updateFullscreenStyles();
-      void viewerUI.elements.viewerImg.offsetHeight; // 強制リフロー (Chromium 109対策)
+      // 回転後のバウンディングボックスを同期確定させ、後続のウィンドウリサイズ計算へ反映
+      void viewerUI.elements.viewerImg.offsetHeight;
       viewerUI.updateImageRendering();
       resizeWindowToFitImage();
       break;
@@ -1134,7 +1151,8 @@ window.addEventListener('keydown', async (e) => {
       viewerState.currentRotation -= 90;
       applyFitState();
       updateFullscreenStyles();
-      void viewerUI.elements.viewerImg.offsetHeight; // 強制リフロー (Chromium 109対策)
+      // 回転後のバウンディングボックスを同期確定させ、後続のウィンドウリサイズ計算へ反映
+      void viewerUI.elements.viewerImg.offsetHeight;
       viewerUI.updateImageRendering();
       resizeWindowToFitImage();
       break;

@@ -1,5 +1,15 @@
 // ============================================================================
-// Veloce - Main Controller (renderer.js)
+// Veloce - Main Application Controller (renderer.js)
+// ============================================================================
+// 本モジュールは、メインウィンドウの全体統括コントローラーとして、
+// 以下のライフサイクル・イベント管理およびUIオーケストレーションを担う。
+//
+// 主な責務:
+// 1. バックエンドIPC通信の調整 (ディレクトリ走査、メタデータ解析、スマートフォルダ検索等)
+// 2. タブ・ナビゲーション履歴 (進む/戻る/タブ切り替え) とレイアウト状態の永続化
+// 3. 仮想スクロールとDOMイベントのバインド (グリッド/リスト切り替え、インスペクター同期)
+// 4. グローバルショートカットおよびコンテキストメニューのルーティング
+// 5. アンドゥ・リドゥスタックおよびファイル操作 (リネーム、ゴミ箱移動、レーティング設定)
 // ============================================================================
 
 import { appState, SmartFolderStore } from './renderer-state.js';
@@ -16,19 +26,13 @@ import {
   getTabNameForPath as resolveTabName
 } from './renderer-tabs.js';
 
-
-// --- Thumbnail Web Worker Pool ---
-// 注意: Tauri v1環境ではWeb Worker内からasset://プロトコルが直接呼べないため、
-// メインスレッドでfetchしてからBlobをpostMessageで渡す必要がありましたが、
-// 数十MBの画像を大量に転送するとメインスレッドがシリアライズ処理で数秒間ブロックし、完全にフリーズしてしまいます。
-// createImageBitmap は仕様上、メインスレッドで呼んでも「画像デコード処理自体はC++側のバックグラウンドスレッドで実行される」ため、
-// Web Workerを使わずともUIスレッドはブロックされません。そのため、Web Workerを完全に廃止し、すべてメインスレッドの非同期処理に一本化しました。
-
+// 開発者ツールショートカット (F12, Ctrl+Shift+I 等) の無効化
 blockDevtoolsShortcuts();
 
+// レンダリング制御およびUI更新ディレイの定数定義
 const CONFIG = {
-  CHUNK_SIZE: 100,        // 一度にDOMに追加する要素数（レンダリング負荷軽減）
-  SEARCH_DELAY: 300,      // 検索入力時の反映遅延時間(ms)
+  CHUNK_SIZE: 100,        // 一度にDOMに追加する要素数（描画負荷軽減）
+  SEARCH_DELAY: 300,      // 検索入力時の反映デバウンス時間(ms)
   REFRESH_DELAY: 100,     // リフレッシュ処理の遅延時間(ms)
   GRID_GAP: 8,            // サムネイルグリッドの隙間(px)
   GRID_PADDING: 8         // サムネイルグリッドのパディング(px)
@@ -38,21 +42,16 @@ const CONFIG = {
 // UI State & Global DOM Elements
 // ----------------------------------------------------
 
-/**
- * thumbnailUrls のサイズが膨らみすぎないように古いエントリを削除する
- */
-
-// --- タブ機能用 ---
+// タブ機能の状態初期化
 appState.tabs = [];
 appState.activeTabIndex = -1;
 
-
-// サムネイル生成の並列数（v1.7.0と同等の8に戻す）
+// ドラッグ操作時に不要なゴーストプレビューを抑制するための透明画像
 const emptyDragImage = new Image();
 emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 const resizingState = { left: false, right: false, center: false, leftTop: false, rightTop: false };
-let draggedFavoriteId = null; // お気に入りのドラッグ状態を管理
+let draggedFavoriteId = null; // お気に入りのドラッグ並び替え状態を管理
 
 const contextMenu = document.createElement('div');
 contextMenu.id = 'context-menu';
@@ -63,10 +62,14 @@ tabListMenu.id = 'tab-list-menu';
 document.body.appendChild(tabListMenu);
 
 /**
- * メニューを特定の位置にアニメーション付きで表示します。
+ * メニュー要素を画面境界内に収まるよう座標補正し、アニメーション付きで表示する
+ * @param {HTMLElement} menuElement - 表示対象のコンテキストメニューまたはドロップダウン
+ * @param {number} startX - クリック位置のX座標
+ * @param {number} startY - クリック位置のY座標
+ * @param {boolean} [isDropdown=false] - ドロップダウン形式フラグ (右端マージン調整用)
  */
 function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) {
-  // 1. サイズ計算のため、一旦 show を付与（scale(1) の正確なサイズを取得）
+  // 1. サイズ計算のため、一旦 show クラスを付与（scale(1) の正確な寸法を取得）
   menuElement.classList.add('show');
   const rect = menuElement.getBoundingClientRect();
   
@@ -75,6 +78,7 @@ function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) 
   let originX = 'left';
   let originY = 'top';
 
+  // 画面右端・下端のはみ出し防止補正
   if (x + rect.width > window.innerWidth) {
     x = window.innerWidth - rect.width - (isDropdown ? 5 : 0);
     originX = 'right';
@@ -84,19 +88,19 @@ function showMenuWithAnimation(menuElement, startX, startY, isDropdown = false) 
     originY = 'bottom';
   }
 
-  // 位置とアニメーションの起点を設定
+  // 位置とスケールアニメーションの起点を設定
   menuElement.style.transformOrigin = `${originY} ${originX}`;
   menuElement.style.left = `${x}px`;
   menuElement.style.top = `${y}px`;
 
-  // 2. アニメーションを無効化し、瞬時に初期状態（非表示・縮小）へスナップさせる
+  // 2. トランジションを無効化し、初期状態（非表示・縮小）へ同期的にスナップ
   menuElement.style.transition = 'none';
   menuElement.classList.remove('show');
 
-  // 3. 強制リフローにより、ブラウザに初期状態を認識させる
+  // 3. ブラウザのスタイル・レイアウト再計算を同期実行させ、初期状態を確定
   void menuElement.offsetWidth;
 
-  // 4. アニメーションを有効に戻し、show を付与してフェードインを開始する
+  // 4. トランジションを復元し、show クラスの再付与でフェード＆スケールインを開始
   menuElement.style.transition = '';
   menuElement.classList.add('show');
 }
@@ -694,6 +698,11 @@ function clearMetadataUI() {
   }
 }
 
+/**
+ * 複数画像選択時のインスペクターサマリーを描画する
+ * 単一画像の個別メタデータ表示を非表示化し、DOM Poolからセクションとタグ要素を取得して
+ * 選択件数・フォルダ全体の割合・一括ショートカットガイドを高速構築する
+ */
 export async function renderMultipleSelectionSummary() {
   const container = document.getElementById('inspector-content');
   const emptyInspectorMsg = document.getElementById('inspector-empty');
@@ -701,18 +710,21 @@ export async function renderMultipleSelectionSummary() {
   const staticTable = document.getElementById('static-file-info-table');
   const emptyInfoMsg = document.getElementById('file-info-empty');
 
+  // 単一ファイル用の静的ファイル情報テーブルを隠し、空状態表示へ切り替え
   if (staticTable && emptyInfoMsg) {
     staticTable.style.display = 'none';
     emptyInfoMsg.style.display = 'flex';
   }
 
   if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
+  // DOM Pool の再利用インデックスをリセットし、前回のセクション・タグをクリーンアップ
   if (typeof resetInspectorPools === 'function') resetInspectorPools();
 
   const count = appState.selection.size;
   const total = appState.totalCount || count;
   const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '100';
 
+  // インスペクターヘッダーに選択件数と割合を表示
   if (headerPath) {
     headerPath.innerHTML = `<bdi dir="ltr">${count} / ${total} 件選択中 (${pct}%)</bdi>`;
     headerPath.removeAttribute('data-path');
@@ -720,7 +732,7 @@ export async function renderMultipleSelectionSummary() {
   }
 
   if (typeof getInspectorSection === 'function') {
-    // 1. 複数選択概要 (モデル/バージョン等のパラメータボックスと完全同一のクラス・余白構成)
+    // 1. 複数選択概要セクション (DOM Poolから要素を取得してGC発生を抑制)
     const sec1 = getInspectorSection();
     sec1.title.textContent = '複数選択概要';
     sec1.copyWrapper.innerHTML = '';
@@ -736,7 +748,7 @@ export async function renderMultipleSelectionSummary() {
 
     if (sec1.root.parentNode !== container) container.appendChild(sec1.root);
 
-    // 2. 一括ショートカット操作
+    // 2. 一括ショートカット操作ガイドセクション
     const sec2 = getInspectorSection();
     sec2.title.textContent = 'ショートカット操作';
     sec2.copyWrapper.innerHTML = '';
@@ -3958,11 +3970,19 @@ document.querySelectorAll('th').forEach(th => {
   });
 });
 
+/**
+ * アプリケーション全体のグローバルキーボードショートカットハンドラー
+ * 入力フォームフォーカス時の除外判定、モーダル/ダイアログのEscape優先制御、
+ * タブ切り替え、ファイル操作、レーティング、およびグリッド内カーソル移動を統括ルーティングする
+ * @param {KeyboardEvent} e - キーイベントオブジェクト
+ */
 export const globalKeydownHandler = async (e) => {
+  // フォールバック用の合成イベント再帰を防止
   if (e._isAggressiveFallback) return;
 
   const activeTagName = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
 
+  // 1. ナビゲーション履歴の進む / 戻る (Alt + ArrowLeft / ArrowRight)
   if (e.altKey && e.key === 'ArrowLeft') {
     e.preventDefault();
     navigateHistory(-1);
@@ -3974,7 +3994,8 @@ export const globalKeydownHandler = async (e) => {
     return;
   }
 
-  // タブ切り替えショートカット（入力欄フォーカス時でも有効にするため、入力欄チェックの前に配置）
+  // 2. タブ切り替えショートカット (Ctrl + Tab / PageDown / PageUp)
+  // 入力欄フォーカス時でもタブ切り替えを妨げないため、入力欄チェックの前に評価
   if (e.ctrlKey && (e.key === 'Tab' || e.key === 'PageDown' || e.key === 'PageUp')) {
     e.preventDefault();
     if (appState.tabs.length > 1) {
@@ -3999,16 +4020,20 @@ export const globalKeydownHandler = async (e) => {
     return;
   }
 
+  // 3. テキスト入力欄フォーカス時は、Escape以外の一般ショートカットを無視
   if ((activeTagName === 'input' || activeTagName === 'textarea') && e.key !== 'Escape') {
     return;
   }
 
+  // 4. ヘルプオーバーレイのトグル (F1 または H)
   if (e.key === 'F1' || e.key.toLowerCase() === 'h') {
     e.preventDefault();
     toggleHelpOverlay();
     return;
   }
 
+  // 5. レーティング設定 (0 〜 5)
+  // 単一または複数選択されたアイテムに対してトグル/更新を適用
   if (['0', '1', '2', '3', '4', '5'].includes(e.key) && !e.ctrlKey && !e.altKey && !e.shiftKey) {
     let targetIndices = [];
     if (appState.selection.size > 0) {
@@ -4021,7 +4046,7 @@ export const globalKeydownHandler = async (e) => {
       e.preventDefault();
       const rating = parseInt(e.key, 10);
 
-      // 並列でファイル情報を即座に取得 (高速化)
+      // 並列でファイル情報を取得
       const files = (await Promise.all(
         targetIndices.map(idx => window.veloceAPI.getFileByIndex(idx))
       )).filter(Boolean);
@@ -4030,7 +4055,7 @@ export const globalKeydownHandler = async (e) => {
         const allHaveSameRating = files.every(f => (appState.ratings[f.path] || 0) === rating);
         const newRating = allHaveSameRating ? 0 : rating;
 
-        // 1. IPC待機を待たずにUI側で即時（0ms）に星ポップアニメーションと表示更新を開始（楽観的UI更新）
+        // 1. IPC待機を待たずにUI側で即座に星表示アニメーションを更新（楽観的UI更新）
         for (const file of files) {
           applyRatingUI(file.path, newRating, true);
         }
@@ -4283,7 +4308,9 @@ export const globalKeydownHandler = async (e) => {
     return;
   }
 
+  // 6. カーソル移動・選択ナビゲーション (矢印キー, PageUp/Down, Home, End)
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
+    // 左ペインのフォルダツリーがアクティブな場合はツリー内ナビゲーションへ委譲
     const isLeftPaneFocused = document.activeElement && document.activeElement.closest('#left-pane');
     if (isLeftPaneFocused) {
       e.preventDefault();
@@ -4300,6 +4327,7 @@ export const globalKeydownHandler = async (e) => {
     if (newIndex === -1) {
       newIndex = 0;
     } else {
+      // コンテナ幅とアイテム寸法から1行あたりの列数を算出し、上下キーによる2次元移動を実現
       const containerWidth = uiManager.elements.thumbnailGrid.clientWidth;
       const itemSize = parseFloat(uiManager.elements.thumbnailSizeSlider.value) || 120;
       const gap = CONFIG.GRID_GAP;

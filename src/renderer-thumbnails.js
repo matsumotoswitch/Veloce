@@ -1,14 +1,48 @@
+// ============================================================================
+// Veloce - Thumbnail Processing & Queue Pipeline (renderer-thumbnails.js)
+// ============================================================================
+// 本モジュールは、大量の画像ファイルに対するサムネイル生成・キャッシュ管理・
+// キューイング制御およびエラー自己修復を担う。
+//
+// 主な機能とアーキテクチャ:
+// 1. ThumbnailWorkerPool:
+//    メインスレッドのUI描画を妨げずに並列で画像デコード・OffscreenCanvas縮小処理を実施。
+//    Chromium 109環境のハングアップを防ぐ5秒間の絶対タイムアウトと4秒のデコードレース制御。
+// 2. 即時描画（Blob URL）と非同期保存の分離:
+//    デコード完了後、即座にメモリ効率の高い Blob URL でDOMへ表示し、
+//    SQLiteへの永続化（Base64変換とRust IPC）はバックグラウンドPromiseで遅延実行。
+// 3. ThumbnailQueueManager:
+//    画面内表示アイテム（優先キュー）と画面外アイテム（プリロードキュー）を分離し、
+//    最大並行数（8枠）のうち表示中アイテムに常時即応枠（4枠）を確保。
+// 4. キューの即時破棄（AbortController）:
+//    フォルダ切り替えやソート変更時に実行中タスクへ中断シグナルを発行し、不要処理を排除。
+// 5. 自己修復（Self-Healing）ウォッチドッグ:
+//    5秒間隔で可視DOMを巡回し、読み込みスタック状態の要素を自動検知して再キュー。
+// ============================================================================
+
 import { appState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
 import { getStreamUrl, debounce } from './utils.js';
 
+/**
+ * サムネイル生成ワーカープール
+ * 画像のフェッチ、Canvas縮小（最大384x384）、Blob URL生成、Base64シリアライズを担当
+ */
 class ThumbnailWorkerPool {
   constructor() {
     this.initialized = true;
   }
 
+  /**
+   * 単一画像のサムネイルを非同期生成する
+   * @param {string} filePath - 対象の画像ファイルパス
+   * @param {string} assetUrl - Tauriカスタムアセットプロトコル等の元画像URL
+   * @param {AbortSignal} [abortSignal] - フォルダ切り替え時の中断シグナル
+   * @returns {Promise<{ url: string, base64Promise: Promise<string> }>}
+   */
   async generate(filePath, assetUrl, abortSignal) {
     return new Promise(async (resolve, reject) => {
+      // 5秒間の絶対タイムアウト制御
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
@@ -32,7 +66,7 @@ class ThumbnailWorkerPool {
         if (!response.ok) throw new Error("Fetch failed: " + response.status);
         const blob = await response.blob();
         
-        // Chromium 109で createImageBitmap がハングするケースの対策
+        // Chromium 109環境で破損画像等により createImageBitmap が永久ハングする問題を防ぐため、4秒タイムアウトで競合
         const sourceElement = await Promise.race([
           createImageBitmap(blob),
           new Promise((_, r) => setTimeout(() => r(new Error("createImageBitmap timed out")), 4000))

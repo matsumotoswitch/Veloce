@@ -1,3 +1,21 @@
+// ============================================================================
+// Veloce - UI Management & Virtual Scrolling System (renderer-ui.js)
+// ============================================================================
+// 本モジュールは、仮想スクロール（グリッドビューおよびリストビュー）、
+// DOM要素のプーリング、選択状態・トースト表示・ダイアログ構築などのUI全般を管轄する。
+//
+// コア最適化アーキテクチャ:
+// 1. 仮想スクロール (Virtual Scroll):
+//    可視領域（+バッファ）のみDOMを描画し、数十万件の画像でも低メモリ・高レスポンスを維持。
+// 2. DOM要素の再利用 (DOM Pool):
+//    要素の都度生成・破棄によるガベージコレクション(GC)を防止するため、
+//    既存のDOM要素を display: 'none' でプールし再利用。
+// 3. 排他ロック制御 (_runWithUpdateLock):
+//    高速スクロール時の非同期レンダリング競合を防ぎ、最新スクロール位置で確実に確定。
+// 4. Chromium 109 / WebView2 最適化:
+//    DOM置換直後のスタイル不整合を防ぐ同期Reflowや、O(1)のプロパティ直接代入を徹底。
+// ============================================================================
+
 import { appState } from './renderer-state.js';
 import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml } from './utils.js';
 import { validateFilename, INVALID_FILENAME_RE } from './path-utils.js';
@@ -239,14 +257,17 @@ class UIManager {
   }
 
   /**
-   * 仮想スクロール等の非同期更新処理が重複して実行されるのを防ぐためのロック機構
+   * 仮想スクロール描画の排他ロック制御機構
+   * 連続スクロール時に非同期レンダリング処理が並行して二重実行されるのを防ぎ、
+   * 実行中に生じた最新の更新要求を保留（Pending）して完了後に次フレーム（rAF）で再実行する
    * @param {string} lockKey - ロックの識別子 ('list' や 'grid' など)
-   * @param {Function} taskFn - 実行する非同期関数
+   * @param {() => Promise<void>} taskFn - 排他実行する非同期描画関数
    */
   async _runWithUpdateLock(lockKey, taskFn) {
     const updatingKey = `_${lockKey}Updating`;
     const pendingKey = `_${lockKey}UpdatePending`;
 
+    // 既にレンダリング処理が進行中の場合は、最新状態の再描画フラグを立ててスキップ
     if (this[updatingKey]) {
       this[pendingKey] = true;
       return;
@@ -257,6 +278,7 @@ class UIManager {
       await taskFn();
     } finally {
       this[updatingKey] = false;
+      // 処理中にスクロール位置がさらに進んでいた場合は、次フレームで最新位置の描画を実行
       if (this[pendingKey]) {
         this[pendingKey] = false;
         requestAnimationFrame(() => this._runWithUpdateLock(lockKey, taskFn));
@@ -1463,7 +1485,8 @@ class UIManager {
       }
     }
 
-    void tbody.offsetHeight; // O(1) 強制リフロー (Chromium 109の描画バグ対策)
+    // Chromium 109 / WebView2 環境において、DOM要素の差分更新直後にスクロール位置を変更した際の再描画遅延を防ぐため同期レイアウトを確定
+    void tbody.offsetHeight;
 
     if (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) {
       container.scrollTop = appState.savedScrollTopList;
@@ -1766,7 +1789,8 @@ class UIManager {
       }
     }
 
-    void content.offsetHeight; // O(1) 強制リフロー (Chromium 109の描画バグ対策)
+    // Chromium 109 / WebView2 において、DOM Pool 要素の display 切り替え直後のスタイル確定を行い、次フレームでの不要な再描画遅延を防止
+    void content.offsetHeight;
 
     // visiblePathSet を _domByPath から構築（_domByPath はループ内 L1671 で既に最新化済み）
     const newVisibleSet = new Set();

@@ -1,5 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+//! # Veloce - High Performance Image Viewer Core Backend
+//!
+//! 本クレートは、Windows 8.1 / 10 / 11 をターゲット環境とした画像ビューアー「Veloce」の
+//! Rustバックエンドコアロジックを実装する。
+//!
+//! ## コアアーキテクチャ & パフォーマンス最適化
+//! 1. **アロケータ**: `mimalloc` をグローバルアロケータに採用し、高頻度アロケーションのオーバーヘッドを極小化。
+//! 2. **並列ディレクトリスキャン**: `jwalk` + `rayon` によるマルチスレッド並列探索と `natural_cmp` 自然順ソート。
+//! 3. **SQLite 高速化**: WAL モード (`journal_mode = WAL`)、`mmap_size`、メモリ一時領域 (`temp_store = MEMORY`) を前提に構築。
+//! 4. **非暗号学的ハッシュ**: キャッシュキー生成に超高速な `xxHash (xxh3_64)` を採用。
+//! 5. **動画ストリーミング**: HTTPサーバー（最大2MBのチャンク配信、`206 Partial Content`）による低メモリ再生。
+//! 6. **Window Pool**: 独立ビューアーウィンドウの破棄・再生成オーバーヘッドを排除する再利用アーキテクチャ。
+//! 7. **メタデータ抽出**: PNG (tEXt/zTXt/iTXt) および WebP (EXIF/XMP) からAI生成プロンプト等を直接解析。
+
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -439,13 +453,14 @@ fn get_veloce_data_dir() -> Option<std::path::PathBuf> {
 
 // --- Tauri コマンド ---
 
+/// システムにマウントされている有効な論理ドライブ一覧（A:\ 〜 Z:\）を取得する
 #[tauri::command]
 fn get_drives() -> Vec<String> {
     let mut drives = Vec::new();
 
     #[cfg(windows)]
     {
-        // Windows APIを直接叩いて、接続済みのドライブ一覧を瞬時に取得する
+        // Windows API (GetLogicalDrives) を直接呼び出し、接続済みの論理ドライブ一覧をビットマスクから直接取得
         extern "system" {
             fn GetLogicalDrives() -> u32;
         }
@@ -549,6 +564,8 @@ fn build_safe_fts_query(input: &str) -> String {
     fts_parts.join(" AND ")
 }
 
+/// スマートフォルダの検索条件（パス、拡張子、レーティング、サイズ、プロンプト全文検索等）から、
+/// SQLite 用の実行クエリ（SELECT / COUNT）およびバインドパラメータを動的に生成する
 fn build_smart_folder_query(
     rule: &SmartFolderRule,
     is_count: bool,
@@ -848,6 +865,8 @@ fn get_smart_folder_paths(
     target_paths
 }
 
+/// 指定されたディレクトリスキャンまたはスマートフォルダ検索をバックグラウンドスレッドで開始する
+/// 走査結果はソートおよびサムネイルキャッシュ一括照会を経て、イベント `dir-load-progress` / `dir-load-complete` でフロントエンドへストリーミング通知される
 #[tauri::command]
 fn load_directory(
     window: tauri::Window,
@@ -954,10 +973,10 @@ fn load_directory(
                 files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
             }
 
-            // ソート完了後、DBを一括クエリして has_thumbnail_cache を正しく設定する (BN-1修正)
-            // これにより、キャッシュ済みファイルはカスタムURL経由で即座に表示され、IPCキューを通らなくなる
+            // ソート完了後、SQLite DBを一括照会して has_thumbnail_cache フラグを事前確定させる
+            // キャッシュ済みファイルはローカルHTTP配信URL経由で即時表示され、不要なサムネイル生成タスクを抑制
             if !path_for_spawn.starts_with("smart://") && !files.is_empty() {
-                // 一括DB確認: hash_key IN (...) でチィンク分割クエリ
+                // 一括DB確認: hash_key IN (...) でチャンク分割クエリ
                 // hash_key = xxh3_64("path_mtime") の形式で登録されている
                 let hash_to_idx: std::collections::HashMap<String, usize> = files
                     .iter()
@@ -1782,6 +1801,9 @@ fn parse_mp4_dimensions(path: &str) -> Option<(u32, u32)> {
     None
 }
 
+/// 対象画像ファイルの完全なメタデータ（プロンプト、解像度、生成パラメータ等）を取得する
+/// SQLite キャッシュ DB に存在すればそれを即座にデシリアライズして返し、
+/// 未キャッシュの場合はバイナリから PNG/WebP チャンクを直接パースしてキャッシュへ登録する
 fn get_full_metadata_for_path(
     file_path: &str,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
@@ -1797,6 +1819,7 @@ fn get_full_metadata_for_path(
     get_full_metadata_for_path_with_stat(file_path, mtime_millis, ctime_millis, file_size, db_conn)
 }
 
+/// 事前に取得した mtime / ctime / ファイルサイズを渡し、ファイルIOを最小限に抑えてメタデータを取得する
 fn get_full_metadata_for_path_with_stat(
     file_path: &str,
     mtime_millis: u64,
@@ -2565,6 +2588,7 @@ async fn check_conflicts(paths: Vec<String>, dest_dir: String) -> Result<Vec<Str
     .unwrap_or_default())
 }
 
+/// フロントエンドのインスペクター表示用に、指定ファイルのメタデータを非同期解析して返却する
 #[tauri::command]
 async fn parse_metadata(
     state: tauri::State<'_, AppState>,
@@ -3016,6 +3040,8 @@ fn generate_thumbnail_inner(
 }
 
 
+/// フロントエンドの OffscreenCanvas で生成されたサムネイル画像（Base64）をデコードし、
+/// SQLite キャッシュ DB へ非同期保存した上で、即時参照可能なローカル HTTP 配信 URL を返却する
 #[tauri::command]
 async fn save_thumbnail(
     state: tauri::State<'_, AppState>,
@@ -3067,8 +3093,8 @@ async fn save_thumbnail(
         now,
     }).await;
 
-    // 保存完了後、即座に使えるカスタムURLを返すことで、JS側が 2回目の getThumbnail IPCを呼ぶ必要をなくす (BN-3修正)
-            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
+    // 保存完了と同時にローカルHTTP配信用URLを返却し、フロントエンド側での再取得IPC呼び出しを不要化
+    let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
     Ok(url)
 }
 
@@ -3167,6 +3193,9 @@ fn get_viewer_hash_str(target_path: Option<&String>) -> String {
     }
 }
 
+/// 独立画像ビューアーウィンドウを開く
+/// Window Pool 内に非表示で待機中のウィンドウが存在する場合はそれを再利用し、
+/// 存在しない場合は新規生成して 'viewer-init-session' イベント経由で表示状態を初期化する
 #[tauri::command]
 async fn open_viewer(
     app: tauri::AppHandle,
@@ -6172,8 +6201,8 @@ mod viewer_tests {
         assert!(size > 0, "Size should be updated to > 0");
     }
 
-    /// BN-1修正の検証: load_directory でDBバッチチェックにより
-    /// has_thumbnail_cache が正しく設定されるかを直接テストする
+    /// load_directory 実行時のDBバッチチェックにより、キャッシュ済みファイルの
+    /// has_thumbnail_cache が正しく true に設定されることを検証するテスト
     #[test]
     fn test_load_directory_has_thumbnail_cache_batch_check() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
