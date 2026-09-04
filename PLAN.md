@@ -172,3 +172,10 @@
 ## 8. 開発運用・AIアシスタント連携ルール
 1. **AIの自動コミット禁止ルール:** AI生成コードを主体として開発を進める際、AIがユーザーに無断で `git commit` を自動実行することはシステムの重大な運用ルール違反となる（`AGENTS.md` の「絶対遵守事項」に基づく）。
 2. 仕様書および機能要件の実装後、AIは変更をワーキングツリーに残し、ユーザーが実機で動作テスト・レビューを終えたのちに手動でコミットするフローを徹底する。
+
+### 8.1 コードコメントとドキュメンテーション品質規範
+* **場当たり的・カジュアルなコメントの排除:** 不具合修正時の一時的なチケットIDや「〜対策」等の短絡的コメントは一切残さず、修正理由をブラウザのレンダリングパイプライン（Chromium 109 / WebView2 同期Reflow）、OS API（Windows 8.1 論理ドライブビットマスク）、非同期並行排他制御（`_runWithUpdateLock`）などの**客観的な技術的根拠・設計意図としてコメントに昇華**する方針を徹底。
+* **Rust / JS 双方向でのドキュメンテーション標準化:**
+  * **Rust (`src-tauri/src/main.rs`):** クレートレベル（`//!`）でmimalloc、SQLite WAL/mmap、xxh3_64、jwalk並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `save_thumbnail`, `parse_metadata`, `build_smart_folder_query` 等）には `///` doc comments を完備。
+  * **JavaScript (`src/*.js`):** `renderer-thumbnails.js`（Workerプール/タイムアウト/Blob URL即時描画）、`renderer-ui.js`（仮想スクロール/DOM Pool/排他ロック）、`viewer.js`（二重バッファリングDOM Swap/先行プリロード/Unsharp SVGフィルター）、`renderer.js`（ライフサイクル/グローバルショートカット統括）の各モジュールヘッダーおよび主要関数にJSDocと設計意図を網羅。
+* **過度な誇張表現・絵文字の厳禁:** コメント内であっても「一瞬」「神速」「爆速」等の過度な誇張表現や絵文字（⭐など）は使用せず、客観的で落ち着いた技術的表現を用いる。
