@@ -694,7 +694,7 @@ function clearMetadataUI() {
   }
 }
 
-async function renderMultipleSelectionSummary() {
+export async function renderMultipleSelectionSummary() {
   const container = document.getElementById('inspector-content');
   const emptyInspectorMsg = document.getElementById('inspector-empty');
   const headerPath = document.getElementById('inspector-header-path');
@@ -714,7 +714,7 @@ async function renderMultipleSelectionSummary() {
   const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '100';
 
   if (headerPath) {
-    headerPath.innerHTML = `<bdi dir="ltr" style="opacity: 0.9;">${count} / ${total} 件選択中 (${pct}%)</bdi>`;
+    headerPath.innerHTML = `<bdi dir="ltr">${count} / ${total} 件選択中 (${pct}%)</bdi>`;
     headerPath.removeAttribute('data-path');
     headerPath.style.display = 'block';
   }

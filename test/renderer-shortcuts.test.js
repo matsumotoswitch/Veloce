@@ -5,6 +5,7 @@ import { uiManager } from '../src/renderer-ui.js';
 describe('Renderer Global Shortcuts & Focus Management', () => {
   let globalKeydownHandler;
   let selectImage;
+  let renderMultipleSelectionSummary;
   let getSelectionRemoveAllRangesSpy;
 
   beforeAll(async () => {
@@ -20,6 +21,11 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       <div id="file-list-bottom-spacer"></div>
       <div id="dir-tree"></div>
       <input type="range" id="thumbnail-size-slider" />
+      <div id="inspector-header-path"></div>
+      <div id="inspector-content"></div>
+      <div id="inspector-empty"></div>
+      <div id="static-file-info-table"></div>
+      <div id="file-info-empty"></div>
     `;
 
     // Populate uiManager.elements so renderer.js won't crash on load
@@ -33,6 +39,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
     const renderer = await import('../src/renderer.js');
     globalKeydownHandler = renderer.globalKeydownHandler;
     selectImage = renderer.selectImage;
+    renderMultipleSelectionSummary = renderer.renderMultipleSelectionSummary;
   });
 
   beforeEach(() => {
@@ -325,6 +332,24 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       await globalKeydownHandler(event);
       
       expect(window.onTabClick).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe('renderMultipleSelectionSummary', () => {
+    it('should format headerPath with bdi and without redundant inline opacity', async () => {
+      appState.selection = new Set([0, 1]);
+      appState.totalCount = 5;
+
+      const headerPath = document.getElementById('inspector-header-path');
+      headerPath.setAttribute('data-path', '/dummy/path.png');
+      headerPath.style.display = 'none';
+
+      await renderMultipleSelectionSummary();
+
+      expect(headerPath.innerHTML).toBe('<bdi dir="ltr">2 / 5 件選択中 (40.0%)</bdi>');
+      expect(headerPath.innerHTML).not.toContain('opacity');
+      expect(headerPath.hasAttribute('data-path')).toBe(false);
+      expect(headerPath.style.display).toBe('block');
     });
   });
 });
