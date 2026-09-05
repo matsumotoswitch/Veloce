@@ -3995,7 +3995,8 @@ where
             continue;
         }
 
-        let path = std::path::Path::new(&path_str);
+        let clean_path = path_str.replace("\\\\?\\", "").replace('/', "\\");
+        let path = std::path::Path::new(&clean_path);
         if !path.exists() {
             if let Err(e) = tx.execute("DELETE FROM cache WHERE hash_key = ?", [&hash_key]) {
                 println!("[Veloce: ERROR] delete non-existent path failed: {}", e);
@@ -4094,29 +4095,26 @@ async fn audit_cache(
         let t_audit_start = std::time::Instant::now();
         println!("[Veloce: INFO] audit_cache started");
         
-        let mut conn = match db_conn.get() {
-            Ok(c) => c,
-            Err(e) => {
-                println!("[Veloce: ERROR] audit_cache: failed to get db conn: {}", e);
-                return;
-            }
-        };
+        let mut conn = db_conn.get().map_err(|e| format!("Database connection error: {}", e))?;
         
-        let _ = perform_audit_cache(&mut conn, |current, total, deleted, fixed| {
+        perform_audit_cache(&mut conn, |current, total, deleted, fixed| {
             let _ = app.emit_all("audit-progress", AuditProgress {
                 current,
                 total,
                 deleted,
                 fixed,
             });
-        });
+        })?;
         
-        let _ = conn.execute("VACUUM", []);
-        let _ = conn.execute("ANALYZE", []);
+        let _ = conn.execute("VACUUM", []).map_err(|e| e.to_string())?;
+        let _ = conn.execute("ANALYZE", []).map_err(|e| e.to_string())?;
+        // VACUUM で WAL に書き出された全ページを即座にメインDBへ反映し、-wal ファイルサイズを 0 バイトに切り詰める
+        let _ = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);", []).map_err(|e| e.to_string())?;
         println!("[Veloce: PERF] audit_cache completed in {}ms", t_audit_start.elapsed().as_millis());
-    });
-    
-    Ok(())
+        Ok(())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -6097,11 +6095,17 @@ mod viewer_tests {
 
     #[test]
     fn test_audit_cache_optimizations() {
-        use rusqlite::Connection;
-        let conn = Connection::open_in_memory().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_audit.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch("
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+        ").unwrap();
+
         conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, size INTEGER)", []).unwrap();
         
-        for i in 0..10 {
+        for i in 0..100 {
             conn.execute("INSERT INTO cache (hash_key, size) VALUES (?1, 100)", [format!("hash_{}", i)]).unwrap();
         }
 
@@ -6110,6 +6114,17 @@ mod viewer_tests {
 
         let analyze_res = conn.execute("ANALYZE", []);
         assert!(analyze_res.is_ok(), "ANALYZE failed");
+
+        // VACUUM 後の wal_checkpoint(TRUNCATE) により WAL が正常に切り詰められることを検証
+        let checkpoint_res = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);", []);
+        assert!(checkpoint_res.is_ok(), "PRAGMA wal_checkpoint(TRUNCATE) failed");
+
+        // -wal ファイルのサイズが 0 バイトであることを確認
+        let wal_path = temp_dir.path().join("test_audit.db-wal");
+        if wal_path.exists() {
+            let metadata = std::fs::metadata(&wal_path).unwrap();
+            assert_eq!(metadata.len(), 0, "WAL file should be truncated to 0 bytes after checkpoint");
+        }
     }
     #[test]
     fn test_viewer_hash_generation() {
@@ -6177,13 +6192,35 @@ mod viewer_tests {
             ["hash_duplicate_2", &format!("\\\\?\\{}", cargo_toml_str.replace("\\", "/"))]
         ).unwrap();
         
+        // ダウンロードフォルダから別フォルダへ移動された想定のファイル（UNCパス、スラッシュ混在、通常パス）
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, thumbnail) VALUES (?1, ?2, 100, 100, 1024, NULL)",
+            ["hash_moved_download_1", "C:\\Users\\User\\Downloads\\moved_image_1.png"]
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, thumbnail) VALUES (?1, ?2, 100, 100, 1024, NULL)",
+            ["hash_moved_download_2", "C:/Users/User/Downloads/moved_image_2.png"]
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, size, thumbnail) VALUES (?1, ?2, 100, 100, 1024, NULL)",
+            ["hash_moved_download_3", "\\\\?\\C:\\Users\\User\\Downloads\\moved_image_3.png"]
+        ).unwrap();
+
         let (deleted, _fixed) = perform_audit_cache(&mut conn, |_, _, _, _| {}).unwrap();
         
-        assert_eq!(deleted, 3, "Should delete the non-existent file and the 2 duplicates");
+        assert_eq!(deleted, 6, "Should delete 4 non-existent files and the 2 duplicates");
         
         // hash_missing should be removed
         let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_missing'", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0);
+
+        // 移動されたダウンロードファイルレコードがすべて削除されていることを検証
+        let count_d1: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_1'", [], |row| row.get(0)).unwrap();
+        let count_d2: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_2'", [], |row| row.get(0)).unwrap();
+        let count_d3: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_3'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count_d1, 0, "Moved download file 1 should be removed");
+        assert_eq!(count_d2, 0, "Moved download file 2 (forward slash) should be removed");
+        assert_eq!(count_d3, 0, "Moved download file 3 (UNC prefix) should be removed");
 
         // hash_duplicate should be removed
         let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_duplicate'", [], |row| row.get(0)).unwrap();
