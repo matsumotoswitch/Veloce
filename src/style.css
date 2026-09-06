@@ -877,6 +877,13 @@ input:-webkit-autofill:focus {
   font-family: inherit;
   font-size: var(--font-size-sm);
   padding: 0;
+  box-shadow: none;
+}
+
+#search-bar:focus,
+#search-bar:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Center Top: File List */
@@ -2890,13 +2897,14 @@ html.viewer-html,
   border-radius: var(--radius-sm);
 }
 
-/* ペイン等の非インタラクティブ要素のフォーカスリングを除外 */
+/* ペイン等の非インタラクティブ要素および内包コンテナ管理の入力要素のフォーカスリングを除外 */
 #left-pane:focus-visible,
 #center-pane:focus-visible,
 #right-pane:focus-visible,
 #center-bottom:focus-visible,
 #dir-tree:focus-visible,
-#smart-folders-list:focus-visible {
+#smart-folders-list:focus-visible,
+#search-bar:focus-visible {
   box-shadow: none;
 }
 

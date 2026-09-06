@@ -112,4 +112,10 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(thumbnailsJs).toContain('const fallbackUrl = BROKEN_MP4_FALLBACK_URL;');
     expect(thumbnailsJs).not.toContain("btoa(BROKEN_SVG)");
   });
+
+  it('should maintain outer accent border and box-shadow on search container while suppressing inner focus line on search bar', () => {
+    expect(cssContent).toMatch(/#search-container:focus-within\s*\{[^}]*border-color:\s*var\(--accent-color\);/);
+    expect(cssContent).toMatch(/#search-container:focus-within\s*\{[^}]*box-shadow:\s*0 0 0 2px rgba\(var\(--accent-rgb\),\s*0\.25\);/);
+    expect(cssContent).toMatch(/#search-bar:focus-visible\s*\{[^}]*box-shadow:\s*none;/);
+  });
 });
