@@ -122,24 +122,24 @@ textarea {
 
 .titlebar-button:hover {
   background-color: var(--accent-hover-translucent);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .titlebar-button:active {
   background-color: var(--accent-hover-translucent);
   filter: brightness(0.85);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .titlebar-button.titlebar-close:hover {
   background-color: var(--danger-red-translucent);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .titlebar-button.titlebar-close:active {
   background-color: var(--danger-red-translucent);
   filter: brightness(0.85);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 body {
@@ -1267,40 +1267,34 @@ input[type="range"]:focus {
 
 .thumbnail-label {
   position: absolute;
-  bottom: 0;
-  /* 余白をなくして下端にピッタリつける */
+  bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
   max-width: calc(100% - 12px);
-  background: rgba(0, 0, 0, 0.8);
-  /* 非ホバー時でも背景を暗くして読みやすく */
-  border-radius: 8px;
-  /* やや小さめのピル */
+  background-color: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
   color: var(--text-light);
   font-size: var(--font-size-xs);
-  /* 少し小さく */
   padding: 2px 8px;
-  /* 余白を削ってスリムに */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
   pointer-events: auto;
-  opacity: 0.75;
-  /* 透過度を少し上げて視認性を確保 */
-  transition: opacity 0.2s ease, background 0.2s ease;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
   display: none;
-  /* Default hidden */
 }
 
 body.show-thumbnail-names .thumbnail-label {
   display: block;
 }
 
-/* サムネイルにマウスを乗せた時だけクッキリ見えるようにする */
 .thumbnail-item:hover .thumbnail-label {
-  opacity: 1;
-  background: rgba(0, 0, 0, 0.95);
+  background-color: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .thumbnail-item:hover {
@@ -2661,7 +2655,7 @@ html.viewer-html,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min:hover,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:hover {
   background-color: var(--accent-hover-translucent);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .window-ctrl-btn--min:active,
@@ -2670,29 +2664,29 @@ html.viewer-html,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:active {
   background-color: var(--accent-hover-translucent);
   filter: brightness(0.85);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .window-ctrl-btn--close:hover {
   background-color: var(--danger-red-translucent);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:hover {
   background-color: var(--danger-red);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .window-ctrl-btn--close:active {
   background-color: var(--danger-red-translucent);
   filter: brightness(0.85);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:active {
   background-color: var(--danger-red);
   filter: brightness(0.85);
-  color: #ffffff;
+  color: var(--text-light);
 }
 
 .unsharp-svg {
@@ -3258,10 +3252,16 @@ th[data-sort] .sort-arrow.desc {
   z-index: 10;
   pointer-events: none;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .rating-badge.show {
   display: flex;
+}
+
+.thumbnail-item:hover .rating-badge {
+  background-color: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .rating-badge svg {
@@ -3269,7 +3269,21 @@ th[data-sort] .sort-arrow.desc {
   /* Gold/Yellow star */
   width: 12px;
   height: 12px;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+
+.rating-star-icon {
+  fill: var(--glow-gold);
+  display: inline-block;
+  vertical-align: text-bottom;
+}
+
+.viewer-rating-display .rating-star-icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+  margin-right: 2px;
+}
+
+.file-table-row .rating-star-icon {
+  margin-right: 2px;
 }
 
 @keyframes rating-pop {

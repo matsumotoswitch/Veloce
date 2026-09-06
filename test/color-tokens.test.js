@@ -40,6 +40,29 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).not.toMatch(/\.rating-badge\s*\{[^}]*backdrop-filter:\s*blur/);
   });
 
+  it('should style thumbnail-label with lightweight translucency consistent with rating-badge', () => {
+    expect(cssContent).toMatch(/\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(0,\s*0,\s*0,\s*0\.45\);/);
+    expect(cssContent).toMatch(/\.thumbnail-label\s*\{[^}]*border:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.18\);/);
+    expect(cssContent).toMatch(/\.thumbnail-label\s*\{[^}]*text-shadow:\s*0 1px 2px rgba\(0,\s*0,\s*0,\s*0\.8\);/);
+    expect(cssContent).not.toMatch(/\.thumbnail-label\s*\{[^}]*opacity:\s*0\.75;/);
+  });
+
+  it('should unify rating-badge and thumbnail-label hover styles and remove drop-shadow on svg', () => {
+    expect(cssContent).toMatch(/\.thumbnail-item:hover \.rating-badge\s*\{[^}]*background-color:\s*rgba\(0,\s*0,\s*0,\s*0\.75\);/);
+    expect(cssContent).toMatch(/\.thumbnail-item:hover \.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(0,\s*0,\s*0,\s*0\.75\);/);
+    expect(cssContent).not.toMatch(/\.rating-badge svg\s*\{[^}]*filter:\s*drop-shadow/);
+  });
+
+  it('should define common .rating-star-icon using var(--glow-gold)', () => {
+    expect(cssContent).toMatch(/\.rating-star-icon\s*\{[^}]*fill:\s*var\(--glow-gold\);/);
+  });
+
+  it('should use var(--text-light) for titlebar and window control buttons instead of #ffffff', () => {
+    expect(cssContent).toMatch(/\.titlebar-button:hover\s*\{[^}]*color:\s*var\(--text-light\);/);
+    expect(cssContent).toMatch(/\.titlebar-button\.titlebar-close:hover\s*\{[^}]*color:\s*var\(--text-light\);/);
+    expect(cssContent).toMatch(/\.window-ctrl-btn--close:hover\s*\{[^}]*color:\s*var\(--text-light\);/);
+  });
+
   it('should not contain raw unaliased #ffd700 outside variable definitions or fallback declarations in CSS', () => {
     // :root の定義行と var(--..., #ffd700) 以外の直接指定（例: fill: #ffd700; color: #ffd700;）を排除
     const lines = cssContent.split('\n');

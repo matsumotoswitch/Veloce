@@ -27,11 +27,11 @@ describe('Titlebar and Window Control Buttons Consistency', () => {
   it('should unify hover styling: translucent blue accent for min/max, translucent danger-red for close', () => {
     // メイン画面の最小化・最大化ホバー
     expect(cssContent).toMatch(/\.titlebar-button:hover\s*\{[^}]*background-color:\s*var\(--accent-hover-translucent\);/);
-    expect(cssContent).toMatch(/\.titlebar-button:hover\s*\{[^}]*color:\s*#ffffff;/);
+    expect(cssContent).toMatch(/\.titlebar-button:hover\s*\{[^}]*color:\s*var\(--text-light\);/);
 
     // ビューア画面の最小化・最大化ホバー
     expect(cssContent).toMatch(/\.window-ctrl-btn--min:hover[^}]*background-color:\s*var\(--accent-hover-translucent\);/);
-    expect(cssContent).toMatch(/\.window-ctrl-btn--min:hover[^}]*color:\s*#ffffff;/);
+    expect(cssContent).toMatch(/\.window-ctrl-btn--min:hover[^}]*color:\s*var\(--text-light\);/);
 
     // メイン画面の閉じるボタンホバー
     expect(cssContent).toMatch(/\.titlebar-button\.titlebar-close:hover\s*\{[^}]*background-color:\s*var\(--danger-red-translucent\);/);
