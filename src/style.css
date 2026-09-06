@@ -1195,27 +1195,36 @@ input[type="range"]:focus {
   stroke: var(--danger-red);
 }
 
-@keyframes true-original-glow {
-
+/* --- アイコン・テキストのアウトライン発光アニメーション (背景を光らせず輪郭線のみ発光) --- */
+@keyframes outline-glow-anim {
   0%,
-  20% {
-    /* 微細なハイライトとごく小さなドロップシャドウ */
-    color: var(--text-color) !important;
-    fill: var(--text-color) !important;
-    stroke: var(--text-color) !important;
-    filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3)) brightness(1.2);
+  30% {
+    color: var(--glow-gold) !important;
+    stroke: var(--glow-gold) !important;
+    filter: drop-shadow(0 0 1px #ffffff) drop-shadow(0 0 5px var(--glow-gold));
   }
-
   100% {
-    /* 残りの400msでスッと元に戻る */
     filter: none;
   }
 }
 
-.click-glow,
-.click-glow * {
-  /* アイコンの中身（SVGのパス等）も含めて発光させるため、子要素にも適用 */
-  animation: true-original-glow 0.5s ease-out !important;
+@keyframes outline-glow-text-anim {
+  0%,
+  30% {
+    color: var(--glow-gold) !important;
+    text-shadow: 0 0 2px #ffffff, 0 0 6px var(--glow-gold);
+  }
+  100% {
+    text-shadow: none;
+  }
+}
+
+.outline-glow-svg {
+  animation: outline-glow-anim 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+.outline-glow-text {
+  animation: outline-glow-text-anim 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
 }
 
 #center-bottom {

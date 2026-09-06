@@ -55,39 +55,40 @@ describe('Utils', () => {
     beforeEach(() => {
       vi.useFakeTimers();
       document.body.innerHTML = '';
-      
-      // Mock requestAnimationFrame
-      vi.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => {
-        setTimeout(cb, 16);
-        return 1;
-      });
     });
     
     afterEach(() => {
       vi.restoreAllMocks();
     });
 
-    it('should create a flash element and remove it after animation', () => {
-      const el = document.createElement('div');
-      el.getBoundingClientRect = () => ({ top: 10, left: 20, width: 100, height: 50 });
-      document.body.appendChild(el);
+    it('should apply outline-glow-svg to inner SVG and remove it after animation', () => {
+      const btn = document.createElement('button');
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      btn.appendChild(svg);
+      document.body.appendChild(btn);
 
-      applyGlowEffect(el);
+      applyGlowEffect(btn);
 
-      const flashes = document.querySelectorAll('div[style*="fixed"]');
-      expect(flashes.length).toBe(1);
-      
-      const flash = flashes[0];
-      expect(flash.style.top).toBe('10px');
-      expect(flash.style.left).toBe('20px');
-      expect(flash.style.width).toBe('100px');
-      expect(flash.style.height).toBe('50px');
-      expect(flash.style.backgroundColor).toBe('rgba(255, 255, 255, 0.4)');
-
-      // Advance past requestAnimationFrames and timeout
-      vi.advanceTimersByTime(1000);
-
+      expect(svg.classList.contains('outline-glow-svg')).toBe(true);
+      // 背景を光らせる div は生成されないこと
       expect(document.querySelectorAll('div[style*="fixed"]').length).toBe(0);
+
+      // アニメーション完了後にクラスが除去されること
+      vi.advanceTimersByTime(700);
+      expect(svg.classList.contains('outline-glow-svg')).toBe(false);
+    });
+
+    it('should apply outline-glow-text to text-only elements without SVG', () => {
+      const tag = document.createElement('span');
+      tag.textContent = 'sample tag';
+      document.body.appendChild(tag);
+
+      applyGlowEffect(tag);
+
+      expect(tag.classList.contains('outline-glow-text')).toBe(true);
+
+      vi.advanceTimersByTime(700);
+      expect(tag.classList.contains('outline-glow-text')).toBe(false);
     });
 
     it('should do nothing if el is null', () => {

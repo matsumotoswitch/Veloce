@@ -1,4 +1,4 @@
-﻿export function debounce(func, wait) {
+export function debounce(func, wait) {
   let timeout;
   return function (...args) {
     clearTimeout(timeout);
@@ -19,42 +19,34 @@ export function escapeHtml(str) {
 }
 
 /**
- * 要素に一時的な発光エフェクトを適用します。
+ * 要素内のアイコン（SVG）またはテキストのアウトラインだけを一時的に発光させます。
+ * 背景矩形を光らせず、描画されている線・輪郭線のみに drop-shadow / text-shadow を適用します。
  * @param {HTMLElement|null|undefined} el
  */
 export function applyGlowEffect(el) {
   if (!el) return;
-  
-  const rect = el.getBoundingClientRect();
-  const flash = document.createElement('div');
-  flash.style.position = 'fixed';
-  flash.style.top = rect.top + 'px';
-  flash.style.left = rect.left + 'px';
-  flash.style.width = rect.width + 'px';
-  flash.style.height = rect.height + 'px';
-  flash.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
-  flash.style.pointerEvents = 'none';
-  flash.style.zIndex = '10005';
-  flash.style.borderRadius = window.getComputedStyle(el).borderRadius || '0px';
-  
-  document.body.appendChild(flash);
-  
-  // Set initial opacity without transition
-  flash.style.transition = 'none';
-  flash.style.opacity = '0.5';
-  
-  // Start fade out in the next frame
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
-      flash.style.opacity = '0';
-    });
-  });
 
-  // Cleanup
-  setTimeout(() => {
-    if (flash.parentNode) flash.remove();
-  }, 600);
+  const svg = el.tagName === 'svg' ? el : (el.querySelector ? el.querySelector('svg') : null);
+  const target = svg || el;
+  const isSvg = !!svg || el.tagName === 'svg';
+  const glowClass = isSvg ? 'outline-glow-svg' : 'outline-glow-text';
+
+  // アニメーションの再トリガーに対応
+  target.classList.remove('outline-glow-svg', 'outline-glow-text');
+  void target.offsetWidth; // Reflow強制でCSSアニメーションをリスタート
+  target.classList.add(glowClass);
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    target.classList.remove(glowClass);
+    target.removeEventListener('animationend', cleanup);
+  };
+  target.addEventListener('animationend', cleanup, { once: true });
+
+  // 万一のイベント未発火に対するフェイルセーフ
+  setTimeout(cleanup, 650);
 }
 
 /**
