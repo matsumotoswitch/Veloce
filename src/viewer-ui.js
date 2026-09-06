@@ -1,4 +1,4 @@
-﻿import { viewerState } from './viewer-state.js';
+import { viewerState } from './viewer-state.js';
 import { applyGlowEffect as glowElement } from './utils.js';
 
 /**
@@ -6,8 +6,10 @@ import { applyGlowEffect as glowElement } from './utils.js';
  */
 class ViewerUI {
   static ICONS = {
-    MAXIMIZE: `<svg viewBox="0 0 10 10" width="10" height="10"><rect width="10" height="10" fill="none" stroke="#fff" stroke-width="1"/></svg>`,
-    RESTORE: `<svg viewBox="0 0 10 10" width="10" height="10"><rect x="1" y="3" width="6" height="6" fill="none" stroke="#fff" stroke-width="1"/><polyline points="3,3 3,1 9,1 9,7 7,7" fill="none" stroke="#fff" stroke-width="1"/></svg>`
+    MINIMIZE: `<svg viewBox="0 0 10 1" width="10" height="1"><rect width="10" height="1" fill="currentColor"/></svg>`,
+    MAXIMIZE: `<svg viewBox="0 0 10 10" width="10" height="10"><rect width="10" height="10" fill="none" stroke="currentColor" stroke-width="1"/></svg>`,
+    RESTORE: `<svg viewBox="0 0 10 10" width="10" height="10"><rect x="1" y="3" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1"/><polyline points="3,3 3,1 9,1 9,7 7,7" fill="none" stroke="currentColor" stroke-width="1"/></svg>`,
+    CLOSE: `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" stroke-width="1"/></svg>`
   };
 
   /**

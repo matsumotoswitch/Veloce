@@ -880,8 +880,9 @@ function createWindowControls() {
 
   // 最小化ボタン
   const minBtn = document.createElement('div');
+  minBtn.id = 'window-min-btn';
   minBtn.className = 'window-ctrl-btn window-ctrl-btn--min';
-  minBtn.innerHTML = `<svg viewBox="0 0 10 1" width="10" height="1"><rect width="10" height="1" fill="#fff"/></svg>`;
+  minBtn.innerHTML = ViewerUI.ICONS.MINIMIZE;
   minBtn.onclick = () => window.veloceAPI.minimizeViewer();
 
   // 最大化/元に戻すボタン
@@ -893,8 +894,9 @@ function createWindowControls() {
 
   // 閉じるボタン
   const closeBtn = document.createElement('div');
+  closeBtn.id = 'window-close-btn';
   closeBtn.className = 'window-ctrl-btn window-ctrl-btn--close';
-  closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="#fff" stroke-width="1"/></svg>`;
+  closeBtn.innerHTML = ViewerUI.ICONS.CLOSE;
   closeBtn.onclick = () => {
     if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
   };

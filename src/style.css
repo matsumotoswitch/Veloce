@@ -13,9 +13,13 @@
   --accent-color: #257e8c;
   --accent-rgb: 37, 126, 140;
   --accent-hover: #2e96a6;
+  --accent-hover-rgb: 46, 150, 166;
   --modal-bg: #141a1d;
   --modal-border: rgba(255, 255, 255, 0.2);
   --danger-red: #e05263;
+  --danger-rgb: 224, 82, 99;
+  --accent-hover-translucent: rgba(var(--accent-hover-rgb), 0.5);
+  --danger-red-translucent: rgba(var(--danger-rgb), 0.55);
   --glow-gold: #e6c762;
   --radius-lg: 12px;
   --radius-md: 8px;
@@ -98,7 +102,7 @@ textarea {
   height: 100%;
   color: var(--text-color);
   cursor: default;
-  transition: background-color 0.1s;
+  transition: background-color 0.1s, color 0.1s;
 }
 
 .titlebar-divider {
@@ -117,12 +121,25 @@ textarea {
 }
 
 .titlebar-button:hover {
-  background-color: rgba(var(--accent-rgb), 0.15);
+  background-color: var(--accent-hover-translucent);
+  color: #ffffff;
+}
+
+.titlebar-button:active {
+  background-color: var(--accent-hover-translucent);
+  filter: brightness(0.85);
+  color: #ffffff;
 }
 
 .titlebar-button.titlebar-close:hover {
-  background-color: var(--danger-red);
-  color: white;
+  background-color: var(--danger-red-translucent);
+  color: #ffffff;
+}
+
+.titlebar-button.titlebar-close:active {
+  background-color: var(--danger-red-translucent);
+  filter: brightness(0.85);
+  color: #ffffff;
 }
 
 body {
@@ -2586,24 +2603,26 @@ html.viewer-html,
 
 .window-ctrl-btn {
   width: 48px;
-  height: 32px;
+  height: 40px;
   display: flex;
   justify-content: center;
   align-items: center;
+  color: var(--text-color);
   cursor: default;
-  transition: background-color 0.1s;
+  transition: background-color 0.1s, color 0.1s;
   background-color: transparent;
-  /* デフォルトは透明に */
   pointer-events: auto;
-  /* クリックを受け付ける */
+}
+
+.window-ctrl-btn svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* グラデーションOFF時のみ、ボタン自体に半透明の背景をつけて視認性を確保する */
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn {
   background-color: rgba(0, 0, 0, 0.4);
 }
-
-/* 一番左の最小化ボタンの左下だけ丸くして、自然なコーナーブロック感を出す */
 
 .window-scale-display {
   height: 32px;
@@ -2627,41 +2646,44 @@ html.viewer-html,
   text-shadow: none;
 }
 
-.viewer-body #window-controls:not(.has-gradient):not(.showing-scale) .window-ctrl-btn--min {
-  border-bottom-left-radius: var(--radius-sm);
-}
-
-/* Override old rule */
-.viewer-body #window-controls.dummy-override .window-ctrl-btn--min {
-  border-bottom-left-radius: var(--radius-sm);
-}
-
-/* ホバー時の上書き（背景色がついている状態でのホバー対応） */
+/* ホバー時のスタイル（メイン画面と統一・透明感のあるオーバーレイ） */
+.window-ctrl-btn--min:hover,
+.window-ctrl-btn--max:hover,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min:hover,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:hover {
-  background-color: rgba(var(--accent-rgb), 0.6);
+  background-color: var(--accent-hover-translucent);
+  color: #ffffff;
+}
+
+.window-ctrl-btn--min:active,
+.window-ctrl-btn--max:active,
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min:active,
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:active {
+  background-color: var(--accent-hover-translucent);
+  filter: brightness(0.85);
+  color: #ffffff;
+}
+
+.window-ctrl-btn--close:hover {
+  background-color: var(--danger-red-translucent);
+  color: #ffffff;
 }
 
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:hover {
   background-color: var(--danger-red);
+  color: #ffffff;
 }
 
-.window-ctrl-btn--min,
-.window-ctrl-btn--max {
-  background-color: transparent;
+.window-ctrl-btn--close:active {
+  background-color: var(--danger-red-translucent);
+  filter: brightness(0.85);
+  color: #ffffff;
 }
 
-.window-ctrl-btn--min:hover,
-.window-ctrl-btn--max:hover {
-  background-color: rgba(var(--accent-rgb), 0.5);
-}
-
-.window-ctrl-btn--close {
-  background-color: transparent;
-}
-
-.window-ctrl-btn--close:hover {
-  background-color: rgba(224, 82, 99, 0.6);
+.viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:active {
+  background-color: var(--danger-red);
+  filter: brightness(0.85);
+  color: #ffffff;
 }
 
 .unsharp-svg {
