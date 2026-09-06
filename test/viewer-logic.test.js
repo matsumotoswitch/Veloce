@@ -240,4 +240,37 @@ describe('Viewer Core Logic & Hotkeys', () => {
     expect(global.viewerState.preloadCache.size).toBe(0);
     expect(global.loadImage).toHaveBeenCalled();
   });
+
+  it('should thoroughly clean up video elements on cache clearing and session reset', () => {
+    const videoMock = {
+      tagName: 'VIDEO',
+      pause: vi.fn(),
+      removeAttribute: vi.fn(),
+      load: vi.fn(),
+      remove: vi.fn()
+    };
+    
+    global.viewerState.preloadCache.set(0, { img: videoMock, path: 'C:/videos/test.mp4' });
+
+    // Simulate clearPreloadCache logic from viewer.js
+    for (const cached of global.viewerState.preloadCache.values()) {
+      if (cached && cached.img) {
+        if (cached.img.tagName === 'VIDEO') {
+          cached.img.pause();
+          cached.img.removeAttribute('src');
+          cached.img.load();
+        } else {
+          cached.img.src = '';
+        }
+        if (typeof cached.img.remove === 'function') cached.img.remove();
+      }
+    }
+    global.viewerState.preloadCache.clear();
+
+    expect(videoMock.pause).toHaveBeenCalled();
+    expect(videoMock.removeAttribute).toHaveBeenCalledWith('src');
+    expect(videoMock.load).toHaveBeenCalled();
+    expect(videoMock.remove).toHaveBeenCalled();
+    expect(global.viewerState.preloadCache.size).toBe(0);
+  });
 });

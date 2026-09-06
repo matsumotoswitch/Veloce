@@ -499,20 +499,25 @@ export class ThumbnailQueueManager {
           if (!appState.isFetchingPreload) {
             appState.isFetchingPreload = true;
             if (typeof window.veloceAPI?.getItems === 'function') {
-              window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
-                if (items && items.length > 0) {
-                  appState.preloadCursor += items.length;
-                  this.preloadQueue.push(...items.map(f => f.path));
-                } else {
+              const fetchPromise = window.veloceAPI.getItems(appState.preloadCursor, 50);
+              if (fetchPromise && typeof fetchPromise.then === 'function') {
+                fetchPromise.then(items => {
+                  if (items && items.length > 0) {
+                    appState.preloadCursor += items.length;
+                    this.preloadQueue.push(...items.map(f => f.path));
+                  } else {
+                    appState.preloadCursor += 50;
+                  }
+                }).catch(err => {
+                  console.warn("Preload getItems failed:", err);
                   appState.preloadCursor += 50;
-                }
-              }).catch(err => {
-                console.warn("Preload getItems failed:", err);
-                appState.preloadCursor += 50;
-              }).finally(() => {
+                }).finally(() => {
+                  appState.isFetchingPreload = false;
+                  this.processNext();
+                });
+              } else {
                 appState.isFetchingPreload = false;
-                this.processNext();
-              });
+              }
             } else {
               appState.isFetchingPreload = false;
             }

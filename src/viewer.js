@@ -51,6 +51,42 @@ let currentlyVisibleImg = currentViewerImg;
 if (currentViewerImg) currentViewerImg.classList.add('mode-default');
 
 /**
+ * プリロードキャッシュ内の全画像・動画リソースを確実に解放してキャッシュを消去
+ */
+function clearPreloadCache() {
+  for (const cached of viewerState.preloadCache.values()) {
+    if (cached && cached.img) {
+      if (cached.img.tagName === 'VIDEO') {
+        cached.img.pause();
+        cached.img.removeAttribute('src');
+        cached.img.load();
+      } else {
+        cached.img.src = '';
+      }
+      if (typeof cached.img.remove === 'function') cached.img.remove();
+    }
+  }
+  viewerState.preloadCache.clear();
+}
+
+/**
+ * 現在表示中の画像・動画要素のリソースを即座に解放
+ */
+function cleanupCurrentImage() {
+  if (currentlyVisibleImg) {
+    if (currentlyVisibleImg.tagName === 'VIDEO') {
+      currentlyVisibleImg.pause();
+      currentlyVisibleImg.removeAttribute('src');
+      currentlyVisibleImg.load();
+    } else {
+      currentlyVisibleImg.src = '';
+    }
+    currentlyVisibleImg.remove();
+    currentlyVisibleImg = null;
+  }
+}
+
+/**
  * SVGシャープネスフィルターの初期化
  * 小数倍率で拡大した際にも滑らかさを保ちつつ輪郭を強調するためのフィルターを生成します。
  */
@@ -120,7 +156,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.currentIndex = parseInt(newIndex, 10);
         
         // Single Window Mode (DOM Pool): clear cache and load new image
-        viewerState.preloadCache.clear();
+        clearPreloadCache();
         await loadImage();
       });
 
@@ -140,7 +176,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.currentIndex = newIndex;
         
         // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
-        viewerState.preloadCache.clear();
+        cleanupCurrentImage();
+        clearPreloadCache();
         viewerState.paths = total > 0 ? new Array(total).fill(null) : null;
         viewerState.currentImagePath = targetPath;
         viewerState.totalImages = total;
@@ -244,7 +281,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.paths = [];
         viewerState.currentImagePath = null;
         viewerState.totalImages = 0;
-        viewerState.preloadCache.clear();
+        cleanupCurrentImage();
+        clearPreloadCache();
       });
 
       listen('viewer-list-updated', (event) => {
@@ -253,7 +291,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const newIndex = newPaths.indexOf(viewerState.currentImagePath);
         
         // ソートやフィルタで順序が変わったため、古いインデックスのキャッシュをすべて破棄
-        viewerState.preloadCache.clear();
+        clearPreloadCache();
 
         if (newIndex !== -1) {
           // 現在表示中の画像が新しいリスト内にも存在する場合、インデックスと総数を更新
@@ -617,6 +655,10 @@ function swapImageElement(newImg, sequenceId) {
     if (img !== currentlyVisibleImg && img !== newImg) {
       if (img.tagName === 'VIDEO') {
         img.pause();
+        img.removeAttribute('src');
+        img.load();
+      } else {
+        img.src = '';
       }
       img.remove();
     }

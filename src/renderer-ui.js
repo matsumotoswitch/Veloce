@@ -24,6 +24,9 @@ import { extractMetadataFields, parsePromptTags, formatRequestType } from './met
 
 const CHUNK_SIZE = 100;
 
+// 破損MP4動画用のフォールバックSVGを事前にBase64化し、onerrorでの都度エンコードとGC発生を排除
+export const BROKEN_MP4_FALLBACK_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiBmaWxsPSJub25lIiBzdHJva2U9IiM0NDQiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgcng9IjIiIHJ5PSIyIj48L3JlY3Q+PGNpcmNsZSBjeD0iOC41IiBjeT0iOC41IiByPSIxLjUiPjwvY2lyY2xlPjxwb2x5bGluZSBwb2ludHM9IjIxIDE1IDE2IDEwIDUgMjEiPjwvcG9seWxpbmU+PC9zdmc+';
+
 let dragCache = { element: null, midX: 0 };
 
 /**
@@ -1699,8 +1702,7 @@ class UIManager {
                   this.classList.remove('loading');
                   let fallback;
                   if (file.path.toLowerCase().endsWith('.mp4')) {
-                    const BROKEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>';
-                    fallback = 'data:image/svg+xml;base64,' + btoa(BROKEN_SVG);
+                    fallback = BROKEN_MP4_FALLBACK_URL;
                   } else {
                     fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
                   }

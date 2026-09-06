@@ -619,5 +619,11 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
 
       generateSpy.mockRestore();
     });
+
+    it('should use pre-encoded BROKEN_MP4_FALLBACK_URL without redundant btoa execution', async () => {
+      const { BROKEN_MP4_FALLBACK_URL } = await import('../src/renderer-ui.js');
+      expect(BROKEN_MP4_FALLBACK_URL).toBeDefined();
+      expect(BROKEN_MP4_FALLBACK_URL).toMatch(/^data:image\/svg\+xml;base64,/);
+    });
   });
 });
