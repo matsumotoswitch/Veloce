@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../src/renderer-state.js';
 
 describe('Thumbnail Cache Rebuild Bug Fixes', () => {
@@ -382,6 +382,242 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       const targetLabel = label;
       expect(targetLabel.closest('.thumbnail-label')).toBe(label);
       expect(targetLabel.closest('.thumbnail-label').textContent).toBe('sample_image.png');
+    });
+  });
+
+  describe('Uncached New Files Priority Queueing in Grid', () => {
+    let originalThumbnailManager;
+
+    beforeEach(() => {
+      originalThumbnailManager = window.thumbnailManager;
+    });
+
+    afterEach(() => {
+      window.thumbnailManager = originalThumbnailManager;
+    });
+
+    it('updateVirtualGrid should enqueue uncached files (hasThumbnailCache: false) to thumbnailManager priority batch and set loading placeholder', async () => {
+      const enqueuedBatches = [];
+      window.thumbnailManager = {
+        enqueuePriorityBatch: vi.fn((paths) => {
+          enqueuedBatches.push(...paths);
+        }),
+        enqueuePriority: vi.fn()
+      };
+
+      const testFiles = [
+        { path: 'C:/media/cached1.png', name: 'cached1.png', mtime: 1000, hasThumbnailCache: true },
+        { path: 'C:/media/new1.png', name: 'new1.png', mtime: 2000, hasThumbnailCache: false },
+        { path: 'C:/media/new2.webp', name: 'new2.webp', mtime: 3000, hasThumbnailCache: false },
+        { path: 'C:/media/cached2.png', name: 'cached2.png', mtime: 4000, hasThumbnailCache: true }
+      ];
+
+      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      sharedAppState.totalCount = testFiles.length;
+      sharedAppState.initialChunk = testFiles;
+      sharedAppState.thumbnailUrls.clear();
+      sharedAppState.selection.clear();
+      sharedAppState.ratings = {};
+      sharedAppState.dragState = { isAppDragging: false };
+      window.appState = sharedAppState;
+
+      const gridContainer = document.createElement('div');
+      gridContainer.id = 'grid-view';
+      gridContainer.getBoundingClientRect = () => ({ width: 800, height: 600 });
+      Object.defineProperty(gridContainer, 'clientWidth', { value: 800, configurable: true });
+      Object.defineProperty(gridContainer, 'clientHeight', { value: 600, configurable: true });
+      Object.defineProperty(gridContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+      const gridSpacer = document.createElement('div');
+      gridSpacer.className = 'virtual-spacer';
+
+      const gridContent = document.createElement('div');
+      gridContent.className = 'virtual-content';
+
+      gridContainer.appendChild(gridSpacer);
+      gridContainer.appendChild(gridContent);
+
+      const { UIManager } = await import('../src/renderer-ui.js');
+      const ui = new UIManager(sharedAppState);
+      ui.elements.thumbnailGrid = gridContainer;
+      ui.elements.thumbnailSizeSlider = { value: '180' };
+
+      await ui.updateVirtualGrid(true);
+
+      // 1. 未生成の2ファイルのみが enqueuePriorityBatch に投入されていること
+      expect(window.thumbnailManager.enqueuePriorityBatch).toHaveBeenCalledTimes(1);
+      expect(enqueuedBatches).toEqual(['C:/media/new1.png', 'C:/media/new2.webp']);
+
+      // 2. DOM要素の検証
+      // children[0] (cached1.png): キャッシュ済みなのでカスタムプロトコルURLが設定される
+      const cached1Img = gridContent.children[0].querySelector('.thumbnail-img');
+      expect(cached1Img.src).toContain('https://veloce.localhost/thumbnail/?path=');
+      expect(sharedAppState.thumbnailUrls.get('C:/media/cached1.png')).toContain('https://veloce.localhost/thumbnail/?path=');
+
+      // children[1] (new1.png): 未生成なのでプレースホルダーとloadingクラスが設定され、Workerによる生成を待つ
+      const new1Img = gridContent.children[1].querySelector('.thumbnail-img');
+      expect(new1Img.src).toContain('data:image/gif;base64');
+      expect(new1Img.classList.contains('loading')).toBe(true);
+
+      // children[2] (new2.webp): 未生成なのでプレースホルダーとloadingクラス
+      const new2Img = gridContent.children[2].querySelector('.thumbnail-img');
+      expect(new2Img.src).toContain('data:image/gif;base64');
+      expect(new2Img.classList.contains('loading')).toBe(true);
+
+      // children[3] (cached2.png): キャッシュ済み
+      const cached2Img = gridContent.children[3].querySelector('.thumbnail-img');
+      expect(cached2Img.src).toContain('https://veloce.localhost/thumbnail/?path=');
+    });
+
+    it('updateVirtualGrid should not enqueue files when all visible items have cached thumbnails', async () => {
+      const enqueueMock = vi.fn();
+      window.thumbnailManager = {
+        enqueuePriorityBatch: enqueueMock,
+        enqueuePriority: vi.fn()
+      };
+
+      const testFiles = [
+        { path: 'C:/media/cached1.png', name: 'cached1.png', mtime: 1000, hasThumbnailCache: true },
+        { path: 'C:/media/cached2.png', name: 'cached2.png', mtime: 2000, hasThumbnailCache: true }
+      ];
+
+      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      sharedAppState.totalCount = testFiles.length;
+      sharedAppState.initialChunk = testFiles;
+      sharedAppState.thumbnailUrls.clear();
+      sharedAppState.selection.clear();
+      sharedAppState.ratings = {};
+      sharedAppState.dragState = { isAppDragging: false };
+      window.appState = sharedAppState;
+
+      const gridContainer = document.createElement('div');
+      gridContainer.id = 'grid-view';
+      gridContainer.getBoundingClientRect = () => ({ width: 800, height: 600 });
+      Object.defineProperty(gridContainer, 'clientWidth', { value: 800, configurable: true });
+      Object.defineProperty(gridContainer, 'clientHeight', { value: 600, configurable: true });
+      Object.defineProperty(gridContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+      const gridSpacer = document.createElement('div');
+      gridSpacer.className = 'virtual-spacer';
+
+      const gridContent = document.createElement('div');
+      gridContent.className = 'virtual-content';
+
+      gridContainer.appendChild(gridSpacer);
+      gridContainer.appendChild(gridContent);
+
+      const { UIManager } = await import('../src/renderer-ui.js');
+      const ui = new UIManager(sharedAppState);
+      ui.elements.thumbnailGrid = gridContainer;
+      ui.elements.thumbnailSizeSlider = { value: '180' };
+
+      await ui.updateVirtualGrid(true);
+
+      expect(enqueueMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Native Downsampled Thumbnail Generation Pipeline', () => {
+    beforeEach(() => {
+      vi.useRealTimers();
+    });
+
+    afterEach(() => {
+      vi.useFakeTimers();
+    });
+
+    it('getImageDimensionsFromBlob should accurately parse PNG dimensions', async () => {
+      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      // PNG: 1920 x 1080
+      const pngHeader = new Uint8Array([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
+        0x00, 0x00, 0x00, 0x0D, // IHDR length 13
+        0x49, 0x48, 0x44, 0x52, // "IHDR"
+        0x00, 0x00, 0x07, 0x80, // width: 1920
+        0x00, 0x00, 0x04, 0x38, // height: 1080
+        0x08, 0x06, 0x00, 0x00, 0x00 // bit_depth, color_type, etc.
+      ]);
+      const blob = new Blob([pngHeader], { type: 'image/png' });
+      const dims = await getImageDimensionsFromBlob(blob);
+      expect(dims).toEqual({ width: 1920, height: 1080 });
+    });
+
+    it('getImageDimensionsFromBlob should accurately parse WebP (VP8X) dimensions', async () => {
+      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      // WebP VP8X: width=1024, height=768 (stored as width-1 = 1023 (0x0003FF), height-1 = 767 (0x0002FF))
+      const webpHeader = new Uint8Array([
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        0x20, 0x00, 0x00, 0x00, // size dummy
+        0x57, 0x45, 0x42, 0x50, // "WEBP"
+        0x56, 0x50, 0x38, 0x58, // "VP8X"
+        0x0A, 0x00, 0x00, 0x00, // chunk size 10
+        0x00, 0x00, 0x00, 0x00, // flags
+        0xFF, 0x03, 0x00,       // width - 1 = 1023 (24bit LE: 0xFF, 0x03, 0x00)
+        0xFF, 0x02, 0x00        // height - 1 = 767 (24bit LE: 0xFF, 0x02, 0x00)
+      ]);
+      const blob = new Blob([webpHeader], { type: 'image/webp' });
+      const dims = await getImageDimensionsFromBlob(blob);
+      expect(dims).toEqual({ width: 1024, height: 768 });
+    });
+
+    it('getImageDimensionsFromBlob should accurately parse JPEG SOF0 dimensions', async () => {
+      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      // JPEG SOF0: height=600 (0x0258), width=800 (0x0320)
+      const jpegHeader = new Uint8Array([
+        0xFF, 0xD8,             // SOI
+        0xFF, 0xC0,             // SOF0
+        0x00, 0x11,             // segment length 17
+        0x08,                   // precision
+        0x02, 0x58,             // height: 600
+        0x03, 0x20,             // width: 800
+        0x03, 0x01, 0x11, 0x00  // components
+      ]);
+      const blob = new Blob([jpegHeader], { type: 'image/jpeg' });
+      const dims = await getImageDimensionsFromBlob(blob);
+      expect(dims).toEqual({ width: 800, height: 600 });
+    });
+
+    it('getImageDimensionsFromBlob should safely return null for invalid or corrupted data', async () => {
+      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      const corrupted = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
+      const blob = new Blob([corrupted]);
+      const dims = await getImageDimensionsFromBlob(blob);
+      expect(dims).toBeNull();
+    });
+
+    it('runTask should bypass getThumbnail IPC when skipDbCheck is true', async () => {
+      const { ThumbnailQueueManager } = await import('../src/renderer-thumbnails.js');
+      const manager = new ThumbnailQueueManager(4);
+      
+      const getThumbnailSpy = vi.fn().mockResolvedValue(null);
+      window.veloceAPI.getThumbnail = getThumbnailSpy;
+      window.veloceAPI.saveThumbnail = vi.fn().mockResolvedValue('asset://saved');
+      
+      // Mock worker generate
+      const { thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const generateSpy = vi.spyOn(thumbnailWorkerPool, 'generate').mockResolvedValue({
+        url: 'blob:test',
+        base64Promise: Promise.resolve('data:image/jpeg;base64,...')
+      });
+
+      // skipDbCheck: true で実行
+      await manager.runTask('C:/media/test_skip.png', true);
+
+      // getThumbnail IPC は一切呼ばれないこと
+      expect(getThumbnailSpy).not.toHaveBeenCalled();
+      // worker.generate は即座に呼ばれること
+      expect(generateSpy).toHaveBeenCalled();
+
+      // skipDbCheck: false（デフォルト）で実行
+      getThumbnailSpy.mockClear();
+      generateSpy.mockClear();
+      await manager.runTask('C:/media/test_normal.png', false);
+
+      // getThumbnail IPC が呼ばれること
+      expect(getThumbnailSpy).toHaveBeenCalledWith('C:/media/test_normal.png');
+      expect(generateSpy).toHaveBeenCalled();
+
+      generateSpy.mockRestore();
     });
   });
 });

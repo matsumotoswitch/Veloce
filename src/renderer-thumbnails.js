@@ -25,8 +25,124 @@ import { UIManager, uiManager } from './renderer-ui.js';
 import { getStreamUrl, debounce } from './utils.js';
 
 /**
+ * Blob から安全にヘッダーバイト列を取得するヘルパー関数
+ * Node/jsdom テスト環境および Chromium/WebView2 の両方に対応
+ * @param {Blob} blob
+ * @param {number} maxBytes
+ * @returns {Promise<ArrayBuffer>}
+ */
+async function readBlobHeaderBuffer(blob, maxBytes = 512) {
+  if (!blob) return new ArrayBuffer(0);
+  const slice = blob.slice ? blob.slice(0, maxBytes) : blob;
+  if (typeof slice.arrayBuffer === 'function') {
+    try {
+      return await slice.arrayBuffer();
+    } catch (e) {}
+  }
+  if (typeof blob.arrayBuffer === 'function') {
+    try {
+      const full = await blob.arrayBuffer();
+      return full.slice(0, maxBytes);
+    } catch (e) {}
+  }
+  if (typeof FileReader !== 'undefined') {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(new ArrayBuffer(0)), 500);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        clearTimeout(timer);
+        resolve(reader.result || new ArrayBuffer(0));
+      };
+      reader.onerror = () => {
+        clearTimeout(timer);
+        resolve(new ArrayBuffer(0));
+      };
+      reader.readAsArrayBuffer(slice);
+    });
+  }
+  return new ArrayBuffer(0);
+}
+
+/**
+ * 画像 Blob の先頭バイナリから幅と高さをミリ秒未満（0.01ms）で高速抽出する
+ * PNG, WebP, JPEG のヘッダーを解析し、デコード前に寸法を特定して
+ * createImageBitmap のネイティブダウンサンプリングを可能にする
+ * @param {Blob} blob
+ * @returns {Promise<{width: number, height: number}|null>}
+ */
+export async function getImageDimensionsFromBlob(blob) {
+  try {
+    const buffer = await readBlobHeaderBuffer(blob, 512);
+    if (!buffer || buffer.byteLength === 0) return null;
+    const view = new DataView(buffer);
+    const len = buffer.byteLength;
+
+    // 1. PNG (89 50 4E 47 0D 0A 1A 0A)
+    if (len >= 24 && view.getUint32(0, false) === 0x89504E47 && view.getUint32(4, false) === 0x0D0A1A0A) {
+      const width = view.getUint32(16, false);
+      const height = view.getUint32(20, false);
+      if (width > 0 && height > 0) return { width, height };
+    }
+
+    // 2. WebP (RIFF .... WEBP)
+    if (len >= 30 && view.getUint32(0, false) === 0x52494646 && view.getUint32(8, false) === 0x57454250) {
+      const chunkType = view.getUint32(12, false);
+      // VP8X (Extended format: "VP8X" = 0x56503858)
+      if (chunkType === 0x56503858 && len >= 30) {
+        const width = (view.getUint8(24) | (view.getUint8(25) << 8) | (view.getUint8(26) << 16)) + 1;
+        const height = (view.getUint8(27) | (view.getUint8(28) << 8) | (view.getUint8(29) << 16)) + 1;
+        if (width > 0 && height > 0) return { width, height };
+      }
+      // VP8L (Lossless format: "VP8L" = 0x5650384C)
+      if (chunkType === 0x5650384C && len >= 25 && view.getUint8(20) === 0x2F) {
+        const b0 = view.getUint8(21);
+        const b1 = view.getUint8(22);
+        const b2 = view.getUint8(23);
+        const b3 = view.getUint8(24);
+        const width = 1 + (((b1 & 0x3F) << 8) | b0);
+        const height = 1 + (((b3 & 0x0F) << 10) | (b2 << 2) | ((b1 & 0xC0) >> 6));
+        if (width > 0 && height > 0) return { width, height };
+      }
+      // VP8 (Lossy format: "VP8 " = 0x56503820)
+      if (chunkType === 0x56503820 && len >= 30) {
+        if (view.getUint8(23) === 0x9D && view.getUint8(24) === 0x01 && view.getUint8(25) === 0x2A) {
+          const width = view.getUint16(26, true) & 0x3FFF;
+          const height = view.getUint16(28, true) & 0x3FFF;
+          if (width > 0 && height > 0) return { width, height };
+        }
+      }
+    }
+
+    // 3. JPEG (FF D8)
+    if (len >= 2 && view.getUint16(0, false) === 0xFFD8) {
+      let offset = 2;
+      while (offset + 9 <= len) {
+        if (view.getUint8(offset) !== 0xFF) break;
+        const marker = view.getUint8(offset + 1);
+        const isSOF = (marker >= 0xC0 && marker <= 0xC3) ||
+                      (marker >= 0xC5 && marker <= 0xC7) ||
+                      (marker >= 0xC9 && marker <= 0xCB) ||
+                      (marker >= 0xCD && marker <= 0xCF);
+        if (isSOF && offset + 8 < len) {
+          const height = view.getUint16(offset + 5, false);
+          const width = view.getUint16(offset + 7, false);
+          if (width > 0 && height > 0) return { width, height };
+        }
+        if (offset + 4 > len) break;
+        const segmentLength = view.getUint16(offset + 2, false);
+        if (segmentLength < 2) break;
+        offset += 2 + segmentLength;
+      }
+    }
+  } catch (e) {
+    // Binary header parse error fallback
+  }
+  return null;
+}
+
+/**
  * サムネイル生成ワーカープール
- * 画像のフェッチ、Canvas縮小（最大384x384）、Blob URL生成、Base64シリアライズを担当
+ * 画像のフェッチ、Chromium ネイティブダウンサンプリング、Canvas縮小（最大384x384）、Blob URL生成、Base64シリアライズを担当
  */
 class ThumbnailWorkerPool {
   constructor() {
@@ -66,12 +182,44 @@ class ThumbnailWorkerPool {
         if (!response.ok) throw new Error("Fetch failed: " + response.status);
         const blob = await response.blob();
         
-        // Chromium 109環境で破損画像等により createImageBitmap が永久ハングする問題を防ぐため、4秒タイムアウトで競合
-        const sourceElement = await Promise.race([
-          createImageBitmap(blob),
+        // ヘッダーから元画像サイズを軽量抽出してダウンサンプリング目標寸法を算出
+        const dims = await getImageDimensionsFromBlob(blob);
+        let targetWidth = 0;
+        let targetHeight = 0;
+        if (dims && dims.width > 0 && dims.height > 0) {
+          if (dims.width > 384 || dims.height > 384) {
+            const ratio = Math.min(384 / dims.width, 384 / dims.height);
+            targetWidth = Math.max(1, Math.round(dims.width * ratio));
+            targetHeight = Math.max(1, Math.round(dims.height * ratio));
+          } else {
+            targetWidth = dims.width;
+            targetHeight = dims.height;
+          }
+        }
+
+        // Chromium 109環境の安全レース制御
+        const decodeRace = (promise) => Promise.race([
+          promise,
           new Promise((_, r) => setTimeout(() => r(new Error("createImageBitmap timed out")), 4000))
         ]);
-        
+
+        // ネイティブダウンサンプリング: Chromium デコーダーが 384px 枠内に直接デコードするため
+        // 巨大な等倍バッファ（数十MB）のメモリ展開とGC負荷を根絶し、デコード時間を極小化
+        let sourceElement;
+        if (targetWidth > 0 && targetHeight > 0) {
+          try {
+            sourceElement = await decodeRace(createImageBitmap(blob, {
+              resizeWidth: targetWidth,
+              resizeHeight: targetHeight,
+              resizeQuality: 'medium'
+            }));
+          } catch (optErr) {
+            sourceElement = await decodeRace(createImageBitmap(blob));
+          }
+        } else {
+          sourceElement = await decodeRace(createImageBitmap(blob));
+        }
+
         if (sourceElement instanceof Error) throw sourceElement;
         let width = sourceElement.width;
         let height = sourceElement.height;
@@ -85,8 +233,9 @@ class ThumbnailWorkerPool {
         
         const canvas = new OffscreenCanvas(width, height);
         const ctx = canvas.getContext('2d');
+        // 等倍またはすでに縮小済みのため、補間品質は medium で最高速化
         ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
+        ctx.imageSmoothingQuality = 'medium';
         ctx.fillStyle = '#1e1e1e';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(sourceElement, 0, 0, width, height);
@@ -155,7 +304,7 @@ export const evictThumbnailCache = debounce((maxSize = 2000) => {
 }, 100);
 window.evictThumbnailCache = evictThumbnailCache;
 
-const THUMBNAIL_BATCH_SIZE = 4;
+const THUMBNAIL_BATCH_SIZE = 8;
 
 export function resetThumbnailPreloader() {
   if (window.thumbnailManager) window.thumbnailManager.resetPreload();
@@ -232,24 +381,26 @@ export class ThumbnailQueueManager {
     this.abortController = new AbortController();
   }
 
-  enqueuePriority(filePath) {
+  enqueuePriority(filePath, skipDbCheck = false) {
     if (!this.activeTasks.has(filePath) && !appState.thumbnailUrls.has(filePath)) {
       // SetでO(1)重複チェック（旧: findIndex O(N) + splice O(N)）
       if (!this.priorityQueueSet.has(filePath)) {
         this.priorityQueueSet.add(filePath);
-        this.priorityQueue.unshift({ filePath });
+        this.priorityQueue.unshift({ filePath, skipDbCheck });
       }
       this.processNext();
     }
   }
 
-  enqueuePriorityBatch(filePaths) {
+  enqueuePriorityBatch(filePaths, skipDbCheck = false) {
     let added = false;
-    for (const filePath of filePaths) {
+    for (const item of filePaths) {
+      const filePath = typeof item === 'string' ? item : item.filePath;
+      const skip = typeof item === 'object' && item.skipDbCheck !== undefined ? item.skipDbCheck : skipDbCheck;
       if (!this.activeTasks.has(filePath) && !appState.thumbnailUrls.has(filePath)) {
         if (!this.priorityQueueSet.has(filePath)) {
           this.priorityQueueSet.add(filePath);
-          this.priorityQueue.push({ filePath });
+          this.priorityQueue.push({ filePath, skipDbCheck: skip });
           added = true;
         }
       }
@@ -312,6 +463,7 @@ export class ThumbnailQueueManager {
 
       while (this.activeTasks.size < this.concurrency) {
         let targetFile = null;
+        let targetSkipDbCheck = false;
 
         // 1. Priority Queue
         if (this.priorityQueue.length > 0) {
@@ -326,7 +478,7 @@ export class ThumbnailQueueManager {
 
           // 表示中ではないアイテム（スクロールで通り過ぎたアイテム等）の処理時は、
           // バックグラウンド枠（全体-4枠）を超えないように制限し、常に表示中アイテムのために即応枠を確保する
-          const bgLimit = Math.max(1, this.concurrency - 4);
+          const bgLimit = Math.max(2, this.concurrency - 4);
           if (!isVisible && this.activeTasks.size >= bgLimit) {
             break;
           }
@@ -339,32 +491,37 @@ export class ThumbnailQueueManager {
             continue;
           }
           targetFile = req.filePath;
+          targetSkipDbCheck = !!req.skipDbCheck;
         }
         // 2. Preload Fetching
         else if (this.preloadQueue.length === 0 && appState.preloadCursor < appState.totalCount) {
           appState.isPreloadRunning = true;
           if (!appState.isFetchingPreload) {
             appState.isFetchingPreload = true;
-            window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
-              if (items && items.length > 0) {
-                appState.preloadCursor += items.length;
-                this.preloadQueue.push(...items.map(f => f.path));
-              } else {
+            if (typeof window.veloceAPI?.getItems === 'function') {
+              window.veloceAPI.getItems(appState.preloadCursor, 50).then(items => {
+                if (items && items.length > 0) {
+                  appState.preloadCursor += items.length;
+                  this.preloadQueue.push(...items.map(f => f.path));
+                } else {
+                  appState.preloadCursor += 50;
+                }
+              }).catch(err => {
+                console.warn("Preload getItems failed:", err);
                 appState.preloadCursor += 50;
-              }
-            }).catch(err => {
-              console.warn("Preload getItems failed:", err);
-              appState.preloadCursor += 50;
-            }).finally(() => {
+              }).finally(() => {
+                appState.isFetchingPreload = false;
+                this.processNext();
+              });
+            } else {
               appState.isFetchingPreload = false;
-              this.processNext();
-            });
+            }
           }
           break; // wait for fetch
         }
         // 3. Preload Queue
         else if (this.preloadQueue.length > 0) {
-          const bgLimit = Math.max(1, this.concurrency - 4);
+          const bgLimit = Math.max(2, this.concurrency - 4);
           if (this.activeTasks.size >= bgLimit) {
             break; // プリロードもバックグラウンド枠上限までとする
           }
@@ -392,7 +549,7 @@ export class ThumbnailQueueManager {
 
         this.activeTasks.add(targetFile);
         // 個別タスクを非同期で起動（完了次第 updateDOM → processNext を呼ぶ）
-        this.runTask(targetFile);
+        this.runTask(targetFile, targetSkipDbCheck);
       }
       
       // キューが完全に空になり、かつ全件のフェッチも終了していれば「完了」とみなして件数を同期
@@ -409,13 +566,16 @@ export class ThumbnailQueueManager {
     }
   }
 
-  async runTask(filePath) {
+  async runTask(filePath, skipDbCheck = false) {
     const signal = this.abortController.signal;
     let fallbackToSvg = false;
 
     try {
-      // 1. Rust からキャッシュ取得試行
-      let url = await window.veloceAPI.getThumbnail(filePath);
+      // 1. Rust からキャッシュ取得試行（未キャッシュ確定時は不要なIPCラウンドトリップをスキップ）
+      let url = null;
+      if (!skipDbCheck) {
+        url = await window.veloceAPI.getThumbnail(filePath);
+      }
       
       if (signal.aborted) return;
       if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {

@@ -1714,7 +1714,7 @@ class UIManager {
                 };
             }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else {
+        } else if (file.hasThumbnailCache) {
             const url = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}`;
             appState.thumbnailUrls.set(file.path, url);
             if (window.evictThumbnailCache) window.evictThumbnailCache();
@@ -1736,6 +1736,14 @@ class UIManager {
                 };
             }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+        } else {
+            img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+            img.classList.add('loading');
+            img.onload = null;
+            img.onerror = null;
+            if (window.thumbnailManager) {
+              filesToEnqueue.push(file.path);
+            }
         }
       } else {
         // パスもインデックスも変わっていないが、サムネイルURLが新たに利用可能になった場合に反映する
@@ -1804,10 +1812,10 @@ class UIManager {
     // --- ここでようやく enqueuePriority を呼ぶ ---
     if (filesToEnqueue.length > 0 && window.thumbnailManager) {
       if (typeof window.thumbnailManager.enqueuePriorityBatch === 'function') {
-        window.thumbnailManager.enqueuePriorityBatch(filesToEnqueue);
+        window.thumbnailManager.enqueuePriorityBatch(filesToEnqueue, true);
       } else {
         for (const fp of filesToEnqueue) {
-          window.thumbnailManager.enqueuePriority(fp);
+          window.thumbnailManager.enqueuePriority(fp, true);
         }
       }
     }

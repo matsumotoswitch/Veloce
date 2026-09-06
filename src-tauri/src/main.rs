@@ -2988,6 +2988,10 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// キャッシュ済みサムネイル（または即時抽出可能な動画サムネイル）をDBから取得する。
+/// ※静止画像の同期デコード・生成はプロトコルハンドラやUIスレッドをブロックし、
+/// 全体のサムネイル表示を停滞させるため、キャッシュミス時は空配列を返し、
+/// フロントエンドの Web Worker プール（OffscreenCanvas）に委譲する。
 fn generate_thumbnail_inner(
     file_path: &str,
     mtime: u64,
@@ -3017,23 +3021,20 @@ fn generate_thumbnail_inner(
         }
     }
     
+    // 動画ファイルのみ高速にシェルAPI/ffmpegで即時抽出（静止画像はJS側の Worker プールに委譲）
     let lower_path = file_path.to_lowercase();
-    let generated_bytes = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-        generate_video_thumbnail_sync(file_path)
-    } else {
-        generate_image_thumbnail_sync(file_path)
-    };
-    
-    if let Some(bytes) = generated_bytes {
-        if let Ok(conn) = db_conn.get() {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-            let _ = conn.execute(
-                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-                rusqlite::params![hash_key, bytes, clean_path, now],
-            );
+    if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+        if let Some(bytes) = generate_video_thumbnail_sync(file_path) {
+            if let Ok(conn) = db_conn.get() {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                let _ = conn.execute(
+                    "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+                    rusqlite::params![hash_key, bytes, clean_path, now],
+                );
+            }
+            return bytes;
         }
-        return bytes;
     }
     
     Vec::new()
@@ -3142,7 +3143,18 @@ async fn precache_directory_recursively(
 
             if !has_both {
                 get_full_metadata_for_path(&path, &db_conn);
-                generate_thumbnail_inner(&path, mtime, &db_conn);
+                if let Some(thumb_bytes) = generate_image_thumbnail_sync(&path) {
+                    if let Ok(conn) = db_conn.get() {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                        let _ = conn.execute(
+                            "INSERT INTO cache (hash_key, path, thumbnail, last_accessed) VALUES (?, ?, ?, ?)
+                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, last_accessed = excluded.last_accessed",
+                            rusqlite::params![&hash_key, &path, &thumb_bytes, now],
+                        );
+                    }
+                } else {
+                    generate_thumbnail_inner(&path, mtime, &db_conn);
+                }
             }
             
             if i % 10 == 0 || i == total - 1 {
