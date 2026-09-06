@@ -895,7 +895,7 @@ function createTreeNode(folder, isRoot = false) {
   icon.style.display = 'inline-flex';
   icon.style.alignItems = 'center';
   if (!isRoot) {
-    icon.style.color = '#4da8da';
+    icon.style.color = 'var(--accent-hover)';
   }
 
   const label = document.createElement('span');
@@ -1272,29 +1272,9 @@ function parseLicenseMarkdown(text) {
 async function showLicenseDialog() {
   const overlay = document.createElement('div');
   overlay.id = 'license-overlay';
-  overlay.style.position = 'fixed';
-  overlay.style.top = '0';
-  overlay.style.left = '0';
-  overlay.style.width = '100vw';
-  overlay.style.height = '100vh';
-  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-  overlay.style.zIndex = '10000';
-  overlay.style.display = 'flex';
-  overlay.style.justifyContent = 'center';
-  overlay.style.alignItems = 'center';
 
   const content = document.createElement('div');
-  content.style.backgroundColor = 'var(--panel-bg)';
-  content.style.padding = '24px';
-  content.style.borderRadius = 'var(--radius-lg)';
-  content.style.border = '1px solid #0d1315';
-  content.style.width = '85%';
-  content.style.maxWidth = '850px';
-  content.style.height = '80%';
-  content.style.display = 'flex';
-  content.style.flexDirection = 'column';
-  content.style.boxShadow = 'var(--modal-shadow)';
-  content.style.cursor = 'default';
+  content.className = 'license-modal-content';
 
   let licenseText = "ライセンス情報を読み込み中";
   try {
@@ -1313,8 +1293,8 @@ async function showLicenseDialog() {
   const parsedText = parseLicenseMarkdown(combinedText);
 
   content.innerHTML = `
-    <h2 style="margin: 0 0 20px 0; color: var(--glow-gold); font-size: 1.2em;">ライセンス情報</h2>
-    <div id="license-text" style="flex: 1; overflow-y: auto; background-color: rgba(0, 0, 0, 0.2); padding: 0px 20px 20px 20px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color); font-family: sans-serif; white-space: normal; font-size: 14px; line-height: 1.6;">${parsedText}</div>
+    <h2 class="modal-header-title" style="margin-bottom: 20px;">ライセンス情報</h2>
+    <div id="license-text">${parsedText}</div>
   `;
 
   // リンクのクリック処理（アプリ内遷移を防ぎ、OS標準のブラウザで開く）
@@ -1383,29 +1363,15 @@ function toggleHelpOverlay(forceShow) {
 
   overlay = document.createElement('div');
   overlay.id = 'help-overlay';
-  overlay.style.position = 'fixed';
-  overlay.style.top = '0';
-  overlay.style.left = '0';
-  overlay.style.width = '100vw';
-  overlay.style.height = '100vh';
-  overlay.style.zIndex = '9999';
-  overlay.style.display = 'flex';
-  overlay.style.justifyContent = 'center';
-  overlay.style.alignItems = 'center';
-  overlay.style.color = '#fff';
-  overlay.style.cursor = 'pointer';
 
   const content = document.createElement('div');
   content.className = 'help-modal-content';
-  content.style.cursor = 'default';
 
   content.innerHTML = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-shrink: 0;">
-      <h2 style="margin: 0; color: var(--glow-gold); font-size: 1.2em; border-bottom: none;">ヘルプ・ショートカット一覧</h2>
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <span id="license-link" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border: 1px solid var(--modal-border); border-radius: 20px; color: var(--text-color); font-size: 0.85em; cursor: pointer; transition: all 0.2s ease; background-color: rgba(0, 0, 0, 0.2);"
-          onmouseover="this.style.backgroundColor='rgba(37, 126, 140, 0.15)'; this.style.borderColor='var(--accent-color)'; this.style.color='#fff';"
-          onmouseout="this.style.backgroundColor='rgba(0, 0, 0, 0.2)'; this.style.borderColor='var(--modal-border)'; this.style.color='var(--text-color)';">
+    <div class="modal-header-row">
+      <h2 class="modal-header-title">ヘルプ・ショートカット一覧</h2>
+      <div class="modal-header-actions">
+        <span id="license-link" class="license-link-btn">
           <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="8" r="7"></circle>
             <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
@@ -1769,6 +1735,9 @@ function resetInspectorPools() {
     inspectorSectionPool[i].box.className = 'prompt-look';
     inspectorSectionPool[i].box.style.cssText = '';
   }
+  for (let i = 0; i < inspectorTagIndex; i++) {
+    inspectorTagPool[i].classList.remove('search-match');
+  }
   inspectorSectionIndex = 0;
   inspectorTagIndex = 0;
 }
@@ -1865,25 +1834,11 @@ async function renderMetadata(file) {
             const isMatch = terms.some(term => t.toLowerCase().includes(term));
             if (isMatch) {
               sectionHasMatch = true;
-              tagEl.style.border = '1px solid #ffcc00';
-              tagEl.style.backgroundColor = 'rgba(255, 204, 0, 0.25)';
-              tagEl.style.color = '#ffcc00';
-              tagEl.style.fontWeight = 'bold';
-              tagEl.style.boxShadow = '0 0 8px rgba(255,204,0,0.3)';
-            } else {
-              tagEl.style.border = '';
-              tagEl.style.backgroundColor = '';
-              tagEl.style.color = '';
-              tagEl.style.fontWeight = '';
-              tagEl.style.boxShadow = '';
             }
+            tagEl.classList.toggle('search-match', isMatch);
             tagEl.innerHTML = highlightSearchTerms(t, terms);
           } else {
-            tagEl.style.border = '';
-            tagEl.style.backgroundColor = '';
-            tagEl.style.color = '';
-            tagEl.style.fontWeight = '';
-            tagEl.style.boxShadow = '';
+            tagEl.classList.remove('search-match');
             tagEl.textContent = t;
           }
           secEl.box.appendChild(tagEl);

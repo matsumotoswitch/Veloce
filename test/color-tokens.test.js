@@ -75,4 +75,41 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
       }
     }
   });
+
+  it('should use var(--accent-hover) for .diff-tag.added instead of hardcoded #61c7d6', () => {
+    expect(cssContent).toMatch(/\.diff-tag\.added\s*\{[^}]*color:\s*var\(--accent-hover\);/);
+    expect(cssContent).not.toMatch(/\.diff-tag\.added\s*\{[^}]*color:\s*#61c7d6;/);
+  });
+
+  it('should define .diff-tag.search-match using var(--glow-gold)', () => {
+    expect(cssContent).toMatch(/\.diff-tag\.search-match\s*\{[^}]*color:\s*var\(--glow-gold\)/);
+    expect(cssContent).toMatch(/\.diff-tag\.search-match\s*\{[^}]*border-color:\s*var\(--glow-gold\)/);
+  });
+
+  it('should define help and license modal classes in style.css', () => {
+    expect(cssContent).toContain('.license-modal-content');
+    expect(cssContent).toContain('.modal-header-row');
+    expect(cssContent).toContain('.modal-header-title');
+    expect(cssContent).toContain('.license-link-btn');
+    expect(cssContent).toContain('#license-text');
+  });
+
+  it('should use var(--accent-hover) for folder tree icons in renderer.js instead of #4da8da', () => {
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    expect(rendererJs).toContain("icon.style.color = 'var(--accent-hover)';");
+    expect(rendererJs).not.toContain("icon.style.color = '#4da8da';");
+  });
+
+  it('should use classList.toggle for inspector search match in renderer.js instead of inline #ffcc00 styling', () => {
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    expect(rendererJs).toContain("tagEl.classList.toggle('search-match', isMatch);");
+    expect(rendererJs).not.toContain("tagEl.style.color = '#ffcc00';");
+    expect(rendererJs).not.toContain("tagEl.style.border = '1px solid #ffcc00';");
+  });
+
+  it('should use shared BROKEN_MP4_FALLBACK_URL constant in renderer-thumbnails.js instead of inline btoa', () => {
+    const thumbnailsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-thumbnails.js'), 'utf-8');
+    expect(thumbnailsJs).toContain('const fallbackUrl = BROKEN_MP4_FALLBACK_URL;');
+    expect(thumbnailsJs).not.toContain("btoa(BROKEN_SVG)");
+  });
 });

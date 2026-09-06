@@ -1804,8 +1804,16 @@ img.thumbnail-img.loading {
 
 .diff-tag.added {
   background-color: rgba(var(--accent-rgb), 0.25);
-  color: #61c7d6;
+  color: var(--accent-hover);
   border: 1px solid var(--accent-color);
+}
+
+.diff-tag.search-match {
+  border-color: var(--glow-gold) !important;
+  background-color: rgba(230, 199, 98, 0.25) !important;
+  color: var(--glow-gold) !important;
+  font-weight: bold;
+  box-shadow: 0 0 8px rgba(230, 199, 98, 0.3) !important;
 }
 
 .diff-tag.removed {
@@ -2892,18 +2900,105 @@ html.viewer-html,
   box-shadow: none;
 }
 
-/* --- ヘルプ画面用スタイル --- */
+/* --- ヘルプ・ライセンス画面用スタイル --- */
+#help-overlay,
+#license-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+#help-overlay {
+  z-index: 9999;
+  color: #fff;
+}
+
+#license-overlay {
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.7) !important;
+}
+
+.help-modal-content,
+.license-modal-content {
+  box-shadow: var(--modal-shadow);
+  display: flex;
+  flex-direction: column;
+  cursor: default;
+}
+
 .help-modal-content {
   background-color: var(--modal-bg);
   border: 1px solid var(--modal-border);
   border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: var(--modal-shadow);
   width: 90vw;
   max-width: 800px;
   max-height: 85vh;
+}
+
+.license-modal-content {
+  background-color: var(--panel-bg);
+  border: 1px solid #0d1315;
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 85%;
+  max-width: 850px;
+  height: 80%;
+}
+
+.modal-header-row {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  flex-shrink: 0;
+}
+
+.modal-header-title {
+  margin: 0;
+  color: var(--glow-gold);
+  font-size: 1.2em;
+  border-bottom: none;
+}
+
+.license-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 1px solid var(--modal-border);
+  border-radius: 20px;
+  color: var(--text-color);
+  font-size: 0.85em;
+  cursor: pointer;
+  background-color: rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+}
+
+.license-link-btn:hover {
+  background-color: rgba(var(--accent-rgb), 0.15);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+#license-text {
+  flex: 1;
+  overflow-y: auto;
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 0 20px 20px 20px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  color: var(--text-color);
+  font-family: inherit;
+  white-space: normal;
+  font-size: var(--font-size-base);
+  line-height: 1.6;
 }
 
 .help-tabs {

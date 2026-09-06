@@ -21,7 +21,7 @@
 // ============================================================================
 
 import { appState } from './renderer-state.js';
-import { UIManager, uiManager } from './renderer-ui.js';
+import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL } from './renderer-ui.js';
 import { getStreamUrl, debounce } from './utils.js';
 
 /**
@@ -653,8 +653,7 @@ export class ThumbnailQueueManager {
 
         if (fallbackToSvg) {
           // 3回失敗: SVGフォールバックを表示し、thumbnailUrlsにもセットして無限リトライを防ぐ
-          const BROKEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>';
-          const fallbackUrl = 'data:image/svg+xml;base64,' + btoa(BROKEN_SVG);
+          const fallbackUrl = BROKEN_MP4_FALLBACK_URL;
           appState.thumbnailUrls.set(filePath, fallbackUrl);
           if (window.evictThumbnailCache) window.evictThumbnailCache();
           this.updateDOM(filePath, fallbackUrl);
