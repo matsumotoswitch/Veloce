@@ -33,6 +33,13 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).not.toMatch(/\.rating-badge svg\s*\{[^}]*fill:\s*#ffd700;/);
   });
 
+  it('should style thumbnail rating badge with lightweight translucency without backdrop-filter', () => {
+    expect(cssContent).toMatch(/\.rating-badge\s*\{[^}]*background-color:\s*rgba\(0,\s*0,\s*0,\s*0\.45\);/);
+    expect(cssContent).toMatch(/\.rating-badge\s*\{[^}]*border:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.18\);/);
+    expect(cssContent).toMatch(/\.rating-badge\s*\{[^}]*box-shadow:\s*0 2px 6px rgba\(0,\s*0,\s*0,\s*0\.35\);/);
+    expect(cssContent).not.toMatch(/\.rating-badge\s*\{[^}]*backdrop-filter:\s*blur/);
+  });
+
   it('should not contain raw unaliased #ffd700 outside variable definitions or fallback declarations in CSS', () => {
     // :root の定義行と var(--..., #ffd700) 以外の直接指定（例: fill: #ffd700; color: #ffd700;）を排除
     const lines = cssContent.split('\n');
