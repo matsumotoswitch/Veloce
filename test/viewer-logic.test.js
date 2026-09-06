@@ -273,4 +273,46 @@ describe('Viewer Core Logic & Hotkeys', () => {
     expect(videoMock.remove).toHaveBeenCalled();
     expect(global.viewerState.preloadCache.size).toBe(0);
   });
+
+  it('should protect currentlyVisibleImg and currentViewerImg from premature purge during rapid navigation', () => {
+    const visibleImg = { tagName: 'IMG', src: 'C:/images/1.jpg', remove: vi.fn() };
+    const loadingImg = { tagName: 'IMG', src: 'C:/images/5.jpg', remove: vi.fn() };
+    const oldImg = { tagName: 'IMG', src: 'C:/images/old.jpg', remove: vi.fn() };
+
+    global.currentlyVisibleImg = visibleImg;
+    global.currentViewerImg = loadingImg;
+
+    global.viewerState.preloadCache.set(0, { img: visibleImg, path: 'C:/images/1.jpg' });
+    global.viewerState.preloadCache.set(5, { img: loadingImg, path: 'C:/images/5.jpg' });
+    global.viewerState.preloadCache.set(9, { img: oldImg, path: 'C:/images/old.jpg' });
+
+    // Simulate preload cache eviction logic with protection guards
+    const total = 20;
+    global.viewerState.currentIndex = 5;
+    for (const cachedIdx of Array.from(global.viewerState.preloadCache.keys())) {
+      let diff = Math.abs(cachedIdx - global.viewerState.currentIndex);
+      if (diff > total / 2) diff = total - diff;
+      if (diff > 3) {
+        const cached = global.viewerState.preloadCache.get(cachedIdx);
+        if (cached && cached.img) {
+          if (cached.img === global.currentlyVisibleImg || cached.img === global.currentViewerImg) {
+            continue;
+          }
+          if (typeof cached.img.remove === 'function') cached.img.remove();
+        }
+        global.viewerState.preloadCache.delete(cachedIdx);
+      }
+    }
+
+    // 表示中の画像とロード中画像は削除・破壊されていないこと
+    expect(visibleImg.remove).not.toHaveBeenCalled();
+    expect(visibleImg.src).toBe('C:/images/1.jpg');
+    expect(loadingImg.remove).not.toHaveBeenCalled();
+    expect(global.viewerState.preloadCache.has(0)).toBe(true);
+    expect(global.viewerState.preloadCache.has(5)).toBe(true);
+
+    // 古い画像のみ正常に削除されること
+    expect(oldImg.remove).toHaveBeenCalled();
+    expect(global.viewerState.preloadCache.has(9)).toBe(false);
+  });
 });

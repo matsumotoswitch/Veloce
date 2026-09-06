@@ -56,12 +56,13 @@ if (currentViewerImg) currentViewerImg.classList.add('mode-default');
 function clearPreloadCache() {
   for (const cached of viewerState.preloadCache.values()) {
     if (cached && cached.img) {
+      if (cached.img === currentlyVisibleImg || cached.img === currentViewerImg) {
+        continue;
+      }
       if (cached.img.tagName === 'VIDEO') {
         cached.img.pause();
         cached.img.removeAttribute('src');
         cached.img.load();
-      } else {
-        cached.img.src = '';
       }
       if (typeof cached.img.remove === 'function') cached.img.remove();
     }
@@ -78,8 +79,6 @@ function cleanupCurrentImage() {
       currentlyVisibleImg.pause();
       currentlyVisibleImg.removeAttribute('src');
       currentlyVisibleImg.load();
-    } else {
-      currentlyVisibleImg.src = '';
     }
     currentlyVisibleImg.remove();
     currentlyVisibleImg = null;
@@ -657,8 +656,6 @@ function swapImageElement(newImg, sequenceId) {
         img.pause();
         img.removeAttribute('src');
         img.load();
-      } else {
-        img.src = '';
       }
       img.remove();
     }
@@ -815,14 +812,16 @@ async function preloadAdjacentImages() {
     if (diff > 3) {
       const cached = viewerState.preloadCache.get(cachedIdx);
       if (cached && cached.img) {
+        // 現在表示中の画像、またはロード進行中の画像は破棄から保護する（高速スクロール時の非同期レース防止）
+        if (cached.img === currentlyVisibleImg || cached.img === currentViewerImg) {
+          continue;
+        }
         if (cached.img.tagName === 'VIDEO') {
           cached.img.pause();
           cached.img.removeAttribute('src');
           cached.img.load();
-        } else {
-          cached.img.src = '';
         }
-        if (cached.img.remove) cached.img.remove();
+        if (typeof cached.img.remove === 'function') cached.img.remove();
       }
       viewerState.preloadCache.delete(cachedIdx);
     }
