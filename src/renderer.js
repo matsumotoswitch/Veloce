@@ -4756,6 +4756,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  if (window.veloceAPI.onSmartFolderPurged) {
+    window.veloceAPI.onSmartFolderPurged(() => {
+      if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
+        window.debouncedUpdateSmartFolderCounts();
+      }
+    });
+  }
+
   if (window.veloceAPI.onDirectoryLoaded) {
     window.veloceAPI.onDirectoryLoaded(async (payload) => {
       if (payload.path !== appState.currentDirectory) return;

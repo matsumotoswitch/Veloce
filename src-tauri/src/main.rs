@@ -876,6 +876,7 @@ fn load_directory(
     let path_clone = target_path.clone();
     let app_clone = window.app_handle();
     let db_conn_clone = state.db_conn.clone();
+    let db_conn_purge = state.db_conn.clone();
     let ratings_map = if let Ok(lock) = state.ratings.lock() {
         lock.clone()
     } else {
@@ -910,10 +911,20 @@ fn load_directory(
             println!("[Veloce: INFO] load_directory task started for: {}", path_for_spawn);
             use rayon::prelude::*;
 
-            let mut files: Vec<std::sync::Arc<ImageFile>> = if path_for_spawn.starts_with("smart://") {
+            let (files, missing_paths): (Vec<std::sync::Arc<ImageFile>>, Vec<String>) = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
                 
-                smart_items.into_par_iter().map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i))).collect()
+                // 実ファイルが存在するものと、エクスプローラ等で移動・削除され消失したものを並列で高速分類
+                let (valid_items, missing_items): (Vec<_>, Vec<_>) = smart_items
+                    .into_par_iter()
+                    .partition(|item| {
+                        let clean_path = item.path.replace("\\\\?\\", "");
+                        std::path::Path::new(&clean_path).is_file()
+                    });
+
+                let missing: Vec<String> = missing_items.into_iter().map(|i| i.path).collect();
+                let valid_files = valid_items.into_par_iter().map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i))).collect();
+                (valid_files, missing)
             } else {
                 let target_entries: Vec<_> = jwalk::WalkDir::new(&path_for_spawn)
                     .max_depth(1)
@@ -922,7 +933,7 @@ fn load_directory(
                     .filter_map(|e| e.ok())
                     .collect();
 
-                target_entries
+                let normal_files: Vec<std::sync::Arc<ImageFile>> = target_entries
                     .into_par_iter()
                     .filter_map(|entry| {
                         let p = entry.path();
@@ -963,8 +974,11 @@ fn load_directory(
                         }
                         None
                     })
-                    .map(std::sync::Arc::new).collect::<Vec<std::sync::Arc<ImageFile>>>()
+                    .map(std::sync::Arc::new).collect::<Vec<std::sync::Arc<ImageFile>>>();
+                (normal_files, Vec::new())
             };
+
+            let mut files = files;
 
             // デフォルトソート（名前順昇順）
             // このソートは generate_thumbnail / save_thumbnail の binary_search_by (O(log N)) を
@@ -1019,12 +1033,12 @@ fn load_directory(
             }
 
             println!("[Veloce: PERF] load_directory for {} completed in {}ms (total files: {})", path_for_spawn, t_load_start.elapsed().as_millis(), files.len());
-            files
+            (files, missing_paths)
 
         }).await;
 
-        let files = match files_result {
-            Ok(f) => f,
+        let (files, missing_paths) = match files_result {
+            Ok((f, m)) => (f, m),
             Err(_) => return,
         };
 
@@ -1066,6 +1080,34 @@ fn load_directory(
                     initial_chunk,
                 },
             );
+        }
+
+        // 消失したファイルが検出された場合、DBキャッシュおよびレーティングから非同期で自動クリーンアップ（Self-Healing）
+        if !missing_paths.is_empty() {
+            let db_pool = db_conn_purge.clone();
+            let missing_to_purge = missing_paths.clone();
+            let app_handle_for_purge = app_clone.clone();
+            tauri::async_runtime::spawn(async move {
+                let missing_for_db = missing_to_purge.clone();
+                let purged = tokio::task::spawn_blocking(move || {
+                    if let Ok(mut conn) = db_pool.get() {
+                        purge_missing_files_from_cache(&mut conn, &missing_for_db).unwrap_or(0)
+                    } else {
+                        0
+                    }
+                }).await.unwrap_or(0);
+
+                if purged > 0 {
+                    if let Some(state) = app_handle_for_purge.try_state::<AppState>() {
+                        if let Ok(mut r_lock) = state.ratings.lock() {
+                            for p in &missing_to_purge {
+                                r_lock.remove(p);
+                            }
+                        }
+                    }
+                    let _ = app_handle_for_purge.emit_all("smart-folder-purged", ());
+                }
+            });
         }
 
         let app_for_bg = app_clone.clone();
@@ -4153,6 +4195,37 @@ where
     Ok((deleted, fixed))
 }
 
+/// 実ファイルが存在しないパス群を SQLite キャッシュおよびレーティングから一括削除する
+pub fn purge_missing_files_from_cache(
+    conn: &mut rusqlite::Connection,
+    missing_paths: &[String],
+) -> Result<usize, rusqlite::Error> {
+    if missing_paths.is_empty() {
+        return Ok(0);
+    }
+    let tx = conn.transaction()?;
+    let mut deleted_count = 0;
+
+    // SQLiteのプレースホルダー上限（999個）を考慮して500件ずつチャンク処理
+    for chunk in missing_paths.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let delete_cache_sql = format!("DELETE FROM cache WHERE path IN ({})", placeholders);
+        let mut stmt = tx.prepare(&delete_cache_sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        deleted_count += stmt.execute(rusqlite::params_from_iter(params))?;
+
+        let delete_ratings_sql = format!("DELETE FROM ratings WHERE path IN ({})", placeholders);
+        if let Ok(mut stmt_r) = tx.prepare(&delete_ratings_sql) {
+            let params_r: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            let _ = stmt_r.execute(rusqlite::params_from_iter(params_r));
+        }
+    }
+
+    tx.commit()?;
+    println!("[Veloce: INFO] purge_missing_files_from_cache: deleted {} missing records", deleted_count);
+    Ok(deleted_count)
+}
+
 #[tauri::command]
 async fn audit_cache(
     app: tauri::AppHandle,
@@ -6948,5 +7021,95 @@ mod viewer_tests {
         assert_eq!(all_files[0].width, 1024, "既存の幅が保持されること");
         assert_eq!(all_files[0].height, 1536, "既存の高さが保持されること");
         assert_eq!(all_files[0].size, 2048, "サイズ等の更新内容は反映されること");
+    }
+
+    /// スマートフォルダ読み込み時における実在ファイル分類および purge_missing_files_from_cache の単体テスト
+    #[test]
+    fn test_purge_missing_files_from_cache_and_filter_logic() {
+        use super::*;
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        let mut conn = db_conn.get().unwrap();
+
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
+                metadata TEXT,
+                thumbnail BLOB,
+                width INTEGER,
+                height INTEGER,
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "CREATE TABLE ratings (
+                path TEXT PRIMARY KEY,
+                rating INTEGER NOT NULL
+            )",
+            [],
+        ).unwrap();
+
+        // テンポラリ実ファイルの作成（テスト後に自動削除）
+        let temp_dir = std::env::temp_dir();
+        let real_file_path = temp_dir.join("veloce_test_real_file.png");
+        std::fs::write(&real_file_path, b"test").unwrap();
+        let real_file_str = real_file_path.to_string_lossy().to_string();
+
+        let missing_file_1 = "C:\\does_not_exist\\missing_1.png".to_string();
+        let missing_file_2 = "C:\\does_not_exist\\missing_2.png".to_string();
+
+        // キャッシュテーブルにレコード挿入
+        conn.execute("INSERT INTO cache (hash_key, path, width, height) VALUES ('h1', ?, 100, 100)", [&real_file_str]).unwrap();
+        conn.execute("INSERT INTO cache (hash_key, path, width, height) VALUES ('h2', ?, 200, 200)", [&missing_file_1]).unwrap();
+        conn.execute("INSERT INTO cache (hash_key, path, width, height) VALUES ('h3', ?, 300, 300)", [&missing_file_2]).unwrap();
+
+        // レーティングテーブルにレコード挿入
+        conn.execute("INSERT INTO ratings (path, rating) VALUES (?, 5)", [&real_file_str]).unwrap();
+        conn.execute("INSERT INTO ratings (path, rating) VALUES (?, 4)", [&missing_file_1]).unwrap();
+
+        // 1. スマートフォルダの分類ロジック検証 (is_file による実在判定)
+        let smart_items = vec![
+            SmartFolderItem { path: real_file_str.clone(), size: 4, mtime: 100, ctime: 100, width: 100, height: 100, metadata: None },
+            SmartFolderItem { path: missing_file_1.clone(), size: 0, mtime: 100, ctime: 100, width: 200, height: 200, metadata: None },
+            SmartFolderItem { path: missing_file_2.clone(), size: 0, mtime: 100, ctime: 100, width: 300, height: 300, metadata: None },
+        ];
+
+        use rayon::prelude::*;
+        let (valid_items, missing_items): (Vec<_>, Vec<_>) = smart_items
+            .into_par_iter()
+            .partition(|item| {
+                let clean_path = item.path.replace("\\\\?\\", "");
+                std::path::Path::new(&clean_path).is_file()
+            });
+
+        assert_eq!(valid_items.len(), 1, "実在するファイルのみが valid に分類されること");
+        assert_eq!(valid_items[0].path, real_file_str);
+        assert_eq!(missing_items.len(), 2, "消失ファイル2件が missing に分類されること");
+
+        // 2. purge_missing_files_from_cache によるDBクリーンアップ検証
+        let missing_paths: Vec<String> = missing_items.into_iter().map(|i| i.path).collect();
+        let deleted = purge_missing_files_from_cache(&mut conn, &missing_paths).unwrap();
+        assert_eq!(deleted, 2, "2件のレコードが削除されること");
+
+        // cache テーブルの残り件数確認（実在ファイル1件のみ残る）
+        let remaining_cache: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get(0)).unwrap();
+        assert_eq!(remaining_cache, 1, "cache テーブルには実在ファイルのみが残ること");
+
+        // ratings テーブルの残り件数確認（実在ファイル1件のみ残る）
+        let remaining_ratings: usize = conn.query_row("SELECT COUNT(*) FROM ratings", [], |r| r.get(0)).unwrap();
+        assert_eq!(remaining_ratings, 1, "ratings テーブルからも消失ファイルのレーティングが削除されること");
+
+        // クリーンアップ
+        let _ = std::fs::remove_file(&real_file_path);
     }
 }

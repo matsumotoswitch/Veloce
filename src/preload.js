@@ -11,6 +11,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(path: string) => Promise<boolean>} pathExists
  * @property {(path: string) => Promise<void>} loadDirectory
  * @property {(callback: (payload: {path: string, totalCount: number}) => void) => void} onDirectoryLoaded
+ * @property {() => void} onSmartFolderPurged
  * @property {(callback: (payload: {processed: number, total: number}) => void) => void} onMetadataBatchUpdated
  * @property {(sortKey: string, asc: boolean, searchQuery: string) => Promise<number>} setViewParams
  * @property {() => Promise<Object<string, number>>} getAllRatings
@@ -91,6 +92,7 @@ window.veloceAPI = {
    * ディレクトリ読み込み完了時に件数のみを受信する新イベント
    */
   onDirectoryLoaded: (callback) => listen('directory-loaded', (event) => callback(event.payload)),
+  onSmartFolderPurged: (callback) => listen('smart-folder-purged', () => callback()),
   onMetadataBatchUpdated: (callback) => listen('metadata-batch-updated', (event) => callback(event.payload)),
   /**
    * Rust側でソート・検索を実行し、フィルタリング後の件数とパス一覧を返す
