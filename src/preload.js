@@ -19,6 +19,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(offset: number, limit: number) => Promise<Array<import('./renderer-state.js').ImageFile>>} getItems
  * @property {(index: number) => Promise<import('./renderer-state.js').ImageFile|null>} getFileByIndex
  * @property {(updates: any[]) => Promise<void>} updateMetadataInState
+ * @property {(path: string, width: number, height: number) => Promise<void>} updateFileDimensions
  * @property {(file: import('./renderer-state.js').ImageFile) => Promise<number>} notifyFileChanged
  * @property {(path: string) => Promise<number>} notifyFileRemoved
  * @property {(dirPath: string) => Promise<Array<{name: string, path: string}>>} getFolders
@@ -117,6 +118,14 @@ window.veloceAPI = {
    * メタデータの読み込み結果をRust側のSource of Truthに反映する
    */
   updateMetadataInState: (updates) => invoke('update_metadata_in_state', { updates }),
+  /**
+   * サムネイル生成やメタデータ解析で判明した画像の幅・高さをRust側に通知する
+   * @param {string} path - 画像ファイルのパス。
+   * @param {number} width - 画像の幅。
+   * @param {number} height - 画像の高さ。
+   * @returns {Promise<void>}
+   */
+  updateFileDimensions: (path, width, height) => invoke('update_file_dimensions', { path, width, height }),
   /**
    * ファイルウォッチャーから通知されたファイル変更をRust側に通知する
    */

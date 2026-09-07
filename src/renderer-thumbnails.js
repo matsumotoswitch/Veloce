@@ -186,6 +186,9 @@ class ThumbnailWorkerPool {
         const dims = await getImageDimensionsFromBlob(blob);
         let targetWidth = 0;
         let targetHeight = 0;
+        let originalWidth = (dims && dims.width > 0) ? dims.width : 0;
+        let originalHeight = (dims && dims.height > 0) ? dims.height : 0;
+
         if (dims && dims.width > 0 && dims.height > 0) {
           if (dims.width > 384 || dims.height > 384) {
             const ratio = Math.min(384 / dims.width, 384 / dims.height);
@@ -221,6 +224,11 @@ class ThumbnailWorkerPool {
         }
 
         if (sourceElement instanceof Error) throw sourceElement;
+        if (originalWidth === 0 && originalHeight === 0 && sourceElement) {
+          originalWidth = sourceElement.width;
+          originalHeight = sourceElement.height;
+        }
+
         let width = sourceElement.width;
         let height = sourceElement.height;
         if (width > 384 || height > 384) {
@@ -257,7 +265,7 @@ class ThumbnailWorkerPool {
         });
 
         clearTimeout(timeoutId);
-        resolve({ url: blobUrl, base64Promise });
+        resolve({ url: blobUrl, base64Promise, width: originalWidth, height: originalHeight });
       } catch (err) {
         reject(err);
       } finally {
@@ -590,7 +598,7 @@ export class ThumbnailQueueManager {
       // 2. キャッシュがない場合、非同期に生成
       if (!url) {
         const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
-        const { url: blobUrl, base64Promise } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
+        const { url: blobUrl, base64Promise, width, height } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
         
         if (signal.aborted) return;
         if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
@@ -601,6 +609,16 @@ export class ThumbnailQueueManager {
         appState.thumbnailUrls.set(filePath, blobUrl);
         evictThumbnailCache();
         this.updateDOM(filePath, blobUrl);
+
+        if (width > 0 && height > 0) {
+          const uiMgr = window.uiManager || (typeof uiManager !== 'undefined' ? uiManager : null);
+          if (uiMgr && typeof uiMgr.updateFileDimensions === 'function') {
+            uiMgr.updateFileDimensions(filePath, width, height);
+          }
+          if (window.veloceAPI && typeof window.veloceAPI.updateFileDimensions === 'function') {
+            window.veloceAPI.updateFileDimensions(filePath, width, height);
+          }
+        }
 
         // バックグラウンドでBase64変換しRustに保存。
         base64Promise.then(base64Url => {

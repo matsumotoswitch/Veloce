@@ -170,6 +170,9 @@ async function refreshFileList(showToast = false) {
   appState.savedScrollTopList = (typeof appState.savedScrollTopList === 'number' && appState.savedScrollTopList > 0)
     ? appState.savedScrollTopList
     : (isReloadingCurrent && listContainer ? listContainer.scrollTop : 0);
+  if (!isReloadingCurrent && listContainer) {
+    listContainer.scrollLeft = 0;
+  }
 
   // UIとデータの初期化
   appState.totalCount = 0;
@@ -241,6 +244,52 @@ async function refreshTree() {
   uiManager.elements.dirTree.scrollLeft = scrollLeft;
 }
 
+/**
+ * フォルダツリー要素を安全にスクロール表示する
+ * ネイティブの scrollIntoView() による祖先要素（body/window全体）の不正なスクロール暴走を防ぐため、
+ * 親コンテナ（#directories-section）の scrollTop のみを直接計算して操作する
+ * @param {HTMLElement} itemDiv - 表示対象のツリーアイテム要素
+ * @param {'center'|'nearest'} [block='center'] - スクロール位置
+ */
+function scrollTreeItemIntoView(itemDiv, block = 'center') {
+  if (!itemDiv) return;
+  const container = itemDiv.closest('#directories-section') || itemDiv.closest('#dir-tree');
+  if (!container) return;
+
+  const itemRect = itemDiv.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+
+  if (block === 'center') {
+    const targetScrollTop = container.scrollTop + (itemRect.top - containerRect.top) - (containerRect.height / 2) + (itemRect.height / 2);
+    container.scrollTop = Math.max(0, targetScrollTop);
+  } else {
+    if (itemRect.top < containerRect.top) {
+      container.scrollTop = Math.max(0, container.scrollTop - (containerRect.top - itemRect.top));
+    } else if (itemRect.bottom > containerRect.bottom) {
+      container.scrollTop = container.scrollTop + (itemRect.bottom - containerRect.bottom);
+    }
+  }
+}
+
+/**
+ * タブ要素を安全に横スクロール表示する
+ * @param {HTMLElement} tabEl - 表示対象のタブ要素
+ */
+function scrollTabIntoView(tabEl) {
+  if (!tabEl) return;
+  const container = document.getElementById('tab-container');
+  if (!container) return;
+
+  const tabRect = tabEl.getBoundingClientRect();
+  const contRect = container.getBoundingClientRect();
+
+  if (tabRect.left < contRect.left) {
+    container.scrollLeft = Math.max(0, container.scrollLeft - (contRect.left - tabRect.left));
+  } else if (tabRect.right > contRect.right) {
+    container.scrollLeft = container.scrollLeft + (tabRect.right - contRect.right);
+  }
+}
+
 async function expandTreeToPath(targetPath, disableScroll = false, rootElement = document) {
   if (!targetPath || targetPath === 'PC') return;
 
@@ -276,7 +325,7 @@ async function expandTreeToPath(targetPath, disableScroll = false, rootElement =
         if (activeItem) activeItem.classList.remove('selected');
         itemDiv.classList.add('selected');
         if (!disableScroll) {
-          itemDiv.scrollIntoView({ block: 'center', behavior: 'instant' });
+          scrollTreeItemIntoView(itemDiv, 'center');
         }
       } else {
         if (itemDiv.expandNode) await itemDiv.expandNode();
@@ -1749,6 +1798,17 @@ async function renderMetadata(file) {
   try {
     const rawMeta = await window.veloceAPI.parseMetadata(file.path);
     const meta = rawMeta || {};
+
+    if (meta.width > 0 && meta.height > 0 && (!file.width || !file.height)) {
+      file.width = meta.width;
+      file.height = meta.height;
+      if (uiManager && typeof uiManager.updateFileDimensions === 'function') {
+        uiManager.updateFileDimensions(file.path, meta.width, meta.height);
+      }
+      if (window.veloceAPI && typeof window.veloceAPI.updateFileDimensions === 'function') {
+        window.veloceAPI.updateFileDimensions(file.path, meta.width, meta.height);
+      }
+    }
 
 
     const d = extractMetadataFields(file, meta);
@@ -3965,7 +4025,7 @@ export const globalKeydownHandler = async (e) => {
         if (container) {
           const tabEls = container.querySelectorAll('.tab-item:not(.new-tab-btn)');
           if (tabEls[nextIndex]) {
-            tabEls[nextIndex].scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
+            scrollTabIntoView(tabEls[nextIndex]);
           }
         }
       }
@@ -4387,7 +4447,7 @@ async function handleTreeNavigation(key) {
 
   const selectItem = async (item, autoExpand = false) => {
     if (item) {
-      item.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+      scrollTreeItemIntoView(item, 'nearest');
     }
 
     appState.selection.clear();
@@ -4448,6 +4508,21 @@ async function handleTreeNavigation(key) {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+  // ウィンドウ全体の不正なスクロールを絶対防止するガード
+  const resetWindowScroll = () => {
+    if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+    if (document.documentElement.scrollTop !== 0 || document.documentElement.scrollLeft !== 0) {
+      document.documentElement.scrollTop = 0;
+      document.documentElement.scrollLeft = 0;
+    }
+    if (document.body.scrollTop !== 0 || document.body.scrollLeft !== 0) {
+      document.body.scrollTop = 0;
+      document.body.scrollLeft = 0;
+    }
+  };
+  resetWindowScroll();
+  window.addEventListener('scroll', resetWindowScroll, { passive: false });
+
   try {
     if (window.veloceAPI && window.veloceAPI.getVideoServerPort) {
       window.videoServerPort = await window.veloceAPI.getVideoServerPort();
@@ -4872,7 +4947,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (container) {
           const tabEls = container.querySelectorAll('.tab-item:not(.new-tab-btn)');
           if (tabEls[index]) {
-            tabEls[index].scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
+            scrollTabIntoView(tabEls[index]);
           }
         }
       });
@@ -5781,6 +5856,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       const newTotal = await window.veloceAPI.notifyFileChanged(newFile);
       if (typeof newTotal === 'number') appState.totalCount = newTotal;
+      if (newFile.width > 0 && newFile.height > 0 && window.uiManager && typeof window.uiManager.updateFileDimensions === 'function') {
+        window.uiManager.updateFileDimensions(newFile.path, newFile.width, newFile.height);
+      }
       scheduleRefresh();
       if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
         window.debouncedUpdateSmartFolderCounts();

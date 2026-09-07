@@ -1662,15 +1662,59 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
     }
 }
 
+/// サムネイル生成やメタデータ解析で判明した画像の幅・高さをRust側のSource of Truthに反映する
+#[tauri::command]
+fn update_file_dimensions(
+    state: tauri::State<'_, AppState>,
+    path: String,
+    width: u32,
+    height: u32,
+) {
+    if width == 0 && height == 0 {
+        return;
+    }
+
+    if let Ok(mut all_files) = state.all_files.lock() {
+        if let Some(f_arc) = all_files.iter_mut().find(|f| f.path == path) {
+            let file = std::sync::Arc::make_mut(f_arc);
+            file.width = width;
+            file.height = height;
+        }
+    }
+    if let Ok(mut filtered) = state.filtered_files.lock() {
+        if let Some(f_arc) = filtered.iter_mut().find(|f| f.path == path) {
+            let file = std::sync::Arc::make_mut(f_arc);
+            file.width = width;
+            file.height = height;
+        }
+    }
+
+    let db_conn = state.db_conn.clone();
+    let path_clone = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(conn) = db_conn.get() {
+            let _ = conn.execute(
+                "UPDATE cache SET width = ?, height = ? WHERE path = ?",
+                rusqlite::params![width, height, path_clone],
+            );
+        }
+    });
+}
+
 /// ファイルウォッチャーから通知されたファイル変更をRust側のSource of Truthに反映する
 #[tauri::command]
 fn notify_file_changed(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    file: ImageFile,
+    mut file: ImageFile,
 ) -> usize {
     if let Ok(mut all_files) = state.all_files.lock() {
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
+            // 既存の幅・高さが取得済みで、通知された値が 0 の場合は既存の寸法を維持する
+            if file.width == 0 && file.height == 0 && (existing.width > 0 || existing.height > 0) {
+                file.width = existing.width;
+                file.height = existing.height;
+            }
             *existing = std::sync::Arc::new(file.clone());
         } else {
             all_files.push(std::sync::Arc::new(file));
@@ -2325,6 +2369,18 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
 #[allow(dead_code)]
 fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
     parse_png_chunks_with_dimensions(path).0
+}
+
+/// 画像・動画ファイルから軽量ヘッダー解析によりミリ秒未満で寸法(width, height)を取得する
+fn get_fast_dimensions_for_file(path: &str, ext_lower: &str) -> (u32, u32) {
+    if ext_lower == "png" {
+        let (_, w, h) = parse_png_chunks_with_dimensions(path);
+        (w, h)
+    } else if ext_lower == "mp4" {
+        parse_mp4_dimensions(path).unwrap_or((0, 0))
+    } else {
+        image::image_dimensions(path).unwrap_or((0, 0))
+    }
 }
 
 fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>> {
@@ -4121,7 +4177,7 @@ async fn audit_cache(
         let _ = conn.execute("VACUUM", []).map_err(|e| e.to_string())?;
         let _ = conn.execute("ANALYZE", []).map_err(|e| e.to_string())?;
         // VACUUM で WAL に書き出された全ページを即座にメインDBへ反映し、-wal ファイルサイズを 0 バイトに切り詰める
-        let _ = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);", []).map_err(|e| e.to_string())?;
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").map_err(|e| e.to_string())?;
         println!("[Veloce: PERF] audit_cache completed in {}ms", t_audit_start.elapsed().as_millis());
         Ok(())
     })
@@ -4893,6 +4949,12 @@ fn main() {
                                             if let Some(&(old_size, old_mtime)) =
                                                 known_files.get(&path_str)
                                             {
+                                                let (initial_width, initial_height) = if size > 0 {
+                                                    get_fast_dimensions_for_file(&path_str, &ext_lower)
+                                                } else {
+                                                    (0, 0)
+                                                };
+
                                                 if old_size != size || old_mtime != mtime {
                                                     let ctime = meta
                                                         .created()
@@ -4916,8 +4978,8 @@ fn main() {
                                                         ctime,
                                                         has_thumbnail_cache: false,
                                                         has_metadata_cache: false,
-                                                        width: 0,
-                                                        height: 0,
+                                                        width: initial_width,
+                                                        height: initial_height,
                                                         prompt: String::new(),
                                                         negative_prompt: String::new(),
                                                         source: String::new(),
@@ -4929,6 +4991,11 @@ fn main() {
                                                         .emit_all("file-changed", img_file);
                                                 }
                                             } else {
+                                                let (initial_width, initial_height) = if size > 0 {
+                                                    get_fast_dimensions_for_file(&path_str, &ext_lower)
+                                                } else {
+                                                    (0, 0)
+                                                };
                                                 let ctime = meta
                                                     .created()
                                                     .ok()
@@ -4950,8 +5017,8 @@ fn main() {
                                                     ctime,
                                                     has_thumbnail_cache: false,
                                                     has_metadata_cache: false,
-                                                    width: 0,
-                                                    height: 0,
+                                                    width: initial_width,
+                                                    height: initial_height,
                                                     prompt: String::new(),
                                                     negative_prompt: String::new(),
                                                     source: String::new(),
@@ -5042,7 +5109,7 @@ fn main() {
                         // アプリ終了時にWALファイルを切り詰める
                         let state = event.window().state::<AppState>();
                         if let Ok(conn) = state.db_conn.get() {
-                            let _ = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);", []);
+                            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
                         }
                         std::process::exit(0);
                     } else if label == "viewer_pool_0" {
@@ -5084,6 +5151,7 @@ fn main() {
             get_file_by_index,
             update_metadata_in_state,
             get_video_server_port,
+            update_file_dimensions,
             notify_file_changed,
             update_smart_folders,
             notify_file_removed,
@@ -5115,7 +5183,6 @@ fn main() {
             get_files_by_indices,
             get_all_ratings,
             migrate_ratings,
-            get_smart_folder_counts,
         ])
         .run(context)
         .expect("error while running tauri application");
@@ -6128,7 +6195,7 @@ mod viewer_tests {
         assert!(analyze_res.is_ok(), "ANALYZE failed");
 
         // VACUUM 後の wal_checkpoint(TRUNCATE) により WAL が正常に切り詰められることを検証
-        let checkpoint_res = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);", []);
+        let checkpoint_res = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         assert!(checkpoint_res.is_ok(), "PRAGMA wal_checkpoint(TRUNCATE) failed");
 
         // -wal ファイルのサイズが 0 バイトであることを確認
@@ -6799,5 +6866,87 @@ mod viewer_tests {
         let digest3 = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", normalized_path, mtime + 1).as_bytes());
         let hash_key3 = format!("{:016x}", digest3);
         assert_ne!(hash_key1, hash_key3, "更新日時が変化した場合は異なるハッシュキーになるべき");
+    }
+
+    /// 新規作成ファイルの幅・高さ動的更新および notify_file_changed における寸法保持ロジックのテスト
+    #[test]
+    fn test_update_file_dimensions_and_preservation_logic() {
+        use super::ImageFile;
+        use std::sync::Arc;
+
+        let initial_file = ImageFile {
+            name: "test.png".to_string(),
+            ext: ".png".to_string(),
+            path: "C:\\images\\test.png".to_string(),
+            size: 1024,
+            mtime: 1000,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 0,
+            height: 0,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+        };
+
+        let mut all_files = vec![Arc::new(initial_file.clone())];
+        let mut filtered_files = vec![Arc::new(initial_file)];
+
+        // 1. 寸法更新ロジックの検証
+        let target_path = "C:\\images\\test.png";
+        let new_w = 1024;
+        let new_h = 1536;
+
+        if let Some(f_arc) = all_files.iter_mut().find(|f| f.path == target_path) {
+            let file = Arc::make_mut(f_arc);
+            file.width = new_w;
+            file.height = new_h;
+        }
+        if let Some(f_arc) = filtered_files.iter_mut().find(|f| f.path == target_path) {
+            let file = Arc::make_mut(f_arc);
+            file.width = new_w;
+            file.height = new_h;
+        }
+
+        assert_eq!(all_files[0].width, 1024);
+        assert_eq!(all_files[0].height, 1536);
+        assert_eq!(filtered_files[0].width, 1024);
+        assert_eq!(filtered_files[0].height, 1536);
+
+        // 2. notify_file_changed で幅・高さが0のイベントが届いた際の寸法保持ロジックの検証
+        let mut incoming_file = ImageFile {
+            name: "test.png".to_string(),
+            ext: ".png".to_string(),
+            path: "C:\\images\\test.png".to_string(),
+            size: 2048,
+            mtime: 2000,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 0,
+            height: 0,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+        };
+
+        if let Some(existing) = all_files.iter_mut().find(|f| f.path == incoming_file.path) {
+            if incoming_file.width == 0 && incoming_file.height == 0 && (existing.width > 0 || existing.height > 0) {
+                incoming_file.width = existing.width;
+                incoming_file.height = existing.height;
+            }
+            *existing = Arc::new(incoming_file);
+        }
+
+        assert_eq!(all_files[0].width, 1024, "既存の幅が保持されること");
+        assert_eq!(all_files[0].height, 1536, "既存の高さが保持されること");
+        assert_eq!(all_files[0].size, 2048, "サイズ等の更新内容は反映されること");
     }
 }

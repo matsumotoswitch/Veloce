@@ -146,12 +146,17 @@ textarea {
   color: var(--text-light);
 }
 
-body {
+html, body {
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
+  overflow: hidden;
+}
+
+body {
   background-color: var(--bg-color);
   /* アプリ全体の背景色 */
-  overflow: hidden;
   /* --- ネイティブアプリ化: UIのテキスト選択をデフォルトで無効化 --- */
   user-select: none;
   -webkit-user-select: none;
@@ -897,7 +902,7 @@ input:-webkit-autofill:focus {
   overflow-y: auto;
   overflow-anchor: none;
   scrollbar-gutter: stable;
-  overflow-x: hidden;
+  overflow-x: auto;
   min-height: 0;
   background-color: var(--bg-color);
   transition: flex-basis 0.25s var(--transition-smooth);
@@ -940,6 +945,10 @@ table#file-table {
   text-align: left;
   table-layout: fixed;
   font-size: var(--font-size-sm);
+}
+
+#file-table th:first-child {
+  min-width: 140px;
 }
 
 #file-table th:nth-child(2) {

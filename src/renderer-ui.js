@@ -1827,6 +1827,46 @@ class UIManager {
     if (typeof window.processNextTask === 'function') window.processNextTask();
     });
   }
+
+  /**
+   * サムネイル生成やメタデータ取得で判明した画像の幅・高さをファイル一覧テーブルに即時反映する
+   * O(1) DOM Pool 更新により、画面全体の再レンダリングやReflowを回避する
+   * @param {string} filePath - 対象ファイルのパス
+   * @param {number} width - 画像の幅
+   * @param {number} height - 画像の高さ
+   */
+  updateFileDimensions(filePath, width, height) {
+    if (!width || !height) return;
+
+    // 1. appState.initialChunk や現在の選択中アイテムなど、JS側のメモリキャッシュを更新
+    const state = (typeof window !== 'undefined' && window.appState) ? window.appState : appState;
+    if (state && state.initialChunk) {
+      const cached = state.initialChunk.find(f => f.path === filePath);
+      if (cached) {
+        cached.width = width;
+        cached.height = height;
+      }
+    }
+
+    // 2. ファイル一覧テーブル（VirtualList）の該当行を O(1) で即時同期
+    if (this._listDomByPath) {
+      const tr = this._listDomByPath.get(filePath);
+      if (tr && tr.children && tr.children.length >= 5) {
+        const tds = tr.children;
+        const newWidth = width.toLocaleString();
+        if (tds[2].textContent !== newWidth) tds[2].textContent = newWidth;
+
+        const newHeight = height.toLocaleString();
+        if (tds[3].textContent !== newHeight) tds[3].textContent = newHeight;
+
+        const d = gcd(width, height);
+        const rw = width / d;
+        const rh = height / d;
+        const ratioStr = (rw > 100 || rh > 100) ? `${(width / height).toFixed(2)}:1` : `${rw}:${rh}`;
+        if (tds[4].textContent !== ratioStr) tds[4].textContent = ratioStr;
+      }
+    }
+  }
 }
 
 export { UIManager };
