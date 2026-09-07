@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="border-overlay" style="display: none;"></div>
+  <div id="border-overlay"></div>
   <div data-tauri-drag-region class="titlebar">
     <div id="tab-container">
       <div id="new-tab-btn" class="new-tab-btn">
@@ -72,7 +72,7 @@
   <!-- ブックマークバー (お気に入り) -->
   <div id="bookmark-bar">
     <div id="bookmark-list"></div>
-    <button id="bookmark-overflow-btn" class="icon-btn" title="隠れたお気に入り" style="display: none;">
+    <button id="bookmark-overflow-btn" class="icon-btn" title="隠れたお気に入り">
       <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
         <path d="m13 17 5-5-5-5"/>
         <path d="m6 17 5-5-5-5"/>
@@ -188,7 +188,7 @@
   <!-- 右ペイン: インスペクター -->
   <div id="right-pane" class="pane-no-border-left">
     <div id="inspector-header" class="pane-header inspector-header-layout">
-      <div id="inspector-header-path" class="open-folder-btn" style="display: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; direction: rtl; text-align: left;"></div>
+      <div id="inspector-header-path" class="open-folder-btn"></div>
     </div>
     <div id="inspector-section" class="inspector-section-bordered" tabindex="-1">
       <div id="inspector-content" class="inspector-data">

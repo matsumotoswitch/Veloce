@@ -1059,7 +1059,7 @@ class UIManager {
       const titleClass = hasDiff ? 'has-diff' : '';
 
       const renderTags = (tags, otherSet, mode) => {
-        if (tags.length === 0 || tags[0] === '-') return '<span style="opacity:0.3">なし</span>';
+        if (tags.length === 0 || tags[0] === '-') return '<span class="diff-tag-empty">なし</span>';
         return tags.map(t => {
           let className = 'common';
           if (mode === 'left' && !otherSet.has(t)) className = 'removed';

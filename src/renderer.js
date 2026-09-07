@@ -1624,8 +1624,8 @@ function showHistoryMenu(event, direction, btnElement) {
     const { displayName, iconHtml, iconClass } = resolvePathDisplay(fav, item.path);
 
     menuItem.innerHTML = `
-      <span class="menu-icon ${iconClass}" style="display: inline-flex; align-items: center;">${iconHtml}</span>
-      <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${displayName}</span>
+      <span class="menu-icon ${iconClass} menu-item-icon">${iconHtml}</span>
+      <span class="menu-item-text">${displayName}</span>
     `;
     menuItem.title = item.path; // ホバーでフルパス表示
 
@@ -1850,7 +1850,7 @@ async function renderMetadata(file) {
 
       if (!secEl.copyBtn) {
         secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
-        secEl.copyBtn = secEl.copyWrapper.querySelector('.diff-copy-btn');
+        secEl.copyBtn = secEl.copyWrapper.firstElementChild;
       } else {
         secEl.copyBtn.setAttribute('data-copy-text', section.value);
       }
@@ -2034,7 +2034,7 @@ async function renderMetadata(file) {
     }
   } catch (error) {
     if (container) {
-      container.innerHTML = `<div style="color:var(--danger-red); padding:10px; font-size:0.9em; border:1px solid var(--danger-red);">描画エラー: ${error.message}</div>`;
+      container.innerHTML = `<div class="render-error-box">描画エラー: ${error.message}</div>`;
     }
   }
 }
@@ -2333,14 +2333,14 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
       { value: 'contains', label: 'を含む' },
       { value: 'not_contains', label: 'を含まない' }
     ]);
-    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="キーワード">`;
+    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input flex-1" placeholder="キーワード">`;
     valueContainer.querySelector('input').value = valVal;
   } else if (type === 'source') {
     setOpCustomSelect([
       { value: '==', label: 'と一致' },
       { value: '!=', label: 'と一致しない' }
     ]);
-    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input" style="flex:1" placeholder="生成元">`;
+    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input flex-1" placeholder="生成元">`;
     valueContainer.querySelector('input').value = valVal;
   } else if (type === 'width' || type === 'height') {
     setOpCustomSelect([
@@ -2348,7 +2348,7 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
       { value: '==', label: 'ちょうど' },
       { value: '>=', label: '以上' }
     ]);
-    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0">`;
+    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input flex-1" min="0">`;
     valueContainer.querySelector('input').value = valVal || 0;
   } else if (type === 'rating') {
     setOpCustomSelect([
@@ -2356,7 +2356,7 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
       { value: '<=', label: '以下' },
       { value: '==', label: 'と一致' }
     ]);
-    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input" style="flex:1" min="0" max="5">`;
+    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input flex-1" min="0" max="5">`;
     valueContainer.querySelector('input').value = valVal || 0;
   } else if (type === 'aspect_ratio') {
     setOpCustomSelect([
@@ -2364,15 +2364,15 @@ function updateSmartFolderRowUI(row, type, initialCond = null) {
       { value: 'landscape', label: '横長' },
       { value: 'square', label: '正方形' }
     ]);
-    valueContainer.innerHTML = `<div style="flex:1"></div><input type="hidden" class="cond-value-input" value="">`;
+    valueContainer.innerHTML = `<div class="flex-1"></div><input type="hidden" class="cond-value-input" value="">`;
   } else if (type === 'path') {
     setOpCustomSelect([
       { value: 'in_folder', label: '直下のみ' },
       { value: 'under_folder', label: 'サブフォルダ含む' }
     ]);
     valueContainer.innerHTML = `
-      <input type="text" class="cond-value-input dialog-input" style="flex:1; height: 32px;">
-      <button type="button" class="btn-browse-path dialog-btn" style="height: 32px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center;">参照...</button>
+      <input type="text" class="cond-value-input dialog-input cond-path-input flex-1">
+      <button type="button" class="btn-browse-path dialog-btn">参照...</button>
     `;
     valueContainer.querySelector('input').value = valVal;
   }
