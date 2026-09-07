@@ -1161,7 +1161,7 @@ export async function selectImage(index, event = null) {
   const listContainer = document.getElementById('center-top');
   if (listContainer) {
     const rowHeight = 28;
-    const theadHeight = document.querySelector('#file-table thead')?.getBoundingClientRect().height || 28;
+    const theadHeight = 32;
     const targetY = theadHeight + (index * rowHeight);
 
     // ヘッダーが position: sticky; top: 0; であるため、表示領域の上端は scrollTop + theadHeight
@@ -1535,8 +1535,6 @@ function showHistoryMenu(event, direction, btnElement) {
   if (!menu) {
     menu = document.createElement('div');
     menu.id = 'history-menu';
-    menu.style.position = 'fixed';
-    menu.style.zIndex = '10001';
     document.body.appendChild(menu);
   }
 
@@ -1577,7 +1575,7 @@ function showHistoryMenu(event, direction, btnElement) {
       e.stopPropagation();
       const offset = item.index - tab.historyIndex; // 目的のインデックスまでの差分を計算
       navigateHistory(offset);
-      menu.style.display = 'none';
+      menu.classList.remove('show');
     });
 
     menu.appendChild(menuItem);
@@ -1587,7 +1585,7 @@ function showHistoryMenu(event, direction, btnElement) {
   const btnRect = btnElement.getBoundingClientRect();
   menu.style.left = `${btnRect.left}px`;
   menu.style.top = `${btnRect.bottom + 4}px`;
-  menu.style.display = 'block';
+  menu.classList.add('show');
 }
 
 // ============================================================================
@@ -3022,7 +3020,7 @@ const closeAllMenus = (e) => {
   const historyMenu = document.getElementById('history-menu');
   if (historyMenu) historyMenu.classList.remove('show');
   const overflowMenu = document.getElementById('bookmark-overflow-menu');
-  if (overflowMenu) overflowMenu.style.display = 'none';
+  if (overflowMenu) overflowMenu.classList.remove('show');
 
   const tabListBtn = document.getElementById('titlebar-tab-list');
   if (tabListBtn) tabListBtn.classList.remove('open');
@@ -4069,11 +4067,17 @@ export const globalKeydownHandler = async (e) => {
       return;
     }
     const historyMenu = document.getElementById('history-menu');
-    if (contextMenu.classList.contains('show') || tabListMenu.classList.contains('show') || (historyMenu && historyMenu.classList.contains('show'))) {
+    const overflowMenu = document.getElementById('bookmark-overflow-menu');
+    if (contextMenu.classList.contains('show') || tabListMenu.classList.contains('show') || (historyMenu && historyMenu.classList.contains('show')) || (overflowMenu && overflowMenu.classList.contains('show'))) {
       e.preventDefault();
       contextMenu.classList.remove('show');
       tabListMenu.classList.remove('show');
       if (historyMenu) historyMenu.classList.remove('show');
+      if (overflowMenu) overflowMenu.classList.remove('show');
+      const overflowBtn = document.getElementById('bookmark-overflow-btn');
+      if (overflowBtn) overflowBtn.classList.remove('open');
+      const tabListBtn = document.getElementById('titlebar-tab-list');
+      if (tabListBtn) tabListBtn.classList.remove('open');
       return;
     }
   }
@@ -4440,9 +4444,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (overflowBtn) {
     overflowBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (bookmarkOverflowMenu && (bookmarkOverflowMenu.classList.contains('show') || bookmarkOverflowMenu.style.display !== 'none')) {
+      if (bookmarkOverflowMenu && bookmarkOverflowMenu.classList.contains('show')) {
         bookmarkOverflowMenu.classList.remove('show');
-        bookmarkOverflowMenu.style.display = 'none';
         overflowBtn.classList.remove('open');
         return;
       }
@@ -4464,10 +4467,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.body.appendChild(bookmarkOverflowMenu);
       }
       bookmarkOverflowMenu.innerHTML = '';
-      bookmarkOverflowMenu.style.display = 'block';
-      bookmarkOverflowMenu.classList.add('show');
-      overflowBtn.classList.add('open');
-      bookmarkOverflowMenu.style.zIndex = '10001';
 
       hiddenItems.forEach(domItem => {
         const path = domItem.dataset.path;
@@ -4520,15 +4519,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       bookmarkOverflowMenu.style.top = `${rect.bottom + 4}px`;
       bookmarkOverflowMenu.style.left = 'auto';
       bookmarkOverflowMenu.style.right = `${window.innerWidth - rect.right}px`;
-      bookmarkOverflowMenu.style.transform = 'scale(0.95)';
-      bookmarkOverflowMenu.style.opacity = '0';
-
-      // animation
-      requestAnimationFrame(() => {
-        bookmarkOverflowMenu.style.transition = 'opacity 0.15s ease, transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1)';
-        bookmarkOverflowMenu.style.opacity = '1';
-        bookmarkOverflowMenu.style.transform = 'scale(1)';
-      });
+      bookmarkOverflowMenu.classList.add('show');
+      overflowBtn.classList.add('open');
     });
   }
 
@@ -5260,12 +5252,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       }, 0);
 
       // ドラッグ中の元アイテムを半透明にする
-      setTimeout(() => { itemDiv.style.opacity = '0.5'; }, 0);
+      setTimeout(() => { itemDiv.classList.add('is-dragging'); }, 0);
     });
 
     favListElement.addEventListener('dragend', (e) => {
       const itemDiv = e.target.closest('.bookmark-item');
-      if (itemDiv) itemDiv.style.opacity = '1';
+      if (itemDiv) itemDiv.classList.remove('is-dragging');
       draggedFavoriteId = null;
       // 全てのドロップインジケータ（線）をクリア
       favListElement.querySelectorAll('.bookmark-item').forEach(item => {

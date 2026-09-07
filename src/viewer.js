@@ -135,10 +135,6 @@ function initUnsharpFilter() {
   const svgNS = "http://www.w3.org/2000/svg";
   const svgElement = document.createElementNS(svgNS, "svg");
   svgElement.setAttribute("class", "unsharp-svg");
-  svgElement.style.position = 'absolute';
-  svgElement.style.width = '0';
-  svgElement.style.height = '0';
-  svgElement.style.pointerEvents = 'none';
 
   const unsharpFilter = document.createElementNS(svgNS, "filter");
   unsharpFilter.id = "unsharp-filter";
@@ -1455,15 +1451,9 @@ function updateInfoContainerVisibility() {
   if (hasScale || hasRating) {
     infoContainer.style.display = 'flex';
     controls.classList.add('showing-scale');
-    // CSS の代わり
-    if (!controls.classList.contains('has-gradient')) {
-      infoContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
-      infoContainer.style.borderBottomLeftRadius = 'var(--radius-sm)';
-    }
   } else {
     infoContainer.style.display = 'none';
     controls.classList.remove('showing-scale');
-    infoContainer.style.backgroundColor = '';
   }
 }
 

@@ -1841,6 +1841,16 @@ img.thumbnail-img.loading {
   margin-bottom: 4px;
   font-size: var(--font-size-sm);
   transition: color 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+
+.diff-section h3 > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .diff-section h3.has-diff {
@@ -2427,6 +2437,11 @@ th[data-sort] svg path {
               border-width 0.15s ease-out;
 }
 
+.tab-item.is-dragging,
+.bookmark-item.is-dragging {
+  opacity: 0.5 !important;
+}
+
 /* タブ追加ボタン専用の独立したスタイル（通常時は背景完全透明） */
 .titlebar #new-tab-btn {
   display: flex;
@@ -2754,6 +2769,18 @@ html.viewer-html,
   justify-content: center;
   padding: 0 12px;
   box-sizing: border-box;
+  pointer-events: none;
+}
+
+.viewer-body #window-controls:not(.has-gradient) .window-info-container {
+  background-color: rgba(0, 0, 0, 0.4);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.unsharp-svg {
+  position: absolute;
+  width: 0;
+  height: 0;
   pointer-events: none;
 }
 
@@ -3101,7 +3128,7 @@ html.viewer-html,
 
 #help-overlay {
   z-index: 9999;
-  color: #fff;
+  color: var(--text-light);
 }
 
 #license-overlay {
@@ -3128,8 +3155,8 @@ html.viewer-html,
 }
 
 .license-modal-content {
-  background-color: var(--panel-bg);
-  border: 1px solid #0d1315;
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
   border-radius: var(--radius-lg);
   padding: 24px;
   width: 85%;
@@ -3169,7 +3196,7 @@ html.viewer-html,
 .license-link-btn:hover {
   background-color: rgba(var(--accent-rgb), 0.15);
   border-color: var(--accent-color);
-  color: #fff;
+  color: var(--text-light);
 }
 
 #license-text {

@@ -185,5 +185,57 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(rendererTabsJs).toContain("targetTabEl.classList.add('tab-collapsing')");
     expect(rendererTabsJs).not.toContain("targetTabEl.style.minWidth = '0'");
   });
+
+  it('should unify license modal colors with modal tokens and avoid #0d1315 or panel-bg', () => {
+    expect(cssContent).toMatch(/\.license-modal-content\s*\{[^}]*background-color:\s*var\(--modal-bg\);/);
+    expect(cssContent).toMatch(/\.license-modal-content\s*\{[^}]*border:\s*1px solid var\(--modal-border\);/);
+    expect(cssContent).not.toContain('#0d1315');
+  });
+
+  it('should use var(--text-light) in help-overlay and license-link-btn:hover instead of #fff', () => {
+    expect(cssContent).toMatch(/#help-overlay\s*\{[^}]*color:\s*var\(--text-light\);/);
+    expect(cssContent).toMatch(/\.license-link-btn:hover\s*\{[^}]*color:\s*var\(--text-light\);/);
+    expect(cssContent).not.toContain('color: #fff;');
+  });
+
+  it('should consolidate diff section headers in style.css and eliminate inline styles in renderer-ui.js', () => {
+    expect(cssContent).toMatch(/\.diff-section h3\s*\{[^}]*display:\s*flex;/);
+    expect(cssContent).toMatch(/\.diff-section h3 > span\s*\{[^}]*display:\s*flex;/);
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    expect(rendererUiJs).not.toContain('style="display: flex; justify-content: space-between;');
+  });
+
+  it('should define .is-dragging in style.css and avoid inline opacity assignments in renderer.js and renderer-ui.js', () => {
+    expect(cssContent).toMatch(/\.tab-item\.is-dragging,\s*\.bookmark-item\.is-dragging\s*\{[^}]*opacity:\s*0\.5/);
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    expect(rendererJs).not.toContain("itemDiv.style.opacity = '0.5'");
+    expect(rendererUiJs).not.toContain("tabEl.style.opacity = '0.5'");
+  });
+
+  it('should define unsharp-svg and viewer info-container gradient styles in style.css and eliminate inline styles in viewer.js', () => {
+    expect(cssContent).toMatch(/\.unsharp-svg\s*\{[^}]*position:\s*absolute;/);
+    expect(cssContent).toMatch(/\.viewer-body #window-controls:not\(\.has-gradient\)\s+\.window-info-container\s*\{[^}]*background-color:\s*rgba\(0,\s*0,\s*0,\s*0\.4\);/);
+    const viewerJs = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
+    expect(viewerJs).not.toContain("svgElement.style.position = 'absolute'");
+    expect(viewerJs).not.toContain("infoContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.4)'");
+  });
+
+  it('should eliminate forced reflow querySelector for table thead in scrollToIndex', () => {
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    expect(rendererJs).not.toContain("document.querySelector('#file-table thead')?.getBoundingClientRect()");
+    expect(rendererJs).toContain("const theadHeight = 32;");
+  });
+
+  it('should unify bookmark-overflow-menu and history-menu using show class instead of inline display/animation', () => {
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    expect(rendererJs).not.toContain("bookmarkOverflowMenu.style.display = 'block'");
+    expect(rendererJs).not.toContain("bookmarkOverflowMenu.style.transition =");
+    expect(rendererJs).not.toContain("overflowMenu.style.display = 'none'");
+    expect(rendererJs).toContain("bookmarkOverflowMenu.classList.add('show')");
+    expect(rendererJs).toContain("bookmarkOverflowMenu.classList.remove('show')");
+    expect(rendererJs).toContain("overflowMenu.classList.remove('show')");
+  });
 });
+
 

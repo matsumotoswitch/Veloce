@@ -431,10 +431,10 @@ class UIManager {
         tabEl.addEventListener('dragstart', (e) => {
           e.dataTransfer.effectAllowed = 'move';
           e.dataTransfer.setData('application/json-tab', tabEl.dataset.index);
-          setTimeout(() => { tabEl.style.opacity = '0.5'; }, 0); 
+          setTimeout(() => { tabEl.classList.add('is-dragging'); }, 0); 
         });
         tabEl.addEventListener('dragend', (e) => {
-          tabEl.style.opacity = '1';
+          tabEl.classList.remove('is-dragging');
           const container = document.getElementById('tab-container');
           if (container) {
             container.querySelectorAll('.tab-item').forEach(item => item.classList.remove('drag-over-left', 'drag-over-right'));
@@ -1096,8 +1096,8 @@ class UIManager {
         <div class="diff-columns">
           <div class="diff-column">
             <div class="diff-section">
-              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center; user-select: none;">
-                <span style="display: flex; align-items: center; gap: 8px;">
+              <h3 class="${titleClass}">
+                <span>
                   <span>${title}</span>
                   ${sub1Html}
                 </span>
@@ -1108,8 +1108,8 @@ class UIManager {
           </div>
           <div class="diff-column">
             <div class="diff-section">
-              <h3 class="${titleClass}" style="display: flex; justify-content: space-between; align-items: center; user-select: none;">
-                <span style="display: flex; align-items: center; gap: 8px;">
+              <h3 class="${titleClass}">
+                <span>
                   <span>${title}</span>
                   ${sub2Html}
                 </span>
