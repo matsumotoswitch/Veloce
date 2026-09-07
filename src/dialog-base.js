@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 共通ダイアログの DOM シェルを生成します。
  * @returns {{ overlay: HTMLDivElement, dialog: HTMLDivElement, cleanup: () => void, bindEscape: (resolve: Function, value: *) => void }}
  */
@@ -36,7 +36,16 @@ export function createDialogShell() {
     document.addEventListener('keydown', keydownHandler);
   };
 
-  return { overlay, dialog, cleanup, bindEscape };
+  const bindOverlayClick = (resolve, value) => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        cleanup();
+        resolve(value);
+      }
+    });
+  };
+
+  return { overlay, dialog, cleanup, bindEscape, bindOverlayClick };
 }
 
 /**
@@ -92,7 +101,7 @@ export function createDialogMessage(message, options = {}) {
  */
 export function showAppDialog(config) {
   return new Promise((resolve) => {
-    const { overlay, dialog, cleanup, bindEscape } = createDialogShell();
+    const { overlay, dialog, cleanup, bindEscape, bindOverlayClick } = createDialogShell();
 
     if (config.messageHtml) {
       dialog.appendChild(createDialogMessage(config.messageHtml, { html: true, className: config.messageClassName }));
@@ -111,6 +120,7 @@ export function showAppDialog(config) {
     dialog.appendChild(buttonsDiv);
 
     bindEscape(resolve, config.escapeValue);
+    bindOverlayClick(resolve, config.escapeValue);
     bind(resolve, cleanup);
 
     document.body.appendChild(overlay);

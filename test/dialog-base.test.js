@@ -151,5 +151,55 @@ describe('Dialog Base UI', () => {
       const result = await dialogPromise;
       expect(result).toBe('escaped');
     });
+
+    it('should resolve with escapeValue when overlay background is clicked', async () => {
+      const config = {
+        message: 'Prompt',
+        buttons: [{ label: 'OK', className: 'btn-ok', value: 'ok' }],
+        escapeValue: 'overlay-escaped'
+      };
+
+      const dialogPromise = showAppDialog(config);
+      const overlay = document.querySelector('.dialog-overlay');
+      expect(overlay).not.toBeNull();
+
+      // Click on overlay background
+      overlay.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+
+      const result = await dialogPromise;
+      expect(result).toBe('overlay-escaped');
+      expect(overlay.classList.contains('show')).toBe(false);
+    });
+
+    it('should not close when clicking inside the dialog box', async () => {
+      const config = {
+        message: 'Prompt',
+        buttons: [{ label: 'OK', className: 'btn-ok', value: 'ok' }],
+        escapeValue: 'overlay-escaped'
+      };
+
+      let resolved = false;
+      const dialogPromise = showAppDialog(config).then(res => {
+        resolved = true;
+        return res;
+      });
+
+      const dialogBox = document.querySelector('.dialog-box');
+      expect(dialogBox).not.toBeNull();
+
+      // Click inside dialog box should not close
+      dialogBox.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+
+      // Advance clock slightly
+      vi.advanceTimersByTime(50);
+      expect(resolved).toBe(false);
+
+      // Now click OK to resolve cleanly
+      const btn = document.querySelector('.btn-ok');
+      btn.click();
+      const result = await dialogPromise;
+      expect(result).toBe('ok');
+    });
   });
 });
+

@@ -1305,6 +1305,14 @@ input[type="range"]:focus {
   contain: layout style;
 }
 
+.thumbnail-flash-effect {
+  position: fixed;
+  background-color: rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+  z-index: 10005;
+  border-radius: var(--radius-xs);
+}
+
 .thumbnail-img {
   width: 100%;
   height: 100%;
@@ -2104,7 +2112,39 @@ img.thumbnail-img.loading {
   /* アクティブかつホバー時は少し明るく */
 }
 
+.tab-list-item .tab-list-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+}
+
+.tab-list-item .tab-menu-item-text {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.tab-list-item .tab-menu-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+}
+
+.tab-list-item.active .tab-menu-item-name {
+  font-weight: bold;
+}
+
 .tab-list-item .path-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+  margin-top: 2px;
   opacity: 0.6;
   transition: opacity 0.15s ease;
 }
@@ -2112,6 +2152,16 @@ img.thumbnail-img.loading {
 .tab-list-item:hover .path-label {
   opacity: 0.85;
   /* ホバー時にパスが見やすくなる */
+}
+
+.tab-list-item .tab-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
 }
 
 /* アイコンの中のSVGがコンテキストメニューのグローバル設定でズレないようにリセット */
@@ -2213,6 +2263,14 @@ th[data-sort] svg path {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
   transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
   height: 32px !important;
+}
+
+#tab-container .tab-item .tab-icon {
+  margin-right: 6px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 
 #tab-container .tab-item::before {
@@ -2352,6 +2410,21 @@ th[data-sort] svg path {
   transform-origin: bottom left;
   pointer-events: none;
   z-index: 20;
+}
+
+#tab-container .tab-item.tab-collapsing {
+  min-width: 0 !important;
+  max-width: 0 !important;
+  width: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  border-width: 0 !important;
+  transition: min-width 0.15s ease-out, max-width 0.15s ease-out, width 0.15s ease-out,
+              padding-left 0.15s ease-out, padding-right 0.15s ease-out,
+              margin-left 0.15s ease-out, margin-right 0.15s ease-out,
+              border-width 0.15s ease-out;
 }
 
 /* タブ追加ボタン専用の独立したスタイル（通常時は背景完全透明） */

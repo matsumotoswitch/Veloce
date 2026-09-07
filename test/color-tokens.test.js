@@ -152,4 +152,38 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
     expect(rendererUiJs).not.toContain("tds[2].style.textAlign = 'right'");
   });
+
+  it('should define .thumbnail-flash-effect in style.css and eliminate forced reflow getComputedStyle in renderer.js', () => {
+    expect(cssContent).toMatch(/\.thumbnail-flash-effect\s*\{[^}]*position:\s*fixed;/);
+    expect(cssContent).toMatch(/\.thumbnail-flash-effect\s*\{[^}]*border-radius:\s*var\(--radius-xs\);/);
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    expect(rendererJs).not.toContain('window.getComputedStyle(el).borderRadius');
+    expect(rendererJs).toContain("flash.className = 'thumbnail-flash-effect'");
+  });
+
+  it('should define tab-list-item sub-elements in style.css and eliminate inline styles in tabListMenu', () => {
+    expect(cssContent).toMatch(/\.tab-list-item \.tab-list-icon\s*\{/);
+    expect(cssContent).toMatch(/\.tab-list-item \.tab-menu-item-text\s*\{/);
+    expect(cssContent).toMatch(/\.tab-list-item \.tab-menu-item-name\s*\{/);
+    expect(cssContent).toMatch(/\.tab-list-item \.tab-close-btn\s*\{/);
+
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    expect(rendererJs).not.toContain("textContainer.style.display = 'flex'");
+    expect(rendererJs).not.toContain("nameLabel.style.fontWeight =");
+    expect(rendererJs).not.toContain("closeBtn.style.flexShrink = '0'");
+  });
+
+  it('should define #tab-container .tab-item .tab-icon in style.css and eliminate inline styles in renderer-ui.js', () => {
+    expect(cssContent).toMatch(/#tab-container \.tab-item \.tab-icon\s*\{[^}]*margin-right:\s*6px;/);
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    expect(rendererUiJs).not.toContain("iconSpan.style.marginRight = '6px'");
+  });
+
+  it('should define .tab-collapsing in style.css and eliminate multi-property inline style assignments in renderer-tabs.js', () => {
+    expect(cssContent).toMatch(/#tab-container \.tab-item\.tab-collapsing\s*\{[^}]*transition:\s*min-width/);
+    const rendererTabsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-tabs.js'), 'utf-8');
+    expect(rendererTabsJs).toContain("targetTabEl.classList.add('tab-collapsing')");
+    expect(rendererTabsJs).not.toContain("targetTabEl.style.minWidth = '0'");
+  });
 });
+

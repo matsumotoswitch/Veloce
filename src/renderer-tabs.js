@@ -180,19 +180,7 @@ export function initTabHandlers(ctx) {
       // overflow: hidden を解除したため、幅が縮小しても transform アニメーションは途切れない
       setTimeout(() => {
         if (!targetTabEl.parentNode) return;
-        targetTabEl.style.transition =
-          'min-width 0.15s ease-out, max-width 0.15s ease-out, width 0.15s ease-out, ' +
-          'padding-left 0.15s ease-out, padding-right 0.15s ease-out, ' +
-          'margin-left 0.15s ease-out, margin-right 0.15s ease-out, ' +
-          'border-width 0.15s ease-out';
-        targetTabEl.style.minWidth = '0';
-        targetTabEl.style.maxWidth = '0';
-        targetTabEl.style.width = '0';
-        targetTabEl.style.paddingLeft = '0';
-        targetTabEl.style.paddingRight = '0';
-        targetTabEl.style.marginLeft = '0';
-        targetTabEl.style.marginRight = '0';
-        targetTabEl.style.borderWidth = '0';
+        targetTabEl.classList.add('tab-collapsing');
       }, 70);
     }
 

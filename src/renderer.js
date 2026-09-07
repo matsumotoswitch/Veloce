@@ -4195,15 +4195,11 @@ export const globalKeydownHandler = async (e) => {
             if (width <= 0 || height <= 0) return;
 
             const flash = document.createElement('div');
-            flash.style.position = 'fixed';
+            flash.className = 'thumbnail-flash-effect';
             flash.style.top = top + 'px';
             flash.style.left = left + 'px';
             flash.style.width = width + 'px';
             flash.style.height = height + 'px';
-            flash.style.backgroundColor = 'rgba(255, 255, 255, 0.5)';
-            flash.style.pointerEvents = 'none';
-            flash.style.zIndex = '10005';
-            flash.style.borderRadius = window.getComputedStyle(el).borderRadius || '0px';
             document.body.appendChild(flash);
 
             const animation = flash.animate([
@@ -4791,11 +4787,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       const iconSpan = document.createElement('span');
       iconSpan.className = `tab-list-icon ${iconClass}`;
-      iconSpan.style.display = 'flex';
-      iconSpan.style.alignItems = 'center';
-      iconSpan.style.justifyContent = 'center';
-      iconSpan.style.flexShrink = '0';
-      iconSpan.style.width = '16px';
       iconSpan.innerHTML = iconHtml;
 
       const svg = iconSpan.querySelector('svg');
@@ -4805,41 +4796,22 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
 
       const textContainer = document.createElement('div');
-      textContainer.style.display = 'flex';
-      textContainer.style.flexDirection = 'column';
-      textContainer.style.overflow = 'hidden';
-      textContainer.style.flex = '1';
+      textContainer.className = 'tab-menu-item-text';
 
       const nameLabel = document.createElement('span');
+      nameLabel.className = 'tab-menu-item-name';
       nameLabel.textContent = tab.name;
-      nameLabel.style.fontWeight = index === appState.activeTabIndex ? 'bold' : 'normal';
-      nameLabel.style.whiteSpace = 'nowrap';
-      nameLabel.style.overflow = 'hidden';
-      nameLabel.style.textOverflow = 'ellipsis';
-      nameLabel.style.fontSize = 'var(--font-size-sm)';
 
       const pathLabel = document.createElement('span');
       pathLabel.className = 'path-label';
       pathLabel.textContent = tab.path;
       pathLabel.title = tab.path;
-      pathLabel.style.whiteSpace = 'nowrap';
-      pathLabel.style.overflow = 'hidden';
-      pathLabel.style.textOverflow = 'ellipsis';
-      pathLabel.style.fontSize = '11px';
-      pathLabel.style.marginTop = '2px';
 
       textContainer.appendChild(nameLabel);
       textContainer.appendChild(pathLabel);
 
       const closeBtn = document.createElement('span');
       closeBtn.className = 'tab-close-btn';
-      closeBtn.style.display = 'flex';
-      closeBtn.style.alignItems = 'center';
-      closeBtn.style.justifyContent = 'center';
-      closeBtn.style.width = '16px';
-      closeBtn.style.height = '16px';
-      closeBtn.style.flexShrink = '0';
-      closeBtn.style.borderRadius = 'var(--radius-xs)';
       closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="7" height="7"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
       closeBtn.addEventListener('click', async (e) => {

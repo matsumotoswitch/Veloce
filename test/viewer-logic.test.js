@@ -86,11 +86,6 @@ describe('Viewer Core Logic & Hotkeys', () => {
               rating = 0; // トグル解除
             }
             await global.window.veloceAPI.setRating(filePath, rating);
-            if (rating === 0) {
-              global.showToast('レーティング解除');
-            } else {
-              global.showToast('Rating ' + rating);
-            }
             global.viewerRatings[filePath] = rating;
             if (typeof global.updateRatingDisplay === 'function') global.updateRatingDisplay();
           }
@@ -160,7 +155,6 @@ describe('Viewer Core Logic & Hotkeys', () => {
     await keydownHandler(event);
     
     expect(global.window.veloceAPI.setRating).toHaveBeenCalledWith('C:/images/2.jpg', 5);
-    expect(global.showToast).toHaveBeenCalledWith('Rating 5');
     expect(global.viewerRatings['C:/images/2.jpg']).toBe(5);
     expect(global.updateRatingDisplay).toHaveBeenCalled();
   });
@@ -172,7 +166,6 @@ describe('Viewer Core Logic & Hotkeys', () => {
     await keydownHandler(event);
     
     expect(global.window.veloceAPI.setRating).toHaveBeenCalledWith('C:/images/2.jpg', 0);
-    expect(global.showToast).toHaveBeenCalledWith('レーティング解除');
     expect(global.viewerRatings['C:/images/2.jpg']).toBe(0);
     expect(global.updateRatingDisplay).toHaveBeenCalled();
   });

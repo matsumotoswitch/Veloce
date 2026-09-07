@@ -42,6 +42,48 @@ function getMediaHeight(media) {
   return media.tagName === 'VIDEO' ? (media.videoHeight || 1) : (media.naturalHeight || 1);
 }
 
+/**
+ * ビューアー用の軽量トースト通知を表示します。
+ * DOM要素の再利用と自動破棄を行い、メイン画面と同一のスタイルを適用します。
+ * @param {string} message - 通知メッセージ (HTML文字列可)
+ * @param {number} [duration=3000] - 表示時間 (ms)
+ * @param {string} [type='info'] - トースト種別 ('info' | 'success' | 'warning' | 'error')
+ */
+export function showToast(message, duration = 3000, type = 'info') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast-message ${type}`;
+  if (typeof message === 'string' && message.includes('<') && message.includes('>')) {
+    toast.innerHTML = message;
+  } else {
+    toast.textContent = message;
+  }
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add('show');
+  });
+
+  const hideTimeout = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (toast.parentElement) toast.remove();
+    }, 200);
+  }, duration);
+
+  return { toast, container, hideTimeout };
+}
+
+if (typeof window !== 'undefined') {
+  window.showToast = showToast;
+}
+
 window.addEventListener('focus', () => {
   viewerState.lastFocusTime = Date.now();
 });
@@ -1253,12 +1295,6 @@ window.addEventListener('keydown', async (e) => {
         }
 
         window.veloceAPI.setRating(filePath, rating);
-        if (rating === 0) {
-          showToast('レーティングを解除しました');
-        } else {
-          const starSvg = '<svg class="rating-star-icon" viewBox="0 0 24 24" width="16" height="16" style="margin-right: 2px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-          showToast(starSvg + rating);
-        }
       }
       break;
     }
@@ -1348,28 +1384,7 @@ window.addEventListener('keydown', async (e) => {
       });
 
       // コピー完了を通知するトーストの表示
-      let container = document.getElementById('toast-container');
-      if (!container) {
-        container = document.createElement('div');
-        container.id = 'toast-container';
-        document.body.appendChild(container);
-      }
-      
-      let toast = document.createElement('div');
-      toast.className = 'toast-message success';
-      toast.textContent = '画像をクリップボードにコピーしました';
-      container.appendChild(toast);
-      
-      requestAnimationFrame(() => {
-        toast.classList.add('show');
-      });
-      
-      setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => {
-          if (toast.parentElement) toast.remove();
-        }, 300);
-      }, 3000);
+      showToast('画像をクリップボードにコピーしました', 3000, 'success');
 	}
   }
 });
@@ -1459,7 +1474,7 @@ let videoSeekBarContainer = null;
 function toggleVideoSeekBar() {
   const img = viewerUI.elements.viewerImg;
   if (!img || img.tagName !== 'VIDEO') {
-    if (typeof showToast === 'function') showToast("動画ではありません");
+    showToast("動画ではありません", 3000, 'warning');
     return;
   }
 

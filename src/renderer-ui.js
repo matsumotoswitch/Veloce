@@ -371,11 +371,6 @@ class UIManager {
 
         const iconSpan = document.createElement('span');
         iconSpan.className = 'tab-icon';
-        iconSpan.style.marginRight = '6px';
-        iconSpan.style.display = 'inline-flex';
-        iconSpan.style.alignItems = 'center';
-        iconSpan.style.flexShrink = '0';
-        iconSpan.style.opacity = '0.8';
         tabEl.appendChild(iconSpan);
 
         const label = document.createElement('span');
