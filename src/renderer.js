@@ -3099,12 +3099,14 @@ document.addEventListener('dragend', async () => {
 });
 
 function handleItemClick(e, isGrid) {
+  appState.activeCenterPane = isGrid ? 'grid' : 'table';
   const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
   if (!item || !item.dataset.index) return;
   selectImage(parseInt(item.dataset.index, 10), e);
 }
 
 function handleItemDblClick(e, isGrid) {
+  appState.activeCenterPane = isGrid ? 'grid' : 'table';
   const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
   if (!item || item.dataset.index === undefined) return;
   const idx = parseInt(item.dataset.index, 10);
@@ -3152,6 +3154,7 @@ function handleItemDragStart(e, isGrid) {
 }
 
 function handleItemContextMenu(e, isGrid) {
+  appState.activeCenterPane = isGrid ? 'grid' : 'table';
   e.preventDefault();
   e.stopPropagation();
 
@@ -3307,6 +3310,12 @@ uiManager.elements.fileListBody.addEventListener('mousedown', () => {
 document.getElementById('left-pane')?.addEventListener('mousedown', () => {
   const dirSection = document.getElementById('directories-section');
   if (dirSection) dirSection.focus();
+});
+document.getElementById('center-top')?.addEventListener('mousedown', () => {
+  appState.activeCenterPane = 'table';
+});
+document.getElementById('center-bottom')?.addEventListener('mousedown', () => {
+  appState.activeCenterPane = 'grid';
 });
 
 uiManager.elements.dirTree.addEventListener('click', async (e) => {
@@ -4273,28 +4282,51 @@ export const globalKeydownHandler = async (e) => {
     if (newIndex === -1) {
       newIndex = 0;
     } else {
-      // コンテナ幅とアイテム寸法から1行あたりの列数を算出し、上下キーによる2次元移動を実現
-      const containerWidth = uiManager.elements.thumbnailGrid.clientWidth;
-      const itemSize = parseFloat(uiManager.elements.thumbnailSizeSlider.value) || 120;
-      const gap = CONFIG.GRID_GAP;
-      const padding = CONFIG.GRID_PADDING;
-      const availableWidth = Math.max(1, containerWidth - padding * 2);
-      const columns = Math.max(1, Math.floor((availableWidth + gap) / (itemSize + gap)));
+      const isTableFocused = (document.activeElement && document.activeElement.closest('#center-top')) ||
+                             (appState.activeCenterPane === 'table');
 
-      if (e.key === 'ArrowLeft') newIndex = Math.max(0, appState.selectedIndex - 1);
-      else if (e.key === 'ArrowRight') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + 1);
-      else if (e.key === 'ArrowUp') newIndex = Math.max(0, appState.selectedIndex - columns);
-      else if (e.key === 'ArrowDown') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + columns);
-      else if (e.key === 'PageUp') {
-        const rows = Math.max(1, Math.floor(uiManager.elements.thumbnailGrid.clientHeight / (itemSize + gap)));
-        newIndex = Math.max(0, appState.selectedIndex - (columns * rows));
+      if (isTableFocused) {
+        // ファイル一覧テーブルでのナビゲーション: 上下キー・左右キーで1行ずつ移動
+        const listContainer = document.getElementById('center-top');
+        const visibleRows = listContainer ? Math.max(1, Math.floor(listContainer.clientHeight / 28)) : 10;
+
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+          newIndex = Math.max(0, appState.selectedIndex - 1);
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+          newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + 1);
+        } else if (e.key === 'PageUp') {
+          newIndex = Math.max(0, appState.selectedIndex - visibleRows);
+        } else if (e.key === 'PageDown') {
+          newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + visibleRows);
+        } else if (e.key === 'Home') {
+          newIndex = 0;
+        } else if (e.key === 'End') {
+          newIndex = appState.totalCount - 1;
+        }
+      } else {
+        // サムネイルグリッドでのナビゲーション: 列数に応じた2次元グリッド移動
+        const containerWidth = uiManager.elements.thumbnailGrid.clientWidth;
+        const itemSize = parseFloat(uiManager.elements.thumbnailSizeSlider.value) || 120;
+        const gap = CONFIG.GRID_GAP;
+        const padding = CONFIG.GRID_PADDING;
+        const availableWidth = Math.max(1, containerWidth - padding * 2);
+        const columns = Math.max(1, Math.floor((availableWidth + gap) / (itemSize + gap)));
+
+        if (e.key === 'ArrowLeft') newIndex = Math.max(0, appState.selectedIndex - 1);
+        else if (e.key === 'ArrowRight') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + 1);
+        else if (e.key === 'ArrowUp') newIndex = Math.max(0, appState.selectedIndex - columns);
+        else if (e.key === 'ArrowDown') newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + columns);
+        else if (e.key === 'PageUp') {
+          const rows = Math.max(1, Math.floor(uiManager.elements.thumbnailGrid.clientHeight / (itemSize + gap)));
+          newIndex = Math.max(0, appState.selectedIndex - (columns * rows));
+        }
+        else if (e.key === 'PageDown') {
+          const rows = Math.max(1, Math.floor(uiManager.elements.thumbnailGrid.clientHeight / (itemSize + gap)));
+          newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + (columns * rows));
+        }
+        else if (e.key === 'Home') newIndex = 0;
+        else if (e.key === 'End') newIndex = appState.totalCount - 1;
       }
-      else if (e.key === 'PageDown') {
-        const rows = Math.max(1, Math.floor(uiManager.elements.thumbnailGrid.clientHeight / (itemSize + gap)));
-        newIndex = Math.min(appState.totalCount - 1, appState.selectedIndex + (columns * rows));
-      }
-      else if (e.key === 'Home') newIndex = 0;
-      else if (e.key === 'End') newIndex = appState.totalCount - 1;
     }
 
     if (newIndex !== appState.selectedIndex) {

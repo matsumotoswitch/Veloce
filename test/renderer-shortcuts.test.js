@@ -333,6 +333,38 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       
       expect(window.onTabClick).toHaveBeenCalledWith(1);
     });
+
+    it('should navigate by 1 row on ArrowDown and ArrowUp when table is active', async () => {
+      appState.totalCount = 10;
+      appState.selectedIndex = 2;
+      appState.activeCenterPane = 'table';
+
+      // ArrowDown should move index by +1
+      const downEvent = new window.KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+      await globalKeydownHandler(downEvent);
+      expect(appState.selectedIndex).toBe(3);
+
+      // ArrowUp should move index by -1
+      const upEvent = new window.KeyboardEvent('keydown', { key: 'ArrowUp', cancelable: true });
+      await globalKeydownHandler(upEvent);
+      expect(appState.selectedIndex).toBe(2);
+    });
+
+    it('should navigate by columns on ArrowDown when grid is active', async () => {
+      appState.totalCount = 20;
+      appState.selectedIndex = 0;
+      appState.activeCenterPane = 'grid';
+
+      // Mock thumbnail grid dimensions for column calculation (e.g. 5 columns)
+      Object.defineProperty(uiManager.elements.thumbnailGrid, 'clientWidth', { value: 650, configurable: true });
+      uiManager.elements.thumbnailSizeSlider.value = '120';
+
+      const downEvent = new window.KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+      await globalKeydownHandler(downEvent);
+
+      // Should move by columns (>= 2)
+      expect(appState.selectedIndex).toBeGreaterThan(1);
+    });
   });
 
   describe('renderMultipleSelectionSummary', () => {

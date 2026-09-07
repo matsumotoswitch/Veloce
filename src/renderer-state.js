@@ -87,6 +87,8 @@ class AppState {
     this.searchQuery = '';
     /** @type {number} 現在アクティブな選択アイテムのインデックス */
     this.selectedIndex = -1;
+    /** @type {'grid' | 'table'} 現在アクティブな中央ペイン ('grid' | 'table') */
+    this.activeCenterPane = 'grid';
     /** @type {Set<number>} 複数選択されているアイテムのインデックス集合 */
     this.selection = new Set();
     /** @type {string} 現在表示中のディレクトリパス */
