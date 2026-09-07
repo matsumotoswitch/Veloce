@@ -4,11 +4,43 @@ import {
   formatRequestType,
   parsePromptTags,
   highlightSearchTerms,
+  createSearchTermsRegex,
   extractMetadataFields,
   buildInspectorSections
 } from '../src/metadata-format.js';
 
 describe('Metadata Format Utils', () => {
+  describe('createSearchTermsRegex and highlightSearchTerms', () => {
+    it('should return null for empty or invalid terms array', () => {
+      expect(createSearchTermsRegex([])).toBeNull();
+      expect(createSearchTermsRegex(null)).toBeNull();
+      expect(createSearchTermsRegex(['', '   '])).toBeNull();
+    });
+
+    it('should escape special regex characters in search terms', () => {
+      const re = createSearchTermsRegex(['c++', '(solo)', '[tag]']);
+      expect(re).toBeInstanceOf(RegExp);
+      expect(re.source).toContain('c\\+\\+');
+      expect(re.source).toContain('\\(solo\\)');
+      expect(re.source).toContain('\\[tag\\]');
+    });
+
+    it('should highlight search terms using pre-compiled regex', () => {
+      const terms = ['1girl', 'smile'];
+      const regex = createSearchTermsRegex(terms);
+      const text = '1girl with a bright smile, high quality';
+      const highlighted = highlightSearchTerms(text, regex);
+      expect(highlighted).toContain('<mark class="search-highlight">1girl</mark>');
+      expect(highlighted).toContain('<mark class="search-highlight">smile</mark>');
+    });
+
+    it('should highlight search terms using terms array (backward compatibility)', () => {
+      const text = 'cat and dog';
+      const highlighted = highlightSearchTerms(text, ['cat']);
+      expect(highlighted).toContain('<mark class="search-highlight">cat</mark>');
+    });
+  });
+
   describe('formatMetadataNumber', () => {
     it('should return null if input is null or undefined', () => {
       expect(formatMetadataNumber(null)).toBeNull();

@@ -118,4 +118,38 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/#search-container:focus-within\s*\{[^}]*box-shadow:\s*0 0 0 2px rgba\(var\(--accent-rgb\),\s*0\.25\);/);
     expect(cssContent).toMatch(/#search-bar:focus-visible\s*\{[^}]*box-shadow:\s*none;/);
   });
+
+  it('should define generation technique color tokens in :root', () => {
+    expect(cssContent).toContain('--color-tag-inpainting: #4a9eff;');
+    expect(cssContent).toContain('--color-tag-vibe: #d27aff;');
+    expect(cssContent).toContain('--color-tag-char-ref: #ff9a4a;');
+    expect(cssContent).toContain('--color-tag-img2img: #4ade80;');
+  });
+
+  it('should define unified classes for sublabel tags, raw-box, flash-effect, drag-ghost, and virtual containers', () => {
+    expect(cssContent).toContain('.sublabel-tags-wrapper');
+    expect(cssContent).toContain('.sublabel-tag--inpainting');
+    expect(cssContent).toContain('.prompt-look.raw-box');
+    expect(cssContent).toContain('#viewer-flash-effect');
+    expect(cssContent).toContain('.bookmark-drag-ghost');
+    expect(cssContent).toContain('.virtual-content');
+  });
+
+  it('should not contain hardcoded technique hex colors in renderer.js or renderer-ui.js', () => {
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+
+    for (const code of [rendererJs, rendererUiJs]) {
+      expect(code).not.toContain("color = '#4a9eff'");
+      expect(code).not.toContain("color = '#d27aff'");
+      expect(code).not.toContain("color = '#ff9a4a'");
+      expect(code).not.toContain("color = '#4ade80'");
+    }
+  });
+
+  it('should define table cell right alignments in style.css and avoid inline textAlign in renderer-ui.js', () => {
+    expect(cssContent).toMatch(/#file-table td:nth-child\(3\)[^}]*text-align:\s*right;/);
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    expect(rendererUiJs).not.toContain("tds[2].style.textAlign = 'right'");
+  });
 });

@@ -1079,20 +1079,19 @@ class UIManager {
         if (!sub || sub === 'Text to Image') return '';
         const labels = sub.split(' + ');
         const spans = labels.map(lbl => {
-          let color = 'var(--text-color)';
-          let opacity = '1';
+          let modifier = '';
           if (lbl.includes('Inpainting')) {
-            color = '#4a9eff';
+            modifier = ' sublabel-tag--inpainting';
           } else if (lbl.includes('Vibe Transfer')) {
-            color = '#d27aff';
+            modifier = ' sublabel-tag--vibe';
           } else if (lbl.includes('Character Reference')) {
-            color = '#ff9a4a';
+            modifier = ' sublabel-tag--char-ref';
           } else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) {
-            color = '#4ade80';
+            modifier = ' sublabel-tag--img2img';
           }
-          return `<span style="font-size: 0.85em; color: ${color}; opacity: ${opacity}; font-weight: normal;">[${lbl}]</span>`;
+          return `<span class="sublabel-tag${modifier}">[${lbl}]</span>`;
         });
-        return `<span style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">${spans.join('')}</span>`;
+        return `<span class="sublabel-tags-wrapper">${spans.join('')}</span>`;
       };
 
       let sub1Html = getSubLabelHtml(subLabel1);
@@ -1398,8 +1397,14 @@ class UIManager {
     const topSpacerHeight = safeStartRow * rowHeight;
     const bottomSpacerHeight = (totalRows - 1 - endRow) * rowHeight;
 
-    topSpacer.style.height = `${topSpacerHeight}px`;
-    bottomSpacer.style.height = `${bottomSpacerHeight}px`;
+    const newTopHeight = `${topSpacerHeight}px`;
+    if (topSpacer.style.height !== newTopHeight) {
+      topSpacer.style.height = newTopHeight;
+    }
+    const newBottomHeight = `${bottomSpacerHeight}px`;
+    if (bottomSpacer.style.height !== newBottomHeight) {
+      bottomSpacer.style.height = newBottomHeight;
+    }
 
     let items;
     if (appState.initialChunk && safeStartRow === 0) {
@@ -1440,11 +1445,6 @@ class UIManager {
         const tds = tr.children;
         tds[0].textContent = file.name;
         tds[1].textContent = file.ext;
-        
-        tds[2].style.textAlign = 'right';
-        tds[3].style.textAlign = 'right';
-        tds[4].style.textAlign = 'right';
-        tds[5].style.textAlign = 'right';
       } else {
         // Just update selection and _listDomByPath registration if path matches but state might have refreshed
         if (!this._listDomByPath) this._listDomByPath = new Map();
@@ -1509,9 +1509,9 @@ class UIManager {
 
     if (!content || !spacer) {
       container.innerHTML = `
-        <div class="virtual-spacer" style="width: 1px; visibility: hidden; pointer-events: none;"></div>
-        <div class="virtual-content" style="position: absolute; top: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(auto-fill, var(--thumbnail-size)); gap: 8px; padding: 0 8px; justify-content: start;"></div>
-        <div class="empty-state-container" style="display: none; position: absolute; inset: 0; align-items: center; justify-content: center; flex-direction: column; opacity: 0.5; pointer-events: none; color: var(--text-color);"></div>
+        <div class="virtual-spacer"></div>
+        <div class="virtual-content"></div>
+        <div class="empty-state-container"></div>
       `;
       content = container.querySelector('.virtual-content');
       spacer = container.querySelector('.virtual-spacer');
@@ -1564,7 +1564,10 @@ class UIManager {
     const rowHeight = itemSize + gap;
     const totalHeight = rows * rowHeight + (padding * 2);
 
-    spacer.style.height = `${totalHeight}px`;
+    const newTotalHeight = `${totalHeight}px`;
+    if (spacer.style.height !== newTotalHeight) {
+      spacer.style.height = newTotalHeight;
+    }
 
     // 描画サイクル中にスクロール位置を復元し、以降の計算で正しい startIndex を利用する（二重レンダリングと遅延を防止）
     if (appState.savedScrollTopGrid) {
@@ -1606,7 +1609,10 @@ class UIManager {
 
     // コンテンツ領域をスクロール位置に合わせて移動 (DOM更新の直前に行うことで、破棄時の表示崩れを防ぐ)
     const offsetY = (safeStartRow * rowHeight) + padding;
-    content.style.transform = `translate3d(0, ${offsetY}px, 0)`;
+    const newTransform = `translate3d(0, ${offsetY}px, 0)`;
+    if (content.style.transform !== newTransform) {
+      content.style.transform = newTransform;
+    }
 
     // DOMの再構築（要素の再利用）
     const targetCount = endIndex - startIndex + 1;
@@ -1691,7 +1697,7 @@ class UIManager {
             img.src = appState.thumbnailUrls.get(file.path);
             if (img.complete) {
                 img.classList.remove('loading');
-                if (img.naturalWidth === 0 && img.src !== 'data:image/svg+xml;base64,...') {
+                if (img.naturalWidth === 0 && !img.src.startsWith('data:image/svg+xml')) {
                     // Force onerror logic if broken
                     img.dispatchEvent(new Event('error'));
                 }

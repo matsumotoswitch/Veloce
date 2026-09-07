@@ -17,7 +17,7 @@ import { UIManager, uiManager, formatSize, formatBytesHuman, formatDate, ICON_SV
 import { ThumbnailQueueManager, thumbnailWorkerPool, evictThumbnailCache, cleanupContext, resetThumbnailPreloader } from './renderer-thumbnails.js';
 import { debounce, blockDevtoolsShortcuts, getStreamUrl } from './utils.js';
 import { validateFilename } from './path-utils.js';
-import { extractMetadataFields, highlightSearchTerms, buildInspectorSections } from './metadata-format.js';
+import { extractMetadataFields, highlightSearchTerms, buildInspectorSections, createSearchTermsRegex } from './metadata-format.js';
 import { resolvePathDisplay } from './favorite-icons.js';
 import {
   initTabHandlers,
@@ -1731,6 +1731,7 @@ function resetInspectorPools() {
     inspectorSectionPool[i].title.style.color = '';
     inspectorSectionPool[i].subLabel.innerHTML = '';
     inspectorSectionPool[i].subLabel.textContent = '';
+    inspectorSectionPool[i].subLabel.className = '';
     inspectorSectionPool[i].copyWrapper.innerHTML = '';
     inspectorSectionPool[i].box.className = 'prompt-look';
     inspectorSectionPool[i].box.style.cssText = '';
@@ -1763,6 +1764,7 @@ async function renderMetadata(file) {
     const terms = searchStr.trim() !== ''
       ? searchStr.toLowerCase().split(/[,\n\r]+/).map(t => t.trim()).filter(Boolean)
       : [];
+    const termsRegex = terms.length > 0 ? createSearchTermsRegex(terms) : null;
 
     resetInspectorPools();
     if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
@@ -1803,18 +1805,14 @@ async function renderMetadata(file) {
       let sectionHasMatch = false;
 
       if (section.isRaw) {
-        secEl.box.className = 'prompt-look';
-        secEl.box.style.whiteSpace = 'pre-wrap';
-        secEl.box.style.fontFamily = 'Consolas, monospace';
-        secEl.box.style.fontSize = 'var(--font-size-xs)';
-        secEl.box.style.wordBreak = 'break-all';
-        secEl.box.style.maxHeight = '400px';
-        secEl.box.style.overflowY = 'auto';
+        secEl.box.className = 'prompt-look raw-box';
+        secEl.box.style.cssText = '';
         const rawText = String(section.value);
-        if (terms.length > 0) {
-          sectionHasMatch = terms.some(term => rawText.toLowerCase().includes(term));
+        if (termsRegex) {
+          termsRegex.lastIndex = 0;
+          sectionHasMatch = termsRegex.test(rawText);
           if (sectionHasMatch) {
-            secEl.box.innerHTML = highlightSearchTerms(rawText, terms);
+            secEl.box.innerHTML = highlightSearchTerms(rawText, termsRegex);
           } else {
             secEl.box.textContent = rawText;
           }
@@ -1829,14 +1827,14 @@ async function renderMetadata(file) {
         for (const t of tags) {
           const tagEl = getInspectorTag();
 
-
-          if (terms.length > 0) {
-            const isMatch = terms.some(term => t.toLowerCase().includes(term));
+          if (termsRegex) {
+            termsRegex.lastIndex = 0;
+            const isMatch = termsRegex.test(t);
             if (isMatch) {
               sectionHasMatch = true;
             }
             tagEl.classList.toggle('search-match', isMatch);
-            tagEl.innerHTML = highlightSearchTerms(t, terms);
+            tagEl.innerHTML = highlightSearchTerms(t, termsRegex);
           } else {
             tagEl.classList.remove('search-match');
             tagEl.textContent = t;
@@ -1854,34 +1852,27 @@ async function renderMetadata(file) {
       if (section.subLabel && section.subLabel !== 'Text to Image') {
         const labels = section.subLabel.split(' + ');
         secEl.subLabel.innerHTML = '';
-        secEl.subLabel.style.display = 'flex';
-        secEl.subLabel.style.gap = '4px';
-        secEl.subLabel.style.alignItems = 'center';
-        secEl.subLabel.style.flexWrap = 'wrap';
+        secEl.subLabel.className = 'sublabel-tags-wrapper';
 
         labels.forEach(lbl => {
-          let color = 'var(--text-color)';
-          let opacity = '1';
+          let modifier = '';
           if (lbl.includes('Inpainting')) {
-            color = '#4a9eff';
+            modifier = ' sublabel-tag--inpainting';
           } else if (lbl.includes('Vibe Transfer')) {
-            color = '#d27aff';
+            modifier = ' sublabel-tag--vibe';
           } else if (lbl.includes('Character Reference')) {
-            color = '#ff9a4a';
+            modifier = ' sublabel-tag--char-ref';
           } else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) {
-            color = '#4ade80';
+            modifier = ' sublabel-tag--img2img';
           }
           const span = document.createElement('span');
-          span.style.fontSize = 'var(--font-size-xs)';
-          span.style.color = color;
-          span.style.opacity = opacity;
-          span.style.fontWeight = 'normal';
+          span.className = `sublabel-tag${modifier}`;
           span.textContent = `[${lbl}]`;
           secEl.subLabel.appendChild(span);
         });
       } else {
         secEl.subLabel.innerHTML = '';
-        secEl.subLabel.style.display = '';
+        secEl.subLabel.className = '';
       }
 
       if (secEl.root.parentNode !== container) {
@@ -5287,16 +5278,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       // アイテムのみを掴んでいるように見せるためのカスタムドラッグイメージ
       const dragGhost = itemDiv.cloneNode(true);
-      dragGhost.style.position = 'absolute';
-      dragGhost.style.top = '-1000px';
-      dragGhost.style.left = '-1000px';
-      dragGhost.style.width = 'max-content'; // コンテンツ幅に合わせる
-      dragGhost.style.padding = '4px 12px';
-      dragGhost.style.backgroundColor = 'var(--panel-bg, #1a2024)';
-      dragGhost.style.border = '1px solid var(--accent-color, #257e8c)';
-      dragGhost.style.color = 'var(--text-color, #ffffff)';
-      dragGhost.style.borderRadius = 'var(--radius-xs)';
-      dragGhost.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+      dragGhost.className = `${itemDiv.className} bookmark-drag-ghost`;
       document.body.appendChild(dragGhost);
 
       e.dataTransfer.setDragImage(dragGhost, 15, 15);

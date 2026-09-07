@@ -1,4 +1,4 @@
-﻿/**
+/**
  * メタデータの数値を表示用にフォーマットします。
  * @param {number|string|null|undefined} num
  * @returns {string|null}
@@ -132,20 +132,33 @@ export function parsePromptTags(text) {
 
 /**
  * 検索語に一致する部分をハイライトします。
- * @param {string} text
+/**
+ * 検索語の配列からハイライト用の単一正規表現を生成します。
+ * タグごとの重複コンパイルを排除し、パフォーマンスを最適化します。
  * @param {string[]} terms
+ * @returns {RegExp|null}
+ */
+export function createSearchTermsRegex(terms) {
+  if (!terms || terms.length === 0) return null;
+  const validTerms = terms.map(t => typeof t === 'string' ? t.trim() : String(t || '')).filter(Boolean);
+  if (validTerms.length === 0) return null;
+  const pattern = validTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return new RegExp(`(${pattern})`, 'gi');
+}
+
+/**
+ * 検索語を <mark> タグでハイライトします。
+ * @param {string} text
+ * @param {string[]|RegExp} termsOrRegex
  * @returns {string}
  */
-export function highlightSearchTerms(text, terms) {
-  if (!text || !terms || terms.length === 0) return text;
+export function highlightSearchTerms(text, termsOrRegex) {
+  if (!text || !termsOrRegex) return text;
+  const re = termsOrRegex instanceof RegExp ? termsOrRegex : createSearchTermsRegex(termsOrRegex);
+  if (!re) return text;
   const escaped = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  let result = escaped;
-  for (const term of terms) {
-    if (!term) continue;
-    const re = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    result = result.replace(re, '<mark class="search-highlight">$1</mark>');
-  }
-  return result;
+  re.lastIndex = 0;
+  return escaped.replace(re, '<mark class="search-highlight">$1</mark>');
 }
 
 /**

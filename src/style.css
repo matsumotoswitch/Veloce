@@ -21,6 +21,10 @@
   --accent-hover-translucent: rgba(var(--accent-hover-rgb), 0.5);
   --danger-red-translucent: rgba(var(--danger-rgb), 0.55);
   --glow-gold: #e6c762;
+  --color-tag-inpainting: #4a9eff;
+  --color-tag-vibe: #d27aff;
+  --color-tag-char-ref: #ff9a4a;
+  --color-tag-img2img: #4ade80;
   --radius-lg: 12px;
   --radius-md: 8px;
   --radius-sm: 6px;
@@ -1016,6 +1020,13 @@ table#file-table {
   text-overflow: ellipsis;
 }
 
+#file-table td:nth-child(3),
+#file-table td:nth-child(4),
+#file-table td:nth-child(5),
+#file-table td:nth-child(6) {
+  text-align: right;
+}
+
 /* Center Bottom: Thumbnails */
 #thumbnail-controls {
   background: var(--panel-bg);
@@ -1247,6 +1258,36 @@ input[type="range"]:focus {
   border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   border-top: 1px solid var(--border-color);
+}
+
+.virtual-spacer {
+  width: 1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.virtual-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--thumbnail-size));
+  gap: 8px;
+  padding: 0 8px;
+  justify-content: start;
+}
+
+.empty-state-container {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  opacity: 0.5;
+  pointer-events: none;
+  color: var(--text-color);
 }
 
 .thumbnail-item {
@@ -1743,6 +1784,44 @@ img.thumbnail-img.loading {
   display: flex;
   align-items: center;
   padding: 4px 10px;
+}
+
+.prompt-look.raw-box {
+  white-space: pre-wrap;
+  font-family: Consolas, monospace;
+  font-size: var(--font-size-xs);
+  word-break: break-all;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.sublabel-tags-wrapper {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sublabel-tag {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  color: var(--text-color);
+}
+
+.sublabel-tag--inpainting {
+  color: var(--color-tag-inpainting);
+}
+
+.sublabel-tag--vibe {
+  color: var(--color-tag-vibe);
+}
+
+.sublabel-tag--char-ref {
+  color: var(--color-tag-char-ref);
+}
+
+.sublabel-tag--img2img {
+  color: var(--color-tag-img2img);
 }
 
 .diff-section {
@@ -2711,6 +2790,18 @@ html.viewer-html,
   pointer-events: none;
 }
 
+#viewer-flash-effect {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9998;
+  background-color: rgba(255, 255, 255, 0.4);
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* --- Navigation Buttons --- */
 .icon-btn:disabled {
   opacity: 0.3 !important;
@@ -2789,6 +2880,19 @@ html.viewer-html,
   transform: scale(1.15) !important;
   box-shadow: 0 0 0 2px var(--accent-color, #257e8c) !important;
   outline: none;
+}
+
+.bookmark-drag-ghost {
+  position: absolute;
+  top: -1000px;
+  left: -1000px;
+  width: max-content;
+  padding: 4px 12px;
+  background-color: var(--panel-bg);
+  border: 1px solid var(--accent-color);
+  color: var(--text-color);
+  border-radius: var(--radius-xs);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 /* --- Veloce 厳選カラークラス --- */

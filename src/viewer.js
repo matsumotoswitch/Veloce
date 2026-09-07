@@ -1334,15 +1334,6 @@ window.addEventListener('keydown', async (e) => {
       if (!flash) {
         flash = document.createElement('div');
         flash.id = 'viewer-flash-effect';
-        flash.style.position = 'fixed';
-        flash.style.top = '0';
-        flash.style.left = '0';
-        flash.style.width = '100vw';
-        flash.style.height = '100vh';
-        flash.style.pointerEvents = 'none';
-        flash.style.zIndex = '9998';
-        flash.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
-        flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
         document.body.appendChild(flash);
       }
       
