@@ -684,9 +684,9 @@ function createMenuItem(label, iconSvg, onClick, isDanger = false, shortcut = ''
   if (isDanger) item.classList.add('danger');
 
   item.innerHTML = `
-    ${iconSvg || '<div style="width:16px;height:16px;"></div>'}
-    <span style="text-align: left; white-space: nowrap;">${label}</span>
-    <span style="text-align: right; opacity: 0.6; font-size: 0.9em;">${shortcut}</span>
+    ${iconSvg || '<div class="menu-icon-placeholder"></div>'}
+    <span class="menu-label">${label}</span>
+    <span class="menu-shortcut">${shortcut}</span>
     <div></div>
   `;
 
@@ -1342,7 +1342,12 @@ async function showLicenseDialog() {
   const parsedText = parseLicenseMarkdown(combinedText);
 
   content.innerHTML = `
-    <h2 class="modal-header-title" style="margin-bottom: 20px;">ライセンス情報</h2>
+    <div class="modal-header-row">
+      <h2 class="modal-header-title">ライセンス情報</h2>
+      <button class="dialog-close-btn" id="license-close-btn" title="閉じる (Esc)">
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
     <div id="license-text">${parsedText}</div>
   `;
 
@@ -1364,6 +1369,11 @@ async function showLicenseDialog() {
     overlay.remove();
     document.removeEventListener('keydown', keydownHandler, true);
   };
+
+  const closeBtn = content.querySelector('#license-close-btn');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', cleanup);
+  }
 
   const keydownHandler = (e) => {
     // Escキー、またはF1/Hキーでライセンス画面を閉じる
@@ -1698,31 +1708,13 @@ function getInspectorSection() {
     return el;
   }
   const section = document.createElement('div');
-  section.className = 'inspector-section';
-  section.style.marginBottom = '15px';
+  section.className = 'inspector-section inspector-section-block';
 
   const h3 = document.createElement('h3');
-  h3.style.fontSize = 'var(--font-size-xs)';
-  h3.style.fontWeight = 'normal';
-  h3.style.marginTop = '0';
-  h3.style.marginBottom = '4px';
-  h3.style.minHeight = '22px';
-  h3.style.height = '22px';
-  h3.style.lineHeight = '22px';
-  h3.style.boxSizing = 'border-box';
-  h3.style.display = 'flex';
-  h3.style.justifyContent = 'space-between';
-  h3.style.alignItems = 'center';
-  h3.style.color = 'var(--text-color)';
-  h3.style.transition = 'color 0.2s';
-  h3.style.userSelect = 'none';
+  h3.className = 'inspector-section-h3';
 
   const titleWrapper = document.createElement('span');
-  titleWrapper.style.display = 'flex';
-  titleWrapper.style.alignItems = 'center';
-  titleWrapper.style.gap = '8px';
-  titleWrapper.style.minHeight = '22px';
-  titleWrapper.style.lineHeight = '22px';
+  titleWrapper.className = 'inspector-title-wrapper';
 
   const titleSpan = document.createElement('span');
   const subLabelSpan = document.createElement('span');
@@ -1731,10 +1723,7 @@ function getInspectorSection() {
   titleWrapper.appendChild(subLabelSpan);
 
   const copyWrapper = document.createElement('div');
-  copyWrapper.style.display = 'flex';
-  copyWrapper.style.alignItems = 'center';
-  copyWrapper.style.minHeight = '22px';
-  copyWrapper.style.height = '22px';
+  copyWrapper.className = 'inspector-copy-wrapper';
 
   h3.appendChild(titleWrapper);
   h3.appendChild(copyWrapper);
@@ -1750,6 +1739,7 @@ function getInspectorSection() {
     title: titleSpan,
     subLabel: subLabelSpan,
     copyWrapper: copyWrapper,
+    copyBtn: null,
     box: box
   };
 
@@ -1773,15 +1763,16 @@ function getInspectorTag() {
 
 function resetInspectorPools() {
   for (let i = 0; i < inspectorSectionIndex; i++) {
-    inspectorSectionPool[i].root.style.display = 'none';
-    inspectorSectionPool[i].box.replaceChildren();
-    inspectorSectionPool[i].title.style.color = '';
-    inspectorSectionPool[i].subLabel.innerHTML = '';
-    inspectorSectionPool[i].subLabel.textContent = '';
-    inspectorSectionPool[i].subLabel.className = '';
-    inspectorSectionPool[i].copyWrapper.innerHTML = '';
-    inspectorSectionPool[i].box.className = 'prompt-look';
-    inspectorSectionPool[i].box.style.cssText = '';
+    const sec = inspectorSectionPool[i];
+    sec.root.style.display = 'none';
+    sec.box.replaceChildren();
+    sec.title.style.color = '';
+    sec.subLabel.textContent = '';
+    sec.subLabel.className = '';
+    sec.subLabel.replaceChildren();
+    sec.copyWrapper.style.display = 'none';
+    sec.box.className = 'prompt-look';
+    sec.box.style.cssText = '';
   }
   for (let i = 0; i < inspectorTagIndex; i++) {
     inspectorTagPool[i].classList.remove('search-match');
@@ -1857,8 +1848,13 @@ async function renderMetadata(file) {
       const secEl = getInspectorSection();
       secEl.title.textContent = section.title;
 
-      let copyHtml = UIManager.createCopyButtonHTML(section.value);
-      secEl.copyWrapper.innerHTML = copyHtml;
+      if (!secEl.copyBtn) {
+        secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
+        secEl.copyBtn = secEl.copyWrapper.querySelector('.diff-copy-btn');
+      } else {
+        secEl.copyBtn.setAttribute('data-copy-text', section.value);
+      }
+      secEl.copyWrapper.style.display = 'flex';
 
       let sectionHasMatch = false;
 
@@ -2156,8 +2152,8 @@ const menuDeleteFile = createMenuItem('ファイルを削除', UIManager.ICONS.F
 const menuSortRoot = document.createElement('div');
 menuSortRoot.className = 'context-menu-item';
 menuSortRoot.innerHTML = `
-  ${UIManager.ICONS.SORT || '<div style="width:16px;height:16px;"></div>'}
-  <span style="text-align: left; white-space: nowrap;">並べ替え</span>
+  ${UIManager.ICONS.SORT || '<div class="menu-icon-placeholder"></div>'}
+  <span class="menu-label">並べ替え</span>
   <span></span>
   <span class="menu-arrow">${UIManager.ICONS.CHEVRON_RIGHT}</span>
 `;
@@ -2245,8 +2241,8 @@ const createSubOption = (label, onClick, dataKey, dataVal) => {
   if (dataKey === 'sortOrder') opt.dataset.sortOrder = dataVal;
 
   opt.innerHTML = `
-    <span class="menu-check" style="display:inline-flex;justify-content:center;align-items:center;width:16px;height:16px;"></span>
-    <span style="text-align: left; white-space: nowrap;">${label}</span>
+    <span class="menu-check menu-check-box"></span>
+    <span class="menu-label">${label}</span>
     <span></span>
     <div></div>
   `;
@@ -3111,7 +3107,28 @@ const dragTooltip = document.createElement('div');
 dragTooltip.id = 'drag-tooltip';
 dragTooltip.className = 'custom-tooltip';
 dragTooltip.style.pointerEvents = 'none'; // マウスイベントを吸収してドロップを妨害しないようにする
+
+const dragTooltipInner = document.createElement('span');
+dragTooltipInner.className = 'drag-tooltip-inner';
+const dragTooltipIcon = document.createElement('span');
+dragTooltipIcon.className = 'drag-tooltip-icon';
+dragTooltipIcon.innerHTML = UIManager.ICONS.COPY;
+const dragTooltipText = document.createElement('span');
+dragTooltipInner.appendChild(dragTooltipIcon);
+dragTooltipInner.appendChild(dragTooltipText);
+dragTooltip.appendChild(dragTooltipInner);
 document.body.appendChild(dragTooltip);
+
+function updateDragTooltip(text, x, y) {
+  if (dragTooltipText.textContent !== text) {
+    dragTooltipText.textContent = text;
+  }
+  dragTooltip.style.left = (x + 15) + 'px';
+  dragTooltip.style.top = (y + 15) + 'px';
+  if (!dragTooltip.classList.contains('show')) {
+    dragTooltip.classList.add('show');
+  }
+}
 
 document.addEventListener('dragover', (e) => {
   if (appState.dragState && appState.dragState.isAppDragging) {
@@ -3138,10 +3155,7 @@ document.addEventListener('dragover', (e) => {
       text = count > 1 ? `${count}個のアイテムを「${folderName}」へ${actionStr}` : `「${folderName}」へ${actionStr}`;
     }
 
-    dragTooltip.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="color: var(--accent-color); width: 14px; height: 14px;">${UIManager.ICONS.COPY}</span>${text}</span>`;
-    dragTooltip.style.left = (e.clientX + 15) + 'px';
-    dragTooltip.style.top = (e.clientY + 15) + 'px';
-    dragTooltip.classList.add('show');
+    updateDragTooltip(text, e.clientX, e.clientY);
   }
 });
 
@@ -3207,10 +3221,7 @@ function handleItemDragStart(e, isGrid) {
 
   const count = selectedIndices.length;
   const text = count > 1 ? `${count} 個のアイテム` : `1 個のアイテム`;
-  dragTooltip.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="color: var(--accent-color); width: 14px; height: 14px;">${UIManager.ICONS.COPY}</span>${text}</span>`;
-  dragTooltip.style.left = (e.clientX + 15) + 'px';
-  dragTooltip.style.top = (e.clientY + 15) + 'px';
-  dragTooltip.classList.add('show');
+  updateDragTooltip(text, e.clientX, e.clientY);
 }
 
 function handleItemContextMenu(e, isGrid) {

@@ -44,7 +44,7 @@
     <div id="search-container">
       <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
     </div>
-    <div id="rating-filter-container" style="display: flex; gap: 4px; margin-left: 8px;">
+    <div id="rating-filter-container" class="rating-filter-wrapper">
       <div class="custom-select" id="custom-rating-val-container" tabindex="0" title="レーティング">
         <div class="custom-select-label" id="custom-rating-val-label">指定なし</div>
         <svg class="custom-select-arrow" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -116,7 +116,7 @@
 	</div>
 	<div class="resizer-h" id="resizer-center"></div>
 	<div id="thumbnail-controls">
-	  <div class="left-controls" style="margin-right: auto; display: flex; align-items: center; gap: 16px;">
+	  <div class="left-controls top-left-controls">
 		<label class="custom-checkbox-wrapper">
 		  <input type="checkbox" id="show-thumbnail-name-chk">
 		  <span class="custom-checkbox"></span>
@@ -153,7 +153,7 @@
 	  </div>
 	  <div class="control-divider"></div>
 	  <label for="thumbnail-size-slider">サムネイル:</label>
-	  <div class="slider-wrapper" style="position: relative; display: flex; align-items: center;">
+	  <div class="slider-wrapper thumbnail-slider-wrapper">
 	    <input type="range" id="thumbnail-size-slider" min="100" max="500" value="120">
 		<div id="thumbnail-slider-tooltip" class="slider-tooltip">120px</div>
 	  </div>
@@ -186,15 +186,15 @@
   <div class="resizer" id="resizer-right"></div>
 
   <!-- 右ペイン: インスペクター -->
-  <div id="right-pane" style="border-left: none;">
-    <div id="inspector-header" class="pane-header" style="height: 32px; padding: 0 8px 4px 4px; border-left: 1px solid var(--panel-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: flex-end; justify-content: flex-start;">
+  <div id="right-pane" class="pane-no-border-left">
+    <div id="inspector-header" class="pane-header inspector-header-layout">
       <div id="inspector-header-path" class="open-folder-btn" style="display: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; direction: rtl; text-align: left;"></div>
     </div>
-    <div id="inspector-section" tabindex="-1" style="border-left: 1px solid var(--border-color);">
+    <div id="inspector-section" class="inspector-section-bordered" tabindex="-1">
       <div id="inspector-content" class="inspector-data">
         <div id="inspector-empty" class="empty-state-msg">
-          <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:12px;"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-          <div style="font-size: 13px; letter-spacing: 0.5px;">画像を選択してタグを表示</div>
+          <svg class="empty-state-icon" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+          <div class="empty-state-text">画像を選択してタグを表示</div>
         </div>
       </div>
     </div>
@@ -210,8 +210,8 @@
   </template>
 
   <template id="sf-condition-template">
-    <div class="sf-condition-row" style="display: flex; gap: 8px; align-items: center;">
-      <div class="custom-select cond-type-select" tabindex="0" style="width: 160px; height: 32px;">
+    <div class="sf-condition-row sf-cond-row-layout">
+      <div class="custom-select cond-type-select sf-cond-type-dim" tabindex="0">
         <span class="custom-select-label">レーティング</span>
         <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         <div class="custom-select-menu">
@@ -226,14 +226,14 @@
         </div>
         <input type="hidden" class="cond-type" value="rating">
       </div>
-      <div class="custom-select cond-op-select" tabindex="0" style="width: 130px; height: 32px;">
+      <div class="custom-select cond-op-select sf-cond-op-dim" tabindex="0">
         <span class="custom-select-label">以上</span>
         <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         <div class="custom-select-menu"></div>
         <input type="hidden" class="cond-operator" value=">=">
       </div>
-      <div class="cond-value-container" style="display: flex; flex: 1; gap: 4px; align-items: center;"></div>
-      <button type="button" class="btn-remove-cond dialog-btn" style="padding: 0 12px; display: inline-flex; align-items: center; justify-content: center;" title="条件を削除"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      <div class="cond-value-container sf-cond-val-box"></div>
+      <button type="button" class="btn-remove-cond dialog-btn btn-remove-cond-style" title="条件を削除"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
     </div>
   </template>
 
@@ -262,7 +262,7 @@
         </button>
       </div>
       <div id="diff-container"></div>
-      <div class="modal-footer" style="display: flex; justify-content: flex-end; margin-top: 16px;">
+      <div class="modal-footer diff-modal-footer">
         <button id="diff-bottom-close-btn" class="dialog-btn">閉じる</button>
       </div>
     </div>
@@ -309,11 +309,11 @@
         <input type="text" id="smart-name-input" class="dialog-input" placeholder="スマートフォルダ名">
       </div>
       <div class="form-group">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <label class="form-label" style="margin-bottom: 0;">条件 (すべての条件に一致)</label>
-          <button id="smart-add-condition-btn" class="dialog-btn" style="padding: 8px 12px;">+ 条件を追加</button>
+        <div class="sf-conditions-header">
+          <label class="form-label">条件 (すべての条件に一致)</label>
+          <button id="smart-add-condition-btn" class="dialog-btn btn-add-cond">+ 条件を追加</button>
         </div>
-        <div id="smart-conditions-list" style="display: flex; flex-direction: column; gap: 8px; overflow: visible;">
+        <div id="smart-conditions-list" class="sf-conditions-container">
           <!-- JSで動的に追加 -->
         </div>
       </div>

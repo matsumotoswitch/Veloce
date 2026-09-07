@@ -77,9 +77,9 @@ class UIManager {
     DATABASE_ZAP: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5V19A9 3 0 0 0 15 21.84"></path><path d="M21 5V8.5"></path><path d="M21 12L18 17H22L19 22"></path></svg>`,
     CHEVRON_UP: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" fill="none"/></svg>`,
     CHEVRON_DOWN: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" fill="none"/></svg>`,
-    SORT_ASC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><path d="m18 15-6-6-6 6" fill="none"/></svg>`,
-    SORT_DESC: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><path d="m6 9 6 6 6-6" fill="none"/></svg>`,
-    SORT_ARROW: `<svg class="sort-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;"><path d="m6 9 6 6 6-6" fill="none"/></svg>`,
+    SORT_ASC: `<svg class="sort-arrow-inline" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" fill="none"/></svg>`,
+    SORT_DESC: `<svg class="sort-arrow-inline" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" fill="none"/></svg>`,
+    SORT_ARROW: `<svg class="sort-arrow sort-arrow-inline" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" fill="none"/></svg>`,
     ERASER: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>`,
     COPY: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`,
     CLIPBOARD: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clipboard"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>`,
@@ -1163,14 +1163,14 @@ class UIManager {
     };
 
     const headerHtml = `
-      <div style="display: flex; gap: 15px; margin-bottom: 15px;">
-        <div style="flex: 1; display: flex; flex-direction: column;">
-          <div class="diff-thumbnail-container" style="margin-top: 0;">
+      <div class="diff-pane-container">
+        <div class="diff-pane-col">
+          <div class="diff-thumbnail-container diff-thumbnail-box">
             ${getMediaHtml(file1.path, src1)}
           </div>
         </div>
-        <div style="flex: 1; display: flex; flex-direction: column;">
-          <div class="diff-thumbnail-container" style="margin-top: 0;">
+        <div class="diff-pane-col">
+          <div class="diff-thumbnail-container diff-thumbnail-box">
             ${getMediaHtml(file2.path, src2)}
           </div>
         </div>
@@ -1360,8 +1360,8 @@ class UIManager {
 
     if (!topSpacer || !bottomSpacer) {
       tbody.innerHTML = `
-        <tr class="list-top-spacer" style="border: none; padding: 0;"><td colspan="8" style="padding: 0; border: none;"></td></tr>
-        <tr class="list-bottom-spacer" style="border: none; padding: 0;"><td colspan="8" style="padding: 0; border: none;"></td></tr>
+        <tr class="list-top-spacer list-spacer-row"><td colspan="8" class="list-spacer-cell"></td></tr>
+        <tr class="list-bottom-spacer list-spacer-row"><td colspan="8" class="list-spacer-cell"></td></tr>
       `;
       topSpacer = tbody.querySelector('.list-top-spacer');
       bottomSpacer = tbody.querySelector('.list-bottom-spacer');
@@ -1536,16 +1536,23 @@ class UIManager {
       const emptyContainer = container.querySelector('.empty-state-container');
       if (emptyContainer) {
         emptyContainer.style.display = 'flex';
-        emptyContainer.innerHTML = appState.searchQuery 
-          ? `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><div style="font-size: 14px; letter-spacing: 0.5px;">検索結果が見つかりません</div>`
-          : `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div style="font-size: 14px; letter-spacing: 0.5px;">このフォルダには画像がありません</div>`;
+        const targetMode = appState.searchQuery ? 'search' : 'folder';
+        if (emptyContainer.dataset.mode !== targetMode) {
+          emptyContainer.dataset.mode = targetMode;
+          emptyContainer.innerHTML = targetMode === 'search'
+            ? `<svg class="empty-state-icon" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><div class="empty-state-text">検索結果が見つかりません</div>`
+            : `<svg class="empty-state-icon" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div class="empty-state-text">このフォルダには画像がありません</div>`;
+        }
       }
       this.lastGridStartIndex = -1;
       this.lastGridEndIndex = -1;
       return;
     } else {
       const emptyContainer = container.querySelector('.empty-state-container');
-      if (emptyContainer) emptyContainer.style.display = 'none';
+      if (emptyContainer) {
+        emptyContainer.style.display = 'none';
+        emptyContainer.dataset.mode = '';
+      }
     }
 
     const itemSize = parseFloat(this.elements.thumbnailSizeSlider?.value) || 120;
@@ -2027,7 +2034,7 @@ export function createFavoriteEditorUI(containerElement, initialIcon = 'star', i
       <div class="form-label">アイコンを選択</div>
       <div class="icon-grid" id="favIconGrid"></div>
       
-      <div class="form-label" style="margin-top: 16px;">カラーを選択</div>
+      <div class="form-label form-label-spaced">カラーを選択</div>
       <div class="color-grid" id="favColorGrid"></div>
     </div>
   `;

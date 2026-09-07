@@ -48,6 +48,16 @@
   --transition-fast: cubic-bezier(0.4, 0, 0.2, 1);
   --text-light: #ffffff;
   --bg-darker: #1e1e1e;
+
+  /* Palette Colors for Favorites & Smart Folders */
+  --palette-default: #ececec;
+  --palette-red: #ef4444;
+  --palette-blue: #3b82f6;
+  --palette-green: #22c55e;
+  --palette-yellow: #eab308;
+  --palette-purple: #a855f7;
+  --palette-pink: #ec4899;
+  --palette-cyan: #06b6d4;
 }
 
 * {
@@ -1228,7 +1238,7 @@ input[type="range"]:focus {
   30% {
     color: var(--glow-gold) !important;
     stroke: var(--glow-gold) !important;
-    filter: drop-shadow(0 0 1px #ffffff) drop-shadow(0 0 5px var(--glow-gold));
+    filter: drop-shadow(0 0 1px var(--text-light)) drop-shadow(0 0 5px var(--glow-gold));
   }
   100% {
     filter: none;
@@ -1239,7 +1249,7 @@ input[type="range"]:focus {
   0%,
   30% {
     color: var(--glow-gold) !important;
-    text-shadow: 0 0 2px #ffffff, 0 0 6px var(--glow-gold);
+    text-shadow: 0 0 2px var(--text-light), 0 0 6px var(--glow-gold);
   }
   100% {
     text-shadow: none;
@@ -1707,11 +1717,11 @@ img.thumbnail-img.loading {
 .modal-content h2,
 .dialog-box h2 {
   margin-top: 0;
-  margin-bottom: 20px;
-  padding-bottom: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 0;
   font-size: 1.25em;
   color: var(--glow-gold);
-  border-bottom: 1px solid var(--modal-border);
+  border-bottom: none;
 }
 
 .modal-header,
@@ -2074,6 +2084,7 @@ img.thumbnail-img.loading {
 }
 
 .context-menu-item svg,
+.context-menu-item .menu-icon-placeholder,
 .context-menu-item>div[style*="width:16px"] {
   width: 16px !important;
   height: 16px !important;
@@ -2099,7 +2110,7 @@ img.thumbnail-img.loading {
 
 /* 危険な操作（削除など）のホバーエフェクト */
 .context-menu-item.danger:hover {
-  background-color: rgba(224, 82, 99, 0.3);
+  background-color: rgba(var(--danger-rgb), 0.3);
   /* 赤の透過 */
   color: var(--text-light);
 }
@@ -3006,35 +3017,35 @@ html.viewer-html,
 
 /* --- Veloce 厳選カラークラス --- */
 .icon-color-default {
-  color: var(--text-color);
+  color: var(--palette-default);
 }
 
 .icon-color-red {
-  color: #ef4444;
+  color: var(--palette-red);
 }
 
 .icon-color-blue {
-  color: #3b82f6;
+  color: var(--palette-blue);
 }
 
 .icon-color-green {
-  color: #22c55e;
+  color: var(--palette-green);
 }
 
 .icon-color-yellow {
-  color: #eab308;
+  color: var(--palette-yellow);
 }
 
 .icon-color-purple {
-  color: #a855f7;
+  color: var(--palette-purple);
 }
 
 .icon-color-pink {
-  color: #ec4899;
+  color: var(--palette-pink);
 }
 
 .icon-color-cyan {
-  color: #06b6d4;
+  color: var(--palette-cyan);
 }
 
 /* 全画面モーダルの背景からぼかしを排除し、パフォーマンス優先にしつつ見やすくする */
@@ -3749,3 +3760,234 @@ input[type="range"]:active~.slider-tooltip {
   opacity: 0.8;
   transform: scale(1.02);
 }
+
+/* ============================================================================
+   共通ユーティリティ & インラインスタイル集約クラス
+   ============================================================================ */
+
+/* コンテキストメニュー */
+.menu-label {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu-shortcut {
+  text-align: right;
+  opacity: 0.6;
+  font-size: 0.9em;
+}
+
+.menu-icon-placeholder {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+}
+
+.menu-check-box {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+/* ドラッグツールチップ */
+.drag-tooltip-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drag-tooltip-icon {
+  color: var(--accent-color);
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* インスペクター DOM Pool 要素スタイル */
+.inspector-section-block {
+  margin-bottom: 15px;
+}
+
+.inspector-section-h3 {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  margin-top: 0;
+  margin-bottom: 4px;
+  min-height: 22px;
+  height: 22px;
+  line-height: 22px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-color);
+  transition: color 0.2s;
+  user-select: none;
+}
+
+.inspector-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  line-height: 22px;
+}
+
+.inspector-copy-wrapper {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+  height: 22px;
+}
+
+/* 差分モーダル */
+.diff-pane-container {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.diff-pane-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-thumbnail-box {
+  margin-top: 0;
+}
+
+.diff-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* リストスペーサー */
+.list-spacer-row {
+  border: none;
+  padding: 0;
+}
+
+.list-spacer-cell {
+  padding: 0;
+  border: none;
+}
+
+/* 空状態表示アイコン・テキスト */
+.empty-state-icon {
+  margin-bottom: 16px;
+}
+
+.empty-state-text {
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+/* ツールバー & レイアウト補助 */
+.rating-filter-wrapper {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.top-left-controls {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.thumbnail-slider-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pane-no-border-left {
+  border-left: none !important;
+}
+
+.inspector-header-layout {
+  height: 32px;
+  padding: 0 8px 4px 4px;
+  border-left: 1px solid var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+}
+
+.inspector-section-bordered {
+  border-left: 1px solid var(--border-color);
+}
+
+.sf-cond-row-layout {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sf-cond-type-dim {
+  width: 160px;
+  height: 32px;
+}
+
+.sf-cond-op-dim {
+  width: 130px;
+  height: 32px;
+}
+
+.sf-cond-val-box {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  align-items: center;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.sort-arrow-inline {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.form-label-spaced {
+  margin-top: 16px;
+}
+
+.sf-conditions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sf-conditions-header .form-label {
+  margin-bottom: 0;
+}
+
+.btn-add-cond {
+  padding: 8px 12px;
+}
+
+.sf-conditions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: visible;
+}
+
+.btn-remove-cond-style {
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+

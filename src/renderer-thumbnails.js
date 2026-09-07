@@ -24,6 +24,9 @@ import { appState } from './renderer-state.js';
 import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL } from './renderer-ui.js';
 import { getStreamUrl, debounce } from './utils.js';
 
+/** サムネイルCanvas塗りつぶし背景色 (var(--bg-darker) と同一のカラー値) */
+const THUMBNAIL_CANVAS_BG = '#1e1e1e';
+
 /**
  * Blob から安全にヘッダーバイト列を取得するヘルパー関数
  * Node/jsdom テスト環境および Chromium/WebView2 の両方に対応
@@ -244,7 +247,7 @@ class ThumbnailWorkerPool {
         // 等倍またはすでに縮小済みのため、補間品質は medium で最高速化
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'medium';
-        ctx.fillStyle = '#1e1e1e';
+        ctx.fillStyle = THUMBNAIL_CANVAS_BG;
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(sourceElement, 0, 0, width, height);
         
