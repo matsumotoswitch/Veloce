@@ -105,5 +105,14 @@ describe('Style Unification and DOM Optimization Tests', () => {
     // リサイザートグルがインラインCSSではなくクラスで指定されていること
     expect(code).toContain('resizer-toggle ${isHorizontal ? \'resizer-toggle-horizontal\' : \'resizer-toggle-vertical\'}');
     expect(code).not.toContain('btn.style.cssText =');
+
+    // 余計な「メタデータが含まれていないか、読み取れませんでした。」の警告テキストが削除されていること
+    expect(code).not.toContain('メタデータが含まれていないか、読み取れませんでした。');
+  });
+
+  it('verifies index.html maintains inspector-empty element for empty folders', () => {
+    const html = fs.readFileSync(indexHtmlPath, 'utf-8');
+    expect(html).toContain('id="inspector-empty"');
+    expect(html).toContain('画像を選択してタグを表示');
   });
 });

@@ -45,7 +45,10 @@ describe('renderMultipleSelectionSummary (PLAN.md Sec 3.2)', () => {
     emptyInfoMsg.style.display = 'none';
     headerPath.style.display = 'none';
     headerPath.innerHTML = '';
-    inspectorContent.innerHTML = '<div id="inspector-empty" class="show"></div>';
+    const emptyInspectorMsg = document.getElementById('inspector-empty');
+    if (emptyInspectorMsg) {
+      emptyInspectorMsg.classList.add('show');
+    }
 
     appState.selection = new Set();
     appState.totalCount = 100;
@@ -59,7 +62,8 @@ describe('renderMultipleSelectionSummary (PLAN.md Sec 3.2)', () => {
 
     expect(staticTable.style.display).toBe('none');
     expect(emptyInfoMsg.style.display).toBe('flex');
-    expect(document.getElementById('inspector-empty').classList.contains('show')).toBe(false);
+    const emptyInspectorMsg = document.getElementById('inspector-empty');
+    expect(emptyInspectorMsg.classList.contains('show')).toBe(false);
   });
 
   it('should render correct selection count and percentage in headerPath', async () => {

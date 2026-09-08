@@ -718,27 +718,15 @@ function clearMetadataUI() {
   if (staticTable && emptyInfoMsg) {
     staticTable.style.display = 'none';
     emptyInfoMsg.style.display = 'flex';
-  } else {
-    const infoContainer = document.getElementById('file-info-content');
-    if (infoContainer) {
-      infoContainer.innerHTML = '<div class="empty-state-msg"><svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div>画像を選択してください</div></div>';
-    }
+  }
+
+  if (typeof resetInspectorPools === 'function') {
+    resetInspectorPools();
   }
 
   const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (emptyInspectorMsg) {
     emptyInspectorMsg.classList.add('show');
-    emptyInspectorMsg.className = 'empty-state-msg show';
-    emptyInspectorMsg.innerHTML = '<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>画像を選択すると詳細が表示されます</div>';
-  } else {
-    const container = document.getElementById('inspector-content');
-    if (container) {
-      container.innerHTML = '<div class="empty-state-msg"><svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>画像を選択すると詳細が表示されます</div></div>';
-    }
-  }
-
-  if (typeof resetInspectorPools === 'function') {
-    resetInspectorPools();
   }
 
   const headerPath = document.getElementById('inspector-header-path');
@@ -754,7 +742,6 @@ function clearMetadataUI() {
  */
 export async function renderMultipleSelectionSummary() {
   const container = document.getElementById('inspector-content');
-  const emptyInspectorMsg = document.getElementById('inspector-empty');
   const headerPath = document.getElementById('inspector-header-path');
   const staticTable = document.getElementById('static-file-info-table');
   const emptyInfoMsg = document.getElementById('file-info-empty');
@@ -765,7 +752,9 @@ export async function renderMultipleSelectionSummary() {
     emptyInfoMsg.style.display = 'flex';
   }
 
+  const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
+
   // DOM Pool の再利用インデックスをリセットし、前回のセクション・タグをクリーンアップ
   if (typeof resetInspectorPools === 'function') resetInspectorPools();
 
@@ -1783,8 +1772,10 @@ function resetInspectorPools() {
 
 async function renderMetadata(file) {
   const container = document.getElementById('inspector-content');
-  const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (!file || !container) return;
+
+  const emptyInspectorMsg = document.getElementById('inspector-empty');
+  if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
 
   try {
     const rawMeta = await window.veloceAPI.parseMetadata(file.path);
@@ -1816,7 +1807,6 @@ async function renderMetadata(file) {
     const termsRegex = terms.length > 0 ? createSearchTermsRegex(terms) : null;
 
     resetInspectorPools();
-    if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
 
     let badge = container.querySelector('.inspector-location-badge');
     if (badge) badge.remove();
@@ -1950,11 +1940,6 @@ async function renderMetadata(file) {
         secEl.box.style.overflowY = 'auto';
         secEl.box.textContent = rawMetaStr;
         if (secEl.root.parentNode !== container) container.appendChild(secEl.root);
-      } else {
-        if (emptyInspectorMsg) {
-          emptyInspectorMsg.className = 'empty-state-msg show';
-          emptyInspectorMsg.innerHTML = '<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg><div>メタデータが含まれていないか、読み取れませんでした。</div>';
-        }
       }
     }
 
