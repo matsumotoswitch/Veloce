@@ -115,4 +115,20 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(html).toContain('id="inspector-empty"');
     expect(html).toContain('画像を選択してタグを表示');
   });
+
+  it('verifies header heights across all panes are unified to 32px via --header-height token', () => {
+    const css = fs.readFileSync(styleCssPath, 'utf-8');
+
+    // --header-height トークンが 32px で定義されていること
+    expect(css).toContain('--header-height: 32px;');
+
+    // サムネイルコントロールヘッダーが var(--header-height) を使用し上下均等パディングであること
+    expect(css).toMatch(/#thumbnail-controls\s*\{[^}]*height:\s*var\(--header-height\);/);
+    expect(css).toMatch(/#thumbnail-controls\s*\{[^}]*padding:\s*0\s+8px;/);
+
+    // 各ペインヘッダーが var(--header-height) に統一されていること
+    expect(css).toMatch(/\.pane-header\s*\{[^}]*height:\s*var\(--header-height\);/);
+    expect(css).toMatch(/#file-table\s+th\s*\{[^}]*height:\s*var\(--header-height\);/);
+    expect(css).toMatch(/\.inspector-header-layout\s*\{[^}]*height:\s*var\(--header-height\);/);
+  });
 });

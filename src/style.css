@@ -38,7 +38,7 @@
   --font-size-sm: 13px;
   --font-size-xs: 12px;
   --font-size-lg: 16px;
-  --header-height: 28px;
+  --header-height: 32px;
   --titlebar-bg: #000000;
   --input-bg: #000000;
   --dialog-bg: #1a2327;
@@ -681,7 +681,7 @@ input:-webkit-autofill:focus {
   font-size: var(--font-size-xs);
   font-weight: normal;
   color: var(--text-color);
-  padding: 0 16px 4px 16px;
+  padding: 0 16px;
   height: var(--header-height);
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
@@ -693,7 +693,7 @@ input:-webkit-autofill:focus {
 }
 
 #smart-folders-section .pane-header {
-  height: 32px;
+  height: var(--header-height);
   padding-top: 0;
   padding-bottom: 0;
 }
@@ -827,7 +827,7 @@ input:-webkit-autofill:focus {
   top: 0;
   left: 0;
   width: 1px;
-  height: 32px;
+  height: var(--header-height);
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
   pointer-events: none;
@@ -842,7 +842,7 @@ input:-webkit-autofill:focus {
   top: 0;
   right: 0;
   width: 13px;
-  height: 32px;
+  height: var(--header-height);
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
   pointer-events: none;
@@ -979,7 +979,7 @@ body.is-resizing #center-top {
 }
 
 #center-top::-webkit-scrollbar-track {
-  margin-top: 32px;
+  margin-top: var(--header-height);
   /* Prevent overlapping the sticky header */
 }
 
@@ -1042,7 +1042,7 @@ table#file-table {
   z-index: 2;
   font-weight: normal;
   font-size: var(--font-size-xs);
-  height: 32px;
+  height: var(--header-height);
   padding: 0 8px;
 }
 
@@ -1084,8 +1084,8 @@ table#file-table {
 /* Center Bottom: Thumbnails */
 #thumbnail-controls {
   background: var(--panel-bg);
-  padding: 0 8px 4px 8px;
-  height: calc(var(--header-height) - 1px);
+  padding: 0 8px;
+  height: var(--header-height);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -3949,7 +3949,7 @@ input[type="range"]:active~.slider-tooltip {
 }
 
 .inspector-header-layout {
-  height: 32px;
+  height: var(--header-height);
   padding: 0 8px 4px 4px;
   border-left: 1px solid var(--panel-bg);
   border-bottom: 1px solid var(--border-color);
