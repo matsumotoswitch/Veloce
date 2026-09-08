@@ -1392,13 +1392,13 @@ class UIManager {
     const topSpacerHeight = safeStartRow * rowHeight;
     const bottomSpacerHeight = (totalRows - 1 - endRow) * rowHeight;
 
-    const newTopHeight = `${topSpacerHeight}px`;
-    if (topSpacer.style.height !== newTopHeight) {
-      topSpacer.style.height = newTopHeight;
+    if (topSpacer._cachedHeight !== topSpacerHeight) {
+      topSpacer._cachedHeight = topSpacerHeight;
+      topSpacer.style.height = `${topSpacerHeight}px`;
     }
-    const newBottomHeight = `${bottomSpacerHeight}px`;
-    if (bottomSpacer.style.height !== newBottomHeight) {
-      bottomSpacer.style.height = newBottomHeight;
+    if (bottomSpacer._cachedHeight !== bottomSpacerHeight) {
+      bottomSpacer._cachedHeight = bottomSpacerHeight;
+      bottomSpacer.style.height = `${bottomSpacerHeight}px`;
     }
 
     let items;
@@ -1435,7 +1435,10 @@ class UIManager {
         if (!this._listDomByPath) this._listDomByPath = new Map();
         this._listDomByPath.set(file.path, tr);
         
-        tr.style.height = `${rowHeight}px`;
+        if (tr._cachedRowHeight !== rowHeight) {
+          tr._cachedRowHeight = rowHeight;
+          tr.style.height = `${rowHeight}px`;
+        }
 
         const tds = tr.children;
         tds[0].textContent = file.name;

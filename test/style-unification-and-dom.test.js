@@ -14,6 +14,8 @@ describe('Style Unification and DOM Optimization Tests', () => {
 
     // --glow-gold-rgb が :root に定義されていること
     expect(css).toContain('--glow-gold-rgb: 230, 199, 98;');
+    expect(css).toContain('--text-rgb: 205, 219, 224;');
+    expect(css).toContain('--bg-darker-rgb: 30, 30, 30;');
 
     // 230, 199, 98 の出現回数が定義の1回のみであること
     const goldRgbMatches = css.match(/230,\s*199,\s*98/g);
@@ -25,6 +27,20 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(dangerRgbMatches).not.toBeNull();
     expect(dangerRgbMatches.length).toBe(1);
 
+    // 205, 219, 224 の出現回数が定義の1回のみであること
+    const textRgbMatches = css.match(/205,\s*219,\s*224/g);
+    expect(textRgbMatches).not.toBeNull();
+    expect(textRgbMatches.length).toBe(1);
+
+    // 30, 30, 30 の出現回数が定義の1回のみであること
+    const bgDarkerRgbMatches = css.match(/30,\s*30,\s*30/g);
+    expect(bgDarkerRgbMatches).not.toBeNull();
+    expect(bgDarkerRgbMatches.length).toBe(1);
+
+    // ハードコードされたフォールバック色の排除
+    expect(css).not.toContain('var(--text-color, #cddbe0)');
+    expect(css).not.toContain('var(--accent-color, #257e8c)');
+
     // 追加されたヘルパークラスが正しく存在すること
     expect(css).toContain('.diff-tag-empty {');
     expect(css).toContain('.menu-item-icon {');
@@ -32,6 +48,11 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(css).toContain('.render-error-box {');
     expect(css).toContain('.btn-browse-path {');
     expect(css).toContain('.cond-path-input {');
+    expect(css).toContain('.resizer-toggle-horizontal {');
+    expect(css).toContain('.resizer-toggle-vertical {');
+
+    // リサイザートグルがホバー時にも中央揃え translate(-50%, -50%) を維持すること（右下へのズレ防止）
+    expect(css).toMatch(/\.resizer-toggle:hover\s*\{[^}]*transform:\s*translate\(-50%,\s*-50%\)\s*scale\(1\.05\);/);
   });
 
   it('verifies index.html has zero inline style attributes', () => {
@@ -47,11 +68,16 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(html).toContain('id="inspector-header-path"');
   });
 
-  it('verifies renderer-ui.js uses diff-tag-empty class instead of inline styles', () => {
+  it('verifies renderer-ui.js uses diff-tag-empty class and optimized height guards', () => {
     const code = fs.readFileSync(rendererUiJsPath, 'utf-8');
 
     // diff-tag-empty クラスが使用されていること
     expect(code).toContain('<span class="diff-tag-empty">なし</span>');
+
+    // 仮想スクロールスペーサーとファイル行で数値キャッシュ比較ガードが使用されていること
+    expect(code).toContain('topSpacer._cachedHeight !== topSpacerHeight');
+    expect(code).toContain('bottomSpacer._cachedHeight !== bottomSpacerHeight');
+    expect(code).toContain('tr._cachedRowHeight !== rowHeight');
 
     // style="..." が存在しないこと
     const inlineStyleMatches = code.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
@@ -75,5 +101,9 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(code).toContain('cond-value-input dialog-input flex-1');
     expect(code).toContain('btn-browse-path dialog-btn');
     expect(code).toContain('cond-path-input flex-1');
+
+    // リサイザートグルがインラインCSSではなくクラスで指定されていること
+    expect(code).toContain('resizer-toggle ${isHorizontal ? \'resizer-toggle-horizontal\' : \'resizer-toggle-vertical\'}');
+    expect(code).not.toContain('btn.style.cssText =');
   });
 });

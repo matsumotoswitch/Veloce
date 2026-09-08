@@ -10,6 +10,7 @@
   --top-bar-bg: #203036;
   --border-color: #394346;
   --text-color: #cddbe0;
+  --text-rgb: 205, 219, 224;
   --accent-color: #257e8c;
   --accent-rgb: 37, 126, 140;
   --accent-hover: #2e96a6;
@@ -49,6 +50,7 @@
   --transition-fast: cubic-bezier(0.4, 0, 0.2, 1);
   --text-light: #ffffff;
   --bg-darker: #1e1e1e;
+  --bg-darker-rgb: 30, 30, 30;
 
   /* Palette Colors for Favorites & Smart Folders */
   --palette-default: #ececec;
@@ -226,7 +228,7 @@ body.is-resizing .app-content {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  color: var(--text-color, #cddbe0);
+  color: var(--text-color);
   box-shadow: var(--popup-shadow) !important;
   font-family: inherit;
   backdrop-filter: none !important;
@@ -467,7 +469,31 @@ input:-webkit-autofill:focus {
 
 /* トグルスイッチの追加スタイル（JSで生成される要素用） */
 .resizer-toggle {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 1;
+  background-color: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  color: var(--text-color);
+  z-index: 1000;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   transition: background-color 0.15s ease, transform 0.2s var(--transition-fast), opacity 0.15s ease;
+}
+
+.resizer-toggle-horizontal {
+  width: 30px;
+  height: 14px;
+}
+
+.resizer-toggle-vertical {
+  width: 14px;
+  height: 30px;
 }
 
 .resizer-toggle:hover {
@@ -475,7 +501,7 @@ input:-webkit-autofill:focus {
   border-color: var(--accent-color) !important;
   color: var(--text-light) !important;
   opacity: 1 !important;
-  transform: scale(1.05);
+  transform: translate(-50%, -50%) scale(1.05);
 }
 
 .resizer-toggle.expanded svg {
@@ -1411,7 +1437,7 @@ body.show-thumbnail-names .thumbnail-label {
 .inspector-data label {
   font-size: var(--font-size-xs);
   margin: 8px 0 4px 0;
-  color: rgba(205, 219, 224, 0.65);
+  color: rgba(var(--text-rgb), 0.65);
 }
 
 .inspector-data textarea {
@@ -3008,7 +3034,7 @@ html.viewer-html,
 .color-btn.active {
   border-color: var(--text-light) !important;
   transform: scale(1.15) !important;
-  box-shadow: 0 0 0 2px var(--accent-color, #257e8c) !important;
+  box-shadow: 0 0 0 2px var(--accent-color) !important;
   outline: none;
 }
 
@@ -3693,7 +3719,7 @@ input[type="range"]:active~.slider-tooltip {
   transform: translateX(-50%);
   width: 80%;
   max-width: 800px;
-  background: rgba(30, 30, 30, 0.85);
+  background: rgba(var(--bg-darker-rgb), 0.85);
   border-radius: 8px;
   padding: 10px 20px;
   display: flex;

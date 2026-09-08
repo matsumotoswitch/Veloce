@@ -3640,22 +3640,9 @@ function setupResizer(resizer, type, cursor) {
 }
 
 function createResizerToggle(resizer, type) {
-  resizer.style.position = 'relative';
-
-  const btn = document.createElement('div');
-  btn.className = 'resizer-toggle';
   const isHorizontal = type === 'center' || type === 'leftTop' || type === 'rightTop';
-  let topPos = '50%';
-  let leftPos = '50%';
-
-  btn.style.cssText = `
-    position: absolute; display: flex; justify-content: center; align-items: center; opacity: 1;
-    background-color: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; color: var(--text-color);
-    z-index: 1000; top: ${topPos}; left: ${leftPos}; transform: translate(-50%, -50%);
-  `;
-
-  btn.style.width = isHorizontal ? '30px' : '14px';
-  btn.style.height = isHorizontal ? '14px' : '30px';
+  const btn = document.createElement('div');
+  btn.className = `resizer-toggle ${isHorizontal ? 'resizer-toggle-horizontal' : 'resizer-toggle-vertical'}`;
 
   let openIcon;
   if (type === 'left') openIcon = UIManager.ICONS.CHEVRON_LEFT;
