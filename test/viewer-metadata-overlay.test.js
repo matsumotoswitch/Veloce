@@ -106,17 +106,63 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     // ファイル名が表示されていること
     expect(content.textContent).toContain('test_character.png');
 
-    // プロンプトタグが表示されていること
-    const tags = content.querySelectorAll('.viewer-meta-tag');
+    // プロンプトタグがメイン画面と同一の .diff-tag で表示されていること
+    const tags = content.querySelectorAll('.diff-tag');
     expect(tags.length).toBeGreaterThan(0);
     const tagTexts = Array.from(tags).map(t => t.textContent);
     expect(tagTexts).toContain('1girl');
     expect(tagTexts).toContain('masterpiece');
 
+    // メイン画面と同一の prompt-look ボックスが使われていること
+    const boxes = content.querySelectorAll('.prompt-look');
+    expect(boxes.length).toBeGreaterThan(0);
+
+    // コピーボタンが配置されていること
+    const copyBtns = content.querySelectorAll('.diff-copy-btn');
+    expect(copyBtns.length).toBeGreaterThan(0);
+
     // パラメータ（Seed, Steps 等）が表示されていること
     expect(content.textContent).toContain('123456789');
     expect(content.textContent).toContain('k_euler');
     expect(content.textContent).toContain('28');
+  });
+
+  it('コピーボタンをクリックしたときにセクション内容がクリップボードにコピーされること', async () => {
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      }
+    });
+
+    toggleMetadataOverlay(true);
+    await updateMetadataOverlay();
+
+    const copyBtn = document.querySelector('.diff-copy-btn');
+    expect(copyBtn).not.toBeNull();
+
+    const textToCopy = copyBtn.getAttribute('data-copy-text');
+    expect(textToCopy).toBeTruthy();
+
+    copyBtn.click();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(textToCopy);
+  });
+
+  it('タグチップをクリックしたときにそのタグがクリップボードにコピーされること', async () => {
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      }
+    });
+
+    toggleMetadataOverlay(true);
+    await updateMetadataOverlay();
+
+    const tag = document.querySelector('.diff-tag');
+    expect(tag).not.toBeNull();
+
+    const tagText = tag.textContent;
+    tag.click();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(tagText);
   });
 
   it('メタデータが存在しない画像の場合は「メタデータが見つかりません」が表示されること', async () => {

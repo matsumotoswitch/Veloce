@@ -19,7 +19,7 @@
 
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
-import { debounce, blockDevtoolsShortcuts, getStreamUrl } from './utils.js';
+import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect } from './utils.js';
 import { extractMetadataFields, parsePromptTags, buildInspectorSections } from './metadata-format.js';
 
 blockDevtoolsShortcuts();
@@ -113,6 +113,9 @@ function clearPreloadCache() {
   viewerState.preloadCache.clear();
 }
 
+const COPY_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+let _lastCopiedOverlayTags = '';
+
 /**
  * メタデータオーバーレイのDOM要素を生成または取得します。
  * @returns {HTMLElement}
@@ -146,13 +149,53 @@ export function createMetadataOverlay() {
 
     const content = document.createElement('div');
     content.id = 'viewer-metadata-content';
-    content.className = 'viewer-metadata-content';
+    content.className = 'viewer-metadata-content inspector-data';
 
     overlay.appendChild(header);
     overlay.appendChild(content);
 
     // 画像操作やドラッグへのイベント伝播を防止
-    overlay.addEventListener('click', (e) => e.stopPropagation());
+    overlay.addEventListener('click', async (e) => {
+      e.stopPropagation();
+
+      // セクション全体のコピーボタン処理
+      const copyBtn = e.target.closest('.diff-copy-btn');
+      if (copyBtn) {
+        const text = copyBtn.getAttribute('data-copy-text');
+        if (text) {
+          await navigator.clipboard.writeText(text);
+          showToast('クリップボードにコピーしました', 2000, 'success');
+          applyGlowEffect(copyBtn);
+        }
+        return;
+      }
+
+      // 個別タグチップのクリックコピー処理（Ctrl+クリックで追加コピー）
+      const tagEl = e.target.closest('.diff-tag');
+      if (tagEl) {
+        const text = tagEl.textContent;
+        if (text) {
+          let textToCopy = text;
+          let isAppended = false;
+          if (e.ctrlKey && _lastCopiedOverlayTags) {
+            isAppended = true;
+            const currentTags = _lastCopiedOverlayTags.split(',').map(t => t.trim()).filter(t => t);
+            if (!currentTags.includes(text)) {
+              textToCopy = _lastCopiedOverlayTags + ', ' + text;
+            } else {
+              textToCopy = _lastCopiedOverlayTags;
+            }
+          }
+          _lastCopiedOverlayTags = textToCopy;
+          await navigator.clipboard.writeText(textToCopy);
+          const displayTxt = textToCopy.length > 20 ? textToCopy.substring(0, 20) + '...' : textToCopy;
+          const prefix = isAppended ? '追加コピーしました: ' : 'コピーしました: ';
+          showToast(`${prefix}${displayTxt}`, 2000, 'success');
+          applyGlowEffect(tagEl);
+        }
+      }
+    });
+
     overlay.addEventListener('dblclick', (e) => e.stopPropagation());
     overlay.addEventListener('mousedown', (e) => e.stopPropagation());
     overlay.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -161,6 +204,89 @@ export function createMetadataOverlay() {
     document.body.appendChild(overlay);
   }
   return overlay;
+}
+
+/**
+ * メイン画面のインスペクターと同一構造のセクションDOM要素を生成します。
+ * @param {string} title
+ * @param {*} value
+ * @param {boolean} [isParam=false]
+ * @param {boolean} [isRaw=false]
+ * @param {string|null} [subLabel=null]
+ * @returns {HTMLElement}
+ */
+function createInspectorSectionElement(title, value, isParam = false, isRaw = false, subLabel = null) {
+  const section = document.createElement('div');
+  section.className = 'inspector-section inspector-section-block';
+
+  const h3 = document.createElement('h3');
+  h3.className = 'inspector-section-h3';
+
+  const titleWrapper = document.createElement('span');
+  titleWrapper.className = 'inspector-title-wrapper';
+
+  const titleSpan = document.createElement('span');
+  titleSpan.textContent = title;
+  titleWrapper.appendChild(titleSpan);
+
+  if (subLabel && subLabel !== 'Text to Image') {
+    const subWrapper = document.createElement('span');
+    subWrapper.className = 'sublabel-tags-wrapper';
+    const labels = subLabel.split(' + ');
+    labels.forEach(lbl => {
+      let modifier = '';
+      if (lbl.includes('Inpainting')) modifier = ' sublabel-tag--inpainting';
+      else if (lbl.includes('Vibe Transfer')) modifier = ' sublabel-tag--vibe';
+      else if (lbl.includes('Character Reference')) modifier = ' sublabel-tag--char-ref';
+      else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) modifier = ' sublabel-tag--img2img';
+
+      const span = document.createElement('span');
+      span.className = `sublabel-tag${modifier}`;
+      span.textContent = `[${lbl}]`;
+      subWrapper.appendChild(span);
+    });
+    titleWrapper.appendChild(subWrapper);
+  }
+
+  const copyWrapper = document.createElement('div');
+  copyWrapper.className = 'inspector-copy-wrapper';
+
+  const copyBtn = document.createElement('span');
+  copyBtn.className = 'diff-copy-btn';
+  copyBtn.title = 'コピー';
+  copyBtn.setAttribute('data-copy-text', String(value));
+  copyBtn.innerHTML = COPY_ICON_SVG;
+  copyWrapper.appendChild(copyBtn);
+
+  h3.appendChild(titleWrapper);
+  h3.appendChild(copyWrapper);
+  section.appendChild(h3);
+
+  const box = document.createElement('div');
+  box.tabIndex = -1;
+
+  if (isRaw) {
+    box.className = 'prompt-look raw-box';
+    box.textContent = String(value);
+  } else if (isParam) {
+    box.className = 'prompt-look param-box';
+    const tag = document.createElement('span');
+    tag.className = 'diff-tag common';
+    tag.textContent = String(value);
+    box.appendChild(tag);
+  } else {
+    box.className = 'prompt-look';
+    const tags = parsePromptTags(String(value));
+    for (const t of tags) {
+      const tag = document.createElement('span');
+      tag.className = 'diff-tag common';
+      tag.textContent = t;
+      box.appendChild(tag);
+    }
+  }
+
+  section.appendChild(box);
+  return section;
 }
 
 /**
@@ -233,63 +359,12 @@ export async function updateMetadataOverlay() {
 
     const fragment = document.createDocumentFragment();
 
-    // ファイル名セクション
-    const nameSec = document.createElement('div');
-    nameSec.className = 'viewer-meta-section';
-    const nameLabel = document.createElement('div');
-    nameLabel.className = 'viewer-meta-label';
-    nameLabel.textContent = 'ファイル名';
-    const nameVal = document.createElement('div');
-    nameVal.className = 'viewer-meta-filename';
-    nameVal.textContent = filename;
-    nameSec.appendChild(nameLabel);
-    nameSec.appendChild(nameVal);
-    fragment.appendChild(nameSec);
+    // 1. ファイル名セクション（メイン画面と同一形式）
+    fragment.appendChild(createInspectorSectionElement('ファイル名', filename, true));
 
+    // 2. メタデータ各セクション
     for (const sec of visibleSections) {
-      const secEl = document.createElement('div');
-      secEl.className = 'viewer-meta-section';
-
-      const labelRow = document.createElement('div');
-      labelRow.className = 'viewer-meta-label-row';
-
-      const label = document.createElement('span');
-      label.className = 'viewer-meta-label';
-      label.textContent = sec.title;
-      labelRow.appendChild(label);
-
-      if (sec.subLabel) {
-        const sub = document.createElement('span');
-        sub.className = 'viewer-meta-sublabel';
-        sub.textContent = `[${sec.subLabel}]`;
-        labelRow.appendChild(sub);
-      }
-      secEl.appendChild(labelRow);
-
-      if (sec.isParam) {
-        const valEl = document.createElement('div');
-        valEl.className = 'viewer-meta-param-val';
-        valEl.textContent = String(sec.value);
-        secEl.appendChild(valEl);
-      } else if (sec.isRaw) {
-        const pre = document.createElement('pre');
-        pre.className = 'viewer-meta-raw';
-        pre.textContent = String(sec.value);
-        secEl.appendChild(pre);
-      } else {
-        // プロンプト / ネガティブプロンプト
-        const tags = parsePromptTags(String(sec.value));
-        const tagsContainer = document.createElement('div');
-        tagsContainer.className = 'viewer-meta-tags-container';
-        for (const tag of tags) {
-          const tagEl = document.createElement('span');
-          tagEl.className = 'viewer-meta-tag';
-          tagEl.textContent = tag;
-          tagsContainer.appendChild(tagEl);
-        }
-        secEl.appendChild(tagsContainer);
-      }
-      fragment.appendChild(secEl);
+      fragment.appendChild(createInspectorSectionElement(sec.title, sec.value, !!sec.isParam, !!sec.isRaw, sec.subLabel || null));
     }
 
     contentEl.innerHTML = '';
