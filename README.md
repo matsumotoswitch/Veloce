@@ -77,6 +77,9 @@ Veloceはインストール不要のポータブルアプリケーションで�
 | `Esc` | メタデータオーバーレイ表示時はオーバーレイを閉じ、非表示時はビューアーウィンドウを閉じる |
 
 ## 開発環境とビルド方法 / Development & Build
+<details>
+<summary>ビルド・開発手順を表示する（開発者向け・クリックで展開）</summary>
+
 ### 1. 前提条件 / Prerequisites
 開発およびビルドには、**Node.js** と **Rust (Cargo)** 環境があらかじめセットアップされている必要があります。
 
@@ -109,6 +112,8 @@ npm run tauri build
 ```
 ビルドが成功すると、`src-tauri/target/release/` 配下に最適化されたスタンドアロンな実行ファイル（`veloce.exe` 等）が生成されます。
 ※VS Code を使用している場合、`upx.exe` を使用してビルドバイナリを自動圧縮するビルドタスク（`.vscode/tasks.json`）が用意されています。
+
+</details>
 
 ## 開発チームと方針 / Development Team & Policy
 **【開発チーム構成】**
