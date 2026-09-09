@@ -230,4 +230,149 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     expect(content.textContent).toContain('ddim');
     expect(content.textContent).toContain('99999');
   });
+
+  it('style.css で #viewer-metadata-overlay, .viewer-metadata-content, .prompt-look に user-select: text が指定されていること', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const cssPath = path.resolve(__dirname, '../src/style.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf-8');
+
+    // テキスト選択許可エリアに #viewer-metadata-overlay, .viewer-metadata-content, .prompt-look が含まれていること
+    const textSelectMatch = cssContent.match(/\/\* --- テキスト選択・コピーを明示的に許可するエリア --- \*\/\s*([^\{]+)\{([^}]+)\}/);
+    expect(textSelectMatch).not.toBeNull();
+    const selectors = textSelectMatch[1];
+    const styles = textSelectMatch[2];
+
+    expect(selectors).toContain('#viewer-metadata-overlay');
+    expect(selectors).toContain('.viewer-metadata-content');
+    expect(selectors).toContain('.prompt-look');
+    expect(styles).toContain('user-select: text');
+    expect(styles).toContain('-webkit-user-select: text');
+
+    // .prompt-look 単体にも user-select: text が指定されていること
+    const promptLookMatch = cssContent.match(/\.prompt-look\s*\{([^}]+)\}/);
+    expect(promptLookMatch).not.toBeNull();
+    expect(promptLookMatch[1]).toContain('user-select: text');
+  });
+
+  it('ドラッグ等でテキスト選択が行われている状態では、個別タグのクリックコピーが抑制されること', async () => {
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      }
+    });
+
+    toggleMetadataOverlay(true);
+    await updateMetadataOverlay();
+
+    const tag = document.querySelector('.diff-tag');
+    expect(tag).not.toBeNull();
+
+    // テキスト選択状態をモック (non-collapsed, 文字列あり)
+    const mockSelection = {
+      isCollapsed: false,
+      toString: () => '1girl, masterpiece'
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue(mockSelection);
+
+    tag.click();
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+
+    // 選択が解除された状態（collapsed）では正常にコピーされること
+    window.getSelection.mockReturnValue({
+      isCollapsed: true,
+      toString: () => ''
+    });
+
+    tag.click();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(tag.textContent);
+  });
+
+  it('プロンプトボックス内のドラッグ選択コピー時に、タグがカンマ区切りでクリップボードに格納されること', async () => {
+    toggleMetadataOverlay(true);
+    await updateMetadataOverlay();
+
+    const overlay = document.getElementById('viewer-metadata-overlay');
+    const promptLook = Array.from(overlay.querySelectorAll('.prompt-look')).find(b => b.querySelectorAll('.diff-tag').length > 1);
+    expect(promptLook).not.toBeNull();
+
+    const tags = promptLook.querySelectorAll('.diff-tag');
+    expect(tags.length).toBeGreaterThan(1);
+
+    // 複数タグを含むクローンフラグメントを作成してモック
+    const fragment = document.createDocumentFragment();
+    const tag1 = document.createElement('span');
+    tag1.className = 'diff-tag common';
+    tag1.textContent = tags[0].textContent;
+    const tag2 = document.createElement('span');
+    tag2.className = 'diff-tag common';
+    tag2.textContent = tags[1].textContent;
+    fragment.appendChild(tag1);
+    fragment.appendChild(tag2);
+
+    const mockRange = {
+      cloneContents: () => fragment
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      getRangeAt: () => mockRange
+    });
+
+    const clipboardDataMock = {
+      setData: vi.fn()
+    };
+    const copyEvent = new Event('copy', { bubbles: true, cancelable: true });
+    Object.assign(copyEvent, { clipboardData: clipboardDataMock });
+
+    promptLook.dispatchEvent(copyEvent);
+
+    expect(clipboardDataMock.setData).toHaveBeenCalledWith(
+      'text/plain',
+      `${tags[0].textContent}, ${tags[1].textContent}`
+    );
+    expect(copyEvent.defaultPrevented).toBe(true);
+  });
+
+  it('オーバーレイ上のマウス・ポインターイベントの伝播が停止されること', () => {
+    toggleMetadataOverlay(true);
+    const overlay = document.getElementById('viewer-metadata-overlay');
+
+    for (const evtName of ['mousedown', 'mouseup', 'pointerdown', 'dblclick']) {
+      const evt = new MouseEvent(evtName, { bubbles: true, cancelable: true });
+      const stopSpy = vi.spyOn(evt, 'stopPropagation');
+      overlay.dispatchEvent(evt);
+      expect(stopSpy).toHaveBeenCalled();
+    }
+  });
+
+  it('テキスト選択中に Ctrl+C を押したときは画像コピーをスキップし、テキストコピー通知が表示されること', () => {
+    viewerState.currentImagePath = 'C:\\images\\test_character.png';
+    window.veloceAPI.copyImageToClipboard = vi.fn();
+
+    // テキスト選択がある状態
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      toString: () => '1girl, masterpiece'
+    });
+
+    const keyEvent = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(keyEvent);
+
+    // 画像のコピーAPIは呼ばれないこと
+    expect(window.veloceAPI.copyImageToClipboard).not.toHaveBeenCalled();
+
+    // トーストコンテナに「テキストをクリップボードにコピーしました」が表示されること
+    const toastContainer = document.getElementById('toast-container');
+    expect(toastContainer).not.toBeNull();
+    expect(toastContainer.textContent).toContain('テキストをクリップボードにコピーしました');
+
+    // 選択がない状態では画像コピーが実行されること
+    window.getSelection.mockReturnValue({
+      isCollapsed: true,
+      toString: () => ''
+    });
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(window.veloceAPI.copyImageToClipboard).toHaveBeenCalledWith('C:\\images\\test_character.png');
+  });
 });

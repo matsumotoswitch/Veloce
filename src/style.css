@@ -79,6 +79,9 @@ table {
 
 /* --- テキスト選択・コピーを明示的に許可するエリア --- */
 #inspector-section,
+#viewer-metadata-overlay,
+.viewer-metadata-content,
+.prompt-look,
 #diff-container,
 .custom-tooltip,
 input,
@@ -1839,6 +1842,8 @@ img.thumbnail-img.loading {
   /* ここを1.1emから0.9emに修正 */
   line-height: 1.5;
   color: var(--text-color);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* パラメータ表示用の高さ調整 */
@@ -4172,6 +4177,8 @@ input[type="range"]:active~.slider-tooltip {
   display: flex;
   flex-direction: column;
   gap: 0;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .viewer-meta-empty,

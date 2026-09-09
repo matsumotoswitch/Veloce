@@ -158,6 +158,12 @@ export function createMetadataOverlay() {
     overlay.addEventListener('click', async (e) => {
       e.stopPropagation();
 
+      // ドラッグ等によるテキスト選択が行われている場合は、個別タグクリックコピーを発火させない
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) {
+        return;
+      }
+
       // セクション全体のコピーボタン処理
       const copyBtn = e.target.closest('.diff-copy-btn');
       if (copyBtn) {
@@ -196,8 +202,32 @@ export function createMetadataOverlay() {
       }
     });
 
+    /**
+     * プロンプトボックス内のドラッグ選択コピー時のフォーマット調整:
+     * メイン画面のインスペクター・Diff画面と同一の挙動とし、
+     * タグ単位で選択されたテキストをカンマ区切りでクリップボードに格納する。
+     */
+    overlay.addEventListener('copy', (e) => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      const promptLook = e.target.closest('.prompt-look');
+      if (!promptLook) return;
+
+      const clone = selection.getRangeAt(0).cloneContents();
+      const tempDiv = document.createElement('div');
+      tempDiv.appendChild(clone);
+      const tags = tempDiv.querySelectorAll('.diff-tag');
+      if (tags.length > 0) {
+        tags.forEach(tag => { tag.textContent = tag.textContent + ", "; });
+        let copiedText = tempDiv.textContent.replace(/,\s*$/, '').trim();
+        e.clipboardData.setData('text/plain', copiedText);
+        e.preventDefault();
+      }
+    });
+
     overlay.addEventListener('dblclick', (e) => e.stopPropagation());
     overlay.addEventListener('mousedown', (e) => e.stopPropagation());
+    overlay.addEventListener('mouseup', (e) => e.stopPropagation());
     overlay.addEventListener('pointerdown', (e) => e.stopPropagation());
     overlay.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
 
@@ -1634,6 +1664,12 @@ window.addEventListener('keydown', async (e) => {
   }
 
   if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+      showToast('テキストをクリップボードにコピーしました', 2000, 'success');
+      return;
+    }
+
     if (viewerState.currentImagePath) {
       window.veloceAPI.copyImageToClipboard(viewerState.currentImagePath);
       // 画像のコピーとシャッターフラッシュエフェクトの適用
