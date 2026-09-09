@@ -20,6 +20,7 @@
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
 import { debounce, blockDevtoolsShortcuts, getStreamUrl } from './utils.js';
+import { extractMetadataFields, parsePromptTags, buildInspectorSections } from './metadata-format.js';
 
 blockDevtoolsShortcuts();
 
@@ -110,6 +111,193 @@ function clearPreloadCache() {
     }
   }
   viewerState.preloadCache.clear();
+}
+
+/**
+ * メタデータオーバーレイのDOM要素を生成または取得します。
+ * @returns {HTMLElement}
+ */
+export function createMetadataOverlay() {
+  let overlay = document.getElementById('viewer-metadata-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'viewer-metadata-overlay';
+    overlay.className = 'viewer-metadata-overlay';
+
+    const header = document.createElement('div');
+    header.className = 'viewer-metadata-header';
+
+    const title = document.createElement('span');
+    title.className = 'viewer-metadata-title';
+    title.textContent = 'メタデータ';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'viewer-metadata-close-btn';
+    closeBtn.className = 'viewer-metadata-close-btn';
+    closeBtn.title = '閉じる (I / Esc)';
+    closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMetadataOverlay(false);
+    });
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    const content = document.createElement('div');
+    content.id = 'viewer-metadata-content';
+    content.className = 'viewer-metadata-content';
+
+    overlay.appendChild(header);
+    overlay.appendChild(content);
+
+    // 画像操作やドラッグへのイベント伝播を防止
+    overlay.addEventListener('click', (e) => e.stopPropagation());
+    overlay.addEventListener('dblclick', (e) => e.stopPropagation());
+    overlay.addEventListener('mousedown', (e) => e.stopPropagation());
+    overlay.addEventListener('pointerdown', (e) => e.stopPropagation());
+    overlay.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+
+    document.body.appendChild(overlay);
+  }
+  return overlay;
+}
+
+/**
+ * メタデータオーバーレイの表示/非表示を切り替えます。
+ * @param {boolean} [forceState]
+ */
+export function toggleMetadataOverlay(forceState) {
+  const newState = (typeof forceState === 'boolean') ? forceState : !viewerState.isMetadataVisible;
+  viewerState.isMetadataVisible = newState;
+
+  const overlay = createMetadataOverlay();
+  if (viewerState.isMetadataVisible) {
+    overlay.classList.add('show');
+    updateMetadataOverlay();
+  } else {
+    overlay.classList.remove('show');
+  }
+}
+
+let currentMetadataSeq = 0;
+
+/**
+ * 現在表示中の画像のメタデータを取得し、オーバーレイに描画します。
+ */
+export async function updateMetadataOverlay() {
+  if (!viewerState.isMetadataVisible) return;
+  const overlay = createMetadataOverlay();
+  const contentEl = document.getElementById('viewer-metadata-content');
+  if (!contentEl) return;
+
+  const filePath = viewerState.currentImagePath;
+  if (!filePath) {
+    contentEl.innerHTML = '<div class="viewer-meta-empty">画像が選択されていません</div>';
+    return;
+  }
+
+  const seq = ++currentMetadataSeq;
+  contentEl.innerHTML = '<div class="viewer-meta-loading">読み込み中...</div>';
+
+  try {
+    let rawMeta = null;
+    if (window.veloceAPI && window.veloceAPI.parseMetadata) {
+      rawMeta = await window.veloceAPI.parseMetadata(filePath);
+    }
+    if (seq !== currentMetadataSeq) return; // シーケンス不一致の破棄
+
+    const meta = rawMeta || {};
+    const filename = filePath.split(/[/\\]/).pop();
+    const mediaEl = viewerUI.elements.viewerImg;
+    const natW = mediaEl ? (mediaEl.naturalWidth || mediaEl.videoWidth || 0) : 0;
+    const natH = mediaEl ? (mediaEl.naturalHeight || mediaEl.videoHeight || 0) : 0;
+
+    const file = {
+      path: filePath,
+      name: filename,
+      width: (meta.width && meta.width > 0) ? meta.width : natW,
+      height: (meta.height && meta.height > 0) ? meta.height : natH
+    };
+
+    const data = extractMetadataFields(file, meta);
+    const sections = buildInspectorSections(data);
+
+    // 有効な値を持つセクションを抽出
+    const visibleSections = sections.filter(s => s && s.value !== null && s.value !== undefined && s.value !== '' && s.value !== '-');
+
+    if (visibleSections.length === 0) {
+      contentEl.innerHTML = '<div class="viewer-meta-empty">メタデータが見つかりません</div>';
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    // ファイル名セクション
+    const nameSec = document.createElement('div');
+    nameSec.className = 'viewer-meta-section';
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'viewer-meta-label';
+    nameLabel.textContent = 'ファイル名';
+    const nameVal = document.createElement('div');
+    nameVal.className = 'viewer-meta-filename';
+    nameVal.textContent = filename;
+    nameSec.appendChild(nameLabel);
+    nameSec.appendChild(nameVal);
+    fragment.appendChild(nameSec);
+
+    for (const sec of visibleSections) {
+      const secEl = document.createElement('div');
+      secEl.className = 'viewer-meta-section';
+
+      const labelRow = document.createElement('div');
+      labelRow.className = 'viewer-meta-label-row';
+
+      const label = document.createElement('span');
+      label.className = 'viewer-meta-label';
+      label.textContent = sec.title;
+      labelRow.appendChild(label);
+
+      if (sec.subLabel) {
+        const sub = document.createElement('span');
+        sub.className = 'viewer-meta-sublabel';
+        sub.textContent = `[${sec.subLabel}]`;
+        labelRow.appendChild(sub);
+      }
+      secEl.appendChild(labelRow);
+
+      if (sec.isParam) {
+        const valEl = document.createElement('div');
+        valEl.className = 'viewer-meta-param-val';
+        valEl.textContent = String(sec.value);
+        secEl.appendChild(valEl);
+      } else if (sec.isRaw) {
+        const pre = document.createElement('pre');
+        pre.className = 'viewer-meta-raw';
+        pre.textContent = String(sec.value);
+        secEl.appendChild(pre);
+      } else {
+        // プロンプト / ネガティブプロンプト
+        const tags = parsePromptTags(String(sec.value));
+        const tagsContainer = document.createElement('div');
+        tagsContainer.className = 'viewer-meta-tags-container';
+        for (const tag of tags) {
+          const tagEl = document.createElement('span');
+          tagEl.className = 'viewer-meta-tag';
+          tagEl.textContent = tag;
+          tagsContainer.appendChild(tagEl);
+        }
+        secEl.appendChild(tagsContainer);
+      }
+      fragment.appendChild(secEl);
+    }
+
+    contentEl.innerHTML = '';
+    contentEl.appendChild(fragment);
+  } catch (err) {
+    if (seq !== currentMetadataSeq) return;
+    contentEl.innerHTML = '<div class="viewer-meta-empty">メタデータの読み込みに失敗しました</div>';
+  }
 }
 
 /**
@@ -799,6 +987,9 @@ async function loadImage() {
     if (filenameEl && path) {
       filenameEl.textContent = path.split(/[/\\]/).pop();
     }
+    if (viewerState.isMetadataVisible) {
+      updateMetadataOverlay();
+    }
   }
 }
 
@@ -1295,7 +1486,11 @@ window.addEventListener('keydown', async (e) => {
       break;
     }
     case 'Escape':
-      if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
+      if (viewerState.isMetadataVisible) {
+        toggleMetadataOverlay(false);
+      } else if (window.veloceAPI && window.veloceAPI.closeWindow) {
+        window.veloceAPI.closeWindow();
+      }
       break;
     case 'F11':
       e.preventDefault(); // ブラウザ標準のフルスクリーン動作を防ぐ
@@ -1315,6 +1510,11 @@ window.addEventListener('keydown', async (e) => {
     case 'B':
       viewerState.isBorderVisible = !viewerState.isBorderVisible;
       viewerUI.applyBorderVisibility();
+      break;
+    case 'i':
+    case 'I':
+      e.preventDefault();
+      toggleMetadataOverlay();
       break;
     case 'u':
     case 'U':

@@ -390,6 +390,9 @@ export class ThumbnailQueueManager {
     this.preloadQueue = [];
     this.isProcessing = false;
     this.abortController = new AbortController();
+    this.completedCount = 0;
+    this.totalEnqueued = 0;
+    this._progressFadeTimeout = null;
   }
 
   enqueuePriority(filePath, skipDbCheck = false) {
@@ -398,6 +401,8 @@ export class ThumbnailQueueManager {
       if (!this.priorityQueueSet.has(filePath)) {
         this.priorityQueueSet.add(filePath);
         this.priorityQueue.unshift({ filePath, skipDbCheck });
+        this.totalEnqueued++;
+        this.updateProgressBar();
       }
       this.processNext();
     }
@@ -412,11 +417,13 @@ export class ThumbnailQueueManager {
         if (!this.priorityQueueSet.has(filePath)) {
           this.priorityQueueSet.add(filePath);
           this.priorityQueue.push({ filePath, skipDbCheck: skip });
+          this.totalEnqueued++;
           added = true;
         }
       }
     }
     if (added) {
+      this.updateProgressBar();
       this.processNext();
     }
   }
@@ -429,6 +436,17 @@ export class ThumbnailQueueManager {
     this.priorityQueue = [];
     this.priorityQueueSet.clear();
     this.preloadQueue = [];
+    this.totalEnqueued = 0;
+    this.completedCount = 0;
+    if (this._progressFadeTimeout) {
+      clearTimeout(this._progressFadeTimeout);
+      this._progressFadeTimeout = null;
+    }
+    const bar = document.getElementById('thumbnail-progress-bar');
+    if (bar) {
+      bar.style.opacity = '0';
+      bar.style.width = '0%';
+    }
     
     // 現在実行中のタスクを強制キャンセルし、新しいコンテキストを開始する
     this.abortController.abort();
@@ -443,8 +461,41 @@ export class ThumbnailQueueManager {
 
   unshiftPreload(paths) {
     const toAdd = paths.filter(p => !this.activeTasks.has(p) && !appState.thumbnailUrls.has(p));
+    if (toAdd.length > 0) {
+      this.totalEnqueued += toAdd.length;
+      this.updateProgressBar();
+    }
     this.preloadQueue.unshift(...toAdd);
     this.processNext();
+  }
+
+  updateProgressBar() {
+    const bar = document.getElementById('thumbnail-progress-bar');
+    if (!bar) return;
+
+    if (this.totalEnqueued <= 0) {
+      bar.style.opacity = '0';
+      bar.style.width = '0%';
+      return;
+    }
+
+    const percent = Math.min(100, Math.max(0, Math.round((this.completedCount / this.totalEnqueued) * 100)));
+    bar.style.opacity = '1';
+    bar.style.width = `${percent}%`;
+
+    if (this.completedCount >= this.totalEnqueued && this.activeTasks.size === 0) {
+      if (this._progressFadeTimeout) clearTimeout(this._progressFadeTimeout);
+      this._progressFadeTimeout = setTimeout(() => {
+        bar.style.opacity = '0';
+        this._progressFadeTimeout = setTimeout(() => {
+          if (this.activeTasks.size === 0 && this.completedCount >= this.totalEnqueued) {
+            bar.style.width = '0%';
+            this.completedCount = 0;
+            this.totalEnqueued = 0;
+          }
+        }, 500);
+      }, 300);
+    }
   }
 
   remove(filePath) {
@@ -671,6 +722,8 @@ export class ThumbnailQueueManager {
     } finally {
       if (!signal.aborted) {
         this.activeTasks.delete(filePath);
+        this.completedCount++;
+        this.updateProgressBar();
 
         if (fallbackToSvg) {
           // 3回失敗: SVGフォールバックを表示し、thumbnailUrlsにもセットして無限リトライを防ぐ

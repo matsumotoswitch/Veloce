@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ビューア画面のデータと状態を管理するクラス
  */
 class ViewerState {
@@ -22,6 +22,7 @@ class ViewerState {
     this.isFullscreen = false;      // フルスクリーン状態かどうか
     this.isBorderVisible = true;    // ウィンドウ枠を表示するかどうか
     this.isUnsharped = false;       // アンシャープマスクフィルターを適用するかどうか
+    this.isMetadataVisible = false; // メタデータオーバーレイを表示するかどうか
     this.lastFocusTime = 0;         // ウィンドウが最後にフォーカスを取得した時刻
     this.ignoreNextClick = false;   // フォーカス目的のクリックを無視するためのフラグ
     this.preloadCache = new Map();  // 前後の画像のプリロードキャッシュ
