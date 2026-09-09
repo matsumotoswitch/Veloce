@@ -1453,7 +1453,7 @@ function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>ダブルクリック</kbd> / <kbd>Enter</kbd></td><td>選択したサムネイルから独立ビューアーを開く</td></tr>
         <tr><td><kbd>F2</kbd></td><td>選択中のファイル/フォルダの名前を変更</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>選択中のファイル/フォルダを安全にゴミ箱へ移動</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>直前のファイル/フォルダ名の変更を元に戻す</td></tr>
         <tr><td><kbd>0</kbd> 〜 <kbd>5</kbd></td><td>選択中の画像にレーティング（星の数）を設定 / 解除</td></tr>
       </table>
@@ -1499,10 +1499,11 @@ function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>F11</kbd></td><td>フルスクリーン表示切り替え</td></tr>
         <tr><td><kbd>A</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
         <tr><td><kbd>B</kbd></td><td>ウィンドウ枠（ボーダー）・UIの表示切替</td></tr>
+        <tr><td><kbd>I</kbd></td><td>メタデータオーバーレイの表示 / 非表示</td></tr>
         <tr><td><kbd>S</kbd></td><td>動画のシークバーの表示 / 非表示</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>画像をゴミ箱に移動し、次の画像を表示</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>
       </table>
     </div>
   `;
