@@ -6,7 +6,9 @@
     inset 1px 0 0 rgba(255, 255, 255, 0.02);
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
   --bg-color: #0b1012;
+  --bg-rgb: 11, 16, 18;
   --panel-bg: #162226;
+  --panel-rgb: 22, 34, 38;
   --top-bar-bg: #203036;
   --border-color: #394346;
   --text-color: #cddbe0;
@@ -4115,7 +4117,7 @@ input[type="range"]:active~.slider-tooltip {
   right: 0;
   width: 340px;
   height: 100vh;
-  background: rgba(var(--bg-darker-rgb), 0.92);
+  background: rgba(var(--bg-rgb), 0.85);
   z-index: 1000;
   display: flex;
   flex-direction: column;
@@ -4140,7 +4142,7 @@ input[type="range"]:active~.slider-tooltip {
   height: 40px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(var(--panel-rgb), 0.85);
   flex-shrink: 0;
 }
 
@@ -4179,6 +4181,10 @@ input[type="range"]:active~.slider-tooltip {
   gap: 0;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.viewer-metadata-overlay .prompt-look {
+  background-color: rgba(0, 0, 0, 0.55);
 }
 
 .viewer-meta-empty,
