@@ -6,6 +6,7 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
   const cssContent = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
   const htmlContent = fs.readFileSync(path.resolve(__dirname, '../src/index.html'), 'utf-8');
   const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+  const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-context-menu.js'), 'utf-8');
   const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
 
@@ -73,11 +74,11 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(htmlContent).not.toMatch(/class="custom-select cond-op-select"[^>]*style=/);
     });
 
-    it('should use CSS classes for context menu item contents in renderer.js', () => {
-      expect(rendererJsContent).toContain('class="menu-icon-placeholder"');
-      expect(rendererJsContent).toContain('class="menu-label"');
-      expect(rendererJsContent).toContain('class="menu-shortcut"');
-      expect(rendererJsContent).not.toContain('<span style="text-align: left; white-space: nowrap;">');
+    it('should use CSS classes for context menu item contents in renderer-context-menu.js', () => {
+      expect(contextMenuJsContent).toContain('class="menu-icon-placeholder"');
+      expect(contextMenuJsContent).toContain('class="menu-label"');
+      expect(contextMenuJsContent).toContain('class="menu-shortcut"');
+      expect(contextMenuJsContent).not.toContain('<span style="text-align: left; white-space: nowrap;">');
     });
 
     it('should use CSS classes for diff modal containers in renderer-ui.js', () => {
