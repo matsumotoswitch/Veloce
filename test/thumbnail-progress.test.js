@@ -14,9 +14,10 @@ describe('Thumbnail Generation Progress Bar (D-1)', () => {
 
     // DOM のモック
     document.body.innerHTML = `
-      <div id="thumbnail-controls"></div>
-      <div id="thumbnail-progress-container">
-        <div id="thumbnail-progress-bar"></div>
+      <div id="thumbnail-controls">
+        <div id="thumbnail-progress-container">
+          <div id="thumbnail-progress-bar"></div>
+        </div>
       </div>
       <div id="center-bottom"></div>
     `;
@@ -110,4 +111,16 @@ describe('Thumbnail Generation Progress Bar (D-1)', () => {
     expect(progressBar.style.opacity).toBe('0');
     expect(progressBar.style.width).toBe('0%');
   });
+
+  it('プログレスバーが thumbnail-controls 内に配置され center-bottom のヘッダー下線を押し下げないこと', () => {
+    const controls = document.getElementById('thumbnail-controls');
+    const centerBottom = document.getElementById('center-bottom');
+    const container = document.getElementById('thumbnail-progress-container');
+
+    // container は controls の子要素であること
+    expect(controls.contains(container)).toBe(true);
+    // controls の次の要素が直接 centerBottom であること（間にブロック要素が挟まらない）
+    expect(controls.nextElementSibling).toBe(centerBottom);
+  });
 });
+
