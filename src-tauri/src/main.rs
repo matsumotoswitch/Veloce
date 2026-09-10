@@ -2875,6 +2875,39 @@ async fn get_cached_thumbnail_batch(
     Ok(results)
 }
 
+/// 縮小画像（RGB8バッファ）に対して高速なアンシャープマスクを適用し、
+/// 縮小によって平滑化された線画や瞳・ハイライトの輪郭を引き締める。
+fn sharpen_rgb_buffer(buffer: &mut [u8], width: u32, height: u32, amount: f32) {
+    if width < 3 || height < 3 || amount <= 0.0 {
+        return;
+    }
+    let src = buffer.to_vec();
+    let w = width as usize;
+    let h = height as usize;
+    let center_weight = 1.0 + 4.0 * amount;
+    let neighbor_weight = amount;
+
+    for y in 1..h - 1 {
+        let row_offset = y * w * 3;
+        let top_offset = (y - 1) * w * 3;
+        let bottom_offset = (y + 1) * w * 3;
+
+        for x in 1..w - 1 {
+            let px = row_offset + x * 3;
+            let left = row_offset + (x - 1) * 3;
+            let right = row_offset + (x + 1) * 3;
+            let top = top_offset + x * 3;
+            let bottom = bottom_offset + x * 3;
+
+            for c in 0..3 {
+                let val = center_weight * (src[px + c] as f32)
+                    - neighbor_weight * (src[left + c] as f32 + src[right + c] as f32 + src[top + c] as f32 + src[bottom + c] as f32);
+                buffer[px + c] = val.clamp(0.0, 255.0).round() as u8;
+            }
+        }
+    }
+}
+
 fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
     if let Ok(img) = image::open(path_str) {
         let rgb_img = img.to_rgb8();
@@ -2906,12 +2939,19 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
                         fr::PixelType::U8x3,
                     );
                     let mut resizer = fr::Resizer::new();
-                    if resizer.resize(&src_image, &mut dst_image, None).is_ok() {
+                    // Lanczos3 高品質補間により縮小時のディテール損失を最小化
+                    let options = fr::ResizeOptions::new().resize_alg(
+                        fr::ResizeAlg::Interpolation(fr::FilterType::Lanczos3)
+                    );
+                    if resizer.resize(&src_image, &mut dst_image, Some(&options)).is_ok() {
+                        let mut buffer = dst_image.into_vec();
+                        sharpen_rgb_buffer(&mut buffer, dst_width, dst_height, 0.22);
+
                         let mut bytes: Vec<u8> = Vec::new();
                         let mut cursor = std::io::Cursor::new(&mut bytes);
                         if image::write_buffer_with_format(
                             &mut cursor,
-                            dst_image.buffer(),
+                            &buffer,
                             dst_width,
                             dst_height,
                             image::ColorType::Rgb8,

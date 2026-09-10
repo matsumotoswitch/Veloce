@@ -334,6 +334,7 @@ input[type="range"]:focus {
   object-fit: contain;
   pointer-events: none;
   border-radius: inherit;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 .thumbnail-label {
