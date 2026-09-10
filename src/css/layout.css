@@ -34,7 +34,7 @@
   height: 100%;
   color: var(--text-color);
   cursor: default;
-  transition: background-color 0.1s, color 0.1s;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .titlebar-divider {

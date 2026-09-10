@@ -61,6 +61,14 @@ describe('Titlebar and Window Control Buttons Consistency', () => {
     expect(ViewerUI.ICONS.CLOSE).toContain('currentColor');
   });
 
+  it('should unify titlebar button hover transition (0.15s ease) between main window and viewer', () => {
+    // メイン画面のタイトルバーボタン: 0.15s ease
+    expect(cssContent).toMatch(/\.titlebar-button\s*\{[^}]*transition:\s*background-color\s+0\.15s\s+ease,\s*color\s+0\.15s\s+ease;/);
+
+    // ビューア画面のウィンドウコントロールボタン: 0.15s ease
+    expect(cssContent).toMatch(/\.window-ctrl-btn\s*\{[^}]*transition:\s*background\s+0\.15s\s+ease,\s*background-color\s+0\.15s\s+ease,\s*color\s+0\.15s\s+ease;/);
+  });
+
   it('should maintain transparent background on viewer control buttons and info container to prevent obtrusiveness', () => {
     // コントロールボタンは常時視認化（目立つ背景色）を避け、通常時 transparent であること
     expect(cssContent).toMatch(/\.window-ctrl-btn\s*\{[^}]*background-color:\s*transparent;/);
