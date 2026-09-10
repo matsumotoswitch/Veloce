@@ -101,11 +101,11 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(rendererJs).not.toContain("icon.style.color = '#4da8da';");
   });
 
-  it('should use classList.toggle for inspector search match in renderer.js instead of inline #ffcc00 styling', () => {
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
-    expect(rendererJs).toContain("tagEl.classList.toggle('search-match', isMatch);");
-    expect(rendererJs).not.toContain("tagEl.style.color = '#ffcc00';");
-    expect(rendererJs).not.toContain("tagEl.style.border = '1px solid #ffcc00';");
+  it('should use classList.toggle for inspector search match in renderer-inspector.js instead of inline #ffcc00 styling', () => {
+    const inspectorJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-inspector.js'), 'utf-8');
+    expect(inspectorJs).toContain("tagEl.classList.toggle('search-match', isMatch);");
+    expect(inspectorJs).not.toContain("tagEl.style.color = '#ffcc00';");
+    expect(inspectorJs).not.toContain("tagEl.style.border = '1px solid #ffcc00';");
   });
 
   it('should use shared BROKEN_MP4_FALLBACK_URL constant in renderer-thumbnails.js instead of inline btoa', () => {

@@ -32,8 +32,50 @@ import {
   createMenuItem,
   createMenuSeparator
 } from './renderer-context-menu.js';
+import {
+  parseLicenseMarkdown,
+  showLicenseDialog,
+  toggleHelpOverlay
+} from './renderer-help.js';
+import {
+  getInspectorSection,
+  getInspectorTag,
+  resetInspectorPools,
+  clearMetadataUI,
+  renderMultipleSelectionSummary,
+  initInspectorDelegation,
+  renderMetadata
+} from './renderer-inspector.js';
+import {
+  updateSmartFolderRowUI,
+  showEditSmartFolderModal,
+  showEditFavoriteModal,
+  initModalHandlers,
+  handleModalEscapeKey
+} from './renderer-dialogs.js';
+import {
+  initDragTooltip,
+  updateDragTooltip,
+  hideDragTooltip,
+  getPathsFromDragEventAsync,
+  handleItemDragStart,
+  initGlobalDndHandlers,
+  initDirTreeDnd,
+  initFavoritesDnd
+} from './renderer-dnd.js';
 
-export { showMenuWithAnimation, createMenuItem, createMenuSeparator };
+export {
+  showMenuWithAnimation,
+  createMenuItem,
+  createMenuSeparator,
+  renderMultipleSelectionSummary,
+  updateSmartFolderRowUI,
+  showEditSmartFolderModal,
+  showEditFavoriteModal,
+  handleItemDragStart,
+  getPathsFromDragEventAsync,
+  updateDragTooltip
+};
 
 // 開発者ツールショートカット (F12, Ctrl+Shift+I 等) の無効化
 blockDevtoolsShortcuts();
@@ -55,12 +97,7 @@ const CONFIG = {
 appState.tabs = [];
 appState.activeTabIndex = -1;
 
-// ドラッグ操作時に不要なゴーストプレビューを抑制するための透明画像
-const emptyDragImage = new Image();
-emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-
 const resizingState = { left: false, right: false, center: false, leftTop: false, rightTop: false };
-let draggedFavoriteId = null; // お気に入りのドラッグ並び替え状態を管理
 
 const contextMenuManager = new ContextMenuManager();
 const contextMenu = contextMenuManager.menuElement;
@@ -645,106 +682,7 @@ function showNotification(message, type = 'info', duration = null, id = null) {
 
 
 
-function clearMetadataUI() {
-  const staticTable = document.getElementById('static-file-info-table');
-  const emptyInfoMsg = document.getElementById('file-info-empty');
-  if (staticTable && emptyInfoMsg) {
-    staticTable.style.display = 'none';
-    emptyInfoMsg.style.display = 'flex';
-  }
-
-  if (typeof resetInspectorPools === 'function') {
-    resetInspectorPools();
-  }
-
-  const emptyInspectorMsg = document.getElementById('inspector-empty');
-  if (emptyInspectorMsg) {
-    emptyInspectorMsg.classList.add('show');
-  }
-
-  const headerPath = document.getElementById('inspector-header-path');
-  if (headerPath) {
-    headerPath.style.display = 'none';
-  }
-}
-
-/**
- * 複数画像選択時のインスペクターサマリーを描画する
- * 単一画像の個別メタデータ表示を非表示化し、DOM Poolからセクションとタグ要素を取得して
- * 選択件数・フォルダ全体の割合・一括ショートカットガイドを高速構築する
- */
-export async function renderMultipleSelectionSummary() {
-  const container = document.getElementById('inspector-content');
-  const headerPath = document.getElementById('inspector-header-path');
-  const staticTable = document.getElementById('static-file-info-table');
-  const emptyInfoMsg = document.getElementById('file-info-empty');
-
-  // 単一ファイル用の静的ファイル情報テーブルを隠し、空状態表示へ切り替え
-  if (staticTable && emptyInfoMsg) {
-    staticTable.style.display = 'none';
-    emptyInfoMsg.style.display = 'flex';
-  }
-
-  const emptyInspectorMsg = document.getElementById('inspector-empty');
-  if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
-
-  // DOM Pool の再利用インデックスをリセットし、前回のセクション・タグをクリーンアップ
-  if (typeof resetInspectorPools === 'function') resetInspectorPools();
-
-  const count = appState.selection.size;
-  const total = appState.totalCount || count;
-  const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '100';
-
-  // インスペクターヘッダーに選択件数と割合を表示
-  if (headerPath) {
-    headerPath.innerHTML = `<bdi dir="ltr">${count} / ${total} 件選択中 (${pct}%)</bdi>`;
-    headerPath.removeAttribute('data-path');
-    headerPath.style.display = 'block';
-  }
-
-  if (typeof getInspectorSection === 'function') {
-    // 1. 複数選択概要セクション (DOM Poolから要素を取得してGC発生を抑制)
-    const sec1 = getInspectorSection();
-    sec1.title.textContent = '複数選択概要';
-    sec1.copyWrapper.innerHTML = '';
-    sec1.subLabel.textContent = '';
-    sec1.box.className = 'prompt-look param-box';
-    sec1.box.style.cssText = '';
-
-    const tag1 = getInspectorTag();
-    tag1.style.cssText = '';
-    tag1.className = 'diff-tag common';
-    tag1.textContent = `選択数: ${count} 件 (フォルダ内 ${total} 件中 ${pct}%)`;
-    sec1.box.appendChild(tag1);
-
-    if (sec1.root.parentNode !== container) container.appendChild(sec1.root);
-
-    // 2. 一括ショートカット操作ガイドセクション
-    const sec2 = getInspectorSection();
-    sec2.title.textContent = 'ショートカット操作';
-    sec2.copyWrapper.innerHTML = '';
-    sec2.subLabel.textContent = '';
-    sec2.box.className = 'prompt-look';
-    sec2.box.style.cssText = '';
-
-    const shortcuts = [
-      '1 〜 5 : 一括レーティング',
-      'Delete : 一括ゴミ箱移動',
-      'Ctrl + C : パスコピー',
-      'Ctrl + A : すべて選択'
-    ];
-
-    for (const sc of shortcuts) {
-      const tag = getInspectorTag();
-      tag.style.cssText = '';
-      tag.className = 'diff-tag common';
-      tag.textContent = sc;
-      sec2.box.appendChild(tag);
-    }
-
-    if (sec2.root.parentNode !== container) container.appendChild(sec2.root);
-  }
-}
+// (clearMetadataUI and renderMultipleSelectionSummary are modularized into renderer-inspector.js)
 
 export function applyRatingUI(path, rating, isOptimistic = false) {
   if (rating === 0) {
@@ -961,48 +899,6 @@ function createTreeNode(folder, isRoot = false) {
   return li;
 }
 
-async function getPathsFromDragEventAsync(e) {
-  if (appState.dragState.paths && appState.dragState.paths.length > 0) {
-    return [...appState.dragState.paths];
-  }
-
-  const indicesStr = e.dataTransfer.getData('application/json-indices');
-  if (indicesStr) {
-    try {
-      const indices = JSON.parse(indicesStr);
-      if (indices && indices.length > 0 && window.veloceAPI.getFilesByIndices) {
-        const files = await window.veloceAPI.getFilesByIndices(indices);
-        if (files) return files.map(f => f.path);
-      }
-    } catch (err) { }
-  }
-
-  const paths = [];
-  const folderDataStr = e.dataTransfer.getData('application/json-folder');
-  if (folderDataStr) {
-    try {
-      const folderData = JSON.parse(folderDataStr);
-      if (folderData && folderData.path) return [folderData.path];
-    } catch (err) { }
-  }
-
-  const jsonData = e.dataTransfer.getData('application/json');
-  if (jsonData) {
-    try {
-      const parsed = JSON.parse(jsonData);
-      if (Array.isArray(parsed)) return parsed;
-    } catch (err) { }
-  }
-
-  const sourcePath = e.dataTransfer.getData('text/plain');
-  if (sourcePath) {
-    let cleanPath = decodeURIComponent(sourcePath).trim();
-    cleanPath = cleanPath.replace(/^file:(?:\/|\\)*/i, '');
-    if (!cleanPath.match(/^[A-Za-z]:/)) cleanPath = '/' + cleanPath;
-    paths.push(cleanPath);
-  }
-  return paths;
-}
 
 const TABLE_HEADERS = {
   name: '名前',
@@ -1191,293 +1087,7 @@ async function openViewer(index, filePath = null) {
   });
 }
 
-function parseLicenseMarkdown(text) {
-  if (!text) return '';
-
-  let html = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  const lines = html.split('\n');
-  let processedLines = [];
-  let bqBuffer = [];
-
-  for (let line of lines) {
-    const bqMatch = line.match(/^\s*&gt;\s?(.*)$/);
-    if (bqMatch) {
-      bqBuffer.push(bqMatch[1]);
-    } else {
-      if (bqBuffer.length > 0) {
-        processedLines.push(`<blockquote class="md-blockquote">${bqBuffer.join('<br>')}</blockquote>`);
-        bqBuffer = [];
-      }
-      processedLines.push(line);
-    }
-  }
-  if (bqBuffer.length > 0) {
-    processedLines.push(`<blockquote class="md-blockquote">${bqBuffer.join('<br>')}</blockquote>`);
-  }
-  html = processedLines.join('\n');
-
-  html = html.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
-  html = html.replace(/\*\*(.*?)\*\*/gm, '<strong>$1</strong>');
-  html = html.replace(/^---$/gm, '<hr>');
-  html = html.replace(/^\*\s+(.*)$/gm, '<li class="md-list-item">$1</li>');
-  html = html.replace(/(?:<li class="md-list-item">.*?<\/li>\n?)+/g, match => {
-    return `<ul class="md-list">${match.replace(/\n/g, '')}</ul>`;
-  });
-
-  const tags = 'h1|h2|h3|ul|li|blockquote|hr';
-  html = html.replace(new RegExp(`\\n+(<\\/?(?:${tags})[^>]*>)`, 'gi'), '$1');
-  html = html.replace(new RegExp(`(<\\/?(?:${tags})[^>]*>)\\n+`, 'gi'), '$1');
-
-  // URL文字列をリンクに変換（すでに href="..." 等になっているものは除外）
-  html = html.replace(/(?<!href=["'])(https?:\/\/[^\s&<"'>\)]+)/g, '<a href="$1">$1</a>');
-
-  html = html.replace(/\n/g, '<br>');
-
-  return html;
-}
-
-async function showLicenseDialog() {
-  const overlay = document.createElement('div');
-  overlay.id = 'license-overlay';
-
-  const content = document.createElement('div');
-  content.className = 'license-modal-content';
-
-  let licenseText = "ライセンス情報を読み込み中";
-  try {
-    if (window.__TAURI__ && window.__TAURI__.invoke) {
-      licenseText = await window.__TAURI__.invoke('get_license_text');
-    } else if (window.veloceAPI && window.veloceAPI.getLicenseText) {
-      licenseText = await window.veloceAPI.getLicenseText();
-    }
-  } catch (e) {
-    console.error("Failed to load licenses:", e);
-    licenseText = "ライセンス情報の読み込みに失敗しました。";
-  }
-
-  const combinedText = licenseText;
-
-  const parsedText = parseLicenseMarkdown(combinedText);
-
-  content.innerHTML = `
-    <div class="modal-header-row">
-      <h2 class="modal-header-title">ライセンス情報</h2>
-      <button class="dialog-close-btn" id="license-close-btn" title="閉じる (Esc)">
-        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-      </button>
-    </div>
-    <div id="license-text">${parsedText}</div>
-  `;
-
-  // リンクのクリック処理（アプリ内遷移を防ぎ、OS標準のブラウザで開く）
-  content.querySelectorAll('a').forEach(a => {
-    a.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const url = a.href;
-      if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
-        await window.__TAURI__.shell.open(url);
-      } else {
-        window.open(url, '_blank');
-      }
-    });
-  });
-
-  const cleanup = () => {
-    overlay.remove();
-    document.removeEventListener('keydown', keydownHandler, true);
-  };
-
-  const closeBtn = content.querySelector('#license-close-btn');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', cleanup);
-  }
-
-  const keydownHandler = (e) => {
-    // Escキー、またはF1/Hキーでライセンス画面を閉じる
-    if (e.key === 'Escape' || e.key === 'F1' || e.key.toLowerCase() === 'h') {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      cleanup();
-
-      // F1/Hキーの場合は背後のヘルプ画面も一緒に閉じる
-      if (e.key === 'F1' || e.key.toLowerCase() === 'h') {
-        const helpOverlay = document.getElementById('help-overlay');
-        if (helpOverlay) {
-          helpOverlay.remove();
-        }
-      }
-    }
-  };
-
-  document.addEventListener('keydown', keydownHandler, true);
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) cleanup();
-  });
-
-  overlay.appendChild(content);
-  document.body.appendChild(overlay);
-}
-
-function toggleHelpOverlay(forceShow) {
-  const licenseOverlay = document.getElementById('license-overlay');
-  if (licenseOverlay) {
-    licenseOverlay.remove();
-  }
-
-  let overlay = document.getElementById('help-overlay');
-
-  if (overlay) {
-    overlay.classList.remove('show');
-    setTimeout(() => {
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    }, 200);
-    return;
-  }
-
-  if (forceShow === false) return;
-
-  overlay = document.createElement('div');
-  overlay.id = 'help-overlay';
-
-  const content = document.createElement('div');
-  content.className = 'help-modal-content';
-
-  content.innerHTML = `
-    <div class="modal-header-row">
-      <h2 class="modal-header-title">ヘルプ・ショートカット一覧</h2>
-      <div class="modal-header-actions">
-        <span id="license-link" class="license-link-btn">
-          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="8" r="7"></circle>
-            <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
-          </svg>
-          ライセンス ＆ クレジット
-        </span>
-        <button class="dialog-close-btn" id="help-close-btn" title="閉じる (Esc)">
-          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
-      </div>
-    </div>
-
-    <div class="help-tabs">
-      <div class="help-tab active" data-target="help-main">メイン画面</div>
-      <div class="help-tab" data-target="help-viewer">ビューワー画面</div>
-    </div>
-
-    <div id="help-main" class="help-tab-content active">
-      <h3 class="help-group-title">ナビゲーション・選択</h3>
-      <table class="help-table">
-        <tr><td><kbd>矢印キー</kbd> / <kbd>PageUp/Down</kbd> / <kbd>Home/End</kbd></td><td>画像の選択を移動（矢印キーはShift 併用で範囲選択）</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>現在のフォルダ内のすべての画像を選択</td></tr>
-        <tr><td><kbd>Ctrl</kbd> / <kbd>Shift</kbd> + クリック</td><td>画像の複数選択</td></tr>
-        <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>フォルダ移動履歴の「戻る」 / 「進む」</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>PageDown</kbd></td><td>次のタブへ切り替え</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> / <kbd>PageUp</kbd></td><td>前のタブへ切り替え</td></tr>
-      </table>
-
-      <h3 class="help-group-title">ファイル操作</h3>
-      <table class="help-table">
-        <tr><td><kbd>ダブルクリック</kbd> / <kbd>Enter</kbd></td><td>選択したサムネイルから独立ビューアーを開く</td></tr>
-        <tr><td><kbd>F2</kbd></td><td>選択中のファイル/フォルダの名前を変更</td></tr>
-        <tr><td><kbd>Delete</kbd></td><td>選択中のファイル/フォルダを安全にゴミ箱へ移動</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>直前のファイル/フォルダ名の変更を元に戻す</td></tr>
-        <tr><td><kbd>0</kbd> 〜 <kbd>5</kbd></td><td>選択中の画像にレーティング（星の数）を設定 / 解除</td></tr>
-      </table>
-
-      <h3 class="help-group-title">ツール・表示</h3>
-      <table class="help-table">
-        <tr><td><kbd>F5</kbd></td><td>最新の情報に更新（再読み込み）</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>検索キーワード入力欄にフォーカス</td></tr>
-        <tr><td><kbd>A</kbd></td><td>開いているビューアーウィンドウを横一列に整列</td></tr>
-        <tr><td><kbd>D</kbd></td><td>選択した2枚の画像の情報を比較 (Diffモーダル)</td></tr>
-        <tr><td><kbd>F1</kbd> / <kbd>H</kbd></td><td>ヘルプの表示 / 非表示</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>各種モーダル・ヘルプ・メニューを閉じる</td></tr>
-      </table>
-    </div>
-
-    <div id="help-viewer" class="help-tab-content">
-      <h3 class="help-group-title">画像切り替え</h3>
-      <table class="help-table">
-        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>前の画像 / 次の画像を表示</td></tr>
-        <tr><td>左クリック / 右クリック</td><td>前の画像 / 次の画像を表示</td></tr>
-        <tr><td>マウスホイール</td><td>上スクロールで前 / 下スクロールで次を表示</td></tr>
-      </table>
-
-      <h3 class="help-group-title">ズーム・移動</h3>
-      <table class="help-table">
-        <tr><td><kbd>Ctrl</kbd> + ホイール</td><td>画像のズームイン / ズームアウト</td></tr>
-        <tr><td>左ドラッグ</td><td>ウィンドウの移動 / スクロール（ズーム時）</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + 左ドラッグ</td><td>ズームイン時、画像内を自由にパン移動</td></tr>
-        <tr><td><kbd>F</kbd></td><td>100%表示（モニターより大きい画像はリサイズ）</td></tr>
-        <tr><td><kbd>Space</kbd></td><td>完全な100%等倍ウィンドウ表示（画面外許可）</td></tr>
-      </table>
-
-      <h3 class="help-group-title">変形・フィルター</h3>
-      <table class="help-table">
-        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>右に90度回転 / 左に90度回転</td></tr>
-        <tr><td><kbd>H</kbd></td><td>画像を左右反転（水平反転）</td></tr>
-        <tr><td><kbd>V</kbd></td><td>画像を上下反転（垂直反転）</td></tr>
-        <tr><td><kbd>U</kbd></td><td>シャープ表示 / 滑らか表示の切り替え</td></tr>
-      </table>
-
-      <h3 class="help-group-title">ウィンドウ・操作</h3>
-      <table class="help-table">
-        <tr><td><kbd>F11</kbd></td><td>フルスクリーン表示切り替え</td></tr>
-        <tr><td><kbd>A</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
-        <tr><td><kbd>B</kbd></td><td>ウィンドウ枠（ボーダー）・UIの表示切替</td></tr>
-        <tr><td><kbd>I</kbd></td><td>メタデータオーバーレイの表示 / 非表示</td></tr>
-        <tr><td><kbd>S</kbd></td><td>動画のシークバーの表示 / 非表示</td></tr>
-        <tr><td><kbd>Delete</kbd></td><td>画像をゴミ箱に移動し、次の画像を表示</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>
-      </table>
-    </div>
-  `;
-
-  const tabs = content.querySelectorAll('.help-tab');
-  const tabContents = content.querySelectorAll('.help-tab-content');
-
-  tabs.forEach(tab => {
-    tab.addEventListener('click', (e) => {
-      e.stopPropagation();
-      tabs.forEach(t => t.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
-
-      tab.classList.add('active');
-      const targetId = tab.dataset.target;
-      content.querySelector('#' + targetId).classList.add('active');
-    });
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target.closest('#help-close-btn')) {
-      toggleHelpOverlay(false);
-      return;
-    }
-    if (e.target.closest('#license-link')) {
-      showLicenseDialog();
-      return;
-    }
-    if (!e.target.closest('.help-modal-content')) {
-      toggleHelpOverlay(false);
-    }
-  });
-
-  overlay.appendChild(content);
-  document.body.appendChild(overlay);
-
-  // DOM追加後にアニメーションをトリガー
-  requestAnimationFrame(() => {
-    overlay.classList.add('show');
-  });
-}
+// (Help & License overlays are modularized into renderer-help.js)
 
 /**
  * 現在のタブの状態を同期します。
@@ -1613,340 +1223,7 @@ const menuNewFolder = createMenuItem('フォルダを新規作成', UIManager.IC
   }
 });
 
-/**
- * 指定されたファイルのメタデータをインスペクターに描画します。
- * Diff画面と同一のデザイン、項目順、コピー機能を提供します。
- */
-// --- DOM Pool for Inspector ---
-const inspectorSectionPool = [];
-const inspectorTagPool = [];
-let inspectorSectionIndex = 0;
-let inspectorTagIndex = 0;
-let _inspectorDelegationInit = false;
-
-function getInspectorSection() {
-  if (inspectorSectionIndex < inspectorSectionPool.length) {
-    const el = inspectorSectionPool[inspectorSectionIndex++];
-    el.root.style.display = 'block';
-    return el;
-  }
-  const section = document.createElement('div');
-  section.className = 'inspector-section inspector-section-block';
-
-  const h3 = document.createElement('h3');
-  h3.className = 'inspector-section-h3';
-
-  const titleWrapper = document.createElement('span');
-  titleWrapper.className = 'inspector-title-wrapper';
-
-  const titleSpan = document.createElement('span');
-  const subLabelSpan = document.createElement('span');
-
-  titleWrapper.appendChild(titleSpan);
-  titleWrapper.appendChild(subLabelSpan);
-
-  const copyWrapper = document.createElement('div');
-  copyWrapper.className = 'inspector-copy-wrapper';
-
-  h3.appendChild(titleWrapper);
-  h3.appendChild(copyWrapper);
-
-  const box = document.createElement('div');
-  box.tabIndex = -1;
-
-  section.appendChild(h3);
-  section.appendChild(box);
-
-  const elObj = {
-    root: section,
-    title: titleSpan,
-    subLabel: subLabelSpan,
-    copyWrapper: copyWrapper,
-    copyBtn: null,
-    box: box
-  };
-
-  inspectorSectionPool.push(elObj);
-  inspectorSectionIndex++;
-  return elObj;
-}
-
-function getInspectorTag() {
-  if (inspectorTagIndex < inspectorTagPool.length) {
-    const el = inspectorTagPool[inspectorTagIndex++];
-    el.style.display = 'inline';
-    return el;
-  }
-  const span = document.createElement('span');
-  span.className = 'diff-tag common';
-  inspectorTagPool.push(span);
-  inspectorTagIndex++;
-  return span;
-}
-
-function resetInspectorPools() {
-  for (let i = 0; i < inspectorSectionIndex; i++) {
-    const sec = inspectorSectionPool[i];
-    sec.root.style.display = 'none';
-    sec.box.replaceChildren();
-    sec.title.style.color = '';
-    sec.subLabel.textContent = '';
-    sec.subLabel.className = '';
-    sec.subLabel.replaceChildren();
-    sec.copyWrapper.style.display = 'none';
-    sec.box.className = 'prompt-look';
-    sec.box.style.cssText = '';
-  }
-  for (let i = 0; i < inspectorTagIndex; i++) {
-    inspectorTagPool[i].classList.remove('search-match');
-  }
-  inspectorSectionIndex = 0;
-  inspectorTagIndex = 0;
-}
-
-async function renderMetadata(file) {
-  const container = document.getElementById('inspector-content');
-  if (!file || !container) return;
-
-  const emptyInspectorMsg = document.getElementById('inspector-empty');
-  if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
-
-  try {
-    const rawMeta = await window.veloceAPI.parseMetadata(file.path);
-    const meta = rawMeta || {};
-
-    if (meta.width > 0 && meta.height > 0 && (!file.width || !file.height)) {
-      file.width = meta.width;
-      file.height = meta.height;
-      if (uiManager && typeof uiManager.updateFileDimensions === 'function') {
-        uiManager.updateFileDimensions(file.path, meta.width, meta.height);
-      }
-      if (window.veloceAPI && typeof window.veloceAPI.updateFileDimensions === 'function') {
-        window.veloceAPI.updateFileDimensions(file.path, meta.width, meta.height);
-      }
-    }
-
-
-    const d = extractMetadataFields(file, meta);
-
-    let searchStr = '';
-    if (uiManager.elements.searchBar?.value) {
-      searchStr = uiManager.elements.searchBar.value;
-    } else if (typeof appState !== 'undefined' && appState.searchQuery) {
-      searchStr = appState.searchQuery;
-    }
-    const terms = searchStr.trim() !== ''
-      ? searchStr.toLowerCase().split(/[,\n\r]+/).map(t => t.trim()).filter(Boolean)
-      : [];
-    const termsRegex = terms.length > 0 ? createSearchTermsRegex(terms) : null;
-
-    resetInspectorPools();
-
-    let badge = container.querySelector('.inspector-location-badge');
-    if (badge) badge.remove();
-
-    const headerPath = document.getElementById('inspector-header-path');
-    if (headerPath) {
-      if (file.path) {
-        const filePathStr = String(file.path);
-        const lastSlash = Math.max(filePathStr.lastIndexOf('\\'), filePathStr.lastIndexOf('/'));
-        const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
-        const escapedPath = dirPath.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        
-        headerPath.innerHTML = `<bdi dir="ltr">${escapedPath}</bdi>`;
-        headerPath.setAttribute('data-path', file.path);
-        headerPath.removeAttribute('title');
-        headerPath.style.display = 'block';
-      } else {
-        headerPath.style.display = 'none';
-      }
-    }
-
-    let hasContent = false;
-    const sections = buildInspectorSections(d);
-
-    for (const section of sections) {
-      if (!section.value || section.value === '-') continue;
-      hasContent = true;
-
-      const secEl = getInspectorSection();
-      secEl.title.textContent = section.title;
-
-      if (!secEl.copyBtn) {
-        secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
-        secEl.copyBtn = secEl.copyWrapper.firstElementChild;
-      } else {
-        secEl.copyBtn.setAttribute('data-copy-text', section.value);
-      }
-      secEl.copyWrapper.style.display = 'flex';
-
-      let sectionHasMatch = false;
-
-      if (section.isRaw) {
-        secEl.box.className = 'prompt-look raw-box';
-        secEl.box.style.cssText = '';
-        const rawText = String(section.value);
-        if (termsRegex) {
-          termsRegex.lastIndex = 0;
-          sectionHasMatch = termsRegex.test(rawText);
-          if (sectionHasMatch) {
-            secEl.box.innerHTML = highlightSearchTerms(rawText, termsRegex);
-          } else {
-            secEl.box.textContent = rawText;
-          }
-        } else {
-          secEl.box.textContent = rawText;
-        }
-      } else {
-        secEl.box.className = section.isParam ? 'prompt-look param-box' : 'prompt-look';
-        secEl.box.style.cssText = '';
-
-        const tags = section.isParam ? [String(section.value)] : String(section.value).split(/[,\n\r]+/).map(t => t.trim()).filter(t => t);
-        for (const t of tags) {
-          const tagEl = getInspectorTag();
-
-          if (termsRegex) {
-            termsRegex.lastIndex = 0;
-            const isMatch = termsRegex.test(t);
-            if (isMatch) {
-              sectionHasMatch = true;
-            }
-            tagEl.classList.toggle('search-match', isMatch);
-            tagEl.innerHTML = highlightSearchTerms(t, termsRegex);
-          } else {
-            tagEl.classList.remove('search-match');
-            tagEl.textContent = t;
-          }
-          secEl.box.appendChild(tagEl);
-        }
-      }
-
-      if (sectionHasMatch) {
-        secEl.title.style.color = 'var(--glow-gold)';
-      } else {
-        secEl.title.style.color = '';
-      }
-
-      if (section.subLabel && section.subLabel !== 'Text to Image') {
-        const labels = section.subLabel.split(' + ');
-        secEl.subLabel.innerHTML = '';
-        secEl.subLabel.className = 'sublabel-tags-wrapper';
-
-        labels.forEach(lbl => {
-          let modifier = '';
-          if (lbl.includes('Inpainting')) {
-            modifier = ' sublabel-tag--inpainting';
-          } else if (lbl.includes('Vibe Transfer')) {
-            modifier = ' sublabel-tag--vibe';
-          } else if (lbl.includes('Character Reference')) {
-            modifier = ' sublabel-tag--char-ref';
-          } else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) {
-            modifier = ' sublabel-tag--img2img';
-          }
-          const span = document.createElement('span');
-          span.className = `sublabel-tag${modifier}`;
-          span.textContent = `[${lbl}]`;
-          secEl.subLabel.appendChild(span);
-        });
-      } else {
-        secEl.subLabel.innerHTML = '';
-        secEl.subLabel.className = '';
-      }
-
-      if (secEl.root.parentNode !== container) {
-        container.appendChild(secEl.root);
-      }
-    }
-
-    if (!hasContent) {
-      const rawMetaStr = JSON.stringify(meta, null, 2);
-      if (rawMetaStr !== '{}' && rawMetaStr !== 'null') {
-        const secEl = getInspectorSection();
-        secEl.title.textContent = '未対応のメタデータ形式';
-        secEl.copyWrapper.innerHTML = '';
-        secEl.subLabel.textContent = '';
-        secEl.box.className = 'prompt-look';
-        secEl.box.style.whiteSpace = 'pre-wrap';
-        secEl.box.style.fontFamily = 'Consolas, monospace';
-        secEl.box.style.fontSize = 'var(--font-size-xs)';
-        secEl.box.style.wordBreak = 'break-all';
-        secEl.box.style.maxHeight = '400px';
-        secEl.box.style.overflowY = 'auto';
-        secEl.box.textContent = rawMetaStr;
-        if (secEl.root.parentNode !== container) container.appendChild(secEl.root);
-      }
-    }
-
-    if (!_inspectorDelegationInit) {
-      _inspectorDelegationInit = true;
-      const delegationRoot = document.getElementById('right-pane') || container;
-      delegationRoot.addEventListener('click', async (e) => {
-        const copyBtn = e.target.closest('.diff-copy-btn');
-        if (copyBtn) {
-          const text = copyBtn.getAttribute('data-copy-text');
-          if (text) {
-            await navigator.clipboard.writeText(text);
-            if (window.uiManager) window.uiManager.showToast("クリップボードにコピーしました", 3000, null, 'success');
-            else showNotification("クリップボードにコピーしました", 'success');
-            uiManager.applyGlowEffect(copyBtn);
-            uiManager.hideCustomTooltip();
-          }
-        }
-      });
-      delegationRoot.addEventListener('mousemove', (e) => {
-        const copyBtn = e.target.closest('.diff-copy-btn');
-        if (copyBtn) {
-          uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
-        } else {
-          uiManager.hideCustomTooltip();
-        }
-      });
-      delegationRoot.addEventListener('mouseleave', () => {
-        uiManager.hideCustomTooltip();
-      }, true);
-
-      delegationRoot.addEventListener('contextmenu', (e) => {
-        const openBtn = e.target.closest('.open-folder-btn');
-        if (openBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-
-          const filePathStr = openBtn.getAttribute('data-path');
-          if (!filePathStr) return;
-
-          const lastSlash = Math.max(filePathStr.lastIndexOf('\\'), filePathStr.lastIndexOf('/'));
-          const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
-          const folderName = dirPath.split(/[\\/]/).pop() || dirPath;
-
-          contextMenuManager.show('inspector-header', {
-            targetFolder: { path: dirPath, name: folderName },
-            isRoot: false
-          }, e.clientX, e.clientY);
-        }
-      });
-
-      delegationRoot.addEventListener('copy', (e) => {
-        const selection = window.getSelection();
-        if (selection.isCollapsed) return;
-        const promptLook = e.target.closest('.prompt-look');
-        if (!promptLook) return;
-
-        const clone = selection.getRangeAt(0).cloneContents();
-        const tempDiv = document.createElement('div');
-        tempDiv.appendChild(clone);
-        const tags = tempDiv.querySelectorAll('.diff-tag');
-        tags.forEach(tag => { tag.textContent = tag.textContent + ", "; });
-        let copiedText = tempDiv.textContent.replace(/,\s*$/, '').trim();
-        e.clipboardData.setData('text/plain', copiedText);
-        e.preventDefault();
-      });
-    }
-  } catch (error) {
-    if (container) {
-      container.innerHTML = `<div class="render-error-box">描画エラー: ${error.message}</div>`;
-    }
-  }
-}
+// (Inspector DOM Pool and renderMetadata are modularized into renderer-inspector.js)
 
 
 const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager.ICONS.FOLDER_PEN, async () => {
@@ -2201,309 +1478,23 @@ const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICO
   showNotification(`「${name}」をお気に入りに追加しました`, 'success');
 });
 
-let sfModalDelegated = false;
-
-function updateSmartFolderRowUI(row, type, initialCond = null) {
-  const typeSelect = row.querySelector('.cond-type-select');
-  const typeInput = row.querySelector('.cond-type');
-  const opSelect = row.querySelector('.cond-op-select');
-  const opInput = row.querySelector('.cond-operator');
-  const valueContainer = row.querySelector('.cond-value-container');
-
-  if (typeInput) typeInput.value = type;
-  if (typeSelect) {
-    const typeLabel = typeSelect.querySelector('.custom-select-label');
-    const typeItems = typeSelect.querySelectorAll('.custom-select-item');
-    typeItems.forEach(i => {
-      const match = i.dataset.value === type;
-      i.classList.toggle('selected', match);
-      if (match && typeLabel) typeLabel.textContent = i.textContent;
-    });
-  }
-
-  const opVal = initialCond ? initialCond.operator : null;
-  const valVal = initialCond ? initialCond.value : '';
-
-  function setOpCustomSelect(ops) {
-    if (!opSelect) return;
-    const menu = opSelect.querySelector('.custom-select-menu');
-    const label = opSelect.querySelector('.custom-select-label');
-    const selectedOp = ops.find(o => o.value === opVal) || ops[0];
-
-    if (menu) {
-      menu.innerHTML = ops.map(o => `<div class="custom-select-item ${o.value === selectedOp.value ? 'selected' : ''}" data-value="${o.value}">${o.label}</div>`).join('');
-    }
-    if (label) label.textContent = selectedOp.label;
-    if (opInput) opInput.value = selectedOp.value;
-  }
-
-  if (type === 'prompt' || type === 'negative_prompt') {
-    setOpCustomSelect([
-      { value: 'contains', label: 'を含む' },
-      { value: 'not_contains', label: 'を含まない' }
-    ]);
-    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input flex-1" placeholder="キーワード">`;
-    valueContainer.querySelector('input').value = valVal;
-  } else if (type === 'source') {
-    setOpCustomSelect([
-      { value: '==', label: 'と一致' },
-      { value: '!=', label: 'と一致しない' }
-    ]);
-    valueContainer.innerHTML = `<input type="text" class="cond-value-input dialog-input flex-1" placeholder="生成元">`;
-    valueContainer.querySelector('input').value = valVal;
-  } else if (type === 'width' || type === 'height') {
-    setOpCustomSelect([
-      { value: '<=', label: '以下' },
-      { value: '==', label: 'ちょうど' },
-      { value: '>=', label: '以上' }
-    ]);
-    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input flex-1" min="0">`;
-    valueContainer.querySelector('input').value = valVal || 0;
-  } else if (type === 'rating') {
-    setOpCustomSelect([
-      { value: '>=', label: '以上' },
-      { value: '<=', label: '以下' },
-      { value: '==', label: 'と一致' }
-    ]);
-    valueContainer.innerHTML = `<input type="number" class="cond-value-input dialog-input flex-1" min="0" max="5">`;
-    valueContainer.querySelector('input').value = valVal || 0;
-  } else if (type === 'aspect_ratio') {
-    setOpCustomSelect([
-      { value: 'portrait', label: '縦長' },
-      { value: 'landscape', label: '横長' },
-      { value: 'square', label: '正方形' }
-    ]);
-    valueContainer.innerHTML = `<div class="flex-1"></div><input type="hidden" class="cond-value-input" value="">`;
-  } else if (type === 'path') {
-    setOpCustomSelect([
-      { value: 'in_folder', label: '直下のみ' },
-      { value: 'under_folder', label: 'サブフォルダ含む' }
-    ]);
-    valueContainer.innerHTML = `
-      <input type="text" class="cond-value-input dialog-input cond-path-input flex-1">
-      <button type="button" class="btn-browse-path dialog-btn">参照...</button>
-    `;
-    valueContainer.querySelector('input').value = valVal;
-  }
-}
-
-function showEditSmartFolderModal(sf, isNew = false) {
-  try {
-    const modal = document.getElementById('edit-smart-folder-modal');
-    modal.style.display = ''; // Inline style のリセット
-    const titleEl = document.getElementById('smart-modal-title');
-    if (titleEl) {
-      titleEl.textContent = isNew ? '新規スマートフォルダ' : 'スマートフォルダを編集';
-    }
-    const container = document.getElementById('smart-icon-selector');
-    const getIconData = createFavoriteEditorUI(container, sf.icon || 'FAV_STAR', sf.color || 'orange');
-
-  const nameInput = document.getElementById('smart-name-input');
-  nameInput.value = sf.name || '';
-
-  const conditionsList = document.getElementById('smart-conditions-list');
-
-  const template = document.getElementById('sf-condition-template');
-  const fragment = document.createDocumentFragment();
-  const conds = Array.isArray(sf.conditions) ? sf.conditions : [];
-
-  conds.forEach(cond => {
-    const clone = template.content.cloneNode(true);
-    const row = clone.querySelector('.sf-condition-row');
-    const typeInput = row.querySelector('.cond-type');
-    if (typeInput) typeInput.value = cond.type;
-    updateSmartFolderRowUI(row, cond.type, cond);
-    fragment.appendChild(clone);
-  });
-  conditionsList.replaceChildren(fragment);
-
-  if (!sfModalDelegated) {
-    sfModalDelegated = true;
-
-    modal.addEventListener('click', async (e) => {
-      const selectItem = e.target.closest('.custom-select-item');
-      if (selectItem) {
-        const parentSelect = selectItem.closest('.custom-select');
-        if (parentSelect) {
-          const hiddenInput = parentSelect.querySelector('input[type="hidden"]');
-          const label = parentSelect.querySelector('.custom-select-label');
-          const val = selectItem.dataset.value;
-
-          parentSelect.querySelectorAll('.custom-select-item').forEach(i => i.classList.remove('selected'));
-          selectItem.classList.add('selected');
-          if (label) label.textContent = selectItem.textContent;
-          if (hiddenInput) hiddenInput.value = val;
-          parentSelect.classList.remove('open');
-          parentSelect.classList.remove('open-up');
-
-          const parentRow = parentSelect.closest('.sf-condition-row');
-          if (parentRow) parentRow.classList.remove('open-select');
-
-          if (parentSelect.classList.contains('cond-type-select')) {
-            if (parentRow) updateSmartFolderRowUI(parentRow, val);
-          }
-        }
-        return;
-      }
-
-      const customSelect = e.target.closest('.custom-select');
-      if (customSelect) {
-        e.stopPropagation();
-        const isOpen = customSelect.classList.contains('open');
-
-        modal.querySelectorAll('.custom-select.open').forEach(el => {
-          el.classList.remove('open');
-          el.classList.remove('open-up');
-        });
-        modal.querySelectorAll('.sf-condition-row.open-select').forEach(el => el.classList.remove('open-select'));
-
-        if (!isOpen) {
-          customSelect.classList.add('open');
-          const row = customSelect.closest('.sf-condition-row');
-          if (row) row.classList.add('open-select');
-
-          const rect = customSelect.getBoundingClientRect();
-          const spaceBelow = window.innerHeight - rect.bottom;
-
-          if (spaceBelow < 180 && rect.top > 200) {
-            customSelect.classList.add('open-up');
-          }
-        }
-        return;
-      }
-
-      modal.querySelectorAll('.custom-select.open').forEach(el => {
-        el.classList.remove('open');
-        el.classList.remove('open-up');
-      });
-      modal.querySelectorAll('.sf-condition-row.open-select').forEach(el => el.classList.remove('open-select'));
-
-      if (e.target.closest('.btn-remove-cond')) {
-        const row = e.target.closest('.sf-condition-row');
-        if (row) {
-          row.classList.add('row-fade-out');
-          setTimeout(() => {
-            if (row.parentNode) row.remove();
-          }, 240);
-        }
-      }
-
-      if (e.target.closest('#smart-add-condition-btn')) {
-        const clone = template.content.cloneNode(true);
-        const row = clone.querySelector('.sf-condition-row');
-        const list = document.getElementById('smart-conditions-list');
-        list.appendChild(clone);
-        const newRow = list.lastElementChild;
-        const typeInput = newRow.querySelector('.cond-type');
-        if (typeInput) typeInput.value = 'rating';
-        updateSmartFolderRowUI(newRow, 'rating', { operator: '>=', value: '4' });
-      }
-
-      if (e.target.closest('.btn-browse-path')) {
-        const row = e.target.closest('.sf-condition-row');
-        const input = row.querySelector('.cond-value-input');
-        if (window.veloceAPI && window.veloceAPI.openFolderDialog) {
-          const folder = await window.veloceAPI.openFolderDialog();
-          if (folder) input.value = folder;
-        }
-      }
-    });
-
-    modal.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        if (e.target && e.target.tagName === 'BUTTON') return;
-        e.preventDefault();
-        e.stopPropagation();
-        document.getElementById('smart-save-btn').click();
-      }
-    });
-  }
-
-  const saveBtn = document.getElementById('smart-save-btn');
-  const cancelBtn = document.getElementById('smart-cancel-btn');
-
-  const newSaveBtn = saveBtn.cloneNode(true);
-  saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
-
-  const newCancelBtn = cancelBtn.cloneNode(true);
-  cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-
-  newCancelBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    modal.classList.remove('show');
-  });
-
-  newSaveBtn.addEventListener('click', async () => {
-    const rules = [];
-    const rows = conditionsList.querySelectorAll('.sf-condition-row');
-    for (const row of rows) {
-      const type = row.querySelector('.cond-type').value;
-      const operator = row.querySelector('.cond-operator').value;
-      const valInput = row.querySelector('.cond-value-input');
-      const value = valInput ? valInput.value.trim() : '';
-
-      if (value === '' && type !== 'aspect_ratio' && type !== 'rating') {
-        continue;
-      }
-
-      rules.push({ type, operator, value });
-    }
-
-    const data = getIconData();
-    sf.icon = data.icon;
-    sf.color = data.color;
-    sf.name = nameInput.value || '無題のスマートフォルダ';
-    sf.conditions = rules;
-    sf.matchType = 'all';
-
-    if (isNew) {
-      sf.id = 'smart_' + Date.now();
-    }
-    // 2. データの保存とRustへの同期（バックグラウンドで完了する）
-    appState.smartFolders = await SmartFolderStore.upsertFolder(sf);
-
-    // 3. UIの差分更新
-    if (isNew) {
-      const listContainer = document.getElementById('smart-folders-list');
-      if (listContainer) listContainer.appendChild(createSmartFolderNode(sf));
-    } else {
-      const oldNode = document.querySelector(`.smart-folder-item[data-id="${sf.id}"]`);
-      if (oldNode) {
-        const newNode = createSmartFolderNode(sf);
-        if (oldNode.classList.contains('selected')) {
-          newNode.classList.add('selected');
-        }
-        oldNode.replaceWith(newNode);
-      }
-    }
-
-    // 4. ダイアログを閉じる
-    modal.classList.remove('show');
-
-    if (appState.currentDirectory === 'smart://' + sf.id) {
-      refreshFileList(true);
-    }
-
-    // 作成・更新後に件数を再計算して表示
-    updateSmartFolderCountsUI();
-  });
-
-  modal.classList.add('show');
-  } catch (err) {
-    console.error("showEditSmartFolderModal error:", err);
-    if (window.uiManager) window.uiManager.showToast("Error: " + err.message, 5000, "error");
-  }
-}
-
 const menuAddSmartFolder = createMenuItem('スマートフォルダを追加...', UIManager.ICONS.FOLDER_PLUS, () => {
-  showEditSmartFolderModal({ name: '', icon: 'FAV_STAR', color: 'orange', conditions: [] }, true);
+  showEditSmartFolderModal({ name: '', icon: 'FAV_STAR', color: 'orange', conditions: [] }, true, {
+    createSmartFolderNode,
+    refreshFileList,
+    updateSmartFolderCountsUI
+  });
 });
 
 const menuEditSmartFolder = createMenuItem('スマートフォルダを編集...', UIManager.ICONS.EDIT, () => {
   if (!contextMenu.targetSmartFolderId) return;
   const sf = appState.smartFolders.find(f => f.id === contextMenu.targetSmartFolderId);
   if (sf) {
-    showEditSmartFolderModal(sf, false);
+    showEditSmartFolderModal(sf, false, {
+      createSmartFolderNode,
+      refreshFileList,
+      updateSmartFolderCountsUI
+    });
   }
 });
 
@@ -2518,7 +1509,11 @@ const menuDuplicateSmartFolder = createMenuItem('スマートフォルダを複�
       color: sf.color,
       conditions: sf.conditions ? JSON.parse(JSON.stringify(sf.conditions)) : []
     };
-    showEditSmartFolderModal(newSf, true);
+    showEditSmartFolderModal(newSf, true, {
+      createSmartFolderNode,
+      refreshFileList,
+      updateSmartFolderCountsUI
+    });
   }
 });
 
@@ -2552,68 +1547,12 @@ const menuEditFavorite = createMenuItem('お気に入りを編集...', UIManager
   if (!contextMenu.targetFavoriteId) return;
   const fav = appState.favorites.find(f => String(f.id) === String(contextMenu.targetFavoriteId));
   if (fav) {
-    const modal = document.getElementById('edit-favorite-modal');
-    if (modal) {
-      modal.style.display = ''; // Inline style のリセット（Escape等で付与された可能性のあるdisplay:noneを解除）
-    }
-    const container = document.getElementById('fav-icon-selector');
-
-    const getFavData = createFavoriteEditorUI(container, fav.icon, fav.color || 'default');
-
-    const saveBtn = document.getElementById('fav-save-btn');
-    const cancelBtn = document.getElementById('fav-cancel-btn');
-
-    const newSaveBtn = saveBtn.cloneNode(true);
-    saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
-    newSaveBtn.style.display = ''; // 古い非表示設定が残っていれば解除
-
-    const newCancelBtn = cancelBtn.cloneNode(true);
-    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-    newCancelBtn.style.display = ''; // 古い非表示設定が残っていれば解除
-
-    newCancelBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const m = document.getElementById('edit-favorite-modal');
-      if (m) {
-        m.classList.remove('show');
-        m.style.display = '';
-      }
-    });
-
-    newSaveBtn.addEventListener('click', () => {
-      const data = getFavData();
-      fav.icon = data.icon;
-      fav.color = data.color;
-      fav.name = document.getElementById('fav-name-input').value;
-      fav.path = document.getElementById('fav-path-input').value;
-      localStorage.setItem('favorites', JSON.stringify(appState.favorites));
-      renderFavorites();
-
-      let tabUpdated = false;
-      appState.tabs.forEach(t => {
-        if (t.path === fav.path) {
-          t.name = fav.name;
-          tabUpdated = true;
-        }
-      });
-      if (tabUpdated) { saveTabsState(); uiManager.renderTabs(); }
-
-      const m = document.getElementById('edit-favorite-modal');
-      if (m) {
-        m.classList.remove('show');
-        m.style.display = '';
-      }
-    });
-
-    const nameInput = document.getElementById('fav-name-input');
-    nameInput.value = fav.name;
-    document.getElementById('fav-path-input').value = fav.path;
     contextMenu.editingFavoriteId = fav.id;
-    if (modal) {
-      modal.classList.add('show');
-    }
-    nameInput.focus();
-    nameInput.select();
+    showEditFavoriteModal(fav, {
+      renderFavorites,
+      saveTabsState,
+      renderTabs: () => uiManager.renderTabs()
+    });
   }
 });
 
@@ -2985,85 +1924,10 @@ window.addEventListener('mousedown', closeAllMenus, true);
 window.addEventListener('click', closeAllMenus, true);
 window.addEventListener('contextmenu', closeAllMenus, true);
 
-// 各種モーダルの安全な閉じる処理
-window.addEventListener('click', (e) => {
-  const diffModal = document.getElementById('diff-modal');
-  if (diffModal && e.target === diffModal) {
-    diffModal.classList.remove('show');
-  }
-  const favModal = document.getElementById('edit-favorite-modal');
-  if (favModal && e.target === favModal) {
-    favModal.classList.remove('show');
-  }
-});
 
-const dragTooltip = document.createElement('div');
-dragTooltip.id = 'drag-tooltip';
-dragTooltip.className = 'custom-tooltip';
-dragTooltip.style.pointerEvents = 'none'; // マウスイベントを吸収してドロップを妨害しないようにする
-
-const dragTooltipInner = document.createElement('span');
-dragTooltipInner.className = 'drag-tooltip-inner';
-const dragTooltipIcon = document.createElement('span');
-dragTooltipIcon.className = 'drag-tooltip-icon';
-dragTooltipIcon.innerHTML = UIManager.ICONS.COPY;
-const dragTooltipText = document.createElement('span');
-dragTooltipInner.appendChild(dragTooltipIcon);
-dragTooltipInner.appendChild(dragTooltipText);
-dragTooltip.appendChild(dragTooltipInner);
-document.body.appendChild(dragTooltip);
-
-function updateDragTooltip(text, x, y) {
-  if (dragTooltipText.textContent !== text) {
-    dragTooltipText.textContent = text;
-  }
-  dragTooltip.style.left = (x + 15) + 'px';
-  dragTooltip.style.top = (y + 15) + 'px';
-  if (!dragTooltip.classList.contains('show')) {
-    dragTooltip.classList.add('show');
-  }
-}
-
-document.addEventListener('dragover', (e) => {
-  if (appState.dragState && appState.dragState.isAppDragging) {
-    const count = (appState.dragState.indices && appState.dragState.indices.length > 0) ? appState.dragState.indices.length : (appState.dragState.paths ? appState.dragState.paths.length : 0);
-    let text = count > 1 ? `${count} 個のアイテム` : `1 個のアイテム`;
-
-    const itemDiv = e.target.closest('#dir-tree .tree-item');
-    if (itemDiv && itemDiv.dataset.path) {
-      let actionStr = 'コピー';
-      if (count > 0) {
-        if (e.ctrlKey) {
-          actionStr = 'コピー';
-        } else if (e.shiftKey) {
-          actionStr = '移動';
-        } else {
-          const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-          const cachedRoot = appState.dragState.cachedRoot || (appState.dragState.paths && appState.dragState.paths.length > 0 ? getRoot(appState.dragState.paths[0]) : null);
-          actionStr = cachedRoot === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
-        }
-      }
-      const isRoot = itemDiv.dataset.isRoot === 'true';
-      const folderName = isRoot ? itemDiv.dataset.path : itemDiv.dataset.name;
-
-      text = count > 1 ? `${count}個のアイテムを「${folderName}」へ${actionStr}` : `「${folderName}」へ${actionStr}`;
-    }
-
-    updateDragTooltip(text, e.clientX, e.clientY);
-  }
-});
-
-document.addEventListener('dragend', async () => {
-  dragTooltip.classList.remove('show');
-  appState.dragState.paths = [];
-  appState.dragState.indices = [];
-  appState.dragState.cachedRoot = null;
-  appState.dragState.isAppDragging = false;
-
-  if (appState.dragState.pendingRefresh) {
-    appState.dragState.pendingRefresh = false;
-    await refreshFileList();
-  }
+initDragTooltip();
+initGlobalDndHandlers({
+  refreshFileList
 });
 
 function handleItemClick(e, isGrid) {
@@ -3085,38 +1949,6 @@ function handleItemDblClick(e, isGrid) {
   }
 }
 
-function handleItemDragStart(e, isGrid) {
-  const item = e.target.closest(isGrid ? '.thumbnail-item' : 'tr');
-  if (!item || !item.dataset.index) return;
-  const index = parseInt(item.dataset.index, 10);
-
-  if (!appState.selection.has(index)) {
-    appState.selection.clear();
-    appState.selection.add(index);
-    appState.selectedIndex = index;
-    uiManager.updateSelectionUI();
-    // ドラッグ開始時のインスペクター更新によるカクつきを防ぐため、updateInspector() は呼ばない
-  }
-
-  const selectedIndices = Array.from(appState.selection);
-  e.dataTransfer.setData('application/json-indices', JSON.stringify(selectedIndices));
-  if (item.dataset.filepath) {
-    e.dataTransfer.setData('text/plain', item.dataset.filepath);
-  }
-  e.dataTransfer.effectAllowed = 'copyMove';
-
-  e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
-
-  const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-  appState.dragState.paths = []; // dropped paths will be fetched async
-  appState.dragState.indices = selectedIndices;
-  appState.dragState.isAppDragging = true;
-  appState.dragState.cachedRoot = getRoot(item.dataset.filepath || '');
-
-  const count = selectedIndices.length;
-  const text = count > 1 ? `${count} 個のアイテム` : `1 個のアイテム`;
-  updateDragTooltip(text, e.clientX, e.clientY);
-}
 
 function handleItemContextMenu(e, isGrid) {
   appState.activeCenterPane = isGrid ? 'grid' : 'table';
@@ -3336,147 +2168,9 @@ uiManager.elements.dirTree.addEventListener('contextmenu', (e) => {
   }, e.clientX, e.clientY);
 });
 
-uiManager.elements.dirTree.addEventListener('dragstart', (e) => {
-  const itemDiv = e.target.closest('.tree-item');
-  // ルート要素はドラッグ不可
-  if (!itemDiv || itemDiv.dataset.isRoot === 'true') {
-    e.preventDefault();
-    return;
-  }
-
-  const folderData = {
-    path: itemDiv.dataset.path,
-    name: itemDiv.dataset.name,
-    isRoot: false
-  };
-  e.dataTransfer.setData('application/json-folder', JSON.stringify(folderData));
-  e.dataTransfer.effectAllowed = 'copyMove';
-
-  const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-  appState.dragState.paths = [itemDiv.dataset.path];
-  appState.dragState.cachedRoot = getRoot(itemDiv.dataset.path);
-  appState.dragState.isAppDragging = true;
-});
-
-uiManager.elements.dirTree.addEventListener('dragenter', (e) => {
-  if (draggedFavoriteId) return; // お気に入り関連のドラッグ中は無視
-  const itemDiv = e.target.closest('.tree-item');
-  if (!itemDiv) return;
-  e.preventDefault();
-  itemDiv.style.backgroundColor = 'rgba(37, 126, 140, 0.3)';
-});
-
-uiManager.elements.dirTree.addEventListener('dragover', (e) => {
-  if (draggedFavoriteId) return;
-  const itemDiv = e.target.closest('.tree-item');
-  if (!itemDiv) return;
-  e.preventDefault();
-
-  let actionStr = 'コピー';
-  const hasItems = (appState.dragState.indices && appState.dragState.indices.length > 0) || (appState.dragState.paths && appState.dragState.paths.length > 0);
-  if (hasItems) {
-    if (e.ctrlKey) {
-      actionStr = 'コピー';
-    } else if (e.shiftKey) {
-      actionStr = '移動';
-    } else {
-      const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-      const cachedRoot = appState.dragState.cachedRoot || (appState.dragState.paths && appState.dragState.paths.length > 0 ? getRoot(appState.dragState.paths[0]) : null);
-      actionStr = cachedRoot === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
-    }
-  }
-  e.dataTransfer.dropEffect = actionStr === '移動' ? 'move' : 'copy';
-});
-
-uiManager.elements.dirTree.addEventListener('dragleave', (e) => {
-  if (draggedFavoriteId) return;
-  const itemDiv = e.target.closest('.tree-item');
-  if (!itemDiv) return;
-  if (!itemDiv.contains(e.relatedTarget)) {
-    itemDiv.style.backgroundColor = '';
-  }
-});
-
-uiManager.elements.dirTree.addEventListener('drop', async (e) => {
-  if (draggedFavoriteId) return;
-  const itemDiv = e.target.closest('.tree-item');
-  if (!itemDiv) return;
-  e.preventDefault();
-  itemDiv.style.backgroundColor = '';
-  dragTooltip.classList.remove('show');
-
-  const paths = await getPathsFromDragEventAsync(e);
-  if (paths.length > 0 && window.veloceAPI.moveOrCopyFile) {
-    let actionStr = 'コピー';
-    let intent = 'auto';
-    if (paths.length > 0) {
-      if (e.ctrlKey) {
-        actionStr = 'コピー';
-        intent = 'copy';
-      } else if (e.shiftKey) {
-        actionStr = '移動';
-        intent = 'move';
-      } else {
-        const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-        actionStr = getRoot(paths[0]) === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
-      }
-    }
-
-    setTimeout(async () => {
-      let targetPaths = paths;
-      let skipCount = 0;
-
-      if (window.veloceAPI.checkConflicts) {
-        try {
-          const conflicts = await window.veloceAPI.checkConflicts(paths, itemDiv.dataset.path);
-          if (conflicts && conflicts.length > 0) {
-            const choice = await uiManager.showConflictDialog(conflicts.length, actionStr);
-            if (choice === 'cancel') {
-              uiManager.showToast('操作をキャンセルしました', 3000, 'file-move');
-              return;
-            } else if (choice === 'skip') {
-              // 重複ファイルを除外して処理を継続する
-              targetPaths = paths.filter(p => !conflicts.includes(p));
-              skipCount = conflicts.length;
-              if (targetPaths.length === 0) {
-                uiManager.showToast(`${skipCount}件の重複をスキップしました`, 3000, 'file-move');
-                return;
-              }
-            }
-          }
-        } catch (err) {
-          console.error('Failed to check conflicts:', err);
-        }
-      }
-
-      uiManager.showToast(`${targetPaths.length}件のファイルを${actionStr}中`, 0, 'file-move', 'info');
-
-      let successCount = 0;
-      for (const p of targetPaths) {
-        const result = await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path, intent);
-        if (result && result.success) {
-          successCount++;
-          if (result.action === 'move') {
-            appState.undoStack.push({ type: 'MOVE_FILE', sourcePath: p, targetPath: result.targetPath });
-          } else if (result.action === 'copy') {
-            appState.undoStack.push({ type: 'COPY_FILE', sourcePath: p, targetPath: result.targetPath });
-          }
-        }
-      }
-      if (successCount > 0) {
-        let msg = `${successCount}件のファイルを${actionStr}しました`;
-        if (skipCount > 0) msg += `（${skipCount}件スキップ）`;
-        uiManager.showToast(msg, 3000, 'file-move');
-        if (appState.dragState.isAppDragging) {
-          appState.dragState.pendingRefresh = true;
-        } else {
-          await refreshFileList();
-        }
-      } else {
-        uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
-      }
-    }, 10);
-  }
+initDirTreeDnd(uiManager.elements.dirTree, {
+  refreshFileList,
+  showNotification
 });
 
 function setupResizer(resizer, type, cursor) {
@@ -3961,22 +2655,7 @@ export const globalKeydownHandler = async (e) => {
       return;
     }
 
-    const diffModal = document.getElementById('diff-modal');
-    if (diffModal && diffModal.classList.contains('show')) {
-      e.preventDefault();
-      diffModal.classList.remove('show');
-      return;
-    }
-    const favModal = document.getElementById('edit-favorite-modal');
-    if (favModal && favModal.classList.contains('show')) {
-      e.preventDefault();
-      favModal.classList.remove('show');
-      return;
-    }
-    const sfModal = document.getElementById('edit-smart-folder-modal');
-    if (sfModal && sfModal.classList.contains('show')) {
-      e.preventDefault();
-      sfModal.classList.remove('show');
+    if (handleModalEscapeKey(e)) {
       return;
     }
     if (document.getElementById('help-overlay')) {
@@ -5194,151 +3873,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   // D&Dの受け入れ範囲を広げるため、リストではなくセクション全体を取得
   const favListElement = document.getElementById('bookmark-list');
   if (favListElement) {
-    // --- お気に入りのドラッグ＆ドロップ並び替え処理 ---
-    favListElement.addEventListener('dragstart', (e) => {
-      const itemDiv = e.target.closest('.bookmark-item');
-      if (!itemDiv) {
-        e.preventDefault();
-        return;
-      }
-      draggedFavoriteId = itemDiv.dataset.id;
-      e.dataTransfer.effectAllowed = 'move';
-
-      // アイテムのみを掴んでいるように見せるためのカスタムドラッグイメージ
-      const dragGhost = itemDiv.cloneNode(true);
-      dragGhost.className = `${itemDiv.className} bookmark-drag-ghost`;
-      document.body.appendChild(dragGhost);
-
-      e.dataTransfer.setDragImage(dragGhost, 15, 15);
-
-      setTimeout(() => {
-        if (dragGhost.parentNode) dragGhost.parentNode.removeChild(dragGhost);
-      }, 0);
-
-      // ドラッグ中の元アイテムを半透明にする
-      setTimeout(() => { itemDiv.classList.add('is-dragging'); }, 0);
-    });
-
-    favListElement.addEventListener('dragend', (e) => {
-      const itemDiv = e.target.closest('.bookmark-item');
-      if (itemDiv) itemDiv.classList.remove('is-dragging');
-      draggedFavoriteId = null;
-      // 全てのドロップインジケータ（線）をクリア
-      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
-        item.classList.remove('drop-target-left', 'drop-target-right');
-      });
-    });
-
-    favListElement.addEventListener('dragover', (e) => {
-      const isFolderDrop = Array.from(e.dataTransfer.types).includes('application/json-folder');
-      if (!draggedFavoriteId && !isFolderDrop) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = isFolderDrop ? 'copy' : 'move';
-
-      const itemDiv = e.target.closest('.bookmark-item');
-
-      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
-        item.classList.remove('drop-target-left', 'drop-target-right');
-      });
-
-      if (!itemDiv || (draggedFavoriteId && itemDiv.dataset.id === draggedFavoriteId)) {
-        // 余白にドラッグしている場合、一番最後のアイテムの下にインジケータを表示する
-        const items = favListElement.querySelectorAll('.bookmark-item');
-        if (items.length > 0) {
-          const lastItem = items[items.length - 1];
-          if (lastItem.dataset.id !== draggedFavoriteId) {
-            lastItem.classList.add('drop-target-right');
-          }
-        }
-        return;
-      }
-
-      // マウス位置がターゲットの半分より左か右かで線の位置を変える
-      const rect = itemDiv.getBoundingClientRect();
-      const midX = rect.left + rect.width / 2;
-
-      if (e.clientX < midX) {
-        itemDiv.classList.add('drop-target-left'); // 左に線
-      } else {
-        itemDiv.classList.add('drop-target-right');  // 右に線
-      }
-    });
-
-    favListElement.addEventListener('dragleave', (e) => {
-      if (e.relatedTarget && favListElement.contains(e.relatedTarget)) return;
-      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
-        item.classList.remove('drop-target-left', 'drop-target-right');
-      });
-    });
-
-    favListElement.addEventListener('drop', (e) => {
-      const isFolderDrop = Array.from(e.dataTransfer.types).includes('application/json-folder');
-      if (!draggedFavoriteId && !isFolderDrop) return;
-      e.preventDefault();
-
-      favListElement.querySelectorAll('.bookmark-item').forEach(item => {
-        item.classList.remove('drop-target-left', 'drop-target-right');
-      });
-
-      if (isFolderDrop) {
-        const jsonData = e.dataTransfer.getData('application/json-folder');
-        if (jsonData) {
-          try {
-            const folder = JSON.parse(jsonData);
-            if (appState.favorites.find(f => f.path === folder.path)) {
-              showNotification(`「${folder.name}」はすでにお気に入りにあります`, 'warning');
-              return;
-            }
-
-            let insertIndex = appState.favorites.length;
-            const itemDiv = e.target.closest('.bookmark-item');
-            if (itemDiv) {
-              const targetId = itemDiv.dataset.id;
-              const rect = itemDiv.getBoundingClientRect();
-              const midX = rect.left + rect.width / 2;
-              const insertAfter = e.clientX >= midX;
-              const newIndex = appState.favorites.findIndex(f => f.id === targetId);
-              if (newIndex > -1) {
-                insertIndex = insertAfter ? newIndex + 1 : newIndex;
-              }
-            }
-
-            const newFav = { id: Date.now().toString(), name: folder.name, path: folder.path, icon: 'star', color: 'default' };
-            appState.favorites.splice(insertIndex, 0, newFav);
-            localStorage.setItem('favorites', JSON.stringify(appState.favorites));
-            renderFavorites();
-            showNotification(`「${folder.name}」をお気に入りに追加しました`, 'success');
-          } catch (err) { }
-        }
-        return;
-      }
-
-      const itemDiv = e.target.closest('.bookmark-item');
-      if (itemDiv && itemDiv.dataset.id === draggedFavoriteId) return;
-
-      const fromIndex = appState.favorites.findIndex(f => f.id === draggedFavoriteId);
-      if (fromIndex > -1) {
-        const [movedItem] = appState.favorites.splice(fromIndex, 1);
-        let newIndex = appState.favorites.length; // デフォルトは末尾
-
-        if (itemDiv) {
-          const targetId = itemDiv.dataset.id;
-          newIndex = appState.favorites.findIndex(f => f.id === targetId);
-          if (newIndex > -1) {
-            const rect = itemDiv.getBoundingClientRect();
-            const midX = rect.left + rect.width / 2;
-            const insertAfter = e.clientX >= midX;
-            if (insertAfter) newIndex += 1;
-          } else {
-            newIndex = appState.favorites.length;
-          }
-        }
-
-        // 並び替えた状態を保存して再描画
-        appState.favorites.splice(newIndex, 0, movedItem);
-        localStorage.setItem('favorites', JSON.stringify(appState.favorites));
-        renderFavorites();
-      }
+    initFavoritesDnd(favListElement, {
+      renderFavorites,
+      showNotification
     });
 
     favListElement.addEventListener('click', async (e) => {
@@ -5383,37 +3920,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  document.getElementById('fav-cancel-btn')?.addEventListener('click', () => {
-    const m = document.getElementById('edit-favorite-modal');
-    if (m) {
-      m.classList.remove('show');
-      m.style.display = '';
-    }
-  });
-
-  document.getElementById('fav-modal-close-btn')?.addEventListener('click', () => {
-    const m = document.getElementById('edit-favorite-modal');
-    if (m) {
-      m.classList.remove('show');
-      m.style.display = '';
-    }
-  });
-
-  document.getElementById('smart-modal-close-btn')?.addEventListener('click', () => {
-    const m = document.getElementById('edit-smart-folder-modal');
-    if (m) {
-      m.classList.remove('show');
-      m.style.display = '';
-    }
-  });
-
-  document.getElementById('diff-close-btn')?.addEventListener('click', () => {
-    document.getElementById('diff-modal')?.classList.remove('show');
-  });
-
-  document.getElementById('diff-bottom-close-btn')?.addEventListener('click', () => {
-    document.getElementById('diff-modal')?.classList.remove('show');
-  });
+  initModalHandlers();
 
   const savedSort = localStorage.getItem('currentSort');
   if (savedSort) {

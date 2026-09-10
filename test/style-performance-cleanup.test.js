@@ -7,6 +7,9 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
   const cssContent = getFullCssContent();
   const htmlContent = fs.readFileSync(path.resolve(__dirname, '../src/index.html'), 'utf-8');
   const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+  const helpJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-help.js'), 'utf-8');
+  const inspectorJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-inspector.js'), 'utf-8');
+  const dndJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-dnd.js'), 'utf-8');
   const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-context-menu.js'), 'utf-8');
   const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
@@ -46,9 +49,9 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
     });
 
     it('should include a uniform close button in showLicenseDialog', () => {
-      expect(rendererJsContent).toContain('id="license-close-btn"');
-      expect(rendererJsContent).toContain('modal-header-row');
-      expect(rendererJsContent).toContain("content.querySelector('#license-close-btn')");
+      expect(helpJsContent).toContain('id="license-close-btn"');
+      expect(helpJsContent).toContain('modal-header-row');
+      expect(helpJsContent).toContain("content.querySelector('#license-close-btn')");
     });
   });
 
@@ -97,23 +100,23 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
 
   describe('4. Performance & DOM Optimizations', () => {
     it('should use CSS classes instead of inline style assignments in getInspectorSection', () => {
-      expect(rendererJsContent).toContain('inspector-section-block');
-      expect(rendererJsContent).toContain('inspector-section-h3');
-      expect(rendererJsContent).toContain('inspector-title-wrapper');
-      expect(rendererJsContent).toContain('inspector-copy-wrapper');
-      expect(rendererJsContent).not.toContain("h3.style.fontSize = 'var(--font-size-xs)'");
-      expect(rendererJsContent).not.toContain("h3.style.lineHeight = '22px'");
+      expect(inspectorJsContent).toContain('inspector-section-block');
+      expect(inspectorJsContent).toContain('inspector-section-h3');
+      expect(inspectorJsContent).toContain('inspector-title-wrapper');
+      expect(inspectorJsContent).toContain('inspector-copy-wrapper');
+      expect(inspectorJsContent).not.toContain("h3.style.fontSize = 'var(--font-size-xs)'");
+      expect(inspectorJsContent).not.toContain("h3.style.lineHeight = '22px'");
     });
 
     it('should reuse copy button DOM in renderMetadata rather than innerHTML string parsing every time', () => {
-      expect(rendererJsContent).toContain('if (!secEl.copyBtn)');
-      expect(rendererJsContent).toContain("secEl.copyBtn.setAttribute('data-copy-text', section.value)");
+      expect(inspectorJsContent).toContain('if (!secEl.copyBtn)');
+      expect(inspectorJsContent).toContain("secEl.copyBtn.setAttribute('data-copy-text', section.value)");
     });
 
     it('should avoid innerHTML re-parse on dragover by caching tooltip child nodes', () => {
-      expect(rendererJsContent).toContain('function updateDragTooltip');
-      expect(rendererJsContent).toContain('dragTooltipText.textContent !== text');
-      expect(rendererJsContent).not.toMatch(/dragover[\s\S]*?dragTooltip\.innerHTML\s*=/);
+      expect(dndJsContent).toContain('function updateDragTooltip');
+      expect(dndJsContent).toContain('dragTooltipText.textContent !== text');
+      expect(dndJsContent).not.toMatch(/dragover[\s\S]*?dragTooltip\.innerHTML\s*=/);
     });
 
     it('should avoid re-parsing empty state SVG in updateVirtualGrid when mode has not changed', () => {

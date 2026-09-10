@@ -746,6 +746,10 @@ table#file-table {
   transition: background 0.2s ease;
 }
 
+#dir-tree .tree-item.drop-target {
+  background-color: rgba(var(--accent-rgb), 0.3);
+}
+
 #dir-tree .tree-item.selected::before {
   opacity: 1;
   transform: translateX(0);

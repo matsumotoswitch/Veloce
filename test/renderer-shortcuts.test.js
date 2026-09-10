@@ -389,17 +389,17 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
     it('should include I key and text copy descriptions in help table', () => {
       const fs = require('fs');
       const path = require('path');
-      const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+      const helpJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-help.js'), 'utf-8');
 
       // ビューアー画面のショートカットに I キーが含まれていること
-      expect(rendererJs).toContain('<tr><td><kbd>I</kbd></td><td>メタデータオーバーレイの表示 / 非表示</td></tr>');
+      expect(helpJs).toContain('<tr><td><kbd>I</kbd></td><td>メタデータオーバーレイの表示 / 非表示</td></tr>');
 
       // メイン画面およびビューアー画面の Ctrl+C にテキストコピーが含まれていること
-      expect(rendererJs).toContain('<tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>');
-      expect(rendererJs).toContain('<tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>');
+      expect(helpJs).toContain('<tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>');
+      expect(helpJs).toContain('<tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>');
 
       // ビューアー画面の Esc にオーバーレイを閉じる旨が含まれていること
-      expect(rendererJs).toContain('<tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>');
+      expect(helpJs).toContain('<tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>');
     });
   });
 });

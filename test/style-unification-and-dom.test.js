@@ -7,6 +7,8 @@ describe('Style Unification and DOM Optimization Tests', () => {
   const rootDir = path.resolve(__dirname, '..');
   const indexHtmlPath = path.join(rootDir, 'src', 'index.html');
   const rendererJsPath = path.join(rootDir, 'src', 'renderer.js');
+  const rendererInspectorJsPath = path.join(rootDir, 'src', 'renderer-inspector.js');
+  const rendererDialogsJsPath = path.join(rootDir, 'src', 'renderer-dialogs.js');
   const rendererUiJsPath = path.join(rootDir, 'src', 'renderer-ui.js');
 
   it('verifies style.css color token definitions and zero hardcoded RGB values', () => {
@@ -84,23 +86,29 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(inlineStyleMatches).toBeNull();
   });
 
-  it('verifies renderer.js has zero inline style attributes and uses optimized DOM access', () => {
+  it('verifies renderer.js, renderer-inspector.js and renderer-dialogs.js have zero inline style attributes and use optimized DOM access', () => {
     const code = fs.readFileSync(rendererJsPath, 'utf-8');
+    const inspectorCode = fs.readFileSync(rendererInspectorJsPath, 'utf-8');
+    const dialogsCode = fs.readFileSync(rendererDialogsJsPath, 'utf-8');
 
     // style="..." 属性が一切存在しないこと
     const inlineStyleMatches = code.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
     expect(inlineStyleMatches).toBeNull();
+    const inspectorInlineStyleMatches = inspectorCode.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
+    expect(inspectorInlineStyleMatches).toBeNull();
+    const dialogsInlineStyleMatches = dialogsCode.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
+    expect(dialogsInlineStyleMatches).toBeNull();
 
     // インスペクターコピーボタンで O(1) firstElementChild が使用されていること
-    expect(code).toContain('secEl.copyBtn = secEl.copyWrapper.firstElementChild;');
+    expect(inspectorCode).toContain('secEl.copyBtn = secEl.copyWrapper.firstElementChild;');
 
     // エラー表示で render-error-box クラスが使用されていること
-    expect(code).toContain('<div class="render-error-box">');
+    expect(inspectorCode).toContain('<div class="render-error-box">');
 
     // スマートフォルダ条件入力UIで適切なCSSクラスが使用されていること
-    expect(code).toContain('cond-value-input dialog-input flex-1');
-    expect(code).toContain('btn-browse-path dialog-btn');
-    expect(code).toContain('cond-path-input flex-1');
+    expect(dialogsCode).toContain('cond-value-input dialog-input flex-1');
+    expect(dialogsCode).toContain('btn-browse-path dialog-btn');
+    expect(dialogsCode).toContain('cond-path-input flex-1');
 
     // リサイザートグルがインラインCSSではなくクラスで指定されていること
     expect(code).toContain('resizer-toggle ${isHorizontal ? \'resizer-toggle-horizontal\' : \'resizer-toggle-vertical\'}');
