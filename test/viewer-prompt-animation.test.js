@@ -142,4 +142,18 @@ describe('Viewer Prompt Overlay Animation (Pop & Hide)', () => {
     expect(css).toContain('.viewer-metadata-overlay.prompt-hide');
     expect(css).toContain('animation: viewerPromptHide 0.22s linear forwards;');
   });
+
+  it('クッションバウンス時の左移動で右側に画像が露出しないよう画面外拡張疑似要素 (::after) が定義されていること', () => {
+    const css = getFullCssContent();
+
+    // オーバーレイ本体の右側画面外拡張
+    expect(css).toMatch(/\.viewer-metadata-overlay::after\s*\{[^}]*left:\s*100%;/);
+    expect(css).toMatch(/\.viewer-metadata-overlay::after\s*\{[^}]*width:\s*20px;/);
+    expect(css).toMatch(/\.viewer-metadata-overlay::after\s*\{[^}]*height:\s*100%;/);
+
+    // ヘッダー部分の右側画面外拡張（ヘッダー背景色と下ボーダー同期）
+    expect(css).toMatch(/\.viewer-metadata-header::after\s*\{[^}]*left:\s*100%;/);
+    expect(css).toMatch(/\.viewer-metadata-header::after\s*\{[^}]*width:\s*20px;/);
+    expect(css).toMatch(/\.viewer-metadata-header::after\s*\{[^}]*height:\s*40px;/);
+  });
 });

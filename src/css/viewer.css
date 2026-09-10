@@ -440,6 +440,18 @@ html.viewer-html,
   pointer-events: none;
 }
 
+/* クッションバウンス時の左移動（-4px / -3px）で右端に生じる隙間を画面外からカバーする拡張背景 */
+.viewer-metadata-overlay::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 100%;
+  width: 20px;
+  height: 100%;
+  background: rgba(var(--bg-rgb), 0.85);
+  pointer-events: none;
+}
+
 .viewer-metadata-overlay.show {
   transform: translateX(0);
   opacity: 1;
@@ -456,6 +468,7 @@ html.viewer-html,
 }
 
 .viewer-metadata-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -465,6 +478,20 @@ html.viewer-html,
   background: rgba(var(--panel-rgb), 0.85);
   flex-shrink: 0;
   box-sizing: border-box;
+}
+
+/* ヘッダー右側の画面外拡張（ヘッダー背景色と下ボーダーを画面外へ延長して完全同期） */
+.viewer-metadata-header::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 100%;
+  width: 20px;
+  height: 40px;
+  background: rgba(var(--panel-rgb), 0.85);
+  border-bottom: 1px solid var(--border-color);
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 .viewer-metadata-title {
