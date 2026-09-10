@@ -60,4 +60,15 @@ describe('Titlebar and Window Control Buttons Consistency', () => {
     expect(ViewerUI.ICONS.RESTORE).toContain('currentColor');
     expect(ViewerUI.ICONS.CLOSE).toContain('currentColor');
   });
+
+  it('should maintain transparent background on viewer control buttons and info container to prevent obtrusiveness', () => {
+    // コントロールボタンは常時視認化（目立つ背景色）を避け、通常時 transparent であること
+    expect(cssContent).toMatch(/\.window-ctrl-btn\s*\{[^}]*background-color:\s*transparent;/);
+    // アイコン輪郭の自然な視認性確保のためのドロップシャドウ
+    expect(cssContent).toMatch(/\.window-ctrl-btn\s*\{[^}]*filter:\s*drop-shadow\(/);
+
+    // 情報コンテナのテキストシャドウ（背景色ボックスなしで輪郭を保護）
+    expect(cssContent).toMatch(/\.viewer-rating-display\s*\{[^}]*text-shadow:\s*0 1px 3px/);
+    expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*text-shadow:\s*0 1px 3px/);
+  });
 });

@@ -126,7 +126,7 @@ html.viewer-html,
 }
 
 .viewer-body #window-controls.has-gradient {
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 100%);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0) 100%);
 }
 
 .viewer-body #window-controls.fs-hidden {
@@ -139,10 +139,10 @@ html.viewer-html,
   line-height: 40px;
   background-color: transparent;
   /* ベタ塗りを廃止 */
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-light);
   font-size: var(--font-size-base);
   font-weight: 500;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 2px 6px rgba(0, 0, 0, 0.75);
   /* 視認性を確保 */
   display: flex;
   align-items: center;
@@ -190,7 +190,7 @@ html.viewer-html,
   font-size: var(--font-size-base);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 2px 6px rgba(0, 0, 0, 0.75);
   box-sizing: border-box;
 }
 
@@ -200,10 +200,11 @@ html.viewer-html,
   display: flex;
   justify-content: center;
   align-items: center;
-  color: var(--text-color);
+  color: var(--text-light);
   cursor: default;
-  transition: background-color 0.1s, color 0.1s;
+  transition: background-color 0.15s ease, color 0.15s ease;
   background-color: transparent;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
   pointer-events: auto;
 }
 
@@ -229,7 +230,7 @@ html.viewer-html,
   pointer-events: none;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 2px 6px rgba(0, 0, 0, 0.75);
   box-sizing: border-box;
 }
 
