@@ -108,7 +108,7 @@ html.viewer-html,
   right: 0;
   left: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
   /* Keep buttons on right even if filename is hidden */
   z-index: 9999;
@@ -135,8 +135,8 @@ html.viewer-html,
 
 .window-filename {
   flex: 1;
-  height: 32px;
-  line-height: 32px;
+  height: 40px;
+  line-height: 40px;
   background-color: transparent;
   /* ベタ塗りを廃止 */
   color: rgba(255, 255, 255, 0.9);
@@ -158,8 +158,8 @@ html.viewer-html,
 }
 
 .window-info-container {
-  height: 32px;
-  line-height: 32px;
+  height: 40px;
+  line-height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -181,8 +181,8 @@ html.viewer-html,
 }
 
 .viewer-rating-display {
-  height: 32px;
-  line-height: 32px;
+  height: 40px;
+  line-height: 40px;
   display: flex;
   align-items: center;
   margin-right: 8px;
@@ -218,8 +218,8 @@ html.viewer-html,
 }
 
 .window-scale-display {
-  height: 32px;
-  line-height: 32px;
+  height: 40px;
+  line-height: 40px;
   color: rgba(255, 255, 255, 0.9);
   font-size: var(--font-size-base);
   padding: 0;
@@ -464,12 +464,18 @@ html.viewer-html,
   border-bottom: 1px solid var(--border-color);
   background: rgba(var(--panel-rgb), 0.85);
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .viewer-metadata-title {
   font-size: var(--font-size-base);
   font-weight: 600;
   color: var(--text-light);
+  height: 40px;
+  line-height: 40px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .viewer-metadata-close-btn {

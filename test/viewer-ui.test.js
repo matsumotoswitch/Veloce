@@ -134,7 +134,7 @@ describe('Viewer UI Visibility', () => {
     expect(typeof window.updateScaleDisplay).toBe('function');
   });
 
-  it('should unify font-size and baseline height between window-filename and window-scale-display in style.css', () => {
+  it('should unify font-size and baseline height with window control buttons (40px) in style.css', () => {
     const fs = require('fs');
     const path = require('path');
     const cssContent = getFullCssContent();
@@ -144,13 +144,15 @@ describe('Viewer UI Visibility', () => {
     expect(cssContent).toMatch(/\.window-filename\s*\{[^}]*font-size:\s*var\(--font-size-base\);/);
     expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*font-size:\s*var\(--font-size-base\);/);
 
-    // 高さ（height）と行の高さ（line-height）がともに 32px で統一されていること
-    expect(cssContent).toMatch(/\.window-filename\s*\{[^}]*height:\s*32px;/);
-    expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*height:\s*32px;/);
-    expect(cssContent).toMatch(/\.window-info-container\s*\{[^}]*height:\s*32px;/);
+    // 高さ（height）と行の高さ（line-height）がコントロールボタン（40px）に合わせて統一されていること
+    expect(cssContent).toMatch(/\.window-filename\s*\{[^}]*height:\s*40px;/);
+    expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*height:\s*40px;/);
+    expect(cssContent).toMatch(/\.window-info-container\s*\{[^}]*height:\s*40px;/);
+    expect(cssContent).toMatch(/\.viewer-rating-display\s*\{[^}]*height:\s*40px;/);
+    expect(cssContent).toMatch(/\.viewer-metadata-title\s*\{[^}]*height:\s*40px;/);
 
-    // #window-controls で上揃え（align-items: flex-start）され、30pxのインライン直書きが存在しないこと
-    expect(cssContent).toMatch(/\.viewer-body #window-controls\s*\{[^}]*align-items:\s*flex-start;/);
+    // #window-controls で中央揃え（align-items: center）され、30pxのインライン直書きが存在しないこと
+    expect(cssContent).toMatch(/\.viewer-body #window-controls\s*\{[^}]*align-items:\s*center;/);
     expect(viewerJsContent).not.toContain("infoContainer.style.height = '30px'");
   });
 });
