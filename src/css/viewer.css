@@ -387,6 +387,42 @@ html.viewer-html,
 
 
 /* --- Viewer Metadata Overlay (A-4) --- */
+/* プロンプト・メタデータ表示: 左右方向のマイルドなスライドイン（スッと入って-4pxだけ優しくオーバーシュート着地） */
+@keyframes viewerPromptPop {
+  0% {
+    transform: translateX(100%);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  }
+  75% {
+    transform: translateX(-4px);
+    opacity: 1;
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* プロンプト・メタデータ消去: マイルドな視覚的逆再生 (一瞬-3pxだけわずかにクッションして右へスライド退場) */
+@keyframes viewerPromptHide {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+    animation-timing-function: ease-out;
+  }
+  30% {
+    transform: translateX(-3px);
+    opacity: 1;
+    animation-timing-function: ease-in;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
 .viewer-metadata-overlay {
   position: fixed;
   top: 0;
@@ -402,13 +438,21 @@ html.viewer-html,
   transform: translateX(100%);
   opacity: 0;
   pointer-events: none;
-  transition: transform 0.25s var(--transition-smooth), opacity 0.25s ease;
 }
 
 .viewer-metadata-overlay.show {
   transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
+}
+
+.viewer-metadata-overlay.prompt-pop {
+  animation: viewerPromptPop 0.25s linear forwards;
+}
+
+.viewer-metadata-overlay.prompt-hide {
+  animation: viewerPromptHide 0.22s linear forwards;
+  pointer-events: none;
 }
 
 .viewer-metadata-header {

@@ -137,7 +137,7 @@ export function createMetadataOverlay() {
     const closeBtn = document.createElement('button');
     closeBtn.id = 'viewer-metadata-close-btn';
     closeBtn.className = 'viewer-metadata-close-btn';
-    closeBtn.title = '閉じる (I / Esc)';
+    closeBtn.title = '閉じる (P / I / Esc)';
     closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -319,8 +319,10 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
   return section;
 }
 
+let _metadataOverlayHideTimer = null;
+
 /**
- * メタデータオーバーレイの表示/非表示を切り替えます。
+ * メタデータオーバーレイの表示/非表示をバウンス・ポップアニメーションとともに切り替えます。
  * @param {boolean} [forceState]
  */
 export function toggleMetadataOverlay(forceState) {
@@ -329,10 +331,36 @@ export function toggleMetadataOverlay(forceState) {
 
   const overlay = createMetadataOverlay();
   if (viewerState.isMetadataVisible) {
+    if (_metadataOverlayHideTimer) {
+      clearTimeout(_metadataOverlayHideTimer);
+      _metadataOverlayHideTimer = null;
+    }
+    overlay.classList.remove('prompt-hide');
     overlay.classList.add('show');
+    // アニメーション再開のためのリフロー強制
+    overlay.classList.remove('prompt-pop');
+    void overlay.offsetWidth;
+    overlay.classList.add('prompt-pop');
+
     updateMetadataOverlay();
   } else {
+    const wasVisible = overlay.classList.contains('show');
     overlay.classList.remove('show');
+    overlay.classList.remove('prompt-pop');
+
+    if (wasVisible) {
+      overlay.classList.remove('prompt-hide');
+      void overlay.offsetWidth;
+      overlay.classList.add('prompt-hide');
+
+      if (_metadataOverlayHideTimer) clearTimeout(_metadataOverlayHideTimer);
+      _metadataOverlayHideTimer = setTimeout(() => {
+        overlay.classList.remove('prompt-hide');
+        _metadataOverlayHideTimer = null;
+      }, 220);
+    } else {
+      overlay.classList.remove('prompt-hide');
+    }
   }
 }
 
@@ -1616,6 +1644,8 @@ window.addEventListener('keydown', async (e) => {
       viewerState.isBorderVisible = !viewerState.isBorderVisible;
       viewerUI.applyBorderVisibility();
       break;
+    case 'p':
+    case 'P':
     case 'i':
     case 'I':
       e.preventDefault();
