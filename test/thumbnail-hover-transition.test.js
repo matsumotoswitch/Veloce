@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Thumbnail Hover Transition Improvements (TODO.md 視覚的改善)', () => {
-  const cssPath = path.resolve(__dirname, '../src/style.css');
-  const cssContent = fs.readFileSync(cssPath, 'utf-8');
+  const cssContent = getFullCssContent();
 
   it('.thumbnail-item に will-change: transform とスムーズなトランジションが設定されていること', () => {
     // .thumbnail-item ブロックの抽出

@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Titlebar and Window Control Buttons Consistency', () => {
-  const cssPath = path.resolve(__dirname, '../src/style.css');
-  const cssContent = fs.readFileSync(cssPath, 'utf-8');
+  const cssContent = getFullCssContent();
 
   it('should unify button dimensions (48px width, 40px height / 100%) between main window and viewer', () => {
     // メイン画面のタイトルバーボタン: 幅 48px, 高さ 100%

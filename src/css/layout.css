@@ -1,0 +1,1216 @@
+/* ============================================================================
+ * Veloce - Layout & Navigation (layout.css)
+ * ============================================================================ */
+
+/* --- Titlebar & Inline Toolbar --- */
+.titlebar {
+  position: relative;
+  height: 40px;
+  background: var(--titlebar-bg) !important;
+  /* 強制的に真っ黒にする */
+  user-select: none;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color) !important;
+  -webkit-app-region: drag;
+}
+
+.titlebar-controls {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 48px;
+  height: 100%;
+  color: var(--text-color);
+  cursor: default;
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.titlebar-divider {
+  width: 1px;
+  min-width: 1px;
+  height: 16px;
+  background-color: rgba(255, 255, 255, 0.4);
+  margin: 0 4px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.titlebar-button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.titlebar-button:hover {
+  background-color: var(--accent-hover-translucent);
+  color: var(--text-light);
+}
+
+.titlebar-button:active {
+  background-color: var(--accent-hover-translucent);
+  filter: brightness(0.85);
+  color: var(--text-light);
+}
+
+.titlebar-button.titlebar-close:hover {
+  background-color: var(--danger-red-translucent);
+  color: var(--text-light);
+}
+
+.titlebar-button.titlebar-close:active {
+  background-color: var(--danger-red-translucent);
+  filter: brightness(0.85);
+  color: var(--text-light);
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--bg-color);
+  /* アプリ全体の背景色 */
+  /* --- ネイティブアプリ化: UIのテキスト選択をデフォルトで無効化 --- */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-content {
+  display: grid;
+  grid-template-columns: var(--left-width, 200px) 4px 1fr 4px var(--right-width, 300px);
+  grid-template-rows: minmax(0, 1fr);
+  height: calc(100vh - 108px);
+  box-sizing: border-box;
+  color: var(--text-color);
+  transition: grid-template-columns 0.25s var(--transition-smooth);
+}
+
+body.is-resizing .app-content {
+  transition: none;
+}
+
+
+/* Panes */
+#left-pane {
+  background: var(--bg-color);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  /* 幅が0になる時に中身がはみ出さないようにする */
+  padding: 0;
+  /* paddingをセクション側に移動 */
+}
+
+#right-pane {
+  background: var(--bg-color);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#bookmark-bar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background-color: var(--top-bar-bg);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 8px;
+  gap: 4px;
+}
+
+#bookmark-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.bookmark-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--text-color);
+  font-size: var(--font-size-xs);
+  transition: background-color 0.2s, color 0.2s;
+  user-select: none;
+}
+
+.bookmark-item:hover {
+  background-color: rgba(var(--accent-rgb), 0.25);
+  color: var(--text-light);
+}
+
+.bookmark-item.selected {
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.25), rgba(28, 94, 105, 0.35));
+  color: var(--text-light);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.bookmark-item.drop-target-left {
+  position: relative;
+}
+
+.bookmark-item.drop-target-left::before {
+  content: '';
+  position: absolute;
+  left: -3px;
+  /* ギャップの真ん中 */
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--accent-color);
+  border-radius: 4px;
+  z-index: 10;
+}
+
+.bookmark-item.drop-target-right {
+  position: relative;
+}
+
+.bookmark-item.drop-target-right::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  /* ギャップの真ん中 */
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--accent-color);
+  border-radius: 4px;
+  z-index: 10;
+}
+
+.bookmark-item svg {
+  opacity: 0.8;
+}
+
+.bookmark-empty-msg {
+  display: flex;
+  align-items: center;
+  color: var(--text-color);
+  opacity: 0.6;
+  font-size: var(--font-size-sm);
+  gap: 8px;
+  padding: 0 8px;
+  user-select: none;
+  pointer-events: none;
+  height: 100%;
+}
+
+.bookmark-empty-msg svg {
+  opacity: 0.6;
+}
+
+#smart-folders-section {
+  padding: 0;
+  flex: 0 0 var(--left-top-height, 130px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-color);
+  transition: flex-basis 0.25s var(--transition-smooth);
+}
+
+:root[data-left-top-collapsed="true"] #smart-folders-section {
+  padding: 0 !important;
+  border-bottom: none !important;
+}
+
+:root[data-left-collapsed="true"] #smart-folders-list,
+:root[data-left-collapsed="true"] #dir-tree {
+  border-right: none !important;
+}
+
+:root[data-right-collapsed="true"] #right-pane {
+  border-left: none !important;
+}
+
+:root[data-left-collapsed="true"] #center-top,
+:root[data-left-collapsed="true"] #thumbnail-grid {
+  border-left: none !important;
+}
+
+:root[data-right-collapsed="true"] #center-top,
+:root[data-right-collapsed="true"] #thumbnail-grid {
+  border-right: none !important;
+}
+
+#smart-folders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0px;
+  padding: 8px 8px 8px 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  flex: 1;
+  border-right: 1px solid var(--border-color);
+}
+
+.pane-header {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  color: var(--text-color);
+  padding: 0 16px;
+  height: var(--header-height);
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+#smart-folders-section .pane-header {
+  height: var(--header-height);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+#inspector-header {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  color: var(--text-color);
+}
+
+#inspector-header-path {
+  display: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  direction: rtl;
+  text-align: left;
+  color: var(--text-color);
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  opacity: 0.9;
+}
+
+.inspector-section {
+  margin-bottom: 15px;
+}
+
+.inspector-section h3 {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  margin-top: 0;
+  margin-bottom: 4px;
+  min-height: 22px;
+  height: 22px;
+  line-height: 22px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-color);
+  user-select: none;
+}
+
+.smart-folder-item {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-size-sm);
+  transition: background-color 0.2s, transform 0.1s var(--transition-fast);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-color);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.smart-folder-item:active {
+  transform: scale(0.98);
+}
+
+.smart-folder-item:hover {
+  background-color: rgba(var(--accent-rgb), 0.15);
+  color: var(--text-light);
+}
+
+.smart-folder-item.selected {
+  background-color: rgba(var(--accent-rgb), 0.3);
+  color: var(--text-light);
+  font-weight: normal;
+}
+
+.smart-folder-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+}
+
+.smart-folder-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.smart-folder-count {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: rgba(255, 255, 255, 0.5);
+  display: none;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.smart-folder-count.show {
+  display: block;
+}
+
+.smart-folder-item.selected .smart-folder-count {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+#directories-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  padding: 0;
+}
+
+#center-pane {
+  background: var(--panel-bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+/* Erase border-left of #center-top next to the table header */
+#center-pane::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: var(--header-height);
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  pointer-events: none;
+  z-index: 11;
+  box-sizing: border-box;
+}
+
+/* Erase border-left of #resizer-right next to the table header, and cover scrollbar track */
+#center-pane::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 13px;
+  height: var(--header-height);
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  pointer-events: none;
+  z-index: 11;
+  box-sizing: border-box;
+}
+
+
+
+#inspector-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  min-height: 0;
+  padding: 4px 8px 8px 8px;
+}
+
+
+/* --- Toolbar --- */
+.toolbar {
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--top-bar-bg);
+}
+
+.toolbar #search-container {
+  flex: 1;
+  max-width: none;
+}
+
+#search-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.25);
+  /* タイトルバーより少し暗く凹ませる */
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+#search-container:focus-within {
+  background: var(--bg-darker);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+}
+
+#search-clear-btn {
+  position: static !important;
+  transform: none !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-color);
+  opacity: 0.8;
+  margin-right: 0;
+  transition: color 0.2s, opacity 0.2s;
+}
+
+#search-clear-btn:hover {
+  color: var(--text-light);
+  opacity: 1;
+}
+
+#search-clear-btn.active {
+  color: var(--accent-hover);
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.6));
+}
+
+#search-bar {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-color);
+  outline: none;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  padding: 0;
+  box-shadow: none;
+}
+
+#search-bar:focus,
+#search-bar:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+
+/* Center Top: File List */
+#center-top {
+  /* flexコンテナ内ではheightよりもflex-basisでサイズ指定する方が確実 */
+  flex: 0 0 var(--top-height, 50%);
+  overflow-y: auto;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+  overflow-x: auto;
+  min-height: 0;
+  background-color: var(--bg-color);
+  transition: flex-basis 0.25s var(--transition-smooth);
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+:root[data-center-collapsed="true"] #center-top {
+  border-bottom: none !important;
+}
+
+:root[data-center-collapsed="true"] #resizer-center {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  /* Instead of display: none, remove it from flow so thumbnail-controls moves up to 0 */
+}
+
+:root[data-center-collapsed="true"] #center-pane::before,
+:root[data-center-collapsed="true"] #center-pane::after {
+  display: none !important;
+}
+
+body.is-resizing #center-top {
+  transition: none;
+}
+
+#center-top::-webkit-scrollbar-track {
+  margin-top: var(--header-height);
+  /* Prevent overlapping the sticky header */
+}
+
+table#file-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+  table-layout: fixed;
+  font-size: var(--font-size-sm);
+}
+
+#file-table th:first-child {
+  min-width: 140px;
+}
+
+#file-table th:nth-child(2) {
+  width: 85px;
+}
+
+#file-table th:nth-child(3) {
+  width: 75px;
+}
+
+#file-table th:nth-child(4) {
+  width: 75px;
+}
+
+#file-table th:nth-child(5) {
+  width: 75px;
+}
+
+#file-table th:nth-child(6) {
+  width: 95px;
+}
+
+#file-table th:nth-child(7) {
+  width: 160px;
+}
+
+#file-table th:nth-child(8) {
+  width: 100px;
+}
+
+#file-table th,
+#file-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#file-table th {
+  background: var(--panel-bg);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-weight: normal;
+  font-size: var(--font-size-xs);
+  height: var(--header-height);
+  padding: 0 8px;
+}
+
+#file-table th:last-child,
+#file-table td:last-child {
+  border-right: none;
+}
+
+#file-table tr:hover {
+  background: rgba(var(--accent-rgb), 0.15);
+}
+
+#file-list-body tr {
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+#file-table tr.selected {
+  background: rgba(var(--accent-rgb), 0.35);
+  color: var(--text-light);
+  font-weight: normal;
+  box-shadow: inset 3px 0 0 var(--accent-hover);
+}
+
+#file-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#file-table td:nth-child(3),
+#file-table td:nth-child(4),
+#file-table td:nth-child(5),
+#file-table td:nth-child(6) {
+  text-align: right;
+}
+
+
+/* Tree View */
+#dir-tree {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  flex: 1;
+  font-size: var(--font-size-base);
+  min-height: 0;
+  padding: 8px 8px 8px 12px;
+  border-right: 1px solid var(--border-color);
+}
+
+#dir-tree>ul {
+  min-width: max-content;
+}
+
+#dir-tree ul {
+  list-style: none;
+  padding-left: 16px;
+  margin: 0;
+}
+
+#dir-tree .tree-root {
+  padding-left: 0;
+}
+
+#dir-tree .tree-item {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+  color: var(--text-color);
+  position: relative;
+  overflow: hidden;
+  /* インジケーターの左端を角丸に合わせてクリップする */
+  transition: color 0.2s, background-color 0.2s, transform 0.1s var(--transition-fast);
+}
+
+#dir-tree .tree-item:active {
+  transform: scale(0.98);
+}
+
+#dir-tree .tree-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: var(--accent-color);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+#dir-tree .tree-item:hover {
+  background-color: rgba(var(--accent-rgb), 0.15);
+  color: var(--text-light);
+}
+
+#dir-tree .tree-item.selected {
+  background: rgba(var(--accent-rgb), 0.4);
+  color: var(--text-light);
+  box-shadow: none;
+  transition: background 0.2s ease;
+}
+
+#dir-tree .tree-item.selected::before {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+#dir-tree .tree-icon {
+  margin-right: 4px;
+  font-size: var(--font-size-base);
+}
+
+/* トグルアイコンのベース色とホバー連動 */
+.toggle-icon {
+  transition: transform 0.2s var(--transition-fast), color 0.2s, opacity 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-color);
+  opacity: 0.5;
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+.toggle-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.tree-item:hover .toggle-icon,
+.tree-item.selected .toggle-icon {
+  color: var(--text-light);
+  opacity: 1;
+}
+
+/* アイコンのホバー・選択時の色反転処理 */
+.tree-item:hover .tree-icon,
+.tree-item.selected .tree-icon,
+.favorite-item:hover .tree-icon,
+.favorite-item.selected .tree-icon {
+  color: var(--text-light) !important;
+}
+
+
+/* --- タブのスタイル --- */
+#tab-container {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 8px;
+  right: 192px;
+  -webkit-app-region: no-drag;
+  background-color: transparent !important;
+  /* タイトルバーの背景を透過させて右上ボタンと統一 */
+  padding: 8px 12px 0 12px !important;
+  display: flex !important;
+  gap: 0px !important;
+  border-bottom: none !important;
+  /* 個別の下線を消去 */
+  height: 40px;
+  max-height: 40px;
+  /* 高さを微調整 */
+  align-items: flex-end;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+#tab-container::-webkit-scrollbar {
+  display: none;
+}
+
+#tab-container .tab-item {
+  display: flex;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  max-width: 320px;
+  min-width: 160px;
+  flex-shrink: 0;
+
+  /* 非アクティブタブ（面と上部エッジの光で表現） */
+  background-color: var(--titlebar-bg) !important;
+  color: var(--text-color) !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-top: none !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  /* #2b3d41: 通常時は下側にインスペクターとの境界線を持たせる */
+  border-radius: 8px 8px 0 0 !important;
+  /* opacity は !important なしにする。CSS アニメーションが opacity を制御できるようにするため。
+     ホバー・アクティブは詳細度が高いため !important なしでも正しく上書きできる */
+  opacity: 0.88;
+  /* タブ間の隙間は gap で管理 */
+  margin-bottom: 0 !important;
+  /* 枠外へのめり込みを無くし、下線を確実に表示させる */
+  padding: 7px 25px 6px 17px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  height: 32px !important;
+}
+
+#tab-container .tab-item .tab-icon {
+  margin-right: 6px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+#tab-container .tab-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background-color: var(--accent-color);
+  border-radius: 8px 8px 0 0;
+  clip-path: inset(0 0 6px 0);
+  pointer-events: none;
+}
+
+#tab-container .tab-item.active::before {
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 6px;
+  border-radius: 6px 6px 0 0;
+  clip-path: inset(0 0 4px 0);
+}
+
+#tab-container .tab-item.is-smart-tab::before {
+  background-color: var(--glow-gold);
+}
+
+#tab-container .tab-item:not(.active):hover {
+  background-color: rgba(var(--accent-rgb), 0.35) !important;
+  color: var(--text-light) !important;
+  opacity: 1;
+}
+
+#tab-container .tab-item.active {
+  /* アクティブタブ（メインコンテンツ領域とシームレスに結合） */
+  background-color: var(--top-bar-bg) !important;
+  /* インスペクターの背景色と完全に同期 */
+  color: var(--text-light) !important;
+  border-left: 1px solid var(--border-color) !important;
+  border-right: 1px solid var(--border-color) !important;
+  border-top: 1px solid var(--border-color) !important;
+  border-bottom: 1px solid transparent !important;
+  /* 下線を透明にして隙間を埋める準備 */
+  border-top-left-radius: 6px !important;
+  border-top-right-radius: 6px !important;
+  position: relative !important;
+  z-index: 10 !important;
+  /* 最前面に浮かせる */
+  padding: 6px 24px 7px 16px !important;
+  opacity: 1;
+  margin-bottom: 0 !important;
+}
+
+/* アクティブタブの下の1pxの隙間を物理的に塞ぐ特効薬 */
+#tab-container .tab-item.active::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  /* タブの下側に2px分はみ出させる */
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--top-bar-bg) !important;
+  /* トップバーと同じ背景色 */
+  z-index: 11;
+}
+
+
+
+/* ドラッグ＆ドロップ時のインジケーター（角丸の影響を受けない直線） */
+.tab-item.drag-over-left::after,
+.tab-item.drag-over-right::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  background-color: var(--accent-color);
+  border-radius: 2px;
+  box-shadow: 0 0 6px var(--accent-color);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.tab-item.drag-over-left::after {
+  left: -2px;
+}
+
+.tab-item.drag-over-right::after {
+  right: -2px;
+}
+
+/* タブ追加: 左下から右上へ膨らんで着地 (透明化なし・transform のみ) */
+@keyframes tabFadeIn {
+  0% {
+    transform: translate(-14px, 8px) scale(0.88);
+  }
+
+  70% {
+    transform: translate(2px, -1px) scale(1.04);
+  }
+
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+.tab-item.tab-fade-in {
+  transform-origin: bottom left;
+  animation: tabFadeIn 0.22s var(--transition-bounce) both;
+}
+
+/* タブ消去: tabFadeIn の視覚的な逆再生 (透明化なし・transform のみ)
+   tabFadeIn:  0%(左下, scale 0.88) → 70%(右上, scale 1.04) → 100%(定位置, scale 1)
+   tabFadeOut: 0%(定位置, scale 1) → 30%(右上, scale 1.04) → 100%(左下, scale 0.88)
+   ※ 30%点はtabFadeInの70%点の逆 (1.0 - 0.7 = 0.3) */
+@keyframes tabFadeOut {
+  0% {
+    transform: translate(0, 0) scale(1);
+    animation-timing-function: var(--transition-bounce);
+  }
+
+  30% {
+    transform: translate(2px, -1px) scale(1.04);
+    animation-timing-function: ease-in;
+  }
+
+  100% {
+    transform: translate(-14px, 8px) scale(0.88);
+  }
+}
+
+#tab-container .tab-item.tab-dent,
+#tab-container .tab-item.tab-fade-out {
+  animation: tabFadeOut 0.22s linear forwards;
+  transform-origin: bottom left;
+  pointer-events: none;
+  z-index: 20;
+}
+
+#tab-container .tab-item.tab-collapsing {
+  min-width: 0 !important;
+  max-width: 0 !important;
+  width: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  border-width: 0 !important;
+  transition: min-width 0.15s ease-out, max-width 0.15s ease-out, width 0.15s ease-out,
+              padding-left 0.15s ease-out, padding-right 0.15s ease-out,
+              margin-left 0.15s ease-out, margin-right 0.15s ease-out,
+              border-width 0.15s ease-out;
+}
+
+.tab-item.is-dragging,
+.bookmark-item.is-dragging {
+  opacity: 0.5 !important;
+}
+
+/* タブ追加ボタン専用の独立したスタイル（通常時は背景完全透明） */
+.titlebar #new-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  padding: 0;
+  margin-left: 8px;
+  margin-right: 12px;
+  /* 右側のコントロール群としっかり隙間を空ける */
+  align-self: center;
+  background: transparent !important;
+  /* グレーの背景を完全に排除 */
+  border: none !important;
+  border-radius: 50% !important;
+  /* ホバー時は綺麗な正円（微角丸が良い場合は 6px にしてください） */
+  color: var(--text-color) !important;
+  opacity: 0.6;
+  cursor: pointer;
+  box-shadow: none !important;
+  transition: background 0.15s var(--transition-fast), color 0.15s var(--transition-fast), opacity 0.15s var(--transition-fast), transform 0.15s var(--transition-fast);
+}
+
+/* ホバー時にフワッと上品なアクリル調の丸背景を浮かび上がらせる */
+.titlebar #new-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-light) !important;
+  opacity: 1;
+}
+
+/* クリックした瞬間は押し込まれつつVeloceのテーマカラーで微発光 */
+.titlebar #new-tab-btn:active {
+  background: rgba(var(--accent-rgb), 0.2) !important;
+  /* Veloceのテーマ色で微発光 */
+  transform: scale(0.92);
+}
+
+/* 内部のプラスアイコン（SVG）のサイズが崩れないように固定 */
+.titlebar #new-tab-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.tab-close-btn {
+  position: absolute;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.4;
+  transition: background-color 0.2s, color 0.2s, opacity 0.2s, border-radius 0.2s;
+}
+
+.tab-item:hover .tab-close-btn,
+.tab-list-item:hover .tab-close-btn {
+  opacity: 0.8;
+}
+
+.tab-close-btn:hover {
+  background-color: rgba(var(--danger-rgb), 0.2) !important;
+  color: var(--danger-red) !important;
+  border-radius: var(--radius-xs);
+}
+
+.tab-label {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to right, black calc(100% - 20px), transparent 100%);
+}
+
+
+/* --- Navigation Buttons --- */
+.icon-btn:disabled {
+  opacity: 0.3 !important;
+  cursor: default;
+}
+
+.icon-btn:disabled:hover {
+  background-color: transparent !important;
+  color: var(--text-color) !important;
+}
+
+
+/* ツールバー & レイアウト補助 */
+.rating-filter-wrapper {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.top-left-controls {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.thumbnail-slider-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pane-no-border-left {
+  border-left: none !important;
+}
+
+.inspector-header-layout {
+  height: var(--header-height);
+  padding: 0 8px 4px 4px;
+  border-left: 1px solid var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+}
+
+.inspector-section-bordered {
+  border-left: 1px solid var(--border-color);
+}
+
+.sf-cond-row-layout {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sf-cond-type-dim {
+  width: 160px;
+  height: 32px;
+}
+
+.sf-cond-op-dim {
+  width: 130px;
+  height: 32px;
+}
+
+.sf-cond-val-box {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  align-items: center;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.sort-arrow-inline {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.form-label-spaced {
+  margin-top: 16px;
+}
+
+.sf-conditions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sf-conditions-header .form-label {
+  margin-bottom: 0;
+}
+
+.btn-add-cond {
+  padding: 8px 12px;
+}
+
+.sf-conditions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: visible;
+}
+
+.btn-remove-cond-style {
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+/* お気に入りオーバーフローボタンのデフォルト非表示 */
+#bookmark-overflow-btn {
+  display: none;
+}
+

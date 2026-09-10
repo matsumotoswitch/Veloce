@@ -1,0 +1,106 @@
+/* ============================================================================
+ * Veloce - Design Tokens & Variables (variables.css)
+ * ============================================================================ */
+
+:root {
+  --popup-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 1px 0 0 rgba(255, 255, 255, 0.02);
+  font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
+  --bg-color: #0b1012;
+  --bg-rgb: 11, 16, 18;
+  --panel-bg: #162226;
+  --panel-rgb: 22, 34, 38;
+  --top-bar-bg: #203036;
+  --border-color: #394346;
+  --text-color: #cddbe0;
+  --text-rgb: 205, 219, 224;
+  --accent-color: #257e8c;
+  --accent-rgb: 37, 126, 140;
+  --accent-hover: #2e96a6;
+  --accent-hover-rgb: 46, 150, 166;
+  --modal-bg: #141a1d;
+  --modal-border: rgba(255, 255, 255, 0.2);
+  --danger-red: #e05263;
+  --danger-rgb: 224, 82, 99;
+  --accent-hover-translucent: rgba(var(--accent-hover-rgb), 0.5);
+  --danger-red-translucent: rgba(var(--danger-rgb), 0.55);
+  --glow-gold: #e6c762;
+  --glow-gold-rgb: 230, 199, 98;
+  --color-tag-inpainting: #4a9eff;
+  --color-tag-vibe: #d27aff;
+  --color-tag-char-ref: #ff9a4a;
+  --color-tag-img2img: #4ade80;
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+
+  --modal-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+
+  --font-size-base: 14px;
+  --font-size-sm: 13px;
+  --font-size-xs: 12px;
+  --font-size-lg: 16px;
+  --header-height: 32px;
+  --titlebar-bg: #000000;
+  --input-bg: #000000;
+  --dialog-bg: #1a2327;
+  --viewer-bg: #131b1e;
+
+  /* v1.11.0 Unifications */
+  --transition-smooth: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-fast: cubic-bezier(0.4, 0, 0.2, 1);
+  --text-light: #ffffff;
+  --bg-darker: #1e1e1e;
+  --bg-darker-rgb: 30, 30, 30;
+
+  /* Palette Colors for Favorites & Smart Folders */
+  --palette-default: #ececec;
+  --palette-red: #ef4444;
+  --palette-blue: #3b82f6;
+  --palette-green: #22c55e;
+  --palette-yellow: #eab308;
+  --palette-purple: #a855f7;
+  --palette-pink: #ec4899;
+  --palette-cyan: #06b6d4;
+}
+
+
+/* --- Veloce Palette Colors --- */
+/* --- Veloce 厳選カラークラス --- */
+.icon-color-default {
+  color: var(--palette-default);
+}
+
+.icon-color-red {
+  color: var(--palette-red);
+}
+
+.icon-color-blue {
+  color: var(--palette-blue);
+}
+
+.icon-color-green {
+  color: var(--palette-green);
+}
+
+.icon-color-yellow {
+  color: var(--palette-yellow);
+}
+
+.icon-color-purple {
+  color: var(--palette-purple);
+}
+
+.icon-color-pink {
+  color: var(--palette-pink);
+}
+
+.icon-color-cyan {
+  color: var(--palette-cyan);
+}
+

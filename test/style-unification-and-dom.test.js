@@ -1,16 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Style Unification and DOM Optimization Tests', () => {
   const rootDir = path.resolve(__dirname, '..');
-  const styleCssPath = path.join(rootDir, 'src', 'style.css');
   const indexHtmlPath = path.join(rootDir, 'src', 'index.html');
   const rendererJsPath = path.join(rootDir, 'src', 'renderer.js');
   const rendererUiJsPath = path.join(rootDir, 'src', 'renderer-ui.js');
 
   it('verifies style.css color token definitions and zero hardcoded RGB values', () => {
-    const css = fs.readFileSync(styleCssPath, 'utf-8');
+    const css = getFullCssContent();
 
     // --glow-gold-rgb が :root に定義されていること
     expect(css).toContain('--glow-gold-rgb: 230, 199, 98;');
@@ -117,7 +117,7 @@ describe('Style Unification and DOM Optimization Tests', () => {
   });
 
   it('verifies header heights across all panes are unified to 32px via --header-height token', () => {
-    const css = fs.readFileSync(styleCssPath, 'utf-8');
+    const css = getFullCssContent();
 
     // --header-height トークンが 32px で定義されていること
     expect(css).toContain('--header-height: 32px;');

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
-  const cssContent = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+  const cssContent = getFullCssContent();
 
   it('should define essential color tokens in :root', () => {
     expect(cssContent).toContain('--glow-gold:');

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { getFullCssContent } from './helpers/css-helper.js';
 import { viewerState } from '../src/viewer-state.js';
 import {
   createMetadataOverlay,
@@ -232,10 +233,7 @@ describe('Viewer Metadata Overlay (A-4)', () => {
   });
 
   it('style.css で #viewer-metadata-overlay, .viewer-metadata-content, .prompt-look に user-select: text が指定されていること', () => {
-    const fs = require('fs');
-    const path = require('path');
-    const cssPath = path.resolve(__dirname, '../src/style.css');
-    const cssContent = fs.readFileSync(cssPath, 'utf-8');
+    const cssContent = getFullCssContent();
 
     // テキスト選択許可エリアに #viewer-metadata-overlay, .viewer-metadata-content, .prompt-look が含まれていること
     const textSelectMatch = cssContent.match(/\/\* --- テキスト選択・コピーを明示的に許可するエリア --- \*\/\s*([^\{]+)\{([^}]+)\}/);

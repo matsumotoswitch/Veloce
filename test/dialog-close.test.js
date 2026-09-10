@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Dialog and Modal Close Buttons UX', () => {
   beforeEach(() => {
@@ -100,12 +101,12 @@ describe('Dialog and Modal Close Buttons UX', () => {
   });
 
   it('should define .dialog-close-btn styles with hover danger red in style.css', () => {
-    const css = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+    const css = getFullCssContent();
     expect(css).toMatch(/\.dialog-close-btn[\s\S]*?color:\s*var\(--danger-red\)/);
   });
 
   it('should not have border-bottom on .dialog-header or .modal-header', () => {
-    const css = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+    const css = getFullCssContent();
     expect(css).not.toMatch(/\.dialog-header\s*\{[^}]*border-bottom:/);
   });
 });

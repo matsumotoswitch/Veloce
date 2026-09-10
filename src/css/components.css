@@ -1,0 +1,924 @@
+/* ============================================================================
+ * Veloce - UI Components (components.css)
+ * ============================================================================ */
+
+/* ボタンをクリックした瞬間にわずかに沈み込むフィードバック（タクタイル感） */
+.dialog-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.dialog-input {
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.sf-condition-row .dialog-input {
+  margin-bottom: 0;
+
+}
+
+/* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
+.resizer:hover:not(:has(.resizer-toggle:hover)),
+.resizer:active,
+.resizer.resizing {
+  background-color: var(--accent-color);
+}
+
+.resizer-h {
+  background-color: var(--panel-bg);
+  box-shadow: none;
+  cursor: row-resize;
+  height: 4px;
+  flex: none;
+  z-index: 10;
+  transition: background-color 0.2s ease;
+  position: relative;
+}
+
+/* バーにホバーした時は青くする。ただし、中のスイッチにホバーしている間は除外する */
+.resizer-h:hover:not(:has(.resizer-toggle:hover)),
+.resizer-h:active,
+.resizer-h.resizing {
+  background-color: var(--accent-color);
+}
+
+/* トグルスイッチの追加スタイル（JSで生成される要素用） */
+.resizer-toggle {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 1;
+  background-color: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  color: var(--text-color);
+  z-index: 1000;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: background-color 0.15s ease, transform 0.2s var(--transition-fast), opacity 0.15s ease;
+}
+
+.resizer-toggle-horizontal {
+  width: 30px;
+  height: 14px;
+}
+
+.resizer-toggle-vertical {
+  width: 14px;
+  height: 30px;
+}
+
+.resizer-toggle:hover {
+  background-color: var(--accent-color) !important;
+  border-color: var(--accent-color) !important;
+  color: var(--text-light) !important;
+  opacity: 1 !important;
+  transform: translate(-50%, -50%) scale(1.05);
+}
+
+.resizer-toggle.expanded svg {
+  transform: rotate(180deg);
+}
+
+.resizer-toggle svg {
+  transition: transform 0.3s var(--transition-fast);
+}
+
+
+/* Custom Checkbox Styles */
+.custom-checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.custom-checkbox-wrapper input[type="checkbox"] {
+  display: none;
+}
+
+.custom-checkbox {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin-right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s, border-color 0.15s;
+  background-color: transparent;
+}
+
+.custom-checkbox-wrapper input[type="checkbox"]:checked+.custom-checkbox {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.custom-checkbox-wrapper input[type="checkbox"]:checked+.custom-checkbox::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-1px);
+}
+
+.checkbox-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-color);
+}
+
+#thumbnail-controls input {
+  cursor: pointer;
+}
+
+.control-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--border-color);
+  margin: 0 4px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-color);
+  opacity: 0.8;
+  transition: background-color 0.2s, color 0.2s, opacity 0.2s, transform 0.1s var(--transition-fast);
+}
+
+.icon-btn:hover {
+  background-color: transparent;
+  color: var(--text-light);
+  opacity: 1;
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+
+/* --- Slider (Range Input) --- */
+input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+  background: var(--text-color);
+  margin-top: -4px;
+  cursor: pointer;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--accent-color);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+}
+
+input[type="range"]:focus {
+  outline: none;
+}
+
+.icon-btn svg {
+  stroke: currentColor;
+  transition: stroke 0.2s ease, filter 0.2s ease;
+}
+
+#open-cache-btn:hover svg {
+  stroke: var(--glow-gold);
+}
+
+#clear-cache-btn:hover svg {
+  stroke: var(--danger-red);
+}
+
+
+/* --- アイコン・テキストのアウトライン発光アニメーション (背景を光らせず輪郭線のみ発光) --- */
+@keyframes outline-glow-anim {
+  0%,
+  30% {
+    color: var(--glow-gold) !important;
+    stroke: var(--glow-gold) !important;
+    filter: drop-shadow(0 0 1px var(--text-light)) drop-shadow(0 0 5px var(--glow-gold));
+  }
+  100% {
+    filter: none;
+  }
+}
+
+@keyframes outline-glow-text-anim {
+  0%,
+  30% {
+    color: var(--glow-gold) !important;
+    text-shadow: 0 0 2px var(--text-light), 0 0 6px var(--glow-gold);
+  }
+  100% {
+    text-shadow: none;
+  }
+}
+
+.outline-glow-svg {
+  animation: outline-glow-anim 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+.outline-glow-text {
+  animation: outline-glow-text-anim 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+#center-bottom {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overflow-x: hidden;
+  min-height: 0;
+  padding: 8px;
+  position: relative;
+  display: block;
+  background-color: var(--bg-color);
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-color);
+}
+
+.virtual-spacer {
+  width: 1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.virtual-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--thumbnail-size));
+  gap: 8px;
+  padding: 0 8px;
+  justify-content: start;
+}
+
+.empty-state-container {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  opacity: 0.5;
+  pointer-events: none;
+  color: var(--text-color);
+}
+
+.thumbnail-item {
+  border: 1px solid transparent;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transform: translateZ(0) scale(1);
+  transition: transform 0.15s var(--transition-smooth), border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  /* レイアウトの再計算をコンポーネント内に閉じ込め、高速化する（paintのcontainを解除してグローを描画可能にする） */
+  contain: layout style;
+  will-change: transform;
+}
+
+.thumbnail-flash-effect {
+  position: fixed;
+  background-color: rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+  z-index: 10005;
+  border-radius: var(--radius-xs);
+}
+
+.thumbnail-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.thumbnail-label {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 12px);
+  background-color: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  color: var(--text-light);
+  font-size: var(--font-size-xs);
+  padding: 2px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  pointer-events: auto;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  display: none;
+}
+
+body.show-thumbnail-names .thumbnail-label {
+  display: block;
+}
+
+.thumbnail-item:hover .thumbnail-label {
+  background-color: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.thumbnail-item:hover {
+  border-color: var(--accent-hover);
+  transform: translateZ(0) scale(1.03);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 8px rgba(var(--accent-rgb), 0.35);
+  z-index: 2;
+}
+
+.thumbnail-item.selected {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-color), 0 0 12px rgba(var(--accent-rgb), 0.5);
+  border-radius: var(--radius-xs);
+  z-index: 2;
+}
+
+.thumbnail-item.selected:hover {
+  border-color: var(--accent-hover);
+  transform: translateZ(0) scale(1.03);
+  box-shadow: 0 0 0 2px var(--accent-hover), 0 4px 14px rgba(0, 0, 0, 0.45), 0 0 10px rgba(var(--accent-rgb), 0.45);
+  z-index: 3;
+}
+
+
+/* --- トースト通知 --- */
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column-reverse;
+  /* 新しい通知が一番下に表示される */
+  gap: 8px;
+  z-index: 10010;
+  /* モーダル(10005)よりもさらに手前の、アプリ最前面に表示 */
+  pointer-events: none;
+  /* マウス操作を邪魔しない */
+  align-items: flex-end;
+}
+
+.toast-message {
+  position: relative;
+  background-color: var(--modal-bg);
+  color: var(--text-color);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px 8px 16px;
+  font-size: var(--font-size-sm);
+  box-shadow: var(--popup-shadow);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.toast-message::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: var(--accent-color);
+}
+
+.toast-message.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-message.warning::before {
+  background-color: var(--glow-gold);
+}
+
+.toast-message.success::before {
+  background-color: var(--accent-color);
+}
+
+.toast-message.error::before {
+  background-color: var(--danger-red);
+}
+
+
+/* --- Custom Tooltip --- */
+.custom-tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 10005;
+  padding: 4px 8px;
+  background-color: var(--modal-bg);
+  color: var(--text-color);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--popup-shadow);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: min(500px, 80vw);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px) scale(0.95);
+  /* 閉じる時のアニメーション（逆バウンス） */
+  transition: opacity 0.16s cubic-bezier(0.36, 0, 0.66, -0.56), transform 0.16s cubic-bezier(0.36, 0, 0.66, -0.56), visibility 0.16s;
+}
+
+.custom-tooltip.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  /* 開く時のアニメーション（バウンス） */
+  transition: opacity 0.22s var(--transition-bounce), transform 0.22s var(--transition-bounce), visibility 0.22s;
+}
+
+
+/* --- コンテキストメニュー --- */
+#context-menu,
+.submenu,
+#tab-list-menu,
+#history-menu,
+#bookmark-overflow-menu {
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-lg);
+
+  /* 影で浮遊感を出し、内側の白線(0.05)でエッジを立たせる */
+  box-shadow: var(--popup-shadow);
+}
+
+#context-menu,
+#tab-list-menu,
+#history-menu,
+#bookmark-overflow-menu {
+  position: fixed;
+  z-index: 10001;
+  padding: 4px 0;
+  font-size: var(--font-size-sm);
+  transform-origin: top left;
+  /* 閉じる時のアニメーション（逆バウンス） */
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.88) translateY(-6px);
+  transition: opacity 0.16s cubic-bezier(0.36, 0, 0.66, -0.56), transform 0.16s cubic-bezier(0.36, 0, 0.66, -0.56), visibility 0.16s;
+  pointer-events: none;
+}
+
+#context-menu.show,
+#tab-list-menu.show,
+#history-menu.show,
+#bookmark-overflow-menu.show {
+  /* 開く時のアニメーション（バウンス） */
+  visibility: visible;
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  transition: opacity 0.22s var(--transition-bounce), transform 0.22s var(--transition-bounce), visibility 0.22s;
+  pointer-events: auto;
+}
+
+#context-menu {
+  min-width: 220px;
+}
+
+#tab-list-menu {
+  min-width: 200px;
+  max-width: 400px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+#history-menu {
+  min-width: 200px;
+  max-width: 400px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+/* セパレータ */
+.menu-separator {
+  height: 1px;
+  background-color: var(--modal-border);
+  margin: 4px 0;
+}
+
+/* --- コンテキストメニュー サブメニュー対応 --- */
+.context-menu-item {
+  position: relative;
+  padding: 4px 12px;
+  display: grid;
+  grid-template-columns: 16px auto minmax(50px, 1fr) 16px;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.context-menu-item svg,
+.context-menu-item .menu-icon-placeholder,
+.context-menu-item>div[style*="width:16px"] {
+  width: 16px !important;
+  height: 16px !important;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+  justify-self: center;
+}
+
+.context-menu-item:hover {
+  background-color: rgba(var(--accent-rgb), 0.3);
+  /* アクセントカラーの透過 */
+  color: var(--text-light);
+}
+
+.context-menu-item:hover svg {
+  opacity: 1;
+}
+
+/* メニューアイテムホバー時に、アイコンの色を強制的に白へ反転させる */
+.context-menu-item:hover .menu-icon {
+  color: var(--text-light) !important;
+}
+
+/* 危険な操作（削除など）のホバーエフェクト */
+.context-menu-item.danger:hover {
+  background-color: rgba(var(--danger-rgb), 0.3);
+  /* 赤の透過 */
+  color: var(--text-light);
+}
+
+.submenu {
+  display: none;
+  position: absolute;
+  top: -7px;
+  left: calc(100% + 2px);
+  min-width: 150px;
+  z-index: 10002;
+  padding: 4px 0;
+}
+
+.context-menu-item:hover>.submenu {
+  display: block;
+  animation: menuFadeIn 0.15s var(--transition-smooth) forwards;
+}
+
+/* tab-list-item 固有の調整 */
+.tab-list-item.active {
+  color: var(--text-light);
+  background-color: rgba(var(--accent-rgb), 0.15);
+  box-shadow: inset 3px 0 0 var(--accent-color);
+}
+
+.tab-list-item.active:hover {
+  background-color: rgba(var(--accent-rgb), 0.3);
+  /* アクティブかつホバー時は少し明るく */
+}
+
+.tab-list-item .tab-list-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+}
+
+.tab-list-item .tab-menu-item-text {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.tab-list-item .tab-menu-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+}
+
+.tab-list-item.active .tab-menu-item-name {
+  font-weight: bold;
+}
+
+.tab-list-item .path-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+  margin-top: 2px;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.tab-list-item:hover .path-label {
+  opacity: 0.85;
+  /* ホバー時にパスが見やすくなる */
+}
+
+.tab-list-item .tab-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+}
+
+/* アイコンの中のSVGがコンテキストメニューのグローバル設定でズレないようにリセット */
+.tab-list-item .tab-list-icon svg {
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  margin: 0 !important;
+  opacity: 1 !important;
+}
+
+/* 右側の閉じるボタンがズレないように */
+.tab-list-item .tab-close-btn svg {
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  width: 8px !important;
+  height: 8px !important;
+  margin: 0 !important;
+}
+
+.menu-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--accent-color);
+}
+
+/* ホバー時は他のテキストやアイコンに合わせて白くし、コントラストを維持する */
+.context-menu-item:hover .menu-check {
+  color: var(--text-light);
+}
+
+/* 矢印アイコンが塗りつぶされて三角形になるのを確実に防ぐ */
+.toggle-icon svg,
+.toggle-icon svg path,
+.resizer-toggle svg,
+.resizer-toggle svg path,
+th[data-sort] svg,
+th[data-sort] svg path {
+  fill: none !important;
+}
+
+
+/* ツールチップのぼかし処理もカット（Win8.1等での描画負荷軽減） */
+.custom-tooltip {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+
+/* Custom Dropdown UI Styles */
+.custom-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 88px;
+  background-color: rgba(0, 0, 0, 0.25);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  font-size: var(--font-size-sm);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  height: 28px;
+  box-sizing: border-box;
+  font-family: inherit;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.custom-select:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.custom-select:focus,
+.custom-select.open {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+}
+
+.custom-select-label {
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.custom-select-arrow {
+  color: var(--text-color);
+  transition: transform 0.2s var(--transition-fast);
+  transform: scale(1.2);
+}
+
+.custom-select.open .custom-select-arrow {
+  transform: scale(1.2) rotate(180deg);
+}
+
+/* ドロップダウン・トグルボタン全般の矢印アニメーション統一表示 */
+#titlebar-tab-list svg {
+  transition: transform 0.2s var(--transition-fast);
+}
+
+#titlebar-tab-list.open svg {
+  transform: rotate(180deg);
+}
+
+#bookmark-overflow-btn svg {
+  transition: transform 0.2s var(--transition-fast);
+}
+
+#bookmark-overflow-btn.open svg {
+  transform: rotate(90deg);
+}
+
+.context-menu-item .menu-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  opacity: 0.7;
+  transition: transform 0.2s var(--transition-fast);
+}
+
+.context-menu-item.open .menu-arrow {
+  transform: rotate(90deg);
+}
+
+/* リロードアイコンの360度回転アニメーション */
+@keyframes spin-reload {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#nav-reload-btn.refreshing svg {
+  animation: spin-reload 0.6s var(--transition-fast);
+}
+
+/* テーブルヘッダーのソート矢印回転アニメーション */
+th[data-sort] .sort-arrow {
+  display: inline-block;
+  margin-left: 4px;
+  vertical-align: middle;
+  transition: transform 0.2s var(--transition-fast), opacity 0.2s;
+}
+
+th[data-sort] .sort-arrow.asc {
+  transform: rotate(180deg);
+}
+
+th[data-sort] .sort-arrow.desc {
+  transform: rotate(0deg);
+}
+
+.custom-select-menu {
+  /* display: none ではなく visibility/opacity で制御してアニメーションさせる */
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-8px) scale(0.88);
+  transition: opacity 0.16s cubic-bezier(0.36, 0, 0.66, -0.56), transform 0.16s cubic-bezier(0.36, 0, 0.66, -0.56), visibility 0.16s;
+
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 250px;
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--popup-shadow);
+  z-index: 1000;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.custom-select.open .custom-select-menu {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity 0.22s var(--transition-bounce), transform 0.22s var(--transition-bounce), visibility 0.22s;
+  transform-origin: top center;
+}
+
+
+/* ============================================================================
+   共通ユーティリティ & インラインスタイル集約クラス
+   ============================================================================ */
+
+/* コンテキストメニュー */
+.menu-label {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu-shortcut {
+  text-align: right;
+  opacity: 0.6;
+  font-size: 0.9em;
+}
+
+.menu-icon-placeholder {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+}
+
+.menu-check-box {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+/* ドラッグツールチップ */
+.drag-tooltip-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drag-tooltip-icon {
+  color: var(--accent-color);
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+/* 履歴コンテキストメニュー */
+.menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.menu-item-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+

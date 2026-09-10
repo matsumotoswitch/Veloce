@@ -1,0 +1,172 @@
+/* ============================================================================
+ * Veloce - Base Styles & Reset (base.css)
+ * ============================================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+body,
+input,
+textarea,
+button,
+select,
+table {
+  font-family: inherit;
+  font-size: var(--font-size-base);
+}
+
+/* --- テキスト選択・コピーを明示的に許可するエリア --- */
+#inspector-section,
+#viewer-metadata-overlay,
+.viewer-metadata-content,
+.prompt-look,
+#diff-container,
+.custom-tooltip,
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  /* 角を丸め、padding-boxを使って、どんな背景色の上でも浮くように */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent-color);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.resizer {
+  background-color: var(--panel-bg);
+  cursor: col-resize;
+  z-index: 10;
+  transition: background-color 0.2s ease;
+  position: relative;
+  border: none;
+}
+
+/* --- Common Utility & Specific Elements --- */
+#border-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px solid var(--accent-color);
+  z-index: 10001;
+}
+
+#titlebar-tab-list {
+  margin-right: 8px;
+}
+
+#titlebar-tab-list svg {
+  width: 20px;
+  height: 20px;
+}
+
+.empty-state-msg {
+  color: var(--text-color);
+  opacity: 0.6;
+  text-align: center;
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: var(--font-size-sm);
+  padding: 24px;
+}
+
+.empty-state-msg.show {
+  display: flex;
+}
+
+.empty-state-msg svg {
+  width: 80px;
+  height: 80px;
+  opacity: 0.8;
+  /* We reduce opacity on the parent, so keep this higher or remove it entirely, let's keep 0.8 to match 0.6 * 0.8 = 0.48 opacity overall */
+  margin-bottom: 4px;
+}
+
+@keyframes staggeredFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+#diff-modal .modal-content {
+  max-width: 800px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+#edit-favorite-modal .dialog-box,
+#edit-smart-folder-modal .dialog-box {
+  width: 640px;
+  max-width: 95%;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-color);
+  opacity: 0.8;
+}
+
+/* Global Focus Indicator for Keyboard Navigation */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.6);
+  border-radius: var(--radius-xs);
+}
+
+.dialog-btn:focus-visible {
+  border-radius: var(--radius-sm);
+}
+
+/* ペイン等の非インタラクティブ要素および内包コンテナ管理の入力要素のフォーカスリングを除外 */
+#left-pane:focus-visible,
+#center-pane:focus-visible,
+#right-pane:focus-visible,
+#center-bottom:focus-visible,
+#dir-tree:focus-visible,
+#smart-folders-list:focus-visible,
+#search-bar:focus-visible {
+  box-shadow: none;
+}

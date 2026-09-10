@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Video Seek Bar', () => {
   beforeEach(() => {
@@ -77,9 +78,7 @@ describe('Video Seek Bar', () => {
   });
 
   it('should define line-height: 1 and tabular-nums for video-time-display', () => {
-    const fs = require('fs');
-    const path = require('path');
-    const cssContent = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+    const cssContent = getFullCssContent();
 
     expect(cssContent).toMatch(/#video-time-display\s*\{[^}]*line-height:\s*1;/);
     expect(cssContent).toMatch(/#video-time-display\s*\{[^}]*font-variant-numeric:\s*tabular-nums;/);

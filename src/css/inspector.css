@@ -1,0 +1,123 @@
+/* ============================================================================
+ * Veloce - Inspector & Metadata (inspector.css)
+ * ============================================================================ */
+
+/* Right Pane: Inspector */
+.inspector-data {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.inspector-data label {
+  font-size: var(--font-size-xs);
+  margin: 8px 0 4px 0;
+  color: rgba(var(--text-rgb), 0.65);
+}
+
+.inspector-data textarea {
+  flex: 1;
+  background: var(--input-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  padding: 4px;
+  resize: none;
+  font-family: inherit;
+  font-size: 1.1em;
+  min-height: 0;
+}
+
+
+/* --- Inspector Location Badge (Smart Folder Only) --- */
+.inspector-location-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.inspector-location-badge:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.inspector-location-badge svg {
+  color: var(--accent-color);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.inspector-location-badge .folder-name {
+  font-family: Consolas, monospace;
+  font-weight: 400;
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.4;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.inspector-location-badge:hover .folder-name {
+  opacity: 1;
+}
+
+
+/* インスペクター DOM Pool 要素スタイル */
+.inspector-section-block {
+  margin-bottom: 15px;
+}
+
+.inspector-section-h3 {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  margin-top: 0;
+  margin-bottom: 4px;
+  min-height: 22px;
+  height: 22px;
+  line-height: 22px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-color);
+  transition: color 0.2s;
+  user-select: none;
+}
+
+.inspector-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  line-height: 22px;
+}
+
+.inspector-copy-wrapper {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+  height: 22px;
+}
+
+
+/* メタデータ描画エラー表示 */
+.render-error-box {
+  color: var(--danger-red);
+  padding: 10px;
+  font-size: 0.9em;
+  border: 1px solid var(--danger-red);
+}
+

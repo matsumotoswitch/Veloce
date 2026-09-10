@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('AGENTS.md & PLAN.md Compliance and Regression Guard', () => {
   const srcDir = path.resolve(__dirname, '../src');
@@ -12,8 +13,7 @@ describe('AGENTS.md & PLAN.md Compliance and Regression Guard', () => {
     .filter(f => f.endsWith('.html'))
     .map(f => ({ name: f, content: fs.readFileSync(path.join(srcDir, f), 'utf-8') }));
 
-  const cssPath = path.join(srcDir, 'style.css');
-  const cssContent = fs.readFileSync(cssPath, 'utf-8');
+  const cssContent = getFullCssContent();
 
   describe('1. No Emoji Compliance (AGENTS.md Sec 2)', () => {
     // Windows 8.1 で豆腐化する Unicode 絵文字・特殊記号（⭐, ★, 🚀, ❌, 👍 等）の混入を禁止

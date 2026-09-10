@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
-  const cssContent = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+  const cssContent = getFullCssContent();
   const htmlContent = fs.readFileSync(path.resolve(__dirname, '../src/index.html'), 'utf-8');
   const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
   const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-context-menu.js'), 'utf-8');

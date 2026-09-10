@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Viewer UI Visibility', () => {
   let controlsContainer, filenameDisplay, infoContainer, ratingDisplay, scaleDisplay;
@@ -136,7 +137,7 @@ describe('Viewer UI Visibility', () => {
   it('should unify font-size and baseline height between window-filename and window-scale-display in style.css', () => {
     const fs = require('fs');
     const path = require('path');
-    const cssContent = fs.readFileSync(path.resolve(__dirname, '../src/style.css'), 'utf-8');
+    const cssContent = getFullCssContent();
     const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
 
     // CSSで window-filename と window-scale-display の font-size が同一（var(--font-size-base)）であること
