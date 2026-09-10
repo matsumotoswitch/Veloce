@@ -202,15 +202,25 @@ html.viewer-html,
   align-items: center;
   color: var(--text-light);
   cursor: default;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   background-color: transparent;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
   pointer-events: auto;
 }
 
 .window-ctrl-btn svg {
   width: 12px;
   height: 12px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  transition: filter 0.15s ease;
+}
+
+/* ホバー時はボタン矩形・アイコンともに影を排除してクリーンに表示 */
+.window-ctrl-btn:hover {
+  filter: none;
+}
+
+.window-ctrl-btn:hover svg {
+  filter: none;
 }
 
 /* グラデーションOFF時のみ、ボタン自体に半透明の背景をつけて視認性を確保する */
@@ -240,17 +250,26 @@ html.viewer-html,
   text-shadow: none;
 }
 
-/* ホバー時のスタイル（メイン画面と統一・透明感のあるオーバーレイ） */
+/* ホバー時のスタイル（ヘッダ部のフェードグラデーションと調和するグラデーション） */
 .window-ctrl-btn--min:hover,
-.window-ctrl-btn--max:hover,
+.window-ctrl-btn--max:hover {
+  background: linear-gradient(to bottom, rgba(var(--accent-hover-rgb), 0.65) 0%, rgba(var(--accent-hover-rgb), 0.35) 60%, rgba(var(--accent-hover-rgb), 0) 100%);
+  color: var(--text-light);
+}
+
+.window-ctrl-btn--min:active,
+.window-ctrl-btn--max:active {
+  background: linear-gradient(to bottom, rgba(var(--accent-hover-rgb), 0.8) 0%, rgba(var(--accent-hover-rgb), 0.45) 60%, rgba(var(--accent-hover-rgb), 0) 100%);
+  filter: brightness(0.85);
+  color: var(--text-light);
+}
+
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min:hover,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:hover {
   background-color: var(--accent-hover-translucent);
   color: var(--text-light);
 }
 
-.window-ctrl-btn--min:active,
-.window-ctrl-btn--max:active,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--min:active,
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--max:active {
   background-color: var(--accent-hover-translucent);
@@ -259,18 +278,18 @@ html.viewer-html,
 }
 
 .window-ctrl-btn--close:hover {
-  background-color: var(--danger-red-translucent);
+  background: linear-gradient(to bottom, rgba(var(--danger-rgb), 0.75) 0%, rgba(var(--danger-rgb), 0.4) 60%, rgba(var(--danger-rgb), 0) 100%);
+  color: var(--text-light);
+}
+
+.window-ctrl-btn--close:active {
+  background: linear-gradient(to bottom, rgba(var(--danger-rgb), 0.9) 0%, rgba(var(--danger-rgb), 0.5) 60%, rgba(var(--danger-rgb), 0) 100%);
+  filter: brightness(0.85);
   color: var(--text-light);
 }
 
 .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn--close:hover {
   background-color: var(--danger-red);
-  color: var(--text-light);
-}
-
-.window-ctrl-btn--close:active {
-  background-color: var(--danger-red-translucent);
-  filter: brightness(0.85);
   color: var(--text-light);
 }
 

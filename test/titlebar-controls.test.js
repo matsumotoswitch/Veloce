@@ -24,20 +24,20 @@ describe('Titlebar and Window Control Buttons Consistency', () => {
     expect(cssContent).toMatch(/\.window-ctrl-btn svg\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px;/);
   });
 
-  it('should unify hover styling: translucent blue accent for min/max, translucent danger-red for close', () => {
+  it('should define appropriate hover styling: translucent accent/danger for main window, gradient matching header for viewer', () => {
     // メイン画面の最小化・最大化ホバー
     expect(cssContent).toMatch(/\.titlebar-button:hover\s*\{[^}]*background-color:\s*var\(--accent-hover-translucent\);/);
     expect(cssContent).toMatch(/\.titlebar-button:hover\s*\{[^}]*color:\s*var\(--text-light\);/);
 
-    // ビューア画面の最小化・最大化ホバー
-    expect(cssContent).toMatch(/\.window-ctrl-btn--min:hover[^}]*background-color:\s*var\(--accent-hover-translucent\);/);
+    // ビューア画面の最小化・最大化ホバー（ヘッダ部のフェードグラデーションと調和するグラデーション）
+    expect(cssContent).toMatch(/\.window-ctrl-btn--min:hover[^}]*background:\s*linear-gradient\(to bottom,\s*rgba\(var\(--accent-hover-rgb\)/);
     expect(cssContent).toMatch(/\.window-ctrl-btn--min:hover[^}]*color:\s*var\(--text-light\);/);
 
     // メイン画面の閉じるボタンホバー
     expect(cssContent).toMatch(/\.titlebar-button\.titlebar-close:hover\s*\{[^}]*background-color:\s*var\(--danger-red-translucent\);/);
 
-    // ビューア画面の閉じるボタンホバー
-    expect(cssContent).toMatch(/\.window-ctrl-btn--close:hover\s*\{[^}]*background-color:\s*var\(--danger-red-translucent\);/);
+    // ビューア画面の閉じるボタンホバー（ヘッダ部のフェードグラデーションと調和するグラデーション）
+    expect(cssContent).toMatch(/\.window-ctrl-btn--close:hover\s*\{[^}]*background:\s*linear-gradient\(to bottom,\s*rgba\(var\(--danger-rgb\)/);
   });
 
   it('should define matching SVG icons with currentColor in UIManager and ViewerUI', async () => {
@@ -64,8 +64,11 @@ describe('Titlebar and Window Control Buttons Consistency', () => {
   it('should maintain transparent background on viewer control buttons and info container to prevent obtrusiveness', () => {
     // コントロールボタンは常時視認化（目立つ背景色）を避け、通常時 transparent であること
     expect(cssContent).toMatch(/\.window-ctrl-btn\s*\{[^}]*background-color:\s*transparent;/);
-    // アイコン輪郭の自然な視認性確保のためのドロップシャドウ
-    expect(cssContent).toMatch(/\.window-ctrl-btn\s*\{[^}]*filter:\s*drop-shadow\(/);
+    // アイコン輪郭の自然な視認性確保のため、ボタン矩形ではなくSVGアイコンにのみドロップシャドウを適用
+    expect(cssContent).toMatch(/\.window-ctrl-btn svg\s*\{[^}]*filter:\s*drop-shadow\(/);
+    // ホバー時はボタン矩形・アイコンともに不要な影を完全に排除すること
+    expect(cssContent).toMatch(/\.window-ctrl-btn:hover\s*\{[^}]*filter:\s*none;/);
+    expect(cssContent).toMatch(/\.window-ctrl-btn:hover svg\s*\{[^}]*filter:\s*none;/);
 
     // 情報コンテナのテキストシャドウ（背景色ボックスなしで輪郭を保護）
     expect(cssContent).toMatch(/\.viewer-rating-display\s*\{[^}]*text-shadow:\s*0 1px 3px/);
