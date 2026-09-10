@@ -385,7 +385,6 @@ html.viewer-html,
   transform: scale(1.02);
 }
 
-
 /* --- Viewer Metadata Overlay (A-4) --- */
 /* プロンプト・メタデータ表示: 左右方向のマイルドなスライドイン（スッと入って-4pxだけ優しくオーバーシュート着地） */
 @keyframes viewerPromptPop {
@@ -458,7 +457,7 @@ html.viewer-html,
 .viewer-metadata-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   height: 40px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-color);
@@ -476,25 +475,6 @@ html.viewer-html,
   display: flex;
   align-items: center;
   box-sizing: border-box;
-}
-
-.viewer-metadata-close-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-xs);
-  color: var(--text-color);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.viewer-metadata-close-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-light);
 }
 
 .viewer-metadata-content {

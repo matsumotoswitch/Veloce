@@ -134,18 +134,7 @@ export function createMetadataOverlay() {
     title.className = 'viewer-metadata-title';
     title.textContent = 'メタデータ';
 
-    const closeBtn = document.createElement('button');
-    closeBtn.id = 'viewer-metadata-close-btn';
-    closeBtn.className = 'viewer-metadata-close-btn';
-    closeBtn.title = '閉じる (P / I / Esc)';
-    closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-    closeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleMetadataOverlay(false);
-    });
-
     header.appendChild(title);
-    header.appendChild(closeBtn);
 
     const content = document.createElement('div');
     content.id = 'viewer-metadata-content';

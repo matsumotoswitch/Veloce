@@ -48,7 +48,7 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     vi.restoreAllMocks();
   });
 
-  it('createMetadataOverlay で DOM 要素が正しく構築されること', () => {
+  it('createMetadataOverlay で DOM 要素が正しく構築され、重複する閉じるボタンが存在しないこと', () => {
     const overlay = createMetadataOverlay();
     expect(overlay).not.toBeNull();
     expect(overlay.id).toBe('viewer-metadata-overlay');
@@ -56,8 +56,13 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     const content = document.getElementById('viewer-metadata-content');
     expect(content).not.toBeNull();
 
+    // ウィンドウコントロールとの重複を防ぐため個別閉じるボタンは存在しないこと
     const closeBtn = document.getElementById('viewer-metadata-close-btn');
-    expect(closeBtn).not.toBeNull();
+    expect(closeBtn).toBeNull();
+
+    const title = overlay.querySelector('.viewer-metadata-title');
+    expect(title).not.toBeNull();
+    expect(title.textContent).toBe('メタデータ');
 
     // 2回呼んでも多重生成されないこと
     const overlay2 = createMetadataOverlay();
@@ -200,13 +205,13 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     expect(window.veloceAPI.closeWindow).toHaveBeenCalled();
   });
 
-  it('閉じるボタンのクリックでオーバーレイが閉じること', () => {
+  it('オーバーレイヘッダーに重複する閉じるボタンが生成されないこと', () => {
     toggleMetadataOverlay(true);
     expect(viewerState.isMetadataVisible).toBe(true);
 
+    // ウィンドウ右上の閉じるボタンと競合するため、オーバーレイヘッダー右上のボタンは廃止されていること
     const closeBtn = document.getElementById('viewer-metadata-close-btn');
-    closeBtn.click();
-    expect(viewerState.isMetadataVisible).toBe(false);
+    expect(closeBtn).toBeNull();
   });
 
   it('画像パスが切り替わった際に updateMetadataOverlay で新しい画像のメタデータが表示されること', async () => {
