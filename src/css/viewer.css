@@ -299,6 +299,38 @@ html.viewer-html,
   color: var(--text-light);
 }
 
+/* プロンプト情報（メタデータオーバーレイ）表示中:
+   ヘッダーパネルのフラットな外観に合わせ、コントロール部ホバー背景色のグラデーションをなし（フラット）にする */
+.viewer-body.metadata-open .window-ctrl-btn--min:hover,
+.viewer-body.metadata-open .window-ctrl-btn--max:hover,
+#window-controls.metadata-open .window-ctrl-btn--min:hover,
+#window-controls.metadata-open .window-ctrl-btn--max:hover {
+  background: var(--accent-hover-translucent);
+  color: var(--text-light);
+}
+
+.viewer-body.metadata-open .window-ctrl-btn--min:active,
+.viewer-body.metadata-open .window-ctrl-btn--max:active,
+#window-controls.metadata-open .window-ctrl-btn--min:active,
+#window-controls.metadata-open .window-ctrl-btn--max:active {
+  background: var(--accent-hover-translucent);
+  filter: brightness(0.85);
+  color: var(--text-light);
+}
+
+.viewer-body.metadata-open .window-ctrl-btn--close:hover,
+#window-controls.metadata-open .window-ctrl-btn--close:hover {
+  background: var(--danger-red-translucent);
+  color: var(--text-light);
+}
+
+.viewer-body.metadata-open .window-ctrl-btn--close:active,
+#window-controls.metadata-open .window-ctrl-btn--close:active {
+  background: var(--danger-red-translucent);
+  filter: brightness(0.85);
+  color: var(--text-light);
+}
+
 .unsharp-svg {
   position: absolute;
   width: 0;

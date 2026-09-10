@@ -12,6 +12,7 @@ describe('Viewer Prompt Overlay Animation (Pop & Hide)', () => {
     document.body.innerHTML = `
       <img id="viewer-img" src="asset://test.png" />
       <div id="window-filename-display"></div>
+      <div id="window-controls"></div>
     `;
 
     viewerState.currentIndex = 0;
@@ -155,5 +156,30 @@ describe('Viewer Prompt Overlay Animation (Pop & Hide)', () => {
     expect(css).toMatch(/\.viewer-metadata-header::after\s*\{[^}]*left:\s*100%;/);
     expect(css).toMatch(/\.viewer-metadata-header::after\s*\{[^}]*width:\s*20px;/);
     expect(css).toMatch(/\.viewer-metadata-header::after\s*\{[^}]*height:\s*40px;/);
+  });
+
+  it('プロンプト情報表示時に metadata-open クラスが付与され、非表示時に解除されること', () => {
+    const controls = document.getElementById('window-controls');
+    expect(document.body.classList.contains('metadata-open')).toBe(false);
+    expect(controls.classList.contains('metadata-open')).toBe(false);
+
+    // プロンプト情報表示
+    toggleMetadataOverlay(true);
+    expect(document.body.classList.contains('metadata-open')).toBe(true);
+    expect(controls.classList.contains('metadata-open')).toBe(true);
+
+    // プロンプト情報非表示
+    toggleMetadataOverlay(false);
+    expect(document.body.classList.contains('metadata-open')).toBe(false);
+    expect(controls.classList.contains('metadata-open')).toBe(false);
+  });
+
+  it('CSS で metadata-open 適用時はコントロール部のホバー背景色がグラデーションなし（フラット）になること', () => {
+    const css = getFullCssContent();
+
+    // プロンプト表示中の最小化・最大化ホバー（フラットな背景色）
+    expect(css).toMatch(/\.viewer-body\.metadata-open \.window-ctrl-btn--min:hover[^{]*\{[^}]*background:\s*var\(--accent-hover-translucent\);/);
+    // プロンプト表示中の閉じるボタンホバー（フラットな背景色）
+    expect(css).toMatch(/\.viewer-body\.metadata-open \.window-ctrl-btn--close:hover[^{]*\{[^}]*background:\s*var\(--danger-red-translucent\);/);
   });
 });

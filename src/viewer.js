@@ -319,11 +319,16 @@ export function toggleMetadataOverlay(forceState) {
   viewerState.isMetadataVisible = newState;
 
   const overlay = createMetadataOverlay();
+  const controls = document.getElementById('window-controls');
+
   if (viewerState.isMetadataVisible) {
     if (_metadataOverlayHideTimer) {
       clearTimeout(_metadataOverlayHideTimer);
       _metadataOverlayHideTimer = null;
     }
+    document.body.classList.add('metadata-open');
+    if (controls) controls.classList.add('metadata-open');
+
     overlay.classList.remove('prompt-hide');
     overlay.classList.add('show');
     // アニメーション再開のためのリフロー強制
@@ -333,6 +338,9 @@ export function toggleMetadataOverlay(forceState) {
 
     updateMetadataOverlay();
   } else {
+    document.body.classList.remove('metadata-open');
+    if (controls) controls.classList.remove('metadata-open');
+
     const wasVisible = overlay.classList.contains('show');
     overlay.classList.remove('show');
     overlay.classList.remove('prompt-pop');
