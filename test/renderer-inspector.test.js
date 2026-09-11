@@ -136,6 +136,28 @@ describe('renderer-inspector.js', () => {
 
       delete window.veloceAPI;
     });
+
+    it('should render unsupported/raw metadata with prompt-look raw-box class and reset inline styles', async () => {
+      window.veloceAPI = {
+        parseMetadata: vi.fn().mockResolvedValue({
+          unrecognized_format_key: 'debug payload value'
+        })
+      };
+
+      const file = { path: 'C:\\test\\unknown.png', width: 0, height: 0 };
+      await renderMetadata(file);
+
+      const container = document.getElementById('inspector-content');
+      const rawBox = container.querySelector('.prompt-look.raw-box');
+      expect(rawBox).not.toBeNull();
+      expect(rawBox.className).toBe('prompt-look raw-box');
+      expect(rawBox.style.fontFamily).toBe('');
+      expect(rawBox.style.whiteSpace).toBe('');
+      expect(rawBox.style.maxHeight).toBe('');
+      expect(rawBox.textContent).toContain('unrecognized_format_key');
+
+      delete window.veloceAPI;
+    });
   });
 
   describe('initInspectorDelegation & Header Path Context Menu', () => {

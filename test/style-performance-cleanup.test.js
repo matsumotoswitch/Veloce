@@ -114,6 +114,15 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(inspectorJsContent).toContain("secEl.copyBtn.setAttribute('data-copy-text', section.value)");
     });
 
+    it('should use prompt-look raw-box class and avoid inline styles for unsupported metadata in renderer-inspector.js', () => {
+      expect(inspectorJsContent).not.toContain("secEl.box.style.fontFamily = 'Consolas, monospace'");
+      expect(inspectorJsContent).not.toContain("secEl.box.style.whiteSpace = 'pre-wrap'");
+      expect(inspectorJsContent).not.toContain("secEl.box.style.wordBreak = 'break-all'");
+      expect(inspectorJsContent).not.toContain('Consolas');
+      expect(inspectorJsContent).toContain("secEl.box.className = 'prompt-look raw-box';");
+      expect(inspectorJsContent).toContain("secEl.box.style.cssText = '';");
+    });
+
     it('should avoid innerHTML re-parse on dragover by caching tooltip child nodes', () => {
       expect(dndJsContent).toContain('function updateDragTooltip');
       expect(dndJsContent).toContain('dragTooltipText.textContent !== text');

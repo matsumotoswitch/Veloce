@@ -479,13 +479,8 @@ export async function renderMetadata(file, options = {}) {
         secEl.title.textContent = '未対応のメタデータ形式';
         secEl.copyWrapper.replaceChildren();
         secEl.subLabel.textContent = '';
-        secEl.box.className = 'prompt-look';
-        secEl.box.style.whiteSpace = 'pre-wrap';
-        secEl.box.style.fontFamily = 'Consolas, monospace';
-        secEl.box.style.fontSize = 'var(--font-size-xs)';
-        secEl.box.style.wordBreak = 'break-all';
-        secEl.box.style.maxHeight = '400px';
-        secEl.box.style.overflowY = 'auto';
+        secEl.box.className = 'prompt-look raw-box';
+        secEl.box.style.cssText = '';
         secEl.box.textContent = rawMetaStr;
         if (secEl.root.parentNode !== container) container.appendChild(secEl.root);
       }
