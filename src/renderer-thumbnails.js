@@ -842,32 +842,56 @@ window.resetThumbnailPreloader = resetThumbnailPreloader;
 // サムネイルの自己修復（Self-healing）監視プロセス
 // 画面に表示されている要素（_domByPath）を定期的に検査し、ロード中のままスタックしているか、
 // SVGフォールバックのエラー状態のまま放置されているサムネイルを検知して自動的に再キューする。
-setInterval(() => {
-  if (window.appState && window.appState.dragState && window.appState.dragState.isAppDragging) return;
-  if (!window.uiManager || !window.uiManager._domByPath) return;
-  if (!window.thumbnailManager) return;
-  
+export function checkThumbnailSelfHealing() {
+  if (window.appState && window.appState.dragState && window.appState.dragState.isAppDragging) return 0;
+  if (window.appState && window.appState.activeCenterPane !== 'grid') return 0;
+  if (!window.uiManager || !window.uiManager._domByPath || window.uiManager._domByPath.size === 0) return 0;
+
+  const tm = window.thumbnailManager;
+  if (!tm) return 0;
+
+  // 優先キューに既にタスクが積まれている場合は、現在キュー処理中であるため早期リターン
+  if (tm.priorityQueue && tm.priorityQueue.length > 0) return 0;
+
+  // 全可視サムネイルが既に正常URLを保持しており、かつ未解決タスクがないアイドル時はDOM走査をスキップ
+  const urls = window.appState && window.appState.thumbnailUrls;
+  if (urls && (!tm.preloadQueue || tm.preloadQueue.length === 0) && tm.activeTasks && tm.activeTasks.size === 0) {
+    let allHealthy = true;
+    for (const path of window.uiManager._domByPath.keys()) {
+      const url = urls.get(path);
+      if (!url || url === BROKEN_MP4_FALLBACK_URL) {
+        allHealthy = false;
+        break;
+      }
+    }
+    if (allHealthy) return 0;
+  }
+
   let retryCount = 0;
   for (const [path, wrapper] of window.uiManager._domByPath.entries()) {
     const img = wrapper.children[0];
     if (!img) continue;
-    
+
     const isStuckLoading = img.classList.contains('loading');
     const isSvgFallback = img.src && img.src.startsWith('data:image/svg+xml');
-    
+
     if (isStuckLoading || isSvgFallback) {
-      if (!window.thumbnailManager.activeTasks.has(path)) {
+      if (!tm.activeTasks || !tm.activeTasks.has(path)) {
         if (window.appState && window.appState.thumbnailUrls) {
           window.appState.thumbnailUrls.delete(path);
         }
-        window.thumbnailManager.enqueuePriority(path);
+        tm.enqueuePriority(path);
         retryCount++;
       }
     }
   }
-  
+
   if (retryCount > 0 && typeof window.processNextTask === 'function') {
     window.processNextTask();
     console.info(`[Self-Healing] Automatically retried ${retryCount} missing/broken thumbnails on screen.`);
   }
-}, 5000);
+  return retryCount;
+}
+
+window.checkThumbnailSelfHealing = checkThumbnailSelfHealing;
+setInterval(checkThumbnailSelfHealing, 5000);

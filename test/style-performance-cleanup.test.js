@@ -13,6 +13,7 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
   const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-context-menu.js'), 'utf-8');
   const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
   const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
+  const thumbnailsJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-thumbnails.js'), 'utf-8');
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
 
   describe('1. Color Tokens & CSS Variables', () => {
@@ -165,6 +166,13 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
 
       // renderer.js の applyRatingUI でも _cachedRating が正しく同期されていること
       expect(rendererJsContent).toContain('td._cachedRating = rating;');
+    });
+
+    it('should suppress Watchdog DOM traversal during idle state in renderer-thumbnails.js', () => {
+      expect(thumbnailsJsContent).toContain("activeCenterPane !== 'grid'");
+      expect(thumbnailsJsContent).toContain('allHealthy = false');
+      expect(thumbnailsJsContent).toContain('export function checkThumbnailSelfHealing');
+      expect(thumbnailsJsContent).toContain('window.checkThumbnailSelfHealing = checkThumbnailSelfHealing;');
     });
 
     it('should use replaceChildren() instead of innerHTML = "" for DOM clearing to reduce GC and avoid HTML parser overhead', () => {

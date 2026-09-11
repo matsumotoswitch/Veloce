@@ -626,4 +626,58 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(BROKEN_MP4_FALLBACK_URL).toMatch(/^data:image\/svg\+xml;base64,/);
     });
   });
+
+  describe('Self-Healing Watchdog Process', () => {
+    it('should early return and avoid DOM scans when in table/list mode or when idle and healthy', async () => {
+      const { checkThumbnailSelfHealing } = await import('../src/renderer-thumbnails.js');
+
+      // 1. activeCenterPane が 'table' (リストビュー) の場合 -> 早期リターン 0
+      window.appState = { activeCenterPane: 'table', dragState: { isAppDragging: false } };
+      window.uiManager = { _domByPath: new Map([['path1', { children: [{ classList: { contains: () => true } }] }]]) };
+      expect(checkThumbnailSelfHealing()).toBe(0);
+
+      // 2. _domByPath が空の場合 -> 早期リターン 0
+      window.appState.activeCenterPane = 'grid';
+      window.uiManager._domByPath = new Map();
+      expect(checkThumbnailSelfHealing()).toBe(0);
+
+      // 3. 全サムネイルがロード済み（healthy）かつキュー・タスクが空の場合 -> DOM走査を行わず早期リターン 0
+      const domMap = new Map();
+      const childGetter = vi.fn();
+      domMap.set('C:/images/pic1.png', {
+        get children() {
+          childGetter();
+          return [{ classList: { contains: () => false }, src: 'https://veloce.localhost/thumbnail/pic1' }];
+        }
+      });
+      window.uiManager._domByPath = domMap;
+      window.appState.thumbnailUrls = new Map([
+        ['C:/images/pic1.png', 'https://veloce.localhost/thumbnail/pic1']
+      ]);
+      window.thumbnailManager = {
+        priorityQueue: [],
+        preloadQueue: [],
+        activeTasks: new Set(),
+        enqueuePriority: vi.fn(),
+        processNext: vi.fn()
+      };
+
+      const retries = checkThumbnailSelfHealing();
+      expect(retries).toBe(0);
+      // 完全アイドル時は DOM の children[0] に一度もアクセスせずに早期リターンすること
+      expect(childGetter).not.toHaveBeenCalled();
+      expect(window.thumbnailManager.enqueuePriority).not.toHaveBeenCalled();
+
+      // 4. スタック中のサムネイルが存在する場合 -> 自動検知して再キューすること
+      domMap.set('C:/images/stuck.png', {
+        children: [{
+          classList: { contains: (cls) => cls === 'loading' },
+          src: 'data:image/gif;base64,...'
+        }]
+      });
+      const retriesStuck = checkThumbnailSelfHealing();
+      expect(retriesStuck).toBe(1);
+      expect(window.thumbnailManager.enqueuePriority).toHaveBeenCalledWith('C:/images/stuck.png');
+    });
+  });
 });
