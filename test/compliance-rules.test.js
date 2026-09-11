@@ -74,6 +74,16 @@ describe('AGENTS.md & PLAN.md Compliance and Regression Guard', () => {
         }
       }
     });
+
+    it('should not contain exaggerated marketing buzzwords in Cargo.toml', () => {
+      const cargoTomlPath = path.resolve(__dirname, '../src-tauri/Cargo.toml');
+      const cargoContent = fs.readFileSync(cargoTomlPath, 'utf-8');
+      for (const term of exaggeratedTerms) {
+        const regex = new RegExp(term, 'g');
+        const matches = cargoContent.match(regex);
+        expect(matches, `Exaggerated term "${term}" found in Cargo.toml`).toBeNull();
+      }
+    });
   });
 
   describe('4. Modal and Dialog Header Consistency (AGENTS.md Sec 2)', () => {
