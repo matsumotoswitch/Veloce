@@ -1473,13 +1473,14 @@ class UIManager {
       const newMtime = formatDate(file.mtime);
       if (tds[6].textContent !== newMtime) tds[6].textContent = newMtime;
 
+      // レーティングの同期（_cachedRating による O(1) キャッシュ判定で毎フレームの innerHTML シリアライズを排除）
       const rating = appState.ratings[file.path] || 0;
-      if (rating > 0) {
-        const starSvg = '<svg class="rating-star-icon" viewBox="0 0 24 24" width="14" height="14"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-        const newHtml = starSvg + rating;
-        if (tds[7].innerHTML !== newHtml) tds[7].innerHTML = newHtml;
-      } else {
-        if (tds[7].textContent !== '-') {
+      if (tds[7]._cachedRating !== rating) {
+        tds[7]._cachedRating = rating;
+        if (rating > 0) {
+          const starSvg = '<svg class="rating-star-icon" viewBox="0 0 24 24" width="14" height="14"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+          tds[7].innerHTML = starSvg + rating;
+        } else {
           tds[7].replaceChildren();
           tds[7].textContent = '-';
         }

@@ -174,4 +174,52 @@ describe('Rating Feature', () => {
     updateRatingDisplay();
     expect(display.style.display).toBe('none');
   });
+
+  it('should manage _cachedRating on list view row cells correctly', () => {
+    // テーブル行のセルモック作成
+    const td = document.createElement('td');
+    const tr = document.createElement('tr');
+    for (let i = 0; i < 7; i++) tr.appendChild(document.createElement('td'));
+    tr.appendChild(td);
+
+    // 初期状態 (レーティングなし)
+    td._cachedRating = 0;
+    td.textContent = '-';
+
+    // リストビューのレーティング同期ロジックシミュレーション
+    const applyRatingToCell = (cell, rating) => {
+      if (cell._cachedRating !== rating) {
+        cell._cachedRating = rating;
+        if (rating > 0) {
+          const starSvg = '<svg class="rating-star-icon" viewBox="0 0 24 24" width="14" height="14"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+          cell.innerHTML = starSvg + rating;
+        } else {
+          cell.replaceChildren();
+          cell.textContent = '-';
+        }
+        return true;
+      }
+      return false; // キャッシュ一致時は DOM 操作をスキップ
+    };
+
+    // 初回適用: DOM 更新が発生
+    const updated1 = applyRatingToCell(td, 4);
+    expect(updated1).toBe(true);
+    expect(td._cachedRating).toBe(4);
+    expect(td.innerHTML).toContain('rating-star-icon');
+    expect(td.innerHTML).toContain('4');
+
+    // 同一レーティングでの再描画シミュレーション（スクロール発生時等）: DOM 更新がスキップされること
+    const updated2 = applyRatingToCell(td, 4);
+    expect(updated2).toBe(false);
+    expect(td._cachedRating).toBe(4);
+
+    // レーティング 0 へのクリア: replaceChildren() と '-' の表示
+    const updated3 = applyRatingToCell(td, 0);
+    expect(updated3).toBe(true);
+    expect(td._cachedRating).toBe(0);
+    expect(td.textContent).toBe('-');
+    expect(td.children.length).toBe(0);
+  });
 });
+

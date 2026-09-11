@@ -124,6 +124,16 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(rendererUiJsContent).toContain('emptyContainer.dataset.mode !== targetMode');
     });
 
+    it('should eliminate innerHTML getter overhead in updateVirtualList by caching rating in _cachedRating', () => {
+      // innerHTML ゲッターの排除（毎スクロールフレームでの C++ DOM ツリーシリアライズを防止）
+      expect(rendererUiJsContent).not.toMatch(/tds\[7\]\.innerHTML\s*!==/);
+      expect(rendererUiJsContent).toContain('if (tds[7]._cachedRating !== rating)');
+      expect(rendererUiJsContent).toContain('tds[7]._cachedRating = rating;');
+
+      // renderer.js の applyRatingUI でも _cachedRating が正しく同期されていること
+      expect(rendererJsContent).toContain('td._cachedRating = rating;');
+    });
+
     it('should use replaceChildren() instead of innerHTML = "" for DOM clearing to reduce GC and avoid HTML parser overhead', () => {
       // renderer.js
       expect(rendererJsContent).not.toMatch(/innerHTML\s*=\s*['"]['"]/);
