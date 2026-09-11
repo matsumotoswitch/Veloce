@@ -347,7 +347,7 @@ html.viewer-html,
   pointer-events: none;
   z-index: 9998;
   background-color: rgba(255, 255, 255, 0.4);
-  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.6s var(--transition-glow);
 }
 
 
@@ -360,7 +360,7 @@ html.viewer-html,
   width: 80%;
   max-width: 800px;
   background: rgba(var(--bg-darker-rgb), 0.85);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 20px;
   display: flex;
   align-items: center;
@@ -377,7 +377,7 @@ html.viewer-html,
 
 #video-time-display {
   color: white;
-  font-family: 'Consolas', monospace;
+  font-family: var(--font-family-mono);
   font-size: var(--font-size-base);
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -395,7 +395,7 @@ html.viewer-html,
   align-items: center;
   justify-content: center;
   padding: 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: background-color 0.2s;
 }
 

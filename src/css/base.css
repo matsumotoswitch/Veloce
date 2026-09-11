@@ -41,7 +41,7 @@ textarea {
 
 ::-webkit-scrollbar-thumb {
   background-color: var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 3px solid transparent;
   background-clip: padding-box;
   /* 角を丸め、padding-boxを使って、どんな背景色の上でも浮くように */

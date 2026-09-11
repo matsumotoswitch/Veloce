@@ -183,7 +183,7 @@ body.is-resizing .app-content {
   bottom: 0;
   width: 3px;
   background-color: var(--accent-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   z-index: 10;
 }
 
@@ -200,7 +200,7 @@ body.is-resizing .app-content {
   bottom: 0;
   width: 3px;
   background-color: var(--accent-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   z-index: 10;
 }
 

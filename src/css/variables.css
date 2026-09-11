@@ -8,7 +8,9 @@
     0 2px 8px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     inset 1px 0 0 rgba(255, 255, 255, 0.02);
-  font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-family-base: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-family-mono: 'Consolas', monospace;
+  font-family: var(--font-family-base);
   --bg-color: #0b1012;
   --bg-rgb: 11, 16, 18;
   --panel-bg: #162226;
@@ -54,6 +56,8 @@
   --transition-smooth: cubic-bezier(0.2, 0.8, 0.2, 1);
   --transition-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
   --transition-fast: cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-close: cubic-bezier(0.36, 0, 0.66, -0.56);
+  --transition-glow: cubic-bezier(0.16, 1, 0.3, 1);
   --text-light: #ffffff;
   --bg-darker: #1e1e1e;
   --bg-darker-rgb: 30, 30, 30;

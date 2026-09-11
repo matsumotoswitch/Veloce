@@ -237,6 +237,33 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(rendererJs).toContain("bookmarkOverflowMenu.classList.remove('show')");
     expect(rendererJs).toContain("overflowMenu.classList.remove('show')");
   });
+
+  it('should define extended transition and font-family tokens in :root', () => {
+    expect(cssContent).toContain('--transition-close:');
+    expect(cssContent).toContain('--transition-glow:');
+    expect(cssContent).toContain('--font-family-base:');
+    expect(cssContent).toContain('--font-family-mono:');
+  });
+
+  it('should not contain unaliased font-size: 14px in any stylesheet module', () => {
+    expect(cssContent).not.toMatch(/font-size:\s*14px;/);
+  });
+
+  it('should use design tokens for border-radius across UI components', () => {
+    expect(cssContent).toMatch(/::-webkit-scrollbar-thumb\s*\{[^}]*border-radius:\s*var\(--radius-md\);/);
+    expect(cssContent).toMatch(/\.thumbnail-label\s*\{[^}]*border-radius:\s*var\(--radius-sm\);/);
+    expect(cssContent).toMatch(/\.rating-badge\s*\{[^}]*border-radius:\s*var\(--radius-sm\);/);
+    expect(cssContent).toMatch(/#video-controls-container\s*\{[^}]*border-radius:\s*var\(--radius-md\);/);
+    expect(cssContent).toMatch(/#video-play-btn\s*\{[^}]*border-radius:\s*var\(--radius-xs\);/);
+  });
+
+  it('should use var(--transition-close) and var(--transition-glow) instead of raw cubic-bezier curves', () => {
+    expect(cssContent).toMatch(/\.dialog-overlay,\s*\.modal\s*\{[^}]*transition:[^}]*var\(--transition-close\)/);
+    expect(cssContent).toMatch(/\.dialog-box\s*\{[^}]*transition:[^}]*var\(--transition-close\)/);
+    expect(cssContent).toMatch(/#context-menu[^}]*transition:[^}]*var\(--transition-close\)/);
+    expect(cssContent).toMatch(/\.custom-select-menu\s*\{[^}]*transition:[^}]*var\(--transition-close\)/);
+    expect(cssContent).toMatch(/\.rating-badge\.rating-pop\s*\{[^}]*animation:\s*rating-pop\s+0\.35s\s+var\(--transition-bounce\);/);
+    expect(cssContent).toMatch(/\.rating-badge\.rating-hide\s*\{[^}]*animation:\s*rating-hide\s+0\.28s\s+var\(--transition-fast\)\s+forwards;/);
+    expect(cssContent).toMatch(/#viewer-flash-effect\s*\{[^}]*transition:[^}]*var\(--transition-glow\)/);
+  });
 });
-
-

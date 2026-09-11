@@ -61,7 +61,7 @@
 }
 
 .inspector-location-badge .folder-name {
-  font-family: Consolas, monospace;
+  font-family: var(--font-family-mono);
   font-weight: 400;
   white-space: normal;
   word-break: break-all;

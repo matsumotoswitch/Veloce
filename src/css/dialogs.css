@@ -17,7 +17,7 @@
   /* 閉じる時のアニメーション（逆バウンス/スナップ） */
   visibility: hidden;
   opacity: 0;
-  transition: opacity 0.16s cubic-bezier(0.36, 0, 0.66, -0.56), visibility 0.16s;
+  transition: opacity 0.16s var(--transition-close), visibility 0.16s;
   pointer-events: none;
 }
 
@@ -46,7 +46,7 @@
   font-family: inherit;
   backdrop-filter: none !important;
   transform: translateY(10px) scale(0.98);
-  transition: transform 0.16s cubic-bezier(0.36, 0, 0.66, -0.56);
+  transition: transform 0.16s var(--transition-close);
 }
 
 .dialog-overlay.show .dialog-box,
@@ -411,7 +411,7 @@ input:-webkit-autofill:focus {
 
 .prompt-look.raw-box {
   white-space: pre-wrap;
-  font-family: Consolas, monospace;
+  font-family: var(--font-family-mono);
   font-size: var(--font-size-xs);
   word-break: break-all;
   max-height: 400px;
@@ -514,7 +514,7 @@ input:-webkit-autofill:focus {
   display: inline-block;
   padding: 2px 6px;
   margin: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background-color: var(--bg-color);
   color: var(--text-color);
   font-family: inherit;
@@ -972,7 +972,7 @@ kbd {
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   color: var(--text-light);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
   font-size: var(--font-size-xs);
   font-weight: bold;
@@ -1048,11 +1048,11 @@ kbd {
 }
 
 .rating-badge.rating-pop {
-  animation: rating-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: rating-pop 0.35s var(--transition-bounce);
 }
 
 .rating-badge.rating-hide {
-  animation: rating-hide 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: rating-hide 0.28s var(--transition-fast) forwards;
 }
 
 .slider-tooltip {
@@ -1063,7 +1063,7 @@ kbd {
   background-color: var(--accent-color);
   color: var(--text-light);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: var(--font-size-xs);
   pointer-events: none;
   opacity: 0;
