@@ -756,8 +756,15 @@ table#file-table {
 }
 
 #dir-tree .tree-icon {
+  display: inline-flex;
+  align-items: center;
   margin-right: 4px;
   font-size: var(--font-size-base);
+  color: var(--accent-hover);
+}
+
+#dir-tree .tree-item[data-is-root="true"] .tree-icon {
+  color: var(--text-color);
 }
 
 /* トグルアイコンのベース色とホバー連動 */

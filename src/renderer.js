@@ -788,26 +788,16 @@ function createTreeNode(folder, isRoot = false) {
   itemDiv.dataset.path = folder.path; // 展開用の目印としてパスを持たせる
   itemDiv.dataset.name = folder.name;
   itemDiv.dataset.isRoot = isRoot;
-  itemDiv.style.display = 'flex';
-  itemDiv.style.alignItems = 'center';
   itemDiv.draggable = !isRoot; // ドライブ以外はドラッグ可能に
 
   // 展開・折りたたみ用のトグルアイコン
   const toggleIcon = document.createElement('span');
   toggleIcon.className = 'tree-toggle toggle-icon';
-  toggleIcon.style.display = 'inline-flex';
-  toggleIcon.style.alignItems = 'center';
   toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
 
   const icon = document.createElement('span');
   icon.className = 'tree-icon';
   icon.innerHTML = isRoot ? UIManager.ICONS.DRIVE : UIManager.ICONS.FOLDER;
-  icon.style.marginRight = '4px';
-  icon.style.display = 'inline-flex';
-  icon.style.alignItems = 'center';
-  if (!isRoot) {
-    icon.style.color = 'var(--accent-hover)';
-  }
 
   const label = document.createElement('span');
   label.className = 'tree-label';

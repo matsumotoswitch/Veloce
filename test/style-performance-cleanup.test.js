@@ -107,6 +107,20 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(viewerJsContent).not.toMatch(/flash\.style\.transition\s*=\s*['"][^'"]*cubic-bezier/);
       expect(viewerJsContent).toContain("flash.style.transition = '';");
     });
+
+    it('should eliminate inline style assignments in createTreeNode in renderer.js and consolidate tree icon styles in layout.css', () => {
+      // renderer.js
+      expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?itemDiv\.style\.display\s*=\s*'flex'/);
+      expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?toggleIcon\.style\.display\s*=\s*'inline-flex'/);
+      expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?icon\.style\.marginRight\s*=\s*'4px'/);
+      expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?icon\.style\.color\s*=\s*'var\(--accent-hover\)'/);
+
+      // layout.css
+      expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*display:\s*inline-flex;/);
+      expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*align-items:\s*center;/);
+      expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*color:\s*var\(--accent-hover\);/);
+      expect(cssContent).toMatch(/#dir-tree \.tree-item\[data-is-root="true"\] \.tree-icon\s*\{[^}]*color:\s*var\(--text-color\);/);
+    });
   });
 
   describe('4. Performance & DOM Optimizations', () => {

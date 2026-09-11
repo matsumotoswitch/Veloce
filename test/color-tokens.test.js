@@ -95,10 +95,11 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toContain('#license-text');
   });
 
-  it('should use var(--accent-hover) for folder tree icons in renderer.js instead of #4da8da', () => {
+  it('should use var(--accent-hover) in layout.css for folder tree icons instead of hardcoded colors or inline styles in renderer.js', () => {
     const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
-    expect(rendererJs).toContain("icon.style.color = 'var(--accent-hover)';");
+    expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*color:\s*var\(--accent-hover\);/);
     expect(rendererJs).not.toContain("icon.style.color = '#4da8da';");
+    expect(rendererJs).not.toContain("icon.style.color = 'var(--accent-hover)';");
   });
 
   it('should use classList.toggle for inspector search match in renderer-inspector.js instead of inline #ffcc00 styling', () => {
