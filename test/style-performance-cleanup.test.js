@@ -12,6 +12,7 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
   const dndJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-dnd.js'), 'utf-8');
   const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-context-menu.js'), 'utf-8');
   const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+  const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
 
   describe('1. Color Tokens & CSS Variables', () => {
@@ -121,6 +122,34 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
 
     it('should avoid re-parsing empty state SVG in updateVirtualGrid when mode has not changed', () => {
       expect(rendererUiJsContent).toContain('emptyContainer.dataset.mode !== targetMode');
+    });
+
+    it('should use replaceChildren() instead of innerHTML = "" for DOM clearing to reduce GC and avoid HTML parser overhead', () => {
+      // renderer.js
+      expect(rendererJsContent).not.toMatch(/innerHTML\s*=\s*['"]['"]/);
+      expect(rendererJsContent).toContain('uiManager.elements.dirTree.replaceChildren(ul);');
+      expect(rendererJsContent).toContain('container.replaceChildren();');
+      expect(rendererJsContent).toContain('childrenUl.replaceChildren();');
+      expect(rendererJsContent).toContain('menu.replaceChildren();');
+      expect(rendererJsContent).toContain('bookmarkOverflowMenu.replaceChildren();');
+      expect(rendererJsContent).toContain('tabListMenu.replaceChildren();');
+
+      // renderer-ui.js
+      expect(rendererUiJsContent).not.toMatch(/innerHTML\s*=\s*['"]['"]/);
+      expect(rendererUiJsContent).toContain('this.elements.fileListBody.replaceChildren();');
+      expect(rendererUiJsContent).toContain('content.replaceChildren();');
+      expect(rendererUiJsContent).toContain('tbody.replaceChildren();');
+      expect(rendererUiJsContent).toContain('tds[7].replaceChildren();');
+
+      // renderer-inspector.js
+      expect(inspectorJsContent).not.toMatch(/innerHTML\s*=\s*['"]['"]/);
+      expect(inspectorJsContent).toContain('sec1.copyWrapper.replaceChildren();');
+      expect(inspectorJsContent).toContain('sec2.copyWrapper.replaceChildren();');
+      expect(inspectorJsContent).toContain('secEl.subLabel.replaceChildren();');
+
+      // viewer.js
+      expect(viewerJsContent).not.toMatch(/innerHTML\s*=\s*['"]['"]/);
+      expect(viewerJsContent).toContain('contentEl.replaceChildren(fragment);');
     });
   });
 

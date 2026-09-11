@@ -100,6 +100,7 @@ appState.activeTabIndex = -1;
 const resizingState = { left: false, right: false, center: false, leftTop: false, rightTop: false };
 
 const contextMenuManager = new ContextMenuManager();
+window.contextMenuManager = contextMenuManager;
 const contextMenu = contextMenuManager.menuElement;
 
 // タブ一覧メニュー
@@ -240,8 +241,7 @@ async function refreshTree() {
     await expandTreeToPath(appState.currentDirectory, true, tempContainer);
   }
 
-  uiManager.elements.dirTree.innerHTML = '';
-  uiManager.elements.dirTree.appendChild(ul);
+  uiManager.elements.dirTree.replaceChildren(ul);
   uiManager.elements.dirTree.scrollTop = scrollTop;
   uiManager.elements.dirTree.scrollLeft = scrollLeft;
 }
@@ -617,7 +617,7 @@ window.addEventListener('click', (e) => {
 function renderFavorites() {
   const container = document.getElementById('bookmark-list');
   if (!container) return;
-  container.innerHTML = '';
+  container.replaceChildren();
 
   if (appState.favorites.length === 0) {
     const emptyMsg = document.createElement('div');
@@ -864,7 +864,7 @@ function createTreeNode(folder, isRoot = false) {
 
   itemDiv.reloadFolder = async () => {
     isLoaded = false;
-    childrenUl.innerHTML = '';
+    childrenUl.replaceChildren();
     const wasExpanded = childrenUl.classList.contains('expanded');
 
     // サブフォルダの有無を事前に確認する
@@ -1130,7 +1130,7 @@ function showHistoryMenu(event, direction, btnElement) {
     document.body.appendChild(menu);
   }
 
-  menu.innerHTML = ''; // 中身をリセット
+  menu.replaceChildren(); // 中身をリセット
 
   const currentIndex = tab.historyIndex;
   let historyItems = [];
@@ -3072,6 +3072,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     updateSortIndicators
   });
 
+  initInspectorDelegation({ contextMenuManager });
+
   const bar = document.getElementById('bookmark-list');
   if (bar) bookmarkResizeObserver.observe(bar);
 
@@ -3101,7 +3103,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         bookmarkOverflowMenu.id = 'bookmark-overflow-menu';
         document.body.appendChild(bookmarkOverflowMenu);
       }
-      bookmarkOverflowMenu.innerHTML = '';
+      bookmarkOverflowMenu.replaceChildren();
 
       hiddenItems.forEach(domItem => {
         const path = domItem.dataset.path;
@@ -3381,7 +3383,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   const updateTabListMenu = () => {
-    tabListMenu.innerHTML = '';
+    tabListMenu.replaceChildren();
     appState.tabs.forEach((tab, index) => {
       const option = document.createElement('div');
       // 右クリックメニューと同じベースクラスを適用し、CSS側にデザインを委ねる

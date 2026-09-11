@@ -10,14 +10,18 @@ import {
   resetInspectorPools,
   clearMetadataUI,
   renderMultipleSelectionSummary,
-  renderMetadata
+  renderMetadata,
+  initInspectorDelegation,
+  resetInspectorDelegationForTest
 } from '../src/renderer-inspector.js';
 
 describe('renderer-inspector.js', () => {
   beforeEach(() => {
     document.body.innerHTML = `
       <div id="right-pane">
-        <div id="inspector-header-path" style="display: none;"></div>
+        <div id="inspector-header">
+          <div id="inspector-header-path" class="open-folder-btn" style="display: none;"></div>
+        </div>
         <div id="inspector-content">
           <div id="inspector-empty" class="show"></div>
         </div>
@@ -36,6 +40,7 @@ describe('renderer-inspector.js', () => {
 
   afterEach(() => {
     resetInspectorPools();
+    resetInspectorDelegationForTest();
     document.body.innerHTML = '';
     vi.restoreAllMocks();
   });
@@ -129,6 +134,37 @@ describe('renderer-inspector.js', () => {
       expect(text).toContain('masterpiece');
       expect(text).toContain('1girl');
 
+      delete window.veloceAPI;
+    });
+  });
+
+  describe('initInspectorDelegation & Header Path Context Menu', () => {
+    it('should trigger contextMenuManager.show when right-clicking header path after renderMetadata', async () => {
+      resetInspectorDelegationForTest();
+      const mockCmm = { show: vi.fn() };
+      window.contextMenuManager = mockCmm;
+
+      window.veloceAPI = {
+        parseMetadata: vi.fn().mockResolvedValue({})
+      };
+
+      const file = { path: 'D:\\Photos\\Landscape\\mountain.png', width: 100, height: 100 };
+      await renderMetadata(file);
+
+      const headerPath = document.getElementById('inspector-header-path');
+      expect(headerPath.getAttribute('data-path')).toBe('D:\\Photos\\Landscape\\mountain.png');
+
+      const event = new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 300 });
+      headerPath.dispatchEvent(event);
+
+      expect(mockCmm.show).toHaveBeenCalledWith(
+        'inspector-header',
+        { targetFolder: { path: 'D:\\Photos\\Landscape', name: 'Landscape' }, isRoot: false },
+        200,
+        300
+      );
+
+      delete window.contextMenuManager;
       delete window.veloceAPI;
     });
   });

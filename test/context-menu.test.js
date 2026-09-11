@@ -1,53 +1,36 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { initInspectorDelegation, resetInspectorDelegationForTest } from '../src/renderer-inspector.js';
 
 describe('Context Menu (Inspector Header)', () => {
-  beforeEach(() => {
-    document.body.innerHTML = `
-      <div id="inspector-header-path" class="open-folder-btn" data-path="C:\\test\\folder\\image.png"></div>
-    `;
-    window.contextMenu = document.createElement('div');
-    window.contextMenu.id = 'context-menu';
-    window.menuOpenInNewTab = document.createElement('div');
-    window.menuOpenInExplorer = document.createElement('div');
-    window.menuCopyPath = document.createElement('div');
-    window.contextMenu.appendChild(window.menuOpenInNewTab);
-    window.contextMenu.appendChild(window.menuOpenInExplorer);
-    window.contextMenu.appendChild(window.menuCopyPath);
-    document.body.appendChild(window.contextMenu);
+  let mockCmm;
 
-    window.showMenuWithAnimation = vi.fn();
+  beforeEach(() => {
+    resetInspectorDelegationForTest();
+    document.body.innerHTML = `
+      <div id="right-pane">
+        <div id="inspector-header">
+          <div id="inspector-header-path" class="open-folder-btn" data-path="C:\\test\\folder\\image.png"></div>
+        </div>
+        <div id="inspector-content"></div>
+      </div>
+    `;
+
+    mockCmm = {
+      show: vi.fn(),
+      hide: vi.fn()
+    };
+    window.contextMenuManager = mockCmm;
   });
 
   afterEach(() => {
+    resetInspectorDelegationForTest();
+    delete window.contextMenuManager;
+    delete window.veloceAPI;
     vi.restoreAllMocks();
   });
 
-  it('should calculate directory path and show menu when contextmenu event is fired on open-folder-btn', () => {
-    // 実際のイベントリスナー相当のロジック
-    const handler = (e) => {
-      const openBtn = e.target.closest('.open-folder-btn');
-      if (openBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const filePathStr = openBtn.getAttribute('data-path');
-        if (!filePathStr) return;
-
-        const lastSlash = Math.max(filePathStr.lastIndexOf('\\'), filePathStr.lastIndexOf('/'));
-        const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
-        const folderName = dirPath.split(/[\\/]/).pop() || dirPath;
-
-        window.contextMenu.targetFolder = { path: dirPath, name: folderName };
-        
-        window.menuOpenInNewTab.style.display = '';
-        window.menuOpenInExplorer.style.display = '';
-          window.menuCopyPath.style.display = '';
-
-        window.showMenuWithAnimation(window.contextMenu, e.clientX, e.clientY);
-      }
-    };
-
-    document.body.addEventListener('contextmenu', handler);
+  it('should calculate directory path and show menu via window.contextMenuManager when contextmenu is fired on open-folder-btn', () => {
+    initInspectorDelegation();
 
     const btn = document.getElementById('inspector-header-path');
     const event = new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 200 });
@@ -58,26 +41,64 @@ describe('Context Menu (Inspector Header)', () => {
 
     expect(event.preventDefault).toHaveBeenCalled();
     expect(event.stopPropagation).toHaveBeenCalled();
-    expect(window.contextMenu.targetFolder.path).toBe('C:\\test\\folder');
-    expect(window.contextMenu.targetFolder.name).toBe('folder');
-    expect(window.menuOpenInNewTab.style.display).toBe('');
-    expect(window.menuOpenInExplorer.style.display).toBe('');
-    expect(window.showMenuWithAnimation).toHaveBeenCalledWith(window.contextMenu, 100, 200);
+    expect(mockCmm.show).toHaveBeenCalledWith(
+      'inspector-header',
+      { targetFolder: { path: 'C:\\test\\folder', name: 'folder' }, isRoot: false },
+      100,
+      200
+    );
+  });
 
-    document.body.removeEventListener('contextmenu', handler);
+  it('should show menu when contextmenu is fired on inspector-header container', () => {
+    initInspectorDelegation();
+
+    const header = document.getElementById('inspector-header');
+    const event = new MouseEvent('contextmenu', { bubbles: true, clientX: 150, clientY: 250 });
+    event.preventDefault = vi.fn();
+    event.stopPropagation = vi.fn();
+
+    header.dispatchEvent(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(mockCmm.show).toHaveBeenCalledWith(
+      'inspector-header',
+      { targetFolder: { path: 'C:\\test\\folder', name: 'folder' }, isRoot: false },
+      150,
+      250
+    );
+  });
+
+  it('should show menu when contextMenuManager is passed in options', () => {
+    delete window.contextMenuManager;
+    initInspectorDelegation({ contextMenuManager: mockCmm });
+
+    const btn = document.getElementById('inspector-header-path');
+    const event = new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 200 });
+    btn.dispatchEvent(event);
+
+    expect(mockCmm.show).toHaveBeenCalledWith(
+      'inspector-header',
+      { targetFolder: { path: 'C:\\test\\folder', name: 'folder' }, isRoot: false },
+      100,
+      200
+    );
+  });
+
+  it('should NOT show menu when inspector-header-path has no data-path', () => {
+    initInspectorDelegation();
+
+    const btn = document.getElementById('inspector-header-path');
+    btn.removeAttribute('data-path');
+
+    const event = new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 200 });
+    btn.dispatchEvent(event);
+
+    expect(mockCmm.show).not.toHaveBeenCalled();
   });
 
   it('should NOT open in explorer when left clicking the open-folder-btn', () => {
-    const handler = (e) => {
-      const openBtn = e.target.closest('.open-folder-btn');
-      if (openBtn) {
-        // Here, the old code used to call openInExplorer. 
-        // We simulate the new state where this is removed.
-        // So nothing should happen.
-      }
-    };
-    
-    document.body.addEventListener('click', handler);
+    initInspectorDelegation();
 
     const btn = document.getElementById('inspector-header-path');
     window.veloceAPI = { openInExplorer: vi.fn() };
@@ -86,8 +107,6 @@ describe('Context Menu (Inspector Header)', () => {
     btn.dispatchEvent(event);
 
     expect(window.veloceAPI.openInExplorer).not.toHaveBeenCalled();
-
-    document.body.removeEventListener('click', handler);
   });
 });
 

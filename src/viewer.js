@@ -422,8 +422,7 @@ export async function updateMetadataOverlay() {
       fragment.appendChild(createInspectorSectionElement(sec.title, sec.value, !!sec.isParam, !!sec.isRaw, sec.subLabel || null));
     }
 
-    contentEl.innerHTML = '';
-    contentEl.appendChild(fragment);
+    contentEl.replaceChildren(fragment);
   } catch (err) {
     if (seq !== currentMetadataSeq) return;
     contentEl.innerHTML = '<div class="viewer-meta-empty">メタデータの読み込みに失敗しました</div>';

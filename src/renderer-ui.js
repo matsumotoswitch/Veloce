@@ -1263,12 +1263,12 @@ class UIManager {
     }
 
     if (resetScroll) {
-      if (this.elements.fileListBody) this.elements.fileListBody.innerHTML = '';
+      if (this.elements.fileListBody) this.elements.fileListBody.replaceChildren();
       
       // フォルダ選択時と同様に、タブ切り替え時等も以前のサムネイル表示を確実にクリアする
       if (this.elements.thumbnailGrid) {
         const content = this.elements.thumbnailGrid.querySelector('.virtual-content');
-        if (content) content.innerHTML = '';
+        if (content) content.replaceChildren();
         const spacer = this.elements.thumbnailGrid.querySelector('.virtual-spacer');
         if (spacer) spacer.style.height = '0px';
       }
@@ -1325,7 +1325,7 @@ class UIManager {
     }
 
     if (appState.totalCount === 0) {
-      tbody.innerHTML = '';
+      tbody.replaceChildren();
       this.lastListStartIndex = -1;
       this.lastListEndIndex = -1;
       return;
@@ -1480,7 +1480,7 @@ class UIManager {
         if (tds[7].innerHTML !== newHtml) tds[7].innerHTML = newHtml;
       } else {
         if (tds[7].textContent !== '-') {
-          tds[7].innerHTML = '';
+          tds[7].replaceChildren();
           tds[7].textContent = '-';
         }
       }
@@ -1534,7 +1534,7 @@ class UIManager {
     }
 
     if (appState.totalCount === 0) {
-      content.innerHTML = '';
+      content.replaceChildren();
       spacer.style.height = '0px';
       const emptyContainer = container.querySelector('.empty-state-container');
       if (emptyContainer) {

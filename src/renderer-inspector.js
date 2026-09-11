@@ -27,6 +27,12 @@ const inspectorTagPool = [];
 let inspectorSectionIndex = 0;
 let inspectorTagIndex = 0;
 let _inspectorDelegationInit = false;
+let _inspectorDelegationOptions = {};
+
+export function resetInspectorDelegationForTest() {
+  _inspectorDelegationInit = false;
+  _inspectorDelegationOptions = {};
+}
 
 /**
  * DOM Pool からセクション要素を取得する（不足時は新規生成してPoolに追加）
@@ -178,7 +184,7 @@ export async function renderMultipleSelectionSummary() {
   // 1. 複数選択概要セクション (DOM Poolから要素を取得してGC発生を抑制)
   const sec1 = getInspectorSection();
   sec1.title.textContent = '複数選択概要';
-  sec1.copyWrapper.innerHTML = '';
+  sec1.copyWrapper.replaceChildren();
   sec1.subLabel.textContent = '';
   sec1.box.className = 'prompt-look param-box';
   sec1.box.style.cssText = '';
@@ -194,7 +200,7 @@ export async function renderMultipleSelectionSummary() {
   // 2. 一括ショートカット操作ガイドセクション
   const sec2 = getInspectorSection();
   sec2.title.textContent = 'ショートカット操作';
-  sec2.copyWrapper.innerHTML = '';
+  sec2.copyWrapper.replaceChildren();
   sec2.subLabel.textContent = '';
   sec2.box.className = 'prompt-look';
   sec2.box.style.cssText = '';
@@ -224,6 +230,13 @@ export async function renderMultipleSelectionSummary() {
  * @param {Function} [options.showNotification] - 通知関数
  */
 export function initInspectorDelegation(options = {}) {
+  if (options.contextMenuManager) {
+    _inspectorDelegationOptions.contextMenuManager = options.contextMenuManager;
+  }
+  if (options.showNotification) {
+    _inspectorDelegationOptions.showNotification = options.showNotification;
+  }
+
   if (_inspectorDelegationInit) return;
   const container = document.getElementById('inspector-content');
   const delegationRoot = document.getElementById('right-pane') || container;
@@ -259,7 +272,8 @@ export function initInspectorDelegation(options = {}) {
   }, true);
 
   delegationRoot.addEventListener('contextmenu', (e) => {
-    const openBtn = e.target.closest('.open-folder-btn');
+    const openBtn = e.target.closest('.open-folder-btn') ||
+      (e.target.closest('#inspector-header')?.querySelector('#inspector-header-path'));
     if (openBtn) {
       e.preventDefault();
       e.stopPropagation();
@@ -271,7 +285,7 @@ export function initInspectorDelegation(options = {}) {
       const dirPath = lastSlash !== -1 ? filePathStr.substring(0, lastSlash) : filePathStr;
       const folderName = dirPath.split(/[\\/]/).pop() || dirPath;
 
-      const cmm = options.contextMenuManager || window.contextMenuManager;
+      const cmm = _inspectorDelegationOptions.contextMenuManager || options.contextMenuManager || window.contextMenuManager;
       if (cmm) {
         cmm.show('inspector-header', {
           targetFolder: { path: dirPath, name: folderName },
@@ -429,7 +443,7 @@ export async function renderMetadata(file, options = {}) {
 
       if (section.subLabel && section.subLabel !== 'Text to Image') {
         const labels = section.subLabel.split(' + ');
-        secEl.subLabel.innerHTML = '';
+        secEl.subLabel.replaceChildren();
         secEl.subLabel.className = 'sublabel-tags-wrapper';
 
         labels.forEach(lbl => {
@@ -449,7 +463,7 @@ export async function renderMetadata(file, options = {}) {
           secEl.subLabel.appendChild(span);
         });
       } else {
-        secEl.subLabel.innerHTML = '';
+        secEl.subLabel.replaceChildren();
         secEl.subLabel.className = '';
       }
 
@@ -463,7 +477,7 @@ export async function renderMetadata(file, options = {}) {
       if (rawMetaStr !== '{}' && rawMetaStr !== 'null') {
         const secEl = getInspectorSection();
         secEl.title.textContent = '未対応のメタデータ形式';
-        secEl.copyWrapper.innerHTML = '';
+        secEl.copyWrapper.replaceChildren();
         secEl.subLabel.textContent = '';
         secEl.box.className = 'prompt-look';
         secEl.box.style.whiteSpace = 'pre-wrap';
