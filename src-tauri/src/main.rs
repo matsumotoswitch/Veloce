@@ -201,6 +201,8 @@ pub struct SmartFolderRule {
 pub enum DbMsg {
     SaveThumbnail {
         hash_key: String,
+        path: String,
+        mtime: u64,
         bytes: Vec<u8>,
         now: i64,
     },
@@ -3228,9 +3230,23 @@ async fn save_thumbnail(
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
     let _ = state.db_tx.send(DbMsg::SaveThumbnail {
         hash_key,
+        path: clean_path.clone(),
+        mtime,
         bytes,
         now,
     }).await;
+
+    // インメモリのファイル一覧にもサムネイルキャッシュ保持フラグを即時反映
+    if let Ok(mut lock) = state.all_files.lock() {
+        if let Some(f) = lock.iter_mut().find(|f| f.path == clean_path || f.path == file_path) {
+            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+        }
+    }
+    if let Ok(mut lock) = state.filtered_files.lock() {
+        if let Some(f) = lock.iter_mut().find(|f| f.path == clean_path || f.path == file_path) {
+            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+        }
+    }
 
     // 保存完了と同時にローカルHTTP配信用URLを返却し、フロントエンド側での再取得IPC呼び出しを不要化
     let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
@@ -3712,22 +3728,78 @@ async fn clear_metadata_cache(
     file_paths: Vec<String>,
 ) -> Result<Vec<String>, String> {
     let db_conn_clone = state.db_conn.clone();
+    let file_paths_clone = file_paths.clone();
+
+    // 1. In-memory state のフラグを即座にリセット（UIがキャッシュなし状態を正しく認識できるようにする）
+    let mut file_paths_set = std::collections::HashSet::new();
+    for p in &file_paths {
+        let clean = p.replace("\\\\?\\", "");
+        let norm_b = clean.replace('/', "\\");
+        let norm_f = clean.replace('\\', "/");
+        file_paths_set.insert(p.clone());
+        file_paths_set.insert(clean);
+        file_paths_set.insert(norm_b);
+        file_paths_set.insert(norm_f);
+    }
+
+    if let Ok(mut lock) = state.all_files.lock() {
+        for f in lock.iter_mut() {
+            if file_paths_set.contains(&f.path) {
+                let f_mut = std::sync::Arc::make_mut(f);
+                f_mut.has_thumbnail_cache = false;
+                f_mut.has_metadata_cache = false;
+                f_mut.meta_loaded = false;
+            }
+        }
+    }
+    if let Ok(mut lock) = state.filtered_files.lock() {
+        for f in lock.iter_mut() {
+            if file_paths_set.contains(&f.path) {
+                let f_mut = std::sync::Arc::make_mut(f);
+                f_mut.has_thumbnail_cache = false;
+                f_mut.has_metadata_cache = false;
+                f_mut.meta_loaded = false;
+            }
+        }
+    }
+
+    // 2. SQLite DB からのキャッシュ一括削除（トランザクション内で高速実行）
     tokio::task::spawn_blocking(move || {
         let mut messages = Vec::new();
-        let conn = db_conn_clone.get().unwrap();
+        let mut conn = db_conn_clone.get().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-        for file_path in file_paths {
+        {
+            let mut stmt_path = tx.prepare_cached(
+                "DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE"
+            ).map_err(|e| e.to_string())?;
 
-            let clean_path = file_path.replace("\\\\?\\", "");
+            let mut stmt_hash = tx.prepare_cached(
+                "DELETE FROM cache WHERE hash_key = ?"
+            ).map_err(|e| e.to_string())?;
 
-            let _ = conn.execute(
-                "DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE",
-                rusqlite::params![&file_path, &clean_path],
-            );
+            for file_path in file_paths_clone {
+                let clean_path = file_path.replace("\\\\?\\", "");
+                let norm_back = clean_path.replace('/', "\\");
+                let norm_fwd = clean_path.replace('\\', "/");
 
+                let _ = stmt_path.execute(rusqlite::params![&clean_path, &norm_back, &norm_fwd]);
 
-            messages.push(format!("Cleared cache for {}", file_path));
+                // ファイルが存在する場合は mtime から hash_key を算出し、path が空で登録された孤立レコードも削除
+                if let Ok(meta) = std::fs::metadata(&clean_path) {
+                    if let Ok(modified) = meta.modified() {
+                        let mtime = modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+                        let hash_key = format!("{:016x}", digest);
+                        let _ = stmt_hash.execute([&hash_key]);
+                    }
+                }
+
+                messages.push(format!("Cleared cache for {}", file_path));
+            }
         }
+
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(messages)
     })
     .await
@@ -4760,12 +4832,12 @@ fn main() {
     let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(4096);
 
     std::thread::spawn(move || {
-        while let Some(DbMsg::SaveThumbnail { hash_key, bytes, now }) = db_rx.blocking_recv() {
+        while let Some(DbMsg::SaveThumbnail { hash_key, path, mtime, bytes, now }) = db_rx.blocking_recv() {
             if let Ok(conn) = db_conn_worker.get() {
                 let _ = conn.execute(
-                    "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, ?)
-                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, last_accessed=excluded.last_accessed",
-                    rusqlite::params![&hash_key, &bytes, now],
+                    "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
+                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed",
+                    rusqlite::params![&hash_key, &path, mtime, &bytes, now],
                 );
             }
         }
@@ -7152,4 +7224,70 @@ mod viewer_tests {
         // クリーンアップ
         let _ = std::fs::remove_file(&real_file_path);
     }
+
+    #[test]
+    fn test_save_thumbnail_and_clear_metadata_cache_logic() {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        let mut conn = pool.get().unwrap();
+
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER
+            )",
+            [],
+        ).unwrap();
+
+        let hash_key = "a1b2c3d4e5f60718";
+        let test_path = "C:\\images\\rebuild_test.png";
+        let test_mtime = 1700000000_u64;
+        let thumb_bytes = vec![1, 2, 3, 4, 5];
+        let now = 123456789_i64;
+
+        // 1. SaveThumbnail のクエリ検証（path, mtime が正しく保存されること）
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed",
+            rusqlite::params![&hash_key, &test_path, test_mtime, &thumb_bytes, now],
+        ).unwrap();
+
+        let (saved_path, saved_mtime, saved_thumb): (String, u64, Vec<u8>) = conn.query_row(
+            "SELECT path, mtime, thumbnail FROM cache WHERE hash_key = ?",
+            [&hash_key],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+
+        assert_eq!(saved_path, test_path, "path が空文字ではなく正しく保存されること");
+        assert_eq!(saved_mtime, test_mtime, "mtime が正しく保存されること");
+        assert_eq!(saved_thumb, thumb_bytes, "サムネイルデータが正しく保存されること");
+
+        // 2. clear_metadata_cache のトランザクション一括削除検証
+        let tx = conn.transaction().unwrap();
+        {
+            let mut stmt_path = tx.prepare_cached(
+                "DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE"
+            ).unwrap();
+            let norm_back = test_path.replace('/', "\\");
+            let norm_fwd = test_path.replace('\\', "/");
+            stmt_path.execute(rusqlite::params![&test_path, &norm_back, &norm_fwd]).unwrap();
+        }
+        tx.commit().unwrap();
+
+        let count: usize = conn.query_row(
+            "SELECT COUNT(*) FROM cache WHERE path = ?",
+            [&test_path],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 0, "キャッシュ削除後に該当レコードが0件になること");
+    }
 }
+

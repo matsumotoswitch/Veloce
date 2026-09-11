@@ -1309,16 +1309,45 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
       const files = await window.veloceAPI.getItems(i, size);
       for (const file of files) {
         pathsToRebuild.push(file.path);
+        if (appState.thumbnailUrls.has(file.path)) {
+          const oldUrl = appState.thumbnailUrls.get(file.path);
+          if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
+          appState.thumbnailUrls.delete(file.path);
+        }
       }
     }
 
     if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
       await window.veloceAPI.clearMetadataCache(pathsToRebuild);
-      cleanupContext();
-      appState.thumbnailTotalRequested = 0;
+
+      appState.thumbnailTotalRequested = pathsToRebuild.length;
       appState.thumbnailCompleted = 0;
-      uiManager.showToast('キャッシュの再構築が完了しました', 3000, 'rebuild-folder', 'success');
-      scheduleRefresh();
+
+      if (!appState.rebuiltPaths) appState.rebuiltPaths = new Set();
+      pathsToRebuild.forEach(p => {
+        appState.thumbnailCounted.delete(p);
+        appState.rebuiltPaths.add(p);
+      });
+
+      if (window.thumbnailManager) window.thumbnailManager.unshiftPreload(pathsToRebuild);
+
+      const toastEl = document.getElementById('toast-rebuild-folder');
+      if (toastEl) {
+        toastEl.classList.remove('show');
+        setTimeout(() => { if (toastEl.parentElement) toastEl.remove(); }, 300);
+      }
+
+      if (typeof window.updateThumbnailToast === 'function') window.updateThumbnailToast();
+      if (typeof window.processNextTask === 'function') window.processNextTask();
+    } else {
+      uiManager.showToast("エラー: APIが見つかりません", 5000, 'error');
+    }
+
+    if (typeof uiManager.updateVirtualGrid === 'function') {
+      uiManager.updateVirtualGrid(true);
+    }
+    if (typeof uiManager.updateVirtualList === 'function') {
+      uiManager.updateVirtualList(true);
     }
   } catch (err) {
     uiManager.showToast(`再構築に失敗しました: ${err}`, 3000, 'rebuild-folder', 'error');
@@ -3282,11 +3311,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (payload.initialChunk) {
         appState.initialChunk = payload.initialChunk;
       }
-      if (payload.path.startsWith("smart://")) {
-        appState.thumbnailTotalRequested = 0;
-      } else {
-        appState.thumbnailTotalRequested = appState.totalCount;
-      }
+      // 通常のディレクトリ読み込み時は全件トーストは表示せず、トップ進捗バー等で必要なアイテムのみ進捗管理する
+      appState.thumbnailTotalRequested = 0;
       appState.thumbnailCompleted = 0;
       appState.thumbnailCounted.clear();
       

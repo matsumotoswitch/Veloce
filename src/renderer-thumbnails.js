@@ -347,6 +347,19 @@ export function cleanupContext() {
   // フォルダ切り替え時に古いマッピングを残さない
   const uiMgr = window.uiManager;
   if (uiMgr && uiMgr._domByPath) uiMgr._domByPath.clear();
+
+  // フォルダ移動時は以前のフォルダの再構築状態を確実に破棄する
+  if (appState) {
+    if (appState.rebuiltPaths) {
+      appState.rebuiltPaths.clear();
+      appState.rebuiltPaths = null;
+    }
+    appState.thumbnailTotalRequested = 0;
+    appState.thumbnailCompleted = 0;
+    if (appState.thumbnailCounted) {
+      appState.thumbnailCounted.clear();
+    }
+  }
 }
 
 
@@ -445,6 +458,7 @@ export class ThumbnailQueueManager {
     this.completedCount = 0;
     this.totalEnqueued = 0;
     this._progressFadeTimeout = null;
+    this._trackedPaths = new Set();
   }
 
   enqueuePriority(filePath, skipDbCheck = false) {
@@ -453,10 +467,19 @@ export class ThumbnailQueueManager {
       if (!this.priorityQueueSet.has(filePath)) {
         this.priorityQueueSet.add(filePath);
         this.priorityQueue.unshift({ filePath, skipDbCheck });
+        if (!this._trackedPaths.has(filePath)) {
+          this._trackedPaths.add(filePath);
+          this.totalEnqueued++;
+          this.updateProgressBar();
+        }
+      }
+      this.processNext();
+    } else if (this.activeTasks.has(filePath)) {
+      if (!this._trackedPaths.has(filePath)) {
+        this._trackedPaths.add(filePath);
         this.totalEnqueued++;
         this.updateProgressBar();
       }
-      this.processNext();
     }
   }
 
@@ -469,6 +492,15 @@ export class ThumbnailQueueManager {
         if (!this.priorityQueueSet.has(filePath)) {
           this.priorityQueueSet.add(filePath);
           this.priorityQueue.push({ filePath, skipDbCheck: skip });
+          if (!this._trackedPaths.has(filePath)) {
+            this._trackedPaths.add(filePath);
+            this.totalEnqueued++;
+            added = true;
+          }
+        }
+      } else if (this.activeTasks.has(filePath)) {
+        if (!this._trackedPaths.has(filePath)) {
+          this._trackedPaths.add(filePath);
           this.totalEnqueued++;
           added = true;
         }
@@ -490,6 +522,7 @@ export class ThumbnailQueueManager {
     this.preloadQueue = [];
     this.totalEnqueued = 0;
     this.completedCount = 0;
+    if (this._trackedPaths) this._trackedPaths.clear();
     if (this._progressFadeTimeout) {
       clearTimeout(this._progressFadeTimeout);
       this._progressFadeTimeout = null;
@@ -513,8 +546,15 @@ export class ThumbnailQueueManager {
 
   unshiftPreload(paths) {
     const toAdd = paths.filter(p => !this.activeTasks.has(p) && !appState.thumbnailUrls.has(p));
-    if (toAdd.length > 0) {
-      this.totalEnqueued += toAdd.length;
+    let added = false;
+    for (const p of toAdd) {
+      if (!this._trackedPaths.has(p)) {
+        this._trackedPaths.add(p);
+        this.totalEnqueued++;
+        added = true;
+      }
+    }
+    if (added) {
       this.updateProgressBar();
     }
     this.preloadQueue.unshift(...toAdd);
@@ -526,27 +566,41 @@ export class ThumbnailQueueManager {
     if (!bar) return;
 
     if (this.totalEnqueued <= 0) {
+      if (this._progressFadeTimeout) {
+        clearTimeout(this._progressFadeTimeout);
+        this._progressFadeTimeout = null;
+      }
       bar.style.opacity = '0';
       bar.style.width = '0%';
+      this.completedCount = 0;
       return;
     }
 
-    const percent = Math.min(100, Math.max(0, Math.round((this.completedCount / this.totalEnqueued) * 100)));
+    const clampedCompleted = Math.min(this.completedCount, this.totalEnqueued);
+    const percent = Math.min(100, Math.max(0, Math.round((clampedCompleted / this.totalEnqueued) * 100)));
     bar.style.opacity = '1';
     bar.style.width = `${percent}%`;
 
-    if (this.completedCount >= this.totalEnqueued && this.activeTasks.size === 0) {
-      if (this._progressFadeTimeout) clearTimeout(this._progressFadeTimeout);
-      this._progressFadeTimeout = setTimeout(() => {
-        bar.style.opacity = '0';
+    // 完了判定: 100%に達したか、または全件完了した場合はバックグラウンドタスクの有無にかかわらず確実にフェードアウト消去
+    const isCompleted = this.completedCount >= this.totalEnqueued || percent >= 100;
+
+    if (isCompleted) {
+      if (!this._progressFadeTimeout) {
         this._progressFadeTimeout = setTimeout(() => {
-          if (this.activeTasks.size === 0 && this.completedCount >= this.totalEnqueued) {
+          bar.style.opacity = '0';
+          this._progressFadeTimeout = setTimeout(() => {
             bar.style.width = '0%';
             this.completedCount = 0;
             this.totalEnqueued = 0;
-          }
-        }, 500);
-      }, 300);
+            if (this._trackedPaths) this._trackedPaths.clear();
+            this._progressFadeTimeout = null;
+          }, 500);
+        }, 300);
+      }
+    } else if (this._progressFadeTimeout) {
+      // 完了前に新たな追跡タスクが追加された場合のみフェードアウトをキャンセル
+      clearTimeout(this._progressFadeTimeout);
+      this._progressFadeTimeout = null;
     }
   }
 
@@ -554,6 +608,13 @@ export class ThumbnailQueueManager {
     this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
     this.priorityQueueSet.delete(filePath);
     this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
+    if (this._trackedPaths && this._trackedPaths.has(filePath)) {
+      this._trackedPaths.delete(filePath);
+      if (this.totalEnqueued > 0) {
+        this.totalEnqueued--;
+        this.updateProgressBar();
+      }
+    }
 
     // リトライカウントをリセット（書き込み完了後の新規ファイルを正しく処理するため）
     if (this._retryMap) {
@@ -601,6 +662,11 @@ export class ThumbnailQueueManager {
           this.priorityQueueSet.delete(req.filePath); // Set との整合性を維持
           
           if (appState.thumbnailUrls.has(req.filePath)) {
+            if (this._trackedPaths && this._trackedPaths.has(req.filePath)) {
+              this._trackedPaths.delete(req.filePath);
+              this.completedCount++;
+              this.updateProgressBar();
+            }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(req.filePath);
             continue;
           }
@@ -649,6 +715,11 @@ export class ThumbnailQueueManager {
           while (this.preloadQueue.length > 0) {
             const p = this.preloadQueue.shift();
             if (appState.thumbnailUrls.has(p)) {
+              if (this._trackedPaths && this._trackedPaths.has(p)) {
+                this._trackedPaths.delete(p);
+                this.completedCount++;
+                this.updateProgressBar();
+              }
               if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
             } else if (!this.activeTasks.has(p)) {
               targetFile = p;
@@ -690,9 +761,9 @@ export class ThumbnailQueueManager {
     let fallbackToSvg = false;
 
     try {
-      // 1. Rust からキャッシュ取得試行（未キャッシュ確定時は不要なIPCラウンドトリップをスキップ）
+      // 1. Rust からキャッシュ取得試行（未キャッシュ確定時または再構築中は不要なIPCラウンドトリップをスキップ）
       let url = null;
-      if (!skipDbCheck) {
+      if (!skipDbCheck && !(appState.rebuiltPaths && appState.rebuiltPaths.has(filePath))) {
         url = await window.veloceAPI.getThumbnail(filePath);
       }
       
@@ -706,7 +777,27 @@ export class ThumbnailQueueManager {
         const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
         const { url: blobUrl, base64Promise, width, height } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
         
-        if (signal.aborted) return;
+        // 生成完了後のBase64変換・DB保存は、フォルダ移動（signal.aborted）にかかわらず確実にコミットする
+        if (base64Promise && typeof base64Promise.then === 'function') {
+          base64Promise.then(base64Url => {
+            window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
+              if (signal.aborted) return;
+              const lightUrl = savedUrl || blobUrl;
+              if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
+                appState.thumbnailUrls.set(filePath, lightUrl);
+                if (window.evictThumbnailCache) window.evictThumbnailCache();
+              }
+            }).catch(err => console.warn('Cache save error:', err));
+          }).catch(err => console.warn('Base64 conversion error:', err));
+        }
+
+        if (signal.aborted) {
+          if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
+            appState.rebuiltPaths.delete(filePath);
+          }
+          return;
+        }
+
         if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
           URL.revokeObjectURL(blobUrl);
           throw new Error('Task invalidated by file-changed');
@@ -725,23 +816,16 @@ export class ThumbnailQueueManager {
             window.veloceAPI.updateFileDimensions(filePath, width, height);
           }
         }
-
-        // バックグラウンドでBase64変換しRustに保存。
-        base64Promise.then(base64Url => {
-          if (signal.aborted) return;
-          window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
-            if (signal.aborted) return;
-            const lightUrl = savedUrl || blobUrl;
-            if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
-              appState.thumbnailUrls.set(filePath, lightUrl);
-              if (window.evictThumbnailCache) window.evictThumbnailCache();
-            }
-          }).catch(err => console.warn('Cache save error:', err));
-        }).catch(err => console.warn('Base64 conversion error:', err));
         
+        if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
+          appState.rebuiltPaths.delete(filePath);
+        }
         return; // 早期リターン
       }
 
+      if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
+        appState.rebuiltPaths.delete(filePath);
+      }
       appState.thumbnailUrls.set(filePath, url);
       evictThumbnailCache();
       this.updateDOM(filePath, url);
@@ -774,8 +858,12 @@ export class ThumbnailQueueManager {
     } finally {
       if (!signal.aborted) {
         this.activeTasks.delete(filePath);
-        this.completedCount++;
-        this.updateProgressBar();
+        const isTracked = this._trackedPaths && this._trackedPaths.has(filePath);
+        if (isTracked) {
+          this._trackedPaths.delete(filePath);
+          this.completedCount++;
+          this.updateProgressBar();
+        }
 
         if (fallbackToSvg) {
           // 3回失敗: SVGフォールバックを表示し、thumbnailUrlsにもセットして無限リトライを防ぐ

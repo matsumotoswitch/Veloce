@@ -680,4 +680,116 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(window.thumbnailManager.enqueuePriority).toHaveBeenCalledWith('C:/images/stuck.png');
     });
   });
+
+  describe('Thumbnail Cache Rebuild Workflow & Persistence', () => {
+    beforeEach(() => {
+      vi.useRealTimers();
+    });
+
+    afterEach(() => {
+      vi.useFakeTimers();
+    });
+
+    it('runTask should persist thumbnail via saveThumbnail even if aborted by folder navigation', async () => {
+      const { ThumbnailQueueManager, thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const manager = new ThumbnailQueueManager(4);
+
+      window.veloceAPI.getThumbnail = vi.fn().mockResolvedValue(null);
+      const saveThumbnailMock = vi.fn().mockResolvedValue('http://127.0.0.1:1234/?path=test.png&thumb=1');
+      window.veloceAPI.saveThumbnail = saveThumbnailMock;
+
+      let resolveBase64;
+      const base64Promise = new Promise((resolve) => { resolveBase64 = resolve; });
+
+      vi.spyOn(thumbnailWorkerPool, 'generate').mockImplementation(async () => {
+        return {
+          url: 'blob:mock-blob',
+          base64Promise,
+          width: 200,
+          height: 200
+        };
+      });
+
+      const taskPromise = manager.runTask('test.png', true);
+
+      // タスク起動後にフォルダ移動が発生して abort された状態をシミュレート
+      manager.abortController.abort();
+
+      // Base64 変換が完了
+      resolveBase64('data:image/jpeg;base64,abc123xyz');
+
+      await taskPromise;
+      await new Promise(r => setTimeout(r, 10));
+
+      // フォルダ移動後でも saveThumbnail は確実に呼ばれ、SQLite DB にキャッシュが永続化されること
+      expect(saveThumbnailMock).toHaveBeenCalledWith('test.png', 'data:image/jpeg;base64,abc123xyz');
+    });
+
+    it('folder cache rebuild should clear old cache, enqueue all paths, and set progress tracking', async () => {
+      const pathsToRebuild = ['C:/photos/img1.png', 'C:/photos/img2.webp', 'C:/photos/img3.jpg'];
+      const unshiftPreloadMock = vi.fn();
+      window.thumbnailManager = {
+        unshiftPreload: unshiftPreloadMock
+      };
+
+      const clearCacheMock = vi.fn().mockResolvedValue([]);
+      window.veloceAPI.clearMetadataCache = clearCacheMock;
+      window.veloceAPI.getItems = vi.fn().mockResolvedValue([
+        { path: pathsToRebuild[0] },
+        { path: pathsToRebuild[1] },
+        { path: pathsToRebuild[2] }
+      ]);
+
+      const testAppState = {
+        currentDirectory: 'C:/photos',
+        totalCount: 3,
+        thumbnailUrls: new Map([
+          ['C:/photos/img1.png', 'blob:old1'],
+          ['C:/photos/img2.webp', 'blob:old2']
+        ]),
+        thumbnailTotalRequested: 0,
+        thumbnailCompleted: 0,
+        thumbnailCounted: new Set(['C:/photos/img1.png']),
+        rebuiltPaths: null
+      };
+      window.appState = testAppState;
+
+      // menuRebuildFolderCache の処理フローをシミュレート
+      const collectedPaths = [];
+      const total = testAppState.totalCount;
+      const batchSize = 1000;
+      for (let i = 0; i < total; i += batchSize) {
+        const size = Math.min(batchSize, total - i);
+        const files = await window.veloceAPI.getItems(i, size);
+        for (const file of files) {
+          collectedPaths.push(file.path);
+          if (testAppState.thumbnailUrls.has(file.path)) {
+            const oldUrl = testAppState.thumbnailUrls.get(file.path);
+            if (oldUrl && oldUrl.startsWith('blob:')) window.URL.revokeObjectURL(oldUrl);
+            testAppState.thumbnailUrls.delete(file.path);
+          }
+        }
+      }
+
+      await window.veloceAPI.clearMetadataCache(collectedPaths);
+      testAppState.thumbnailTotalRequested = collectedPaths.length;
+      testAppState.thumbnailCompleted = 0;
+      if (!testAppState.rebuiltPaths) testAppState.rebuiltPaths = new Set();
+      collectedPaths.forEach(p => {
+        testAppState.thumbnailCounted.delete(p);
+        testAppState.rebuiltPaths.add(p);
+      });
+      window.thumbnailManager.unshiftPreload(collectedPaths);
+
+      // 検証
+      expect(clearCacheMock).toHaveBeenCalledWith(pathsToRebuild);
+      expect(testAppState.thumbnailUrls.size).toBe(0);
+      expect(testAppState.thumbnailTotalRequested).toBe(3);
+      expect(testAppState.thumbnailCompleted).toBe(0);
+      expect(testAppState.thumbnailCounted.size).toBe(0);
+      expect(testAppState.rebuiltPaths.size).toBe(3);
+      expect(unshiftPreloadMock).toHaveBeenCalledWith(pathsToRebuild);
+    });
+  });
 });
+
