@@ -266,4 +266,10 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/\.rating-badge\.rating-hide\s*\{[^}]*animation:\s*rating-hide\s+0\.28s\s+var\(--transition-fast\)\s+forwards;/);
     expect(cssContent).toMatch(/#viewer-flash-effect\s*\{[^}]*transition:[^}]*var\(--transition-glow\)/);
   });
+
+  it('should use rgba(var(--accent-rgb), 0.35) for bookmark-item.selected gradient without hardcoded RGB values', () => {
+    expect(cssContent).toMatch(/\.bookmark-item\.selected\s*\{[^}]*background:\s*linear-gradient\(135deg,\s*rgba\(var\(--accent-rgb\),\s*0\.25\),\s*rgba\(var\(--accent-rgb\),\s*0\.35\)\);/);
+    expect(cssContent).not.toContain('rgba(28, 94, 105');
+  });
 });
+

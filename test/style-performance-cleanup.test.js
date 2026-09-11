@@ -42,6 +42,11 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(cssContent).toMatch(/outline-glow-anim[\s\S]*?filter:\s*drop-shadow\(0 0 1px var\(--text-light\)\)/);
       expect(cssContent).toMatch(/outline-glow-text-anim[\s\S]*?text-shadow:\s*0 0 2px var\(--text-light\)/);
     });
+
+    it('should tokenize bookmark-item.selected gradient and eliminate hardcoded rgba(28, 94, 105, ...)', () => {
+      expect(cssContent).toMatch(/\.bookmark-item\.selected\s*\{[^}]*background:\s*linear-gradient\(135deg,\s*rgba\(var\(--accent-rgb\),\s*0\.25\),\s*rgba\(var\(--accent-rgb\),\s*0\.35\)\);/);
+      expect(cssContent).not.toContain('28, 94, 105');
+    });
   });
 
   describe('2. Modal & Dialog Uniformity (AGENTS.md Sec 2)', () => {
