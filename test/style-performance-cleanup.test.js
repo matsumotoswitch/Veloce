@@ -102,6 +102,11 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(rendererUiJsContent).toContain('list-spacer-cell');
       expect(rendererUiJsContent).not.toContain('<tr class="list-top-spacer" style="border: none; padding: 0;">');
     });
+
+    it('should eliminate inline cubic-bezier transition override on flash effect in viewer.js', () => {
+      expect(viewerJsContent).not.toMatch(/flash\.style\.transition\s*=\s*['"][^'"]*cubic-bezier/);
+      expect(viewerJsContent).toContain("flash.style.transition = '';");
+    });
   });
 
   describe('4. Performance & DOM Optimizations', () => {

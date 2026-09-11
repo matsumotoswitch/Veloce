@@ -1711,7 +1711,7 @@ window.addEventListener('keydown', async (e) => {
       
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          flash.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
+          flash.style.transition = '';
           flash.style.opacity = '0';
         });
       });

@@ -155,4 +155,15 @@ describe('Viewer UI Visibility', () => {
     expect(cssContent).toMatch(/\.viewer-body #window-controls\s*\{[^}]*align-items:\s*center;/);
     expect(viewerJsContent).not.toContain("infoContainer.style.height = '30px'");
   });
+
+  it('should use CSS transition token for #viewer-flash-effect and avoid inline cubic-bezier in viewer.js', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
+    const cssContent = getFullCssContent();
+
+    expect(cssContent).toMatch(/#viewer-flash-effect\s*\{[^}]*transition:\s*opacity\s+0\.6s\s+var\(--transition-glow\);/);
+    expect(viewerJsContent).not.toMatch(/flash\.style\.transition\s*=\s*['"][^'"]*cubic-bezier/);
+    expect(viewerJsContent).toContain("flash.style.transition = '';");
+  });
 });
