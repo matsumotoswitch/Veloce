@@ -1079,7 +1079,7 @@ fn load_directory(
                 // 一括DB確認: hash_key IN (...) でチャンク分割クエリ
                 // hash_key = xxh3_64("path_mtime") の形式で登録されている
                 let hash_to_idx: std::collections::HashMap<String, usize> = files
-                    .iter()
+                    .par_iter()
                     .enumerate()
                     .map(|(i, f)| {
                         let clean = f.path.replace("\\\\?\\", "");
@@ -2614,57 +2614,92 @@ fn extract_stealth_pnginfo(path: &str) -> Option<String> {
     let img = image::open(path).ok()?.into_rgba8();
     let width = img.width() as usize;
     let height = img.height() as usize;
+    let total_pixels = width * height;
     let raw = img.into_raw();
 
-    // アルファチャンネルの最下位ビットを抽出（Column-Major Order: x -> y）
-    let mut bits = Vec::with_capacity(width * height);
-    for x in 0..width {
-        for y in 0..height {
-            let idx = (y * width + x) * 4 + 3;
-            if idx < raw.len() {
-                bits.push(raw[idx] & 1);
-            }
-        }
-    }
-
-    // 8ビットずつ結合してバイト配列に変換（MSB first）
-    let mut bytes = Vec::with_capacity(bits.len() / 8);
-    for chunk in bits.chunks_exact(8) {
-        let mut b = 0u8;
-        for (i, bit) in chunk.iter().enumerate() {
-            b |= bit << (7 - i);
-        }
-        bytes.push(b);
-    }
-
-    if bytes.len() < 30 {
+    // 署名（15バイト）+ 長さ（4バイト）= 19バイト = 152ビット
+    if total_pixels < 152 || raw.len() < total_pixels * 4 {
         return None;
     }
 
-    let header = String::from_utf8_lossy(&bytes[0..15]);
-    if header == "stealth_pngcomp" {
-        // stealth_pngcomp の場合、15〜19バイト目にビッグエンディアンで長さが入る
-        let len_bytes: [u8; 4] = bytes[15..19].try_into().ok()?;
-        let length = u32::from_be_bytes(len_bytes) as usize;
-
-        if 19 + length <= bytes.len() {
-            let payload = &bytes[19..19 + length];
-            let mut decoder = GzDecoder::new(payload);
-            let mut decompressed = String::new();
-            if decoder.read_to_string(&mut decompressed).is_ok() {
-                return Some(decompressed);
+    // 1. 先頭19バイト（152ピクセル）を走査してシグネチャを早期判定
+    // 通常のプロンプトなし画像の場合、全画素の走査ループと巨大ベクタ割り当てを完全にスキップ
+    let mut header_bytes = [0u8; 19];
+    let mut bit_idx = 0;
+    'header_loop: for x in 0..width {
+        for y in 0..height {
+            let idx = (y * width + x) * 4 + 3;
+            let bit = raw[idx] & 1;
+            let byte_pos = bit_idx / 8;
+            let bit_pos = 7 - (bit_idx % 8);
+            header_bytes[byte_pos] |= bit << bit_pos;
+            bit_idx += 1;
+            if bit_idx >= 152 {
+                break 'header_loop;
             }
         }
-    } else if header == "stealth_pnginfo" {
-        // 非圧縮のstealth_pnginfo（念のためのフォールバック）
-        let len_bytes: [u8; 4] = bytes[15..19].try_into().ok()?;
-        let length = u32::from_be_bytes(len_bytes) as usize;
+    }
 
-        if 19 + length <= bytes.len() {
-            let payload = &bytes[19..19 + length];
-            if let Ok(text) = String::from_utf8(payload.to_vec()) {
-                return Some(text);
+    let is_comp = &header_bytes[0..15] == b"stealth_pngcomp";
+    let is_raw = &header_bytes[0..15] == b"stealth_pnginfo";
+    if !is_comp && !is_raw {
+        // 通常の画像は即座に早期リターン
+        return None;
+    }
+
+    // 2. ペイロード長を取得し、必要なピクセル数のみを走査
+    let len_bytes: [u8; 4] = header_bytes[15..19].try_into().ok()?;
+    let length = u32::from_be_bytes(len_bytes) as usize;
+    let total_needed_bytes = 19 + length;
+    let total_needed_bits = total_needed_bytes.checked_mul(8)?;
+
+    if total_pixels < total_needed_bits {
+        return None;
+    }
+
+    let mut payload_bytes = Vec::with_capacity(total_needed_bytes);
+    payload_bytes.extend_from_slice(&header_bytes);
+
+    let mut current_byte = 0u8;
+    let mut current_bit_count = 0;
+    let mut current_bit_idx = 0;
+
+    'payload_loop: for x in 0..width {
+        for y in 0..height {
+            if current_bit_idx < 152 {
+                current_bit_idx += 1;
+                continue;
             }
+            let idx = (y * width + x) * 4 + 3;
+            let bit = raw[idx] & 1;
+            current_byte |= bit << (7 - current_bit_count);
+            current_bit_count += 1;
+            if current_bit_count == 8 {
+                payload_bytes.push(current_byte);
+                current_byte = 0;
+                current_bit_count = 0;
+                if payload_bytes.len() >= total_needed_bytes {
+                    break 'payload_loop;
+                }
+            }
+        }
+    }
+
+    if payload_bytes.len() < total_needed_bytes {
+        return None;
+    }
+
+    let payload = &payload_bytes[19..total_needed_bytes];
+
+    if is_comp {
+        let mut decoder = GzDecoder::new(payload);
+        let mut decompressed = String::new();
+        if decoder.read_to_string(&mut decompressed).is_ok() {
+            return Some(decompressed);
+        }
+    } else if is_raw {
+        if let Ok(text) = String::from_utf8(payload.to_vec()) {
+            return Some(text);
         }
     }
 
@@ -5140,6 +5175,7 @@ fn main() {
                     std::collections::HashMap::new();
                 let mut known_folders: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
+                let mut idle_cycles: u32 = 0;
 
                 loop {
                     let current_dir = {
@@ -5184,9 +5220,12 @@ fn main() {
                         dir_changed = true;
                     }
 
+                    // 安定状態ではポーリング待機時間を最大1000msへ緩和し、待機時ディスクI/Oを抑制
+                    let poll_timeout_ms = if idle_cycles >= 2 { 1000 } else { 500 };
+
                     // Wait for events
                     let mut rx_ready = false;
-                    if let Ok(_) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                    if let Ok(_) = rx.recv_timeout(std::time::Duration::from_millis(poll_timeout_ms)) {
                         rx_ready = true;
                         std::thread::sleep(std::time::Duration::from_millis(100)); // Debounce
                         while let Ok(_) = rx.try_recv() {}
@@ -5212,8 +5251,10 @@ fn main() {
                     }
 
                     if !dir_changed && !rx_ready {
+                        idle_cycles = idle_cycles.saturating_add(1);
                         continue;
                     }
+                    idle_cycles = 0;
 
                     let current_dir = {
                         let state = app_handle.state::<AppState>();
@@ -7734,6 +7775,124 @@ mod viewer_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_stealth_pnginfo_early_exit_on_normal_image() {
+        // 通常の画像（Stealth PNGInfoを持たないRGBA画像）を作成
+        let width = 20u32;
+        let height = 20u32;
+        let mut img = image::RgbaImage::new(width, height);
+        for pixel in img.pixels_mut() {
+            *pixel = image::Rgba([255, 128, 64, 255]);
+        }
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_normal_no_stealth.png");
+        img.save(&test_file).unwrap();
+
+        let result = extract_stealth_pnginfo(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert!(result.is_none(), "通常の画像では早期ヘッダー判定により即座に None が返ること");
+    }
+
+    #[test]
+    fn test_stealth_pnginfo_valid_payload_decompression() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let sample_prompt = "1girl, solo, masterpiece, anime style, highly detailed";
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(sample_prompt.as_bytes()).unwrap();
+        let compressed_payload = encoder.finish().unwrap();
+
+        let mut payload_bytes = Vec::new();
+        payload_bytes.extend_from_slice(b"stealth_pngcomp");
+        payload_bytes.extend_from_slice(&(compressed_payload.len() as u32).to_be_bytes());
+        payload_bytes.extend_from_slice(&compressed_payload);
+
+        // ビット列に変換
+        let mut bits = Vec::new();
+        for b in payload_bytes {
+            for i in 0..8 {
+                bits.push((b >> (7 - i)) & 1);
+            }
+        }
+
+        let width = 50u32;
+        let height = 50u32;
+        let mut img = image::RgbaImage::new(width, height);
+
+        // Column-Major (x -> y) でアルファ最下位ビットに埋め込む
+        let mut bit_idx = 0;
+        for x in 0..width {
+            for y in 0..height {
+                let bit = if bit_idx < bits.len() { bits[bit_idx] } else { 0 };
+                bit_idx += 1;
+                img.put_pixel(x, y, image::Rgba([100, 150, 200, 254 | bit]));
+            }
+        }
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_valid_stealth.png");
+        img.save(&test_file).unwrap();
+
+        let result = extract_stealth_pnginfo(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert_eq!(result.as_deref(), Some(sample_prompt), "Stealth PNGInfo からプロンプトが正確に解凍・抽出されること");
+    }
+
+    #[test]
+    fn test_load_directory_parallel_hash_keys() {
+        use rayon::prelude::*;
+
+        let dummy_files: Vec<ImageFile> = (0..500).map(|i| ImageFile {
+            name: format!("image_{:04}.png", i),
+            ext: ".png".to_string(),
+            path: format!("C:\\images\\sub\\image_{:04}.png", i),
+            size: 1024 * i as u64,
+            mtime: 1700000000 + i as u64,
+            ctime: 1700000000 + i as u64,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 800,
+            height: 600,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+        }).collect();
+
+        // シーケンシャル計算
+        let seq_map: std::collections::HashMap<String, usize> = dummy_files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let clean = f.path.replace("\\\\?\\", "");
+                let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean, f.mtime).as_bytes());
+                (format!("{:016x}", digest), i)
+            })
+            .collect();
+
+        // Rayon 並列計算
+        let par_map: std::collections::HashMap<String, usize> = dummy_files
+            .par_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let clean = f.path.replace("\\\\?\\", "");
+                let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean, f.mtime).as_bytes());
+                (format!("{:016x}", digest), i)
+            })
+            .collect();
+
+        assert_eq!(seq_map.len(), 500);
+        assert_eq!(par_map.len(), 500);
+        assert_eq!(seq_map, par_map, "並列ハッシュ生成とシーケンシャル生成の結果が完全に一致すること");
     }
 }
 
