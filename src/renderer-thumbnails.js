@@ -308,19 +308,32 @@ class ThumbnailWorkerPool {
         
         const blobUrl = URL.createObjectURL(outBlob);
         
-        const base64Promise = new Promise((resolveB64, rejectB64) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            resolveB64(reader.result);
-          };
-          reader.onerror = () => {
-            rejectB64(new Error("FileReader failed"));
-          };
-          reader.readAsDataURL(outBlob);
-        });
+        // Base64 変換の遅延評価（Lazy Promise）:
+        // バイナリストリーム送信時は FileReader による不要な Base64 文字列生成とヒープ割り当て・GCを完全に回避する
+        let cachedBase64Promise = null;
+        const base64Promise = {
+          then(onFulfilled, onRejected) {
+            if (!cachedBase64Promise) {
+              cachedBase64Promise = new Promise((resolveB64, rejectB64) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  resolveB64(reader.result);
+                };
+                reader.onerror = () => {
+                  rejectB64(new Error("FileReader failed"));
+                };
+                reader.readAsDataURL(outBlob);
+              });
+            }
+            return cachedBase64Promise.then(onFulfilled, onRejected);
+          },
+          catch(onRejected) {
+            return this.then(null, onRejected);
+          }
+        };
 
         clearTimeout(timeoutId);
-        resolve({ url: blobUrl, base64Promise, width: originalWidth, height: originalHeight });
+        resolve({ url: blobUrl, blob: outBlob, base64Promise, width: originalWidth, height: originalHeight });
       } catch (err) {
         reject(err);
       } finally {
@@ -443,6 +456,50 @@ function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
     window.veloceAPI.getThumbnail(filePath),
     new Promise((_, reject) => setTimeout(() => reject(new Error('Thumbnail timeout')), timeoutMs))
   ]);
+}
+
+/**
+ * サムネイルのバイナリ Blob をローカル HTTP サーバーへ直接 POST 送信して SQLite へ保存する。
+ * Base64 文字列生成やデコードを完全に排除し、通信データ量と GC 負荷を削減する。
+ * HTTP サーバーが利用できない場合（テスト環境等）は従来の Base64 IPC に安全にフォールバックする。
+ * @param {string} filePath - 保存先画像ファイルパス
+ * @param {Blob} [blob] - 生成された JPEG/PNG の生 Blob
+ * @param {Promise<string>} [base64Promise] - フォールバック用の Base64 Promise
+ * @returns {Promise<string|null>} 保存完了後の即時参照用URL（またはnull）
+ */
+export async function saveThumbnailBinary(filePath, blob, base64Promise) {
+  const port = window.videoServerPort;
+  if (port && typeof fetch === 'function' && blob) {
+    try {
+      const targetUrl = `http://127.0.0.1:${port}/save-thumbnail?path=${encodeURIComponent(filePath)}`;
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream'
+        },
+        body: blob
+      });
+      if (response.ok) {
+        const savedUrl = await response.text();
+        return savedUrl;
+      }
+    } catch (e) {
+      console.warn('[Thumbnail] Binary save failed, falling back to IPC:', e);
+    }
+  }
+
+  // フォールバック: 従来の Base64 + Tauri IPC
+  if (base64Promise && typeof base64Promise.then === 'function') {
+    try {
+      const b64 = await base64Promise;
+      if (window.veloceAPI && typeof window.veloceAPI.saveThumbnail === 'function') {
+        return await window.veloceAPI.saveThumbnail(filePath, b64);
+      }
+    } catch (err) {
+      console.warn('[Thumbnail] Fallback saveThumbnail error:', err);
+    }
+  }
+  return null;
 }
 
 export class ThumbnailQueueManager {
@@ -775,21 +832,17 @@ export class ThumbnailQueueManager {
       // 2. キャッシュがない場合、非同期に生成
       if (!url) {
         const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
-        const { url: blobUrl, base64Promise, width, height } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
+        const { url: blobUrl, blob: outBlob, base64Promise, width, height } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
         
-        // 生成完了後のBase64変換・DB保存は、フォルダ移動（signal.aborted）にかかわらず確実にコミットする
-        if (base64Promise && typeof base64Promise.then === 'function') {
-          base64Promise.then(base64Url => {
-            window.veloceAPI.saveThumbnail(filePath, base64Url).then((savedUrl) => {
-              if (signal.aborted) return;
-              const lightUrl = savedUrl || blobUrl;
-              if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
-                appState.thumbnailUrls.set(filePath, lightUrl);
-                if (window.evictThumbnailCache) window.evictThumbnailCache();
-              }
-            }).catch(err => console.warn('Cache save error:', err));
-          }).catch(err => console.warn('Base64 conversion error:', err));
-        }
+        // 生成完了後のバイナリ直接送信（またはフォールバック保存）は、フォルダ移動（signal.aborted）にかかわらず確実にコミットする
+        saveThumbnailBinary(filePath, outBlob, base64Promise).then((savedUrl) => {
+          if (signal.aborted) return;
+          const lightUrl = savedUrl || blobUrl;
+          if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
+            appState.thumbnailUrls.set(filePath, lightUrl);
+            if (window.evictThumbnailCache) window.evictThumbnailCache();
+          }
+        }).catch(err => console.warn('Cache save error:', err));
 
         if (signal.aborted) {
           if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {

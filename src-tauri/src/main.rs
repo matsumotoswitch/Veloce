@@ -4552,7 +4552,10 @@ fn get_video_server_port(state: tauri::State<'_, AppState>) -> u16 {
     state.video_server_port
 }
 
-fn start_local_video_server() -> u16 {
+fn start_local_video_server(
+    db_tx: tokio::sync::mpsc::Sender<DbMsg>,
+    app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>>,
+) -> u16 {
     use std::net::TcpListener;
     use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
     use std::fs::File;
@@ -4563,6 +4566,8 @@ fn start_local_video_server() -> u16 {
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {
+                let db_tx = db_tx.clone();
+                let app_handle_slot = app_handle_slot.clone();
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(&mut stream);
                     let mut request_line = String::new();
@@ -4579,13 +4584,110 @@ fn start_local_video_server() -> u16 {
                         let mut headers = String::new();
                         headers.push_str("HTTP/1.1 200 OK\r\n");
                         headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                        headers.push_str("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
-                        headers.push_str("Access-Control-Allow-Headers: Range, Content-Type\r\n");
+                        headers.push_str("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
+                        headers.push_str("Access-Control-Allow-Headers: Range, Content-Type, Content-Length\r\n");
                         headers.push_str("Access-Control-Max-Age: 86400\r\n");
                         headers.push_str("Connection: close\r\n\r\n");
                         let _ = stream.write_all(headers.as_bytes());
                         return;
                     }
+
+                    // POST /save-thumbnail?path=...[&mtime=...]
+                    // 生のバイナリBlobを直接受け取り、Base64デコードのオーバーヘッドなしでSQLiteへ非同期投入する
+                    if method == "POST" && uri.starts_with("/save-thumbnail") {
+                        let mut path_str = String::new();
+                        let mut mtime: u64 = 0;
+                        if let Some(query) = uri.split('?').nth(1) {
+                            for pair in query.split('&') {
+                                if pair.starts_with("path=") {
+                                    path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                                } else if pair.starts_with("mtime=") {
+                                    mtime = pair[6..].parse().unwrap_or(0);
+                                }
+                            }
+                        }
+
+                        if path_str.is_empty() {
+                            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                            return;
+                        }
+
+                        let mut content_length: usize = 0;
+                        loop {
+                            let mut header_line = String::new();
+                            if reader.read_line(&mut header_line).is_err() { break; }
+                            let trimmed = header_line.trim();
+                            if trimmed.is_empty() { break; }
+                            let lower = trimmed.to_lowercase();
+                            if lower.starts_with("content-length:") {
+                                content_length = lower["content-length:".len()..].trim().parse().unwrap_or(0);
+                            }
+                        }
+
+                        // サムネイルバイナリは最大10MBを上限として安全確認
+                        if content_length == 0 || content_length > 10 * 1024 * 1024 {
+                            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                            return;
+                        }
+
+                        let mut body = vec![0u8; content_length];
+                        if reader.read_exact(&mut body).is_err() {
+                            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                            return;
+                        }
+
+                        if mtime == 0 {
+                            use tauri::Manager;
+                            if let Ok(handle_guard) = app_handle_slot.lock() {
+                                if let Some(app_handle) = handle_guard.as_ref() {
+                                    let state = app_handle.state::<AppState>();
+                                    mtime = state.get_mtime(&path_str).unwrap_or(0);
+                                }
+                            }
+                            if mtime == 0 {
+                                mtime = std::fs::metadata(&path_str)
+                                    .and_then(|m| m.modified())
+                                    .unwrap_or(std::time::UNIX_EPOCH)
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as u64;
+                            }
+                        }
+
+                        let clean_path = path_str.replace("\\\\?\\", "");
+                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
+                        let hash_key = format!("{:016x}", digest);
+
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                        let _ = db_tx.blocking_send(DbMsg::SaveThumbnail {
+                            hash_key,
+                            path: clean_path.clone(),
+                            mtime,
+                            bytes: body,
+                            now,
+                        });
+
+                        // AppState のメモリ上キャッシュフラグを即時反映
+                        use tauri::Manager;
+                        if let Ok(handle_guard) = app_handle_slot.lock() {
+                            if let Some(app_handle) = handle_guard.as_ref() {
+                                let state = app_handle.state::<AppState>();
+                                state.mark_thumbnail_cached(&path_str);
+                            }
+                        }
+
+                        let saved_url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", port, urlencoding::encode(&path_str), mtime);
+                        let mut resp = String::new();
+                        resp.push_str("HTTP/1.1 200 OK\r\n");
+                        resp.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+                        resp.push_str("Access-Control-Allow-Origin: *\r\n");
+                        resp.push_str(&format!("Content-Length: {}\r\n", saved_url.len()));
+                        resp.push_str("Connection: close\r\n\r\n");
+                        resp.push_str(&saved_url);
+                        let _ = stream.write_all(resp.as_bytes());
+                        return;
+                    }
+
                     let mut path_str = String::new();
                     let mut is_thumb = false;
                     let mut mtime: u64 = 0;
@@ -4734,7 +4836,13 @@ fn main() {
         let _ = windows::Win32::System::Console::AttachConsole(windows::Win32::System::Console::ATTACH_PARENT_PROCESS);
     }
 
-    let video_port = start_local_video_server();
+    let db_conn = init_db().expect("Failed to initialize SQLite database");
+    let db_conn_worker = db_conn.clone();
+    let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(4096);
+
+    let app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let video_port = start_local_video_server(db_tx.clone(), app_handle_slot.clone());
 
     let mut context = tauri::generate_context!();
 
@@ -4866,10 +4974,6 @@ fn main() {
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
         });
         
-    let db_conn = init_db().expect("Failed to initialize SQLite database");
-    let db_conn_worker = db_conn.clone();
-    let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(4096);
-
     std::thread::spawn(move || {
         while let Some(first_msg) = db_rx.blocking_recv() {
             let mut batch = Vec::with_capacity(64);
@@ -4911,6 +5015,8 @@ fn main() {
         }
     });
 
+    let app_handle_slot_setup = app_handle_slot.clone();
+
     builder
         .manage(AppState {
             image_paths: Mutex::new(Vec::new()),
@@ -4936,8 +5042,12 @@ fn main() {
             video_server_port: video_port,
         })
         .setup(move |app| {
-            // SQLite からレーティング情報を非同期でメモリにロード（起動高速化のため）
             let app_handle = app.handle();
+            if let Ok(mut slot) = app_handle_slot_setup.lock() {
+                *slot = Some(app_handle.clone());
+            }
+
+            // SQLite からレーティング情報を非同期でメモリにロード（起動高速化のため）
             
             std::thread::spawn(move || {
                 // 初回のディレクトリロードI/Oを優先するため、少し遅延させる
@@ -7564,6 +7674,66 @@ mod viewer_tests {
         assert_eq!(h, 600, "IHDRからheightがゼロコピー抽出されること");
         assert_eq!(chunks.get("Title").map(|s| s.as_str()), Some("Veloce Test"), "tEXtチャンクが抽出されること");
         assert_eq!(chunks.get("Description").map(|s| s.as_str()), Some("NovelAI Prompt Test"), "iTXtチャンクが抽出されること");
+    }
+
+    #[test]
+    fn test_local_server_post_save_thumbnail() {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+
+        let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
+        let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let port = start_local_video_server(db_tx, app_handle_slot);
+
+        // 1. OPTIONS プリフライトの検証
+        {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let options_req = format!(
+                "OPTIONS /save-thumbnail HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                port
+            );
+            stream.write_all(options_req.as_bytes()).unwrap();
+
+            let mut resp = String::new();
+            stream.read_to_string(&mut resp).unwrap();
+            assert!(resp.starts_with("HTTP/1.1 200 OK"), "OPTIONS が 200 OK を返すこと");
+            assert!(resp.contains("POST"), "CORS ヘッダーで POST が許可されていること");
+        }
+
+        // 2. POST /save-thumbnail による生のバイナリ直接送信の検証
+        {
+            let dummy_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let test_path = "C:\\test\\sample_image.png";
+            let post_req_header = format!(
+                "POST /save-thumbnail?path={}&mtime=998877 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                urlencoding::encode(test_path),
+                port,
+                dummy_jpeg.len()
+            );
+
+            stream.write_all(post_req_header.as_bytes()).unwrap();
+            stream.write_all(&dummy_jpeg).unwrap();
+
+            let mut resp = String::new();
+            stream.read_to_string(&mut resp).unwrap();
+            assert!(resp.starts_with("HTTP/1.1 200 OK"), "POST が 200 OK を返すこと");
+            assert!(resp.contains("thumb=1"), "レスポンスにサムネイルURLが含まれていること");
+            assert!(resp.contains("mtime=998877"), "レスポンスURLにmtimeが含まれていること");
+
+            // db_rx に DbMsg::SaveThumbnail が正しく送信されているか検証
+            let msg = db_rx.try_recv().expect("db_tx に DbMsg::SaveThumbnail が投入されていること");
+            match msg {
+                DbMsg::SaveThumbnail { hash_key, path, mtime, bytes, .. } => {
+                    assert_eq!(path, test_path);
+                    assert_eq!(mtime, 998877);
+                    assert_eq!(bytes, dummy_jpeg, "Base64 デコードなしで生のバイナリがそのまま届いていること");
+                    let expected_digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", test_path, 998877).as_bytes());
+                    let expected_key = format!("{:016x}", expected_digest);
+                    assert_eq!(hash_key, expected_key, "xxh3 によるハッシュキーが整合していること");
+                }
+            }
+        }
     }
 }
 

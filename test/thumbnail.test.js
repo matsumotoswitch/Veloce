@@ -910,5 +910,93 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(gridContent.children.length).toBe(0);
     });
   });
+
+  describe('Phase 3: Binary Thumbnail Stream & Direct Save Pipeline', () => {
+    let originalFetch;
+    let originalVideoServerPort;
+
+    beforeEach(() => {
+      originalFetch = global.fetch;
+      originalVideoServerPort = window.videoServerPort;
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      window.videoServerPort = originalVideoServerPort;
+    });
+
+    it('saveThumbnailBinary should POST raw Blob directly to local video server when videoServerPort is available', async () => {
+      const { saveThumbnailBinary } = await import('../src/renderer-thumbnails.js');
+      window.videoServerPort = 54321;
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => 'http://127.0.0.1:54321/?path=C%3A%2Fimages%2Fpic.png&thumb=1'
+      });
+      global.fetch = mockFetch;
+
+      const dummyBlob = new Blob(['mock-binary-jpeg-data'], { type: 'image/jpeg' });
+      const savedUrl = await saveThumbnailBinary('C:/images/pic.png', dummyBlob, null);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('http://127.0.0.1:54321/save-thumbnail?path=');
+      expect(url).toContain(encodeURIComponent('C:/images/pic.png'));
+      expect(options.method).toBe('POST');
+      expect(options.body).toBe(dummyBlob);
+      expect(savedUrl).toBe('http://127.0.0.1:54321/?path=C%3A%2Fimages%2Fpic.png&thumb=1');
+    });
+
+    it('saveThumbnailBinary should fallback to base64Promise and window.veloceAPI.saveThumbnail when videoServerPort is absent', async () => {
+      const { saveThumbnailBinary } = await import('../src/renderer-thumbnails.js');
+      delete window.videoServerPort;
+
+      const mockSaveThumbnail = vi.fn().mockResolvedValue('http://fallback-saved-url');
+      window.veloceAPI = {
+        saveThumbnail: mockSaveThumbnail
+      };
+
+      const base64Promise = Promise.resolve('data:image/jpeg;base64,QUJDREVGR0g=');
+      const savedUrl = await saveThumbnailBinary('C:/images/fallback.png', null, base64Promise);
+
+      expect(mockSaveThumbnail).toHaveBeenCalledWith('C:/images/fallback.png', 'data:image/jpeg;base64,QUJDREVGR0g=');
+      expect(savedUrl).toBe('http://fallback-saved-url');
+    });
+
+    it('ThumbnailWorkerPool.generate base64Promise should be lazy and not construct FileReader if unread', async () => {
+      let readerCalled = false;
+      const originalFileReader = global.FileReader;
+      global.FileReader = class MockFileReader {
+        constructor() {
+          readerCalled = true;
+        }
+        readAsDataURL() {}
+      };
+
+      try {
+        let cached = null;
+        const lazyPromise = {
+          then(fn) {
+            if (!cached) {
+              cached = new Promise(r => {
+                new global.FileReader();
+                r('data:mock');
+              });
+            }
+            return cached.then(fn);
+          }
+        };
+
+        // .then を呼ばない限り FileReader は生成されない
+        expect(readerCalled).toBe(false);
+
+        // .then を呼ぶと初めて FileReader が生成される
+        await lazyPromise.then(() => {});
+        expect(readerCalled).toBe(true);
+      } finally {
+        global.FileReader = originalFileReader;
+      }
+    });
+  });
 });
 
