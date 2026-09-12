@@ -98,6 +98,10 @@ html.viewer-html,
   height: auto;
 }
 
+.viewer-body #border-overlay {
+  display: block;
+}
+
 .viewer-body #border-overlay.border-hidden {
   border: none !important;
 }

@@ -166,4 +166,14 @@ describe('Viewer UI Visibility', () => {
     expect(viewerJsContent).not.toMatch(/flash\.style\.transition\s*=\s*['"][^'"]*cubic-bezier/);
     expect(viewerJsContent).toContain("flash.style.transition = '';");
   });
+
+  it('should ensure viewer #border-overlay is displayed by default and hidden when border-hidden class is present', () => {
+    const cssContent = getFullCssContent();
+
+    // ビューアー画面で #border-overlay が display: block に設定されていること
+    expect(cssContent).toMatch(/\.viewer-body #border-overlay\s*\{[^}]*display:\s*block;/);
+
+    // border-hidden クラス付与時は border: none !important となること
+    expect(cssContent).toMatch(/\.viewer-body #border-overlay\.border-hidden\s*\{[^}]*border:\s*none\s*!important;/);
+  });
 });
