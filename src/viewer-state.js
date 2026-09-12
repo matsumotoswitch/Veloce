@@ -26,6 +26,7 @@ class ViewerState {
     this.lastFocusTime = 0;         // ウィンドウが最後にフォーカスを取得した時刻
     this.ignoreNextClick = false;   // フォーカス目的のクリックを無視するためのフラグ
     this.preloadCache = new Map();  // 前後の画像のプリロードキャッシュ
+    this.lastDirection = 1;         // 直近のナビゲーション進行方向 (1: 次へ/前進, -1: 前へ/後退)
   }
 }
 

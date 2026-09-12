@@ -532,6 +532,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
         cleanupCurrentImage();
         clearPreloadCache();
+        viewerState.lastDirection = 1;
         viewerState.paths = total > 0 ? new Array(total).fill(null) : null;
         viewerState.currentImagePath = targetPath;
         viewerState.totalImages = total;
@@ -791,16 +792,16 @@ function applyFitState() {
   document.documentElement.scrollLeft = 0;
 }
 
-const resizeObserver = new ResizeObserver(debounce(async () => {
+const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(debounce(async () => {
     // リサイズ中にIPC通信（await invoke）を行うとOSのメッセージループが詰まり
     // 例外0xc000041dでクラッシュするため、ブラウザのAPIを用いて判定する
-    const isMax = window.innerWidth >= window.screen.availWidth - 10 && window.innerHeight >= window.screen.availHeight - 10;
+    const isMax = window.innerWidth >= (window.screen ? window.screen.availWidth - 10 : 0) && window.innerHeight >= (window.screen ? window.screen.availHeight - 10 : 0);
     const maxBtn = document.getElementById('window-max-btn');
     if (maxBtn) {
       maxBtn.innerHTML = isMax ? ViewerUI.ICONS.RESTORE : ViewerUI.ICONS.MAXIMIZE;
     }
 
-    const isFs = window.innerHeight === window.screen.height;
+    const isFs = window.screen && window.innerHeight === window.screen.height;
     if (isFs && !viewerState.isFullscreen) {
       viewerState.isFullscreen = true;
       const overlay = document.getElementById('border-overlay');
@@ -813,8 +814,11 @@ const resizeObserver = new ResizeObserver(debounce(async () => {
     }
     
     updateFullscreenStyles();
-}, CONFIG.RESIZE_THROTTLE));
-resizeObserver.observe(document.body);
+}, CONFIG.RESIZE_THROTTLE)) : null;
+
+if (resizeObserver && typeof resizeObserver.observe === 'function' && typeof document !== 'undefined' && document.body) {
+  resizeObserver.observe(document.body);
+}
 
 /**
  * フルスクリーン（100%表示）時のスタイルを更新する。
@@ -1122,12 +1126,31 @@ async function loadImage() {
   }
 }
 
+/**
+ * 進行方向ベクトルに応じたスマートプリロードのオフセット配列を取得する。
+ * 連続送り時の描画待ちを排除するため、進行方向に多くの先読み枠を優先配分し、
+ * かつ逆方向も最低1枚は即座に戻れるよう枠を確保する。
+ * @param {number} [direction=1] - 進行方向 (1: 次へ/前進, -1: 前へ/後退)
+ * @returns {number[]} プリロード対象の相対オフセット配列
+ */
+export function getPreloadDeltas(direction = 1) {
+  if (direction === 1) {
+    return [1, 2, 3, -1];
+  } else if (direction === -1) {
+    return [-1, -2, -3, 1];
+  }
+  return [1, -1, 2, -2];
+}
+if (typeof window !== 'undefined') {
+  window.getPreloadDeltas = getPreloadDeltas;
+}
+
 async function preloadAdjacentImages() {
   const total = viewerState.totalImages;
   if (total <= 1) return;
 
-  // ±2 までプリロード（循環対応・並列ロード） (#7)
-  const deltas = [1, -1, 2, -2];
+  // 進行方向ベクトルに応じたスマートプリロード（方向予測配分）
+  const deltas = getPreloadDeltas(viewerState.lastDirection);
   const indicesToPreload = [];
   for (const delta of deltas) {
     const targetIdx = ((viewerState.currentIndex + delta) % total + total) % total;
@@ -1191,6 +1214,7 @@ async function preloadAdjacentImages() {
  */
 function showNext() {
   if (viewerState.totalImages > 0) {
+    viewerState.lastDirection = 1;
     viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
     loadImage();
   }
@@ -1201,6 +1225,7 @@ function showNext() {
  */
 function showPrev() {
   if (viewerState.totalImages > 0) {
+    viewerState.lastDirection = -1;
     viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
     loadImage();
   }
@@ -1519,6 +1544,7 @@ window.addEventListener('wheel', (e) => {
     }
 
     if (steps !== 0) {
+      viewerState.lastDirection = steps > 0 ? 1 : -1;
       viewerState.currentIndex = (viewerState.currentIndex + steps % viewerState.totalImages + viewerState.totalImages) % viewerState.totalImages;
       loadImage();
     }

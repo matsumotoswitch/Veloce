@@ -167,4 +167,67 @@ describe('Viewer Prefetch Logic (Phase 1)', () => {
     expect(cachedPath).toBe('3.jpg');
     expect(global.window.veloceAPI.getViewerImage).not.toHaveBeenCalled();
   });
+
+  describe('Phase 4: Smart Directional Preload Pipeline', () => {
+    it('getPreloadDeltas should allocate directional offsets correctly', async () => {
+      const { getPreloadDeltas } = await import('../src/viewer.js');
+      expect(getPreloadDeltas(1)).toEqual([1, 2, 3, -1]);
+      expect(getPreloadDeltas(-1)).toEqual([-1, -2, -3, 1]);
+      expect(getPreloadDeltas(0)).toEqual([1, -1, 2, -2]);
+    });
+
+    it('should prioritize forward indices (+1, +2, +3, -1) when lastDirection is 1', async () => {
+      const { getPreloadDeltas } = await import('../src/viewer.js');
+      global.viewerState.currentIndex = 5;
+      global.viewerState.totalImages = 10;
+      global.viewerState.lastDirection = 1;
+
+      const deltas = getPreloadDeltas(global.viewerState.lastDirection);
+      const total = global.viewerState.totalImages;
+      const targets = deltas.map(d => ((global.viewerState.currentIndex + d) % total + total) % total);
+
+      expect(targets).toEqual([6, 7, 8, 4]);
+    });
+
+    it('should prioritize backward indices (-1, -2, -3, +1) when lastDirection is -1', async () => {
+      const { getPreloadDeltas } = await import('../src/viewer.js');
+      global.viewerState.currentIndex = 5;
+      global.viewerState.totalImages = 10;
+      global.viewerState.lastDirection = -1;
+
+      const deltas = getPreloadDeltas(global.viewerState.lastDirection);
+      const total = global.viewerState.totalImages;
+      const targets = deltas.map(d => ((global.viewerState.currentIndex + d) % total + total) % total);
+
+      expect(targets).toEqual([4, 3, 2, 6]);
+    });
+
+    it('should wrap around circular boundaries correctly during forward fast scroll', async () => {
+      const { getPreloadDeltas } = await import('../src/viewer.js');
+      global.viewerState.currentIndex = 9; // 末尾
+      global.viewerState.totalImages = 10;
+      global.viewerState.lastDirection = 1;
+
+      const deltas = getPreloadDeltas(1);
+      const total = global.viewerState.totalImages;
+      const targets = deltas.map(d => ((global.viewerState.currentIndex + d) % total + total) % total);
+
+      // 9 から +1=0, +2=1, +3=2, -1=8
+      expect(targets).toEqual([0, 1, 2, 8]);
+    });
+
+    it('should wrap around circular boundaries correctly during backward fast scroll', async () => {
+      const { getPreloadDeltas } = await import('../src/viewer.js');
+      global.viewerState.currentIndex = 0; // 先頭
+      global.viewerState.totalImages = 10;
+      global.viewerState.lastDirection = -1;
+
+      const deltas = getPreloadDeltas(-1);
+      const total = global.viewerState.totalImages;
+      const targets = deltas.map(d => ((global.viewerState.currentIndex + d) % total + total) % total);
+
+      // 0 から -1=9, -2=8, -3=7, +1=1
+      expect(targets).toEqual([9, 8, 7, 1]);
+    });
+  });
 });
