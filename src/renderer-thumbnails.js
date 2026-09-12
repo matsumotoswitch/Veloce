@@ -152,9 +152,9 @@ export async function getImageDimensionsFromBlob(blob) {
  * @param {OffscreenCanvasRenderingContext2D|CanvasRenderingContext2D} ctx - Canvas 2D コンテキスト
  * @param {number} width - Canvasの幅
  * @param {number} height - Canvasの高さ
- * @param {number} [amount=0.22] - シャープ化強度（0.15〜0.30推奨）
+ * @param {number} [amount=0.15] - シャープ化強度（0.10〜0.25推奨）
  */
-export function applySharpenFilter(ctx, width, height, amount = 0.22) {
+export function applySharpenFilter(ctx, width, height, amount = 0.15) {
   if (width < 3 || height < 3 || amount <= 0) return;
   try {
     const imgData = ctx.getImageData(0, 0, width, height);
@@ -299,9 +299,6 @@ class ThumbnailWorkerPool {
         ctx.fillStyle = THUMBNAIL_CANVAS_BG;
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(sourceElement, 0, 0, width, height);
-        
-        // 縮小によって平滑化された線画や瞳・ハイライトの輪郭をアンシャープマスクでくっきり引き締める
-        applySharpenFilter(ctx, width, height, 0.22);
         
         const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.90 });
         sourceElement.close();

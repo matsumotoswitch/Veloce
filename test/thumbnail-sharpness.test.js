@@ -29,7 +29,7 @@ describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mas
         }
       };
 
-      applySharpenFilter(mockCtx, width, height, 0.22);
+      applySharpenFilter(mockCtx, width, height, 0.15);
 
       // 中心ピクセル (2, 2) の値が 128 のまま維持されること
       const centerIdx = (2 * width + 2) * 4;
@@ -62,7 +62,7 @@ describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mas
         }
       };
 
-      applySharpenFilter(mockCtx, width, height, 0.22);
+      applySharpenFilter(mockCtx, width, height, 0.15);
 
       // エッジの境界直前 (x = 1): 明るい隣接画素に引っ張られて、より暗く（< 50）引き締まる
       const edgeDarkIdx = (2 * width + 1) * 4;
@@ -99,11 +99,12 @@ describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mas
   });
 
   describe('2. Frontend configuration test', () => {
-    it('uses high resizeQuality and high imageSmoothingQuality in renderer-thumbnails.js', () => {
+    it('uses high resizeQuality and high imageSmoothingQuality in renderer-thumbnails.js without active sharpen filter', () => {
       const code = fs.readFileSync(thumbnailsJsPath, 'utf-8');
       expect(code).toContain("resizeQuality: 'high'");
       expect(code).toContain("ctx.imageSmoothingQuality = 'high'");
-      expect(code).toContain('applySharpenFilter(ctx, width, height, 0.22)');
+      const generateMethod = code.match(/async generate\([\s\S]*?\n  \}/)?.[0] || '';
+      expect(generateMethod).not.toContain('applySharpenFilter');
       expect(code).toContain("type: 'image/jpeg', quality: 0.90");
     });
 
@@ -114,10 +115,10 @@ describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mas
   });
 
   describe('3. Rust backend configuration test', () => {
-    it('uses FilterType::Lanczos3 and sharpen_rgb_buffer in main.rs', () => {
+    it('uses FilterType::Lanczos3 without active sharpen_rgb_buffer invocation in main.rs', () => {
       const rustCode = fs.readFileSync(mainRsPath, 'utf-8');
       expect(rustCode).toContain('FilterType::Lanczos3');
-      expect(rustCode).toContain('sharpen_rgb_buffer(&mut buffer, dst_width, dst_height, 0.22)');
+      expect(rustCode).not.toContain('sharpen_rgb_buffer(&mut buffer');
     });
   });
 });

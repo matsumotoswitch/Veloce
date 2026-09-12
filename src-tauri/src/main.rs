@@ -2969,6 +2969,7 @@ async fn get_cached_thumbnail_batch(
 
 /// 縮小画像（RGB8バッファ）に対して高速なアンシャープマスクを適用し、
 /// 縮小によって平滑化された線画や瞳・ハイライトの輪郭を引き締める。
+#[allow(dead_code)]
 fn sharpen_rgb_buffer(buffer: &mut [u8], width: u32, height: u32, amount: f32) {
     if width < 3 || height < 3 || amount <= 0.0 {
         return;
@@ -3036,8 +3037,7 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
                         fr::ResizeAlg::Interpolation(fr::FilterType::Lanczos3)
                     );
                     if resizer.resize(&src_image, &mut dst_image, Some(&options)).is_ok() {
-                        let mut buffer = dst_image.into_vec();
-                        sharpen_rgb_buffer(&mut buffer, dst_width, dst_height, 0.22);
+                        let buffer = dst_image.into_vec();
 
                         let mut bytes: Vec<u8> = Vec::new();
                         let mut cursor = std::io::Cursor::new(&mut bytes);
