@@ -898,21 +898,24 @@ export class ThumbnailQueueManager {
       const img = wrapper.children[0]; // .thumbnail-img
       if (img) {
         img.src = url;
-        if (img.complete) {
-          img.classList.remove('loading');
-        } else {
-          img.onload = function () { this.classList.remove('loading'); };
-          img.onerror = function () {
+        img.onload = function () {
+          if (wrapper.dataset.filepath === filePath) {
             this.classList.remove('loading');
-            const fallback = window.veloceAPI.convertFileSrc(filePath);
-            if (this.src !== fallback && !this.src.startsWith('asset://')) {
-              if (window.appState && window.appState.thumbnailUrls) {
-                window.appState.thumbnailUrls.set(filePath, fallback);
-              }
-              this.src = fallback;
+            wrapper.classList.remove('loading');
+          }
+        };
+        img.onerror = function () {
+          if (wrapper.dataset.filepath !== filePath) return;
+          this.classList.remove('loading');
+          wrapper.classList.remove('loading');
+          const fallback = window.veloceAPI.convertFileSrc(filePath);
+          if (this.src !== fallback && !this.src.startsWith('asset://')) {
+            if (window.appState && window.appState.thumbnailUrls) {
+              window.appState.thumbnailUrls.set(filePath, fallback);
             }
-          };
-        }
+            this.src = fallback;
+          }
+        };
       }
       return;
     }

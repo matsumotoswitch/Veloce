@@ -318,6 +318,7 @@ input[type="range"]:focus {
   /* レイアウトの再計算をコンポーネント内に閉じ込め、高速化する（paintのcontainを解除してグローを描画可能にする） */
   contain: layout style;
   will-change: transform;
+  background-color: var(--panel-bg);
 }
 
 .thumbnail-flash-effect {
@@ -335,6 +336,7 @@ input[type="range"]:focus {
   pointer-events: none;
   border-radius: inherit;
   image-rendering: -webkit-optimize-contrast;
+  transition: opacity 0.1s ease-out;
 }
 
 .thumbnail-label {

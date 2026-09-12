@@ -217,6 +217,10 @@ pub struct AppState {
     // Source of Truth: 全ファイルとフィルタリング済みファイルをRust側で保持
     all_files: Mutex<Vec<std::sync::Arc<ImageFile>>>,
     filtered_files: Mutex<Vec<std::sync::Arc<ImageFile>>>,
+    // O(1) 高速逆引きインデックス
+    path_to_all_idx: Mutex<std::collections::HashMap<String, usize>>,
+    path_to_filtered_idx: Mutex<std::collections::HashMap<String, usize>>,
+    path_to_mtime: Mutex<std::collections::HashMap<String, u64>>,
     sort_config: Mutex<SortConfig>,
     search_query: Mutex<String>,
     ratings: Mutex<std::collections::HashMap<String, u8>>,
@@ -226,6 +230,77 @@ pub struct AppState {
     smart_folders: Mutex<Vec<SmartFolderRule>>,
     db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     video_server_port: u16,
+}
+
+impl AppState {
+    /// all_files のインデックスと mtime の逆引きマップを再構築する
+    pub fn rebuild_all_indices(&self, files: &[std::sync::Arc<ImageFile>]) {
+        let mut all_map = std::collections::HashMap::with_capacity(files.len() * 2);
+        let mut mtime_map = std::collections::HashMap::with_capacity(files.len() * 2);
+        for (i, f) in files.iter().enumerate() {
+            all_map.insert(f.path.clone(), i);
+            let clean = f.path.replace("\\\\?\\", "");
+            if clean != f.path {
+                all_map.insert(clean.clone(), i);
+                mtime_map.insert(clean, f.mtime);
+            }
+            mtime_map.insert(f.path.clone(), f.mtime);
+        }
+        if let Ok(mut lock) = self.path_to_all_idx.lock() {
+            *lock = all_map;
+        }
+        if let Ok(mut lock) = self.path_to_mtime.lock() {
+            *lock = mtime_map;
+        }
+    }
+
+    /// filtered_files のインデックス逆引きマップを再構築する
+    pub fn rebuild_filtered_indices(&self, files: &[std::sync::Arc<ImageFile>]) {
+        let mut filtered_map = std::collections::HashMap::with_capacity(files.len() * 2);
+        for (i, f) in files.iter().enumerate() {
+            filtered_map.insert(f.path.clone(), i);
+            let clean = f.path.replace("\\\\?\\", "");
+            if clean != f.path {
+                filtered_map.insert(clean, i);
+            }
+        }
+        if let Ok(mut lock) = self.path_to_filtered_idx.lock() {
+            *lock = filtered_map;
+        }
+    }
+
+    /// パスから mtime を O(1) で取得する
+    pub fn get_mtime(&self, path: &str) -> Option<u64> {
+        let clean = path.replace("\\\\?\\", "");
+        if let Ok(lock) = self.path_to_mtime.lock() {
+            lock.get(path).or_else(|| lock.get(&clean)).copied()
+        } else {
+            None
+        }
+    }
+
+    /// サムネイルキャッシュ保持フラグを all_files と filtered_files の両方で O(1) 更新する
+    pub fn mark_thumbnail_cached(&self, path: &str) {
+        let clean = path.replace("\\\\?\\", "");
+        if let Ok(all_idx_lock) = self.path_to_all_idx.lock() {
+            if let Some(&idx) = all_idx_lock.get(path).or_else(|| all_idx_lock.get(&clean)) {
+                if let Ok(mut lock) = self.all_files.lock() {
+                    if let Some(f) = lock.get_mut(idx) {
+                        std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                    }
+                }
+            }
+        }
+        if let Ok(filt_idx_lock) = self.path_to_filtered_idx.lock() {
+            if let Some(&idx) = filt_idx_lock.get(path).or_else(|| filt_idx_lock.get(&clean)) {
+                if let Ok(mut lock) = self.filtered_files.lock() {
+                    if let Some(f) = lock.get_mut(idx) {
+                        std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // --- ユーティリティ ---
@@ -900,6 +975,15 @@ fn load_directory(
     if let Ok(mut lock) = state.image_paths.lock() {
         lock.clear();
     }
+    if let Ok(mut lock) = state.path_to_all_idx.lock() {
+        lock.clear();
+    }
+    if let Ok(mut lock) = state.path_to_filtered_idx.lock() {
+        lock.clear();
+    }
+    if let Ok(mut lock) = state.path_to_mtime.lock() {
+        lock.clear();
+    }
     if let Ok(mut dir_lock) = state.current_dir.lock() {
         *dir_lock = path_clone.clone();
     }
@@ -1063,6 +1147,7 @@ fn load_directory(
             if let Ok(mut lock) = state.image_paths.lock() {
                 *lock = files.iter().map(|f| f.path.clone()).collect();
             }
+            state.rebuild_all_indices(&files);
 
             // 初回表示のサムネイル順序がおかしくなるのを防ぐため、送信前に一度ソートとフィルタを適用する
             let total_count = apply_filters_and_sort(None, &state);
@@ -1545,6 +1630,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     drop(search_query);
 
     if let Ok(mut lock) = state.filtered_files.lock() {
+        state.rebuild_filtered_indices(&filtered);
         *lock = filtered;
     }
     if let Ok(mut lock) = state.image_paths.lock() {
@@ -1718,18 +1804,27 @@ fn update_file_dimensions(
         return;
     }
 
-    if let Ok(mut all_files) = state.all_files.lock() {
-        if let Some(f_arc) = all_files.iter_mut().find(|f| f.path == path) {
-            let file = std::sync::Arc::make_mut(f_arc);
-            file.width = width;
-            file.height = height;
+    let clean = path.replace("\\\\?\\", "");
+    if let Ok(all_idx_lock) = state.path_to_all_idx.lock() {
+        if let Some(&idx) = all_idx_lock.get(&path).or_else(|| all_idx_lock.get(&clean)) {
+            if let Ok(mut all_files) = state.all_files.lock() {
+                if let Some(f_arc) = all_files.get_mut(idx) {
+                    let file = std::sync::Arc::make_mut(f_arc);
+                    file.width = width;
+                    file.height = height;
+                }
+            }
         }
     }
-    if let Ok(mut filtered) = state.filtered_files.lock() {
-        if let Some(f_arc) = filtered.iter_mut().find(|f| f.path == path) {
-            let file = std::sync::Arc::make_mut(f_arc);
-            file.width = width;
-            file.height = height;
+    if let Ok(filt_idx_lock) = state.path_to_filtered_idx.lock() {
+        if let Some(&idx) = filt_idx_lock.get(&path).or_else(|| filt_idx_lock.get(&clean)) {
+            if let Ok(mut filtered) = state.filtered_files.lock() {
+                if let Some(f_arc) = filtered.get_mut(idx) {
+                    let file = std::sync::Arc::make_mut(f_arc);
+                    file.width = width;
+                    file.height = height;
+                }
+            }
         }
     }
 
@@ -2724,18 +2819,9 @@ async fn generate_thumbnail(
 ) -> Result<String, String> {
     let db_conn = state.db_conn.clone();
     
-    // filtered_files から mtime を取得し、同時にファイルが存在するかを確認する
-    // Mutexの保持時間を最小化するため、ロック内では mtime だけを取り出す
-    let (mem_mtime, is_valid) = if let Ok(lock) = state.filtered_files.lock() {
-        // ソート済み Vec に対してバイナリサーチ O(log N) で検索
-        match lock.binary_search_by(|f| f.path.as_str().cmp(file_path.as_str())) {
-            Ok(idx) => (Some(lock[idx].mtime), true),
-            // ソート済みでない場合（スマートフォルダ等）はフォールバックとして iter().find()
-            Err(_) => {
-                let found = lock.iter().find(|f| f.path == file_path);
-                (found.map(|f| f.mtime), found.is_some())
-            }
-        }
+    // O(1) 高速逆引きインデックスから mtime を即座に取得
+    let (mem_mtime, is_valid) = if let Some(mt) = state.get_mtime(&file_path) {
+        (Some(mt), true)
     } else {
         (None, false)
     };
@@ -2788,14 +2874,12 @@ async fn generate_thumbnail_batch(
 ) -> Result<Vec<ThumbnailResult>, String> {
     let db_conn = state.db_conn.clone();
     
-    // Fast path: get mtimes from memory via O(1) HashMap lookup (avoid O(N) iter().find() per path)
+    // Fast path: O(1) path_to_mtime lookup (avoid O(N) HashMap rebuild and linear scan)
     let mut files_to_process = Vec::new();
-    if let Ok(lock) = state.filtered_files.lock() {
-        // HashMap<path, mtime> を一度だけ構築して全パスをO(1)でルックアップ
-        let mtime_map: std::collections::HashMap<&str, u64> =
-            lock.iter().map(|f| (f.path.as_str(), f.mtime)).collect();
+    if let Ok(mtime_lock) = state.path_to_mtime.lock() {
         for file_path in &file_paths {
-            if let Some(&mtime) = mtime_map.get(file_path.as_str()) {
+            let clean = file_path.replace("\\\\?\\", "");
+            if let Some(&mtime) = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)) {
                 files_to_process.push((file_path.clone(), mtime));
             }
         }
@@ -2831,13 +2915,12 @@ async fn get_cached_thumbnail_batch(
 ) -> Result<Vec<ThumbnailResult>, String> {
     let db_conn = state.db_conn.clone();
 
-    // filtered_files から mtime を O(1) HashMap ルックアップで取得（旧: iter().find() O(N)）
+    // Fast path: O(1) path_to_mtime lookup (avoid O(N) HashMap rebuild)
     let mut files_with_mtime: Vec<(String, u64)> = Vec::new();
-    if let Ok(lock) = state.filtered_files.lock() {
-        let mtime_map: std::collections::HashMap<&str, u64> =
-            lock.iter().map(|f| (f.path.as_str(), f.mtime)).collect();
+    if let Ok(mtime_lock) = state.path_to_mtime.lock() {
         for file_path in &file_paths {
-            if let Some(&mtime) = mtime_map.get(file_path.as_str()) {
+            let clean = file_path.replace("\\\\?\\", "");
+            if let Some(&mtime) = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)) {
                 files_with_mtime.push((file_path.clone(), mtime));
             }
         }
@@ -3189,15 +3272,8 @@ async fn save_thumbnail(
     file_path: String,
     b64_data: String,
 ) -> Result<String, String> {
-    // filtered_files から mtime を取得 (バイナリサーチ O(log N))
-    let mem_mtime = if let Ok(lock) = state.filtered_files.lock() {
-        match lock.binary_search_by(|f| f.path.as_str().cmp(file_path.as_str())) {
-            Ok(idx) => Some(lock[idx].mtime),
-            Err(_) => lock.iter().find(|f| f.path == file_path).map(|f| f.mtime),
-        }
-    } else {
-        None
-    };
+    // O(1) 高速逆引きインデックスから mtime を取得
+    let mem_mtime = state.get_mtime(&file_path);
 
     let mtime = if let Some(mt) = mem_mtime {
         mt
@@ -3236,17 +3312,8 @@ async fn save_thumbnail(
         now,
     }).await;
 
-    // インメモリのファイル一覧にもサムネイルキャッシュ保持フラグを即時反映
-    if let Ok(mut lock) = state.all_files.lock() {
-        if let Some(f) = lock.iter_mut().find(|f| f.path == clean_path || f.path == file_path) {
-            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
-        }
-    }
-    if let Ok(mut lock) = state.filtered_files.lock() {
-        if let Some(f) = lock.iter_mut().find(|f| f.path == clean_path || f.path == file_path) {
-            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
-        }
-    }
+    // インメモリのファイル一覧にもサムネイルキャッシュ保持フラグを O(1) 即時反映
+    state.mark_thumbnail_cached(&file_path);
 
     // 保存完了と同時にローカルHTTP配信用URLを返却し、フロントエンド側での再取得IPC呼び出しを不要化
     let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
@@ -4832,13 +4899,42 @@ fn main() {
     let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(4096);
 
     std::thread::spawn(move || {
-        while let Some(DbMsg::SaveThumbnail { hash_key, path, mtime, bytes, now }) = db_rx.blocking_recv() {
-            if let Ok(conn) = db_conn_worker.get() {
-                let _ = conn.execute(
-                    "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
-                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed",
-                    rusqlite::params![&hash_key, &path, mtime, &bytes, now],
-                );
+        while let Some(first_msg) = db_rx.blocking_recv() {
+            let mut batch = Vec::with_capacity(64);
+            batch.push(first_msg);
+
+            // キューに溜まっているメッセージを最大63件ノンブロッキングでバッチ取得
+            while batch.len() < 64 {
+                match db_rx.try_recv() {
+                    Ok(msg) => batch.push(msg),
+                    Err(_) => break,
+                }
+            }
+
+            if let Ok(mut conn) = db_conn_worker.get() {
+                if batch.len() == 1 {
+                    let DbMsg::SaveThumbnail { hash_key, path, mtime, bytes, now } = &batch[0];
+                    let _ = conn.execute(
+                        "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
+                         ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed",
+                        rusqlite::params![hash_key, path, mtime, bytes, now],
+                    );
+                } else {
+                    if let Ok(tx) = conn.transaction() {
+                        {
+                            if let Ok(mut stmt) = tx.prepare_cached(
+                                "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
+                                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed"
+                            ) {
+                                for msg in &batch {
+                                    let DbMsg::SaveThumbnail { hash_key, path, mtime, bytes, now } = msg;
+                                    let _ = stmt.execute(rusqlite::params![hash_key, path, mtime, bytes, now]);
+                                }
+                            }
+                        }
+                        let _ = tx.commit();
+                    }
+                }
             }
         }
     });
@@ -4851,6 +4947,9 @@ fn main() {
             viewer_hashes: Mutex::new(std::collections::HashMap::new()),
             all_files: Mutex::new(Vec::new()),
             filtered_files: Mutex::new(Vec::new()),
+            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
             sort_config: Mutex::new(SortConfig {
                 key: "name".to_string(),
                 asc: true,
@@ -6271,6 +6370,9 @@ mod viewer_tests {
             current_dir: Mutex::new("smart://fav_5".to_string()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
             viewer_hashes: Mutex::new(std::collections::HashMap::new()), // Trigger refresh
+            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
             all_files: Mutex::new(vec![
                 Arc::new(ImageFile {
                     name: "b.jpg".to_string(),
@@ -7288,6 +7390,155 @@ mod viewer_tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(count, 0, "キャッシュ削除後に該当レコードが0件になること");
+    }
+
+    #[test]
+    fn test_path_index_o1_lookup_and_flag_update() {
+        let app_state = AppState {
+            image_paths: Mutex::new(Vec::new()),
+            current_dir: Mutex::new(String::new()),
+            viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
+            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
+            all_files: Mutex::new(Vec::new()),
+            filtered_files: Mutex::new(Vec::new()),
+            sort_config: Mutex::new(super::SortConfig {
+                key: "name".to_string(),
+                asc: true,
+            }),
+            search_query: Mutex::new(String::new()),
+            ratings: Mutex::new(std::collections::HashMap::new()),
+            rating_filter_val: Mutex::new(0),
+            rating_filter_op: Mutex::new("gte".to_string()),
+            db_conn: init_db().unwrap(),
+            smart_folders: Mutex::new(Vec::new()),
+            db_tx: tokio::sync::mpsc::channel(1).0,
+            video_server_port: 0,
+        };
+
+        let file1 = std::sync::Arc::new(ImageFile {
+            name: "img1.png".to_string(),
+            ext: ".png".to_string(),
+            path: "\\\\?\\C:\\images\\img1.png".to_string(),
+            size: 1024,
+            mtime: 1700000001,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 512,
+            height: 512,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+        });
+
+        let file2 = std::sync::Arc::new(ImageFile {
+            name: "img2.webp".to_string(),
+            ext: ".webp".to_string(),
+            path: "C:\\images\\img2.webp".to_string(),
+            size: 2048,
+            mtime: 1700000002,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 1024,
+            height: 768,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+        });
+
+        let files = vec![file1, file2];
+
+        // 状態にセット & インデックス再構築
+        if let Ok(mut lock) = app_state.all_files.lock() {
+            *lock = files.clone();
+        }
+        if let Ok(mut lock) = app_state.filtered_files.lock() {
+            *lock = files.clone();
+        }
+        app_state.rebuild_all_indices(&files);
+        app_state.rebuild_filtered_indices(&files);
+
+        // 1. O(1) mtime 逆引き検証（プレフィックスあり・なし両対応）
+        assert_eq!(app_state.get_mtime("\\\\?\\C:\\images\\img1.png"), Some(1700000001));
+        assert_eq!(app_state.get_mtime("C:\\images\\img1.png"), Some(1700000001));
+        assert_eq!(app_state.get_mtime("C:\\images\\img2.webp"), Some(1700000002));
+        assert_eq!(app_state.get_mtime("C:\\images\\non_existent.png"), None);
+
+        // 2. mark_thumbnail_cached による O(1) フラグ更新検証
+        app_state.mark_thumbnail_cached("C:\\images\\img1.png");
+        {
+            let all = app_state.all_files.lock().unwrap();
+            assert!(all[0].has_thumbnail_cache, "all_files のキャッシュフラグが更新されること");
+            let filtered = app_state.filtered_files.lock().unwrap();
+            assert!(filtered[0].has_thumbnail_cache, "filtered_files のキャッシュフラグが更新されること");
+            assert!(!filtered[1].has_thumbnail_cache, "無関係なファイルのフラグは変更されないこと");
+        }
+
+        // プレフィックス付きパスでも更新可能か検証
+        app_state.mark_thumbnail_cached("\\\\?\\C:\\images\\img2.webp");
+        {
+            let filtered = app_state.filtered_files.lock().unwrap();
+            assert!(filtered[1].has_thumbnail_cache, "プレフィックスパス指定でも更新されること");
+        }
+    }
+
+    #[test]
+    fn test_sqlite_batch_write_transaction() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT NOT NULL,
+                mtime INTEGER NOT NULL,
+                thumbnail BLOB,
+                last_accessed INTEGER NOT NULL
+            )",
+            [],
+        ).unwrap();
+
+        // 複数件のバッチ保存メッセージを用意
+        let msgs = vec![
+            ("hash_1", "C:\\img1.png", 1000u64, vec![1u8, 2, 3], 123456789i64),
+            ("hash_2", "C:\\img2.png", 2000u64, vec![4u8, 5, 6], 123456789i64),
+            ("hash_3", "C:\\img3.png", 3000u64, vec![7u8, 8, 9], 123456789i64),
+        ];
+
+        // トランザクション一括コミット
+        let mut tx_conn = conn;
+        let tx = tx_conn.transaction().unwrap();
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed"
+            ).unwrap();
+
+            for (hash_key, path, mtime, bytes, now) in &msgs {
+                stmt.execute(rusqlite::params![hash_key, path, mtime, bytes, now]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+
+        let count: usize = tx_conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 3, "バッチ保存された全レコードがコミットされていること");
+
+        let (path, mtime, thumb): (String, u64, Vec<u8>) = tx_conn.query_row(
+            "SELECT path, mtime, thumbnail FROM cache WHERE hash_key = ?",
+            ["hash_2"],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        assert_eq!(path, "C:\\img2.png");
+        assert_eq!(mtime, 2000);
+        assert_eq!(thumb, vec![4u8, 5, 6]);
     }
 }
 

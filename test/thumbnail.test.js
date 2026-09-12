@@ -791,5 +791,124 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(unshiftPreloadMock).toHaveBeenCalledWith(pathsToRebuild);
     });
   });
+
+  describe('Thumbnail Flickering and Stale Image Elimination', () => {
+    it('should immediately set loading class on wrapper and img when slot is recycled for a new file', async () => {
+      if (!window.thumbnailManager) {
+        window.thumbnailManager = { enqueuePriorityBatch: vi.fn(), enqueuePriority: vi.fn(), processNext: vi.fn() };
+      } else if (!window.thumbnailManager.processNext) {
+        window.thumbnailManager.processNext = vi.fn();
+      }
+      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      const { UIManager } = await import('../src/renderer-ui.js');
+
+      const fileA = { path: 'C:/media/a.png', name: 'a.png', mtime: 1000, hasThumbnailCache: true };
+      const fileB = { path: 'C:/media/b.png', name: 'b.png', mtime: 2000, hasThumbnailCache: true };
+
+      sharedAppState.totalCount = 1;
+      sharedAppState.initialChunk = [fileA];
+      sharedAppState.thumbnailUrls.clear();
+      sharedAppState.selection.clear();
+      sharedAppState.ratings = {};
+      sharedAppState.dragState = { isAppDragging: false };
+      window.appState = sharedAppState;
+
+      const gridContainer = document.createElement('div');
+      gridContainer.id = 'grid-view';
+      Object.defineProperty(gridContainer, 'clientWidth', { value: 800, configurable: true });
+      Object.defineProperty(gridContainer, 'clientHeight', { value: 600, configurable: true });
+      Object.defineProperty(gridContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+      const gridSpacer = document.createElement('div');
+      gridSpacer.className = 'virtual-spacer';
+      const gridContent = document.createElement('div');
+      gridContent.className = 'virtual-content';
+      gridContainer.appendChild(gridSpacer);
+      gridContainer.appendChild(gridContent);
+
+      const ui = new UIManager(sharedAppState);
+      ui.elements.thumbnailGrid = gridContainer;
+      ui.elements.thumbnailSizeSlider = { value: '180' };
+
+      // 初期描画（fileA）
+      await ui.updateVirtualGrid(true);
+      const wrapper = gridContent.children[0];
+      const img = wrapper.querySelector('.thumbnail-img');
+
+      expect(wrapper.dataset.filepath).toBe('C:/media/a.png');
+      expect(wrapper.classList.contains('loading')).toBe(true);
+      expect(img.classList.contains('loading')).toBe(true);
+
+      // fileA のロードが完了
+      img.onload();
+      expect(wrapper.classList.contains('loading')).toBe(false);
+      expect(img.classList.contains('loading')).toBe(false);
+
+      // 次に別のファイル fileB で同一スロットを再利用
+      sharedAppState.initialChunk = [fileB];
+      await ui.updateVirtualGrid(true);
+
+      // スロット再利用直後：前の画像が露出しないよう、即座に loading クラスが付与されること
+      expect(wrapper.dataset.filepath).toBe('C:/media/b.png');
+      expect(wrapper.classList.contains('loading')).toBe(true);
+      expect(img.classList.contains('loading')).toBe(true);
+
+      // fileB のロードが完了
+      img.onload();
+      expect(wrapper.classList.contains('loading')).toBe(false);
+      expect(img.classList.contains('loading')).toBe(false);
+    });
+
+    it('should drop stale async render if scroll position advances during getItems', async () => {
+      if (!window.thumbnailManager) {
+        window.thumbnailManager = { enqueuePriorityBatch: vi.fn(), enqueuePriority: vi.fn(), processNext: vi.fn() };
+      } else if (!window.thumbnailManager.processNext) {
+        window.thumbnailManager.processNext = vi.fn();
+      }
+      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      const { UIManager } = await import('../src/renderer-ui.js');
+
+      sharedAppState.totalCount = 100;
+      sharedAppState.initialChunk = null; // force veloceAPI.getItems
+      sharedAppState.thumbnailUrls.clear();
+      sharedAppState.selection.clear();
+      sharedAppState.ratings = {};
+      sharedAppState.dragState = { isAppDragging: false };
+      window.appState = sharedAppState;
+
+      const gridContainer = document.createElement('div');
+      gridContainer.id = 'grid-view';
+      Object.defineProperty(gridContainer, 'clientWidth', { value: 800, configurable: true });
+      Object.defineProperty(gridContainer, 'clientHeight', { value: 600, configurable: true });
+      gridContainer.scrollTop = 0;
+
+      const gridSpacer = document.createElement('div');
+      gridSpacer.className = 'virtual-spacer';
+      const gridContent = document.createElement('div');
+      gridContent.className = 'virtual-content';
+      gridContainer.appendChild(gridSpacer);
+      gridContainer.appendChild(gridContent);
+
+      const ui = new UIManager(sharedAppState);
+      ui.elements.thumbnailGrid = gridContainer;
+      ui.elements.thumbnailSizeSlider = { value: '180' };
+
+      // getItems 実行中に scrollTop が急激に進んだ状況をシミュレート
+      window.veloceAPI.getItems = vi.fn(async (start, count) => {
+        gridContainer.scrollTop = 2000; // スクロールが大きく進む
+        return Array.from({ length: count }, (_, i) => ({
+          path: `C:/media/img_${start + i}.png`,
+          name: `img_${start + i}.png`,
+          mtime: 1000,
+          hasThumbnailCache: true
+        }));
+      });
+
+      await ui.updateVirtualGrid(false);
+
+      // 古い位置（scrollTop: 0 付近）の描画が破棄され、コンテンツが空のまま維持されること
+      expect(gridContent.children.length).toBe(0);
+    });
+  });
 });
 

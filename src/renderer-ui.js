@@ -1613,6 +1613,15 @@ class UIManager {
       items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
     }
 
+    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策・ちらつき防止）
+    const currentScrollTop = container.scrollTop;
+    const currentStartRow = Math.floor(Math.max(0, currentScrollTop - padding) / rowHeight);
+    const currentSafeStartRow = Math.max(0, currentStartRow - 8);
+    const currentStartIndex = currentSafeStartRow * cols;
+    if (!force && currentStartIndex !== startIndex) {
+      return;
+    }
+
     // コンテンツ領域をスクロール位置に合わせて移動 (DOM更新の直前に行うことで、破棄時の表示崩れを防ぐ)
     const offsetY = (safeStartRow * rowHeight) + padding;
     const newTransform = `translate3d(0, ${offsetY}px, 0)`;
@@ -1687,6 +1696,10 @@ class UIManager {
         wrapper.dataset.index = i;
         img.dataset.currentSrc = file.path;
 
+        // 再利用直後は古い画像の残像を即座に隠蔽し、スケルトンローディング状態にする
+        wrapper.classList.add('loading');
+        img.classList.add('loading');
+
         if (file.name) {
           label.textContent = file.name;
           wrapper.dataset.filename = file.name;
@@ -1700,18 +1713,26 @@ class UIManager {
         }
 
         if (appState.thumbnailUrls.has(file.path)) {
-            img.src = appState.thumbnailUrls.get(file.path);
-            if (img.complete) {
+            const targetUrl = appState.thumbnailUrls.get(file.path);
+            img.src = targetUrl;
+            if (img.complete && img.naturalWidth > 0 && targetUrl.startsWith('data:')) {
                 img.classList.remove('loading');
+                wrapper.classList.remove('loading');
                 if (img.naturalWidth === 0 && !img.src.startsWith('data:image/svg+xml')) {
                     // Force onerror logic if broken
                     img.dispatchEvent(new Event('error'));
                 }
             } else {
-                img.classList.add('loading');
-                img.onload = function() { this.classList.remove('loading'); };
+                img.onload = function() {
+                  if (wrapper.dataset.filepath === file.path) {
+                    this.classList.remove('loading');
+                    wrapper.classList.remove('loading');
+                  }
+                };
                 img.onerror = function() {
+                  if (wrapper.dataset.filepath !== file.path) return;
                   this.classList.remove('loading');
+                  wrapper.classList.remove('loading');
                   let fallback;
                   if (file.path.toLowerCase().endsWith('.mp4')) {
                     fallback = BROKEN_MP4_FALLBACK_URL;
@@ -1733,26 +1754,27 @@ class UIManager {
             appState.thumbnailUrls.set(file.path, url);
             if (window.evictThumbnailCache) window.evictThumbnailCache();
             img.src = url;
-            if (img.complete) {
-                img.classList.remove('loading');
-            } else {
-                img.classList.add('loading');
-                img.onload = function() { this.classList.remove('loading'); };
-                img.onerror = function() {
-                  this.classList.remove('loading');
-                  // veloce:// URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
-                  if (window.appState && window.appState.thumbnailUrls) {
-                    window.appState.thumbnailUrls.delete(file.path);
-                  }
-                  if (window.thumbnailManager) {
-                    window.thumbnailManager.enqueuePriority(file.path);
-                  }
-                };
-            }
+            img.onload = function() {
+              if (wrapper.dataset.filepath === file.path) {
+                this.classList.remove('loading');
+                wrapper.classList.remove('loading');
+              }
+            };
+            img.onerror = function() {
+              if (wrapper.dataset.filepath !== file.path) return;
+              this.classList.remove('loading');
+              wrapper.classList.remove('loading');
+              // veloce:// URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
+              if (window.appState && window.appState.thumbnailUrls) {
+                window.appState.thumbnailUrls.delete(file.path);
+              }
+              if (window.thumbnailManager) {
+                window.thumbnailManager.enqueuePriority(file.path);
+              }
+            };
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
         } else {
             img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-            img.classList.add('loading');
             img.onload = null;
             img.onerror = null;
             if (window.thumbnailManager) {
@@ -1765,11 +1787,12 @@ class UIManager {
           const cachedUrl = appState.thumbnailUrls.get(file.path);
           if (img.src !== cachedUrl) {
             img.src = cachedUrl;
-            if (img.complete) {
-              img.classList.remove('loading');
-            } else {
-              img.onload = function() { this.classList.remove('loading'); };
-            }
+            img.onload = function() {
+              if (wrapper.dataset.filepath === file.path) {
+                this.classList.remove('loading');
+                wrapper.classList.remove('loading');
+              }
+            };
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
           }
         }
