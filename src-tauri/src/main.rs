@@ -2413,92 +2413,64 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
     let mut chunks = std::collections::HashMap::new();
     let mut width = 0;
     let mut height = 0;
-    if let Ok(mut f) = std::fs::File::open(path) {
-        let mut sig = [0; 8];
-        if f.read_exact(&mut sig).is_err()
-            || sig != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
-        {
-            return (chunks, width, height);
-        }
-        loop {
-            let mut len_bytes = [0; 4];
-            if f.read_exact(&mut len_bytes).is_err() {
-                break;
-            }
-            let len = u32::from_be_bytes(len_bytes) as usize;
-            if len > 100_000_000 {
-                break;
-            } // 安全のための上限
-
-            let mut chunk_type = [0; 4];
-            if f.read_exact(&mut chunk_type).is_err() {
-                break;
-            }
-
-            if &chunk_type == b"IHDR" && len >= 8 {
-                let mut dim_bytes = [0; 8];
-                if f.read_exact(&mut dim_bytes).is_ok() {
-                    width = u32::from_be_bytes([dim_bytes[0], dim_bytes[1], dim_bytes[2], dim_bytes[3]]);
-                    height = u32::from_be_bytes([dim_bytes[4], dim_bytes[5], dim_bytes[6], dim_bytes[7]]);
-                    let remaining = len.saturating_sub(8);
-                    if remaining > 0 {
-                        use std::io::{Seek, SeekFrom};
-                        let _ = f.seek(SeekFrom::Current(remaining as i64));
+    if let Ok(file) = std::fs::File::open(path) {
+        if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
+            let buffer = &mmap[..];
+            if buffer.len() >= 8 && buffer[0..8] == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+                let mut offset = 8;
+                while offset + 8 <= buffer.len() {
+                    let len = u32::from_be_bytes(
+                        buffer[offset..offset + 4]
+                            .try_into()
+                            .unwrap_or_default(),
+                    ) as usize;
+                    if len > 100_000_000 || offset + 8 + len + 4 > buffer.len() {
+                        break;
                     }
-                } else {
-                    break;
-                }
-            } else if &chunk_type == b"tEXt" {
-                let mut data = vec![0; len];
-                if f.read_exact(&mut data).is_err() {
-                    break;
-                }
-                if let Some(null_idx) = data.iter().position(|&b| b == 0) {
-                    let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
-                    let text = String::from_utf8_lossy(&data[null_idx + 1..]).to_string();
-                    chunks.insert(keyword, text);
-                }
-            } else if &chunk_type == b"iTXt" {
-                let mut data = vec![0; len];
-                if f.read_exact(&mut data).is_err() {
-                    break;
-                }
-                if let Some(null_idx) = data.iter().position(|&b| b == 0) {
-                    let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
-                    let mut offset = null_idx + 1;
-                    if offset + 2 <= data.len() {
-                        let comp_flag = data[offset];
-                        offset += 2;
-                        if let Some(n1) = data[offset..].iter().position(|&b| b == 0) {
-                            offset += n1 + 1; // skip lang tag
-                            if let Some(n2) = data[offset..].iter().position(|&b| b == 0) {
-                                offset += n2 + 1; // skip trans keyword
-                                let text_data = &data[offset..];
-                                let text = if comp_flag == 1 {
-                                    let mut decoder = flate2::read::ZlibDecoder::new(text_data);
-                                    let mut s = String::new();
-                                    decoder.read_to_string(&mut s).unwrap_or_default();
-                                    s
-                                } else {
-                                    String::from_utf8_lossy(text_data).to_string()
-                                };
-                                chunks.insert(keyword, text);
+
+                    let chunk_type = &buffer[offset + 4..offset + 8];
+                    let data = &buffer[offset + 8..offset + 8 + len];
+
+                    if chunk_type == b"IHDR" && len >= 8 {
+                        width = u32::from_be_bytes(data[0..4].try_into().unwrap_or_default());
+                        height = u32::from_be_bytes(data[4..8].try_into().unwrap_or_default());
+                    } else if chunk_type == b"tEXt" {
+                        if let Some(null_idx) = data.iter().position(|&b| b == 0) {
+                            let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
+                            let text = String::from_utf8_lossy(&data[null_idx + 1..]).to_string();
+                            chunks.insert(keyword, text);
+                        }
+                    } else if chunk_type == b"iTXt" {
+                        if let Some(null_idx) = data.iter().position(|&b| b == 0) {
+                            let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
+                            let mut off = null_idx + 1;
+                            if off + 2 <= data.len() {
+                                let comp_flag = data[off];
+                                off += 2;
+                                if let Some(n1) = data[off..].iter().position(|&b| b == 0) {
+                                    off += n1 + 1; // skip lang tag
+                                    if let Some(n2) = data[off..].iter().position(|&b| b == 0) {
+                                        off += n2 + 1; // skip trans keyword
+                                        let text_data = &data[off..];
+                                        let text = if comp_flag == 1 {
+                                            let mut decoder = flate2::read::ZlibDecoder::new(text_data);
+                                            let mut s = String::new();
+                                            decoder.read_to_string(&mut s).unwrap_or_default();
+                                            s
+                                        } else {
+                                            String::from_utf8_lossy(text_data).to_string()
+                                        };
+                                        chunks.insert(keyword, text);
+                                    }
+                                }
                             }
                         }
+                    } else if chunk_type == b"IEND" {
+                        break;
                     }
-                }
-            } else if &chunk_type == b"IEND" {
-                break;
-            } else {
-                use std::io::{Seek, SeekFrom};
-                if f.seek(SeekFrom::Current(len as i64)).is_err() {
-                    break;
-                }
-            }
 
-            let mut crc = [0; 4];
-            if f.read_exact(&mut crc).is_err() {
-                break;
+                    offset += 8 + len + 4; // 4 (len) + 4 (type) + len (data) + 4 (crc)
+                }
             }
         }
     }
@@ -7539,6 +7511,59 @@ mod viewer_tests {
         assert_eq!(path, "C:\\img2.png");
         assert_eq!(mtime, 2000);
         assert_eq!(thumb, vec![4u8, 5, 6]);
+    }
+
+    #[test]
+    fn test_memmap_png_chunks_and_metadata() {
+        let mut png_bytes = Vec::new();
+        // PNG Signature
+        png_bytes.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+
+        // IHDR chunk: len=13, width=800, height=600, bit_depth=8, color_type=2, ...
+        png_bytes.extend_from_slice(&13u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IHDR");
+        png_bytes.extend_from_slice(&800u32.to_be_bytes());
+        png_bytes.extend_from_slice(&600u32.to_be_bytes());
+        png_bytes.extend_from_slice(&[8, 2, 0, 0, 0]);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]); // dummy CRC
+
+        // tEXt chunk: keyword="Title", text="Veloce Test"
+        let mut text_data = Vec::new();
+        text_data.extend_from_slice(b"Title\0Veloce Test");
+        png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"tEXt");
+        png_bytes.extend_from_slice(&text_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]); // dummy CRC
+
+        // iTXt chunk (uncompressed): keyword="Description", text="NovelAI Prompt Test"
+        // format: keyword + null + comp_flag(0) + comp_method(0) + lang_tag + null + trans_keyword + null + text
+        let mut itxt_data = Vec::new();
+        itxt_data.extend_from_slice(b"Description\0");
+        itxt_data.extend_from_slice(&[0, 0]); // uncompressed
+        itxt_data.extend_from_slice(b"\0"); // empty lang tag
+        itxt_data.extend_from_slice(b"\0"); // empty trans keyword
+        itxt_data.extend_from_slice(b"NovelAI Prompt Test");
+        png_bytes.extend_from_slice(&(itxt_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"iTXt");
+        png_bytes.extend_from_slice(&itxt_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]); // dummy CRC
+
+        // IEND chunk: len=0
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IEND");
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]); // dummy CRC
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_veloce_memmap_png.png");
+        std::fs::write(&test_file, &png_bytes).unwrap();
+
+        let (chunks, w, h) = parse_png_chunks_with_dimensions(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert_eq!(w, 800, "IHDRからwidthがゼロコピー抽出されること");
+        assert_eq!(h, 600, "IHDRからheightがゼロコピー抽出されること");
+        assert_eq!(chunks.get("Title").map(|s| s.as_str()), Some("Veloce Test"), "tEXtチャンクが抽出されること");
+        assert_eq!(chunks.get("Description").map(|s| s.as_str()), Some("NovelAI Prompt Test"), "iTXtチャンクが抽出されること");
     }
 }
 
