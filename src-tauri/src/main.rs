@@ -1237,8 +1237,12 @@ fn load_directory(
 
             let total_paths = paths_to_process.len();
             let mut processed_count = 0;
+            let mut last_emit = std::time::Instant::now();
 
-            for chunk in paths_to_process.chunks(50) {
+            const METADATA_CHUNK_SIZE: usize = 200;
+            const EMIT_THROTTLE_MS: u128 = 150;
+
+            for chunk in paths_to_process.chunks(METADATA_CHUNK_SIZE) {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
                     if let Ok(dir_lock) = state.current_dir.lock() {
                         if *dir_lock != path_for_bg {
@@ -1334,11 +1338,15 @@ fn load_directory(
                         }
                     }
                     
-                    // Emit event to JS
-                    let _ = app_for_bg.emit_all("metadata-batch-updated", MetadataBatchUpdatedPayload {
-                        processed: processed_count,
-                        total: total_paths,
-                    });
+                    // フロントエンドへの IPC 通知スロットリング (150ms 経過時または全件完了時のみ emit)
+                    let is_finished = processed_count >= total_paths;
+                    if is_finished || last_emit.elapsed().as_millis() >= EMIT_THROTTLE_MS {
+                        last_emit = std::time::Instant::now();
+                        let _ = app_for_bg.emit_all("metadata-batch-updated", MetadataBatchUpdatedPayload {
+                            processed: processed_count,
+                            total: total_paths,
+                        });
+                    }
                 }
             }
         });
@@ -8053,6 +8061,56 @@ mod viewer_tests {
         let _ = std::fs::remove_file(&test_file);
 
         assert!(result.is_none(), "VP8 lossy等の非アルファWebPは即座にNoneが返ること");
+    }
+
+    #[test]
+    fn test_metadata_batch_throttle_and_chunk_logic() {
+        // 1. チャンクサイズ200での正確な分割検証
+        let items: Vec<usize> = (0..650).collect();
+        const METADATA_CHUNK_SIZE: usize = 200;
+        let chunks: Vec<&[usize]> = items.chunks(METADATA_CHUNK_SIZE).collect();
+        assert_eq!(chunks.len(), 4, "650件のアイテムは200件単位で4チャンクに分割されること");
+        assert_eq!(chunks[0].len(), 200);
+        assert_eq!(chunks[1].len(), 200);
+        assert_eq!(chunks[2].len(), 200);
+        assert_eq!(chunks[3].len(), 50);
+
+        // 2. 150ms スロットリングおよび全件完了時 emit 保証ロジックのシミュレーション
+        const EMIT_THROTTLE_MS: u128 = 150;
+        let total_paths = items.len();
+        let mut processed_count = 0;
+        let mut emit_count = 0;
+        let mut last_emit_ms = 0u128; // シミュレート時刻
+
+        // 時間経過シミュレーション: 各チャンクの完了時刻（ミリ秒）
+        // チャンク0: 10ms (初回は未経過なのでemitスキップ)
+        // チャンク1: 160ms (前回emit(0ms)から160ms経過 -> emit発火)
+        // チャンク2: 220ms (前回emit(160ms)から60ms経過 -> emitスキップ)
+        // チャンク3: 280ms (前回emitから60msだが全件完了(processed==total) -> 必ずemit発火)
+        let chunk_finish_times = [10u128, 160u128, 220u128, 280u128];
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            processed_count += chunk.len();
+            let current_time_ms = chunk_finish_times[i];
+            let is_finished = processed_count >= total_paths;
+            let should_emit = is_finished || (current_time_ms - last_emit_ms) >= EMIT_THROTTLE_MS;
+
+            if should_emit {
+                last_emit_ms = current_time_ms;
+                emit_count += 1;
+            }
+
+            match i {
+                0 => assert!(!should_emit, "10ms時点では150ms未満かつ未完了のためemitスキップされること"),
+                1 => assert!(should_emit, "160ms時点では150ms経過したためemitが発火すること"),
+                2 => assert!(!should_emit, "220ms時点(前回から60ms)ではスロットリングによりスキップされること"),
+                3 => assert!(should_emit, "280ms時点(前回から60ms)でも全件完了時は必ずemitが発火すること"),
+                _ => {}
+            }
+        }
+
+        assert_eq!(emit_count, 2, "4チャンク中、スロットリングにより中間通知が抑制され全件完了を含めて2回のみemitされること");
+        assert_eq!(processed_count, 650);
     }
 
     #[test]
