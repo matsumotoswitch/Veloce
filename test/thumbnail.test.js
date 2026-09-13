@@ -997,6 +997,151 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
         global.FileReader = originalFileReader;
       }
     });
+
+    it('updateVirtualGrid should use local HTTP URL with thumb=1 when window.videoServerPort is available', async () => {
+      window.videoServerPort = 12345;
+      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      const testFiles = [{ path: 'C:/images/cached.png', name: 'cached.png', mtime: 55555, hasThumbnailCache: true }];
+      sharedAppState.totalCount = testFiles.length;
+      sharedAppState.initialChunk = testFiles;
+      sharedAppState.thumbnailUrls.clear();
+      sharedAppState.selection.clear();
+      sharedAppState.ratings = {};
+      sharedAppState.dragState = { isAppDragging: false };
+      window.appState = sharedAppState;
+
+      const gridContainer = document.createElement('div');
+      gridContainer.id = 'grid-view';
+      gridContainer.getBoundingClientRect = () => ({ width: 800, height: 600 });
+      Object.defineProperty(gridContainer, 'clientWidth', { value: 800, configurable: true });
+      Object.defineProperty(gridContainer, 'clientHeight', { value: 600, configurable: true });
+      Object.defineProperty(gridContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+      const gridSpacer = document.createElement('div');
+      gridSpacer.className = 'virtual-spacer';
+      const gridContent = document.createElement('div');
+      gridContent.className = 'virtual-content';
+      gridContainer.appendChild(gridSpacer);
+      gridContainer.appendChild(gridContent);
+
+      const { UIManager } = await import('../src/renderer-ui.js');
+      const ui = new UIManager(sharedAppState);
+      ui.elements.thumbnailGrid = gridContainer;
+      ui.elements.thumbnailSizeSlider = { value: '180' };
+
+      try {
+        await ui.updateVirtualGrid(true);
+
+        const cachedImg = gridContent.children[0].querySelector('.thumbnail-img');
+        expect(cachedImg.src).toContain('http://127.0.0.1:12345/?path=C%3A%2Fimages%2Fcached.png&mtime=55555&thumb=1');
+        expect(sharedAppState.thumbnailUrls.get('C:/images/cached.png')).toContain('http://127.0.0.1:12345/?path=');
+      } finally {
+        delete window.videoServerPort;
+      }
+    });
+
+    it('updateDOM should normalize path slashes and immediately remove loading class if img.complete is true', async () => {
+      const { ThumbnailQueueManager } = await import('../src/renderer-thumbnails.js');
+      const manager = new ThumbnailQueueManager(2);
+      const wrapper = document.createElement('div');
+      wrapper.dataset.filepath = 'C:\\images\\photo.png';
+      wrapper.classList.add('loading');
+      const img = document.createElement('img');
+      img.classList.add('loading');
+      wrapper.appendChild(img);
+
+      // DOM map にバックスラッシュで登録
+      window.uiManager = {
+        _domByPath: new Map([['C:\\images\\photo.png', wrapper]])
+      };
+
+      // スラッシュ区切りで updateDOM を呼び出し、img.complete = true の状況
+      Object.defineProperty(img, 'complete', { value: true, writable: true });
+      Object.defineProperty(img, 'naturalWidth', { value: 200, writable: true });
+
+      manager.updateDOM('C:/images/photo.png', 'blob:http://localhost/mock-blob');
+
+      expect(img.src).toBe('blob:http://localhost/mock-blob');
+      expect(img.classList.contains('loading')).toBe(false);
+      expect(wrapper.classList.contains('loading')).toBe(false);
+    });
+
+    it('saveThumbnailBinary should fallback to base64 and save via IPC if videoServerPort is unset', async () => {
+      delete window.videoServerPort;
+      const { saveThumbnailBinary } = await import('../src/renderer-thumbnails.js');
+      const mockSave = vi.fn().mockResolvedValue('http://127.0.0.1:9999/?saved=1');
+      window.veloceAPI.saveThumbnail = mockSave;
+
+      const base64Promise = Promise.resolve('data:image/jpeg;base64,QUJDREVGR0g=');
+      const result = await saveThumbnailBinary('C:/test/file.jpg', null, base64Promise);
+
+      expect(mockSave).toHaveBeenCalledWith('C:/test/file.jpg', 'data:image/jpeg;base64,QUJDREVGR0g=');
+      expect(result).toBe('http://127.0.0.1:9999/?saved=1');
+    });
+
+    it('runTask should immediately recover via Rust getThumbnail when worker generate throws', async () => {
+      const { appState } = await import('../src/renderer-state.js');
+      const { ThumbnailQueueManager, thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const manager = new ThumbnailQueueManager(2);
+      const filePath = 'C:/test/rebuild_target.png';
+
+      // 再構築対象としてセット
+      appState.rebuiltPaths = new Set([filePath]);
+
+      // Worker generate を強制失敗させる
+      vi.spyOn(thumbnailWorkerPool, 'generate').mockRejectedValueOnce(new Error('Fetch failed: 403 CSP block'));
+
+      // Rust 側救済モック
+      const rustRecoveredUrl = 'http://127.0.0.1:12345/?path=C%3A%2Ftest%2Frebuild_target.png&thumb=1';
+      window.veloceAPI.getThumbnail = vi.fn().mockResolvedValue(rustRecoveredUrl);
+
+      // DOM 要素準備
+      const wrapper = document.createElement('div');
+      wrapper.dataset.filepath = filePath;
+      const img = document.createElement('img');
+      img.classList.add('loading');
+      wrapper.appendChild(img);
+      window.uiManager = { _domByPath: new Map([[filePath, wrapper]]) };
+
+      await manager.runTask(filePath);
+
+      // Rust バックエンド救済が呼ばれ、SVGアイコンにならず正規のURLが設定されること
+      expect(window.veloceAPI.getThumbnail).toHaveBeenCalledWith(filePath);
+      expect(appState.thumbnailUrls.get(filePath)).toBe(rustRecoveredUrl);
+      expect(img.src).toBe(rustRecoveredUrl);
+    });
+
+    it('thumbnailWorkerPool.generate should fallback to readBinaryFile when fetch fails', async () => {
+      vi.useRealTimers();
+      const { thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const filePath = 'C:/test/binary_fallback.png';
+
+      // fetch を拒否モック
+      const originalFetch = global.fetch;
+      global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+
+      // readBinaryFile をモック (PNGヘッダー風バイナリ)
+      const mockBytes = new Uint8Array([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, // 256x256
+        0x08, 0x06, 0x00, 0x00, 0x00
+      ]);
+      window.veloceAPI.readBinaryFile = vi.fn().mockResolvedValue(mockBytes);
+
+      try {
+        const controller = new AbortController();
+        const promise = thumbnailWorkerPool.generate(filePath, 'https://asset.localhost/test.png', controller.signal);
+        // readBinaryFile が呼ばれたことを確認
+        await new Promise((r) => setTimeout(r, 50));
+        expect(window.veloceAPI.readBinaryFile).toHaveBeenCalledWith(filePath);
+        controller.abort();
+        await promise.catch(() => {});
+      } finally {
+        global.fetch = originalFetch;
+        vi.useFakeTimers();
+      }
+    });
   });
 });
 

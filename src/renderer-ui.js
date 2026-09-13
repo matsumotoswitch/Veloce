@@ -1715,7 +1715,7 @@ class UIManager {
         if (appState.thumbnailUrls.has(file.path)) {
             const targetUrl = appState.thumbnailUrls.get(file.path);
             img.src = targetUrl;
-            if (img.complete && img.naturalWidth > 0 && targetUrl.startsWith('data:')) {
+            if (img.complete && img.naturalWidth > 0) {
                 img.classList.remove('loading');
                 wrapper.classList.remove('loading');
                 if (img.naturalWidth === 0 && !img.src.startsWith('data:image/svg+xml')) {
@@ -1747,31 +1747,52 @@ class UIManager {
                     this.src = fallback;
                   }
                 };
+                if (img.complete && img.naturalWidth > 0) {
+                  if (wrapper.dataset.filepath === file.path) {
+                    img.classList.remove('loading');
+                    wrapper.classList.remove('loading');
+                  }
+                }
             }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else if (file.hasThumbnailCache) {
-            const url = `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}`;
+        } else if (file.hasThumbnailCache && !(appState.rebuiltPaths && appState.rebuiltPaths.has(file.path))) {
+            const url = window.videoServerPort
+              ? `http://127.0.0.1:${window.videoServerPort}/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}&thumb=1`
+              : `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}`;
             appState.thumbnailUrls.set(file.path, url);
             if (window.evictThumbnailCache) window.evictThumbnailCache();
             img.src = url;
-            img.onload = function() {
+            if (img.complete && img.naturalWidth > 0) {
               if (wrapper.dataset.filepath === file.path) {
-                this.classList.remove('loading');
+                img.classList.remove('loading');
                 wrapper.classList.remove('loading');
               }
-            };
-            img.onerror = function() {
-              if (wrapper.dataset.filepath !== file.path) return;
-              this.classList.remove('loading');
-              wrapper.classList.remove('loading');
-              // veloce:// URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
-              if (window.appState && window.appState.thumbnailUrls) {
-                window.appState.thumbnailUrls.delete(file.path);
+            } else {
+              img.onload = function() {
+                if (wrapper.dataset.filepath === file.path) {
+                  this.classList.remove('loading');
+                  wrapper.classList.remove('loading');
+                }
+              };
+              img.onerror = function() {
+                if (wrapper.dataset.filepath !== file.path) return;
+                this.classList.remove('loading');
+                wrapper.classList.remove('loading');
+                // URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
+                if (window.appState && window.appState.thumbnailUrls) {
+                  window.appState.thumbnailUrls.delete(file.path);
+                }
+                if (window.thumbnailManager) {
+                  window.thumbnailManager.enqueuePriority(file.path);
+                }
+              };
+              if (img.complete && img.naturalWidth > 0) {
+                if (wrapper.dataset.filepath === file.path) {
+                  img.classList.remove('loading');
+                  wrapper.classList.remove('loading');
+                }
               }
-              if (window.thumbnailManager) {
-                window.thumbnailManager.enqueuePriority(file.path);
-              }
-            };
+            }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
         } else {
             img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -1787,12 +1808,25 @@ class UIManager {
           const cachedUrl = appState.thumbnailUrls.get(file.path);
           if (img.src !== cachedUrl) {
             img.src = cachedUrl;
-            img.onload = function() {
+            if (img.complete && img.naturalWidth > 0) {
               if (wrapper.dataset.filepath === file.path) {
-                this.classList.remove('loading');
+                img.classList.remove('loading');
                 wrapper.classList.remove('loading');
               }
-            };
+            } else {
+              img.onload = function() {
+                if (wrapper.dataset.filepath === file.path) {
+                  this.classList.remove('loading');
+                  wrapper.classList.remove('loading');
+                }
+              };
+              if (img.complete && img.naturalWidth > 0) {
+                if (wrapper.dataset.filepath === file.path) {
+                  img.classList.remove('loading');
+                  wrapper.classList.remove('loading');
+                }
+              }
+            }
             if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
           }
         }

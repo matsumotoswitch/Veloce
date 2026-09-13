@@ -272,8 +272,14 @@ impl AppState {
     /// パスから mtime を O(1) で取得する
     pub fn get_mtime(&self, path: &str) -> Option<u64> {
         let clean = path.replace("\\\\?\\", "");
+        let norm_back = clean.replace('/', "\\");
+        let norm_fwd = clean.replace('\\', "/");
         if let Ok(lock) = self.path_to_mtime.lock() {
-            lock.get(path).or_else(|| lock.get(&clean)).copied()
+            lock.get(path)
+                .or_else(|| lock.get(&clean))
+                .or_else(|| lock.get(&norm_back))
+                .or_else(|| lock.get(&norm_fwd))
+                .copied()
         } else {
             None
         }
@@ -282,8 +288,13 @@ impl AppState {
     /// サムネイルキャッシュ保持フラグを all_files と filtered_files の両方で O(1) 更新する
     pub fn mark_thumbnail_cached(&self, path: &str) {
         let clean = path.replace("\\\\?\\", "");
+        let norm_back = clean.replace('/', "\\");
+        let norm_fwd = clean.replace('\\', "/");
         if let Ok(all_idx_lock) = self.path_to_all_idx.lock() {
-            if let Some(&idx) = all_idx_lock.get(path).or_else(|| all_idx_lock.get(&clean)) {
+            if let Some(&idx) = all_idx_lock.get(path)
+                .or_else(|| all_idx_lock.get(&clean))
+                .or_else(|| all_idx_lock.get(&norm_back))
+                .or_else(|| all_idx_lock.get(&norm_fwd)) {
                 if let Ok(mut lock) = self.all_files.lock() {
                     if let Some(f) = lock.get_mut(idx) {
                         std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
@@ -292,7 +303,10 @@ impl AppState {
             }
         }
         if let Ok(filt_idx_lock) = self.path_to_filtered_idx.lock() {
-            if let Some(&idx) = filt_idx_lock.get(path).or_else(|| filt_idx_lock.get(&clean)) {
+            if let Some(&idx) = filt_idx_lock.get(path)
+                .or_else(|| filt_idx_lock.get(&clean))
+                .or_else(|| filt_idx_lock.get(&norm_back))
+                .or_else(|| filt_idx_lock.get(&norm_fwd)) {
                 if let Ok(mut lock) = self.filtered_files.lock() {
                     if let Some(f) = lock.get_mut(idx) {
                         std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
@@ -2826,16 +2840,8 @@ async fn generate_thumbnail(
 ) -> Result<String, String> {
     let db_conn = state.db_conn.clone();
     
-    // O(1) 高速逆引きインデックスから mtime を即座に取得
-    let (mem_mtime, is_valid) = if let Some(mt) = state.get_mtime(&file_path) {
-        (Some(mt), true)
-    } else {
-        (None, false)
-    };
-
-    if !is_valid {
-        return Ok(String::new());
-    }
+    // O(1) 高速逆引きインデックスから mtime を取得（なければディスクからフォールバック取得）
+    let mem_mtime = state.get_mtime(&file_path);
 
     let video_port = state.video_server_port;
     let url = tokio::task::spawn_blocking(move || {
@@ -3251,20 +3257,24 @@ fn generate_thumbnail_inner(
         }
     }
     
-    // 動画ファイルのみ高速にシェルAPI/ffmpegで即時抽出（静止画像はJS側の Worker プールに委譲）
+    // 静止画像または動画ファイルのサムネイルを高速生成（キャッシュミス時）
     let lower_path = file_path.to_lowercase();
-    if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-        if let Some(bytes) = generate_video_thumbnail_sync(file_path) {
-            if let Ok(conn) = db_conn.get() {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                let _ = conn.execute(
-                    "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-                    rusqlite::params![hash_key, bytes, clean_path, now],
-                );
-            }
-            return bytes;
+    let generated_bytes = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+        generate_video_thumbnail_sync(file_path)
+    } else {
+        generate_image_thumbnail_sync(file_path)
+    };
+
+    if let Some(bytes) = generated_bytes {
+        if let Ok(conn) = db_conn.get() {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let _ = conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+                rusqlite::params![hash_key, bytes, clean_path, now],
+            );
         }
+        return bytes;
     }
     
     Vec::new()
@@ -4616,14 +4626,22 @@ fn start_local_video_server(
                     let uri = parts[1];
 
                     if method == "OPTIONS" {
+                        loop {
+                            let mut header_line = String::new();
+                            if reader.read_line(&mut header_line).is_err() { break; }
+                            if header_line.trim().is_empty() { break; }
+                        }
                         let mut headers = String::new();
                         headers.push_str("HTTP/1.1 200 OK\r\n");
                         headers.push_str("Access-Control-Allow-Origin: *\r\n");
                         headers.push_str("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
-                        headers.push_str("Access-Control-Allow-Headers: Range, Content-Type, Content-Length\r\n");
+                        headers.push_str("Access-Control-Allow-Headers: Range, Content-Type, Content-Length, Access-Control-Request-Private-Network\r\n");
+                        headers.push_str("Access-Control-Allow-Private-Network: true\r\n");
                         headers.push_str("Access-Control-Max-Age: 86400\r\n");
+                        headers.push_str("Content-Length: 0\r\n");
                         headers.push_str("Connection: close\r\n\r\n");
                         let _ = stream.write_all(headers.as_bytes());
+                        let _ = stream.flush();
                         return;
                     }
 
@@ -4758,6 +4776,40 @@ fn start_local_video_server(
                                         cache_bytes = thumb;
                                     }
                                 }
+                                if cache_bytes.is_empty() {
+                                    let norm_back = clean_path.replace('/', "\\");
+                                    let norm_fwd = clean_path.replace('\\', "/");
+                                    if let Ok(mut stmt) = conn.prepare_cached(
+                                        "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
+                                    ) {
+                                        if let Ok(thumb) = stmt.query_row([&clean_path, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
+                                            cache_bytes = thumb;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if cache_bytes.is_empty() {
+                            let lower = path_str.to_lowercase();
+                            let generated = if lower.ends_with(".mp4") || lower.ends_with(".webm") || lower.ends_with(".avi") || lower.ends_with(".mkv") {
+                                generate_video_thumbnail_sync(&path_str)
+                            } else {
+                                generate_image_thumbnail_sync(&path_str)
+                            };
+                            if let Some(bytes) = generated {
+                                if let Some(mut db_path) = crate::get_veloce_data_dir() {
+                                    db_path.push("veloce_cache.db");
+                                    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                                        let _ = conn.execute(
+                                            "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+                                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+                                            rusqlite::params![hash_key, bytes, clean_path, now],
+                                        );
+                                    }
+                                }
+                                cache_bytes = bytes;
                             }
                         }
 
@@ -7074,6 +7126,50 @@ mod viewer_tests {
         assert_eq!(res2, vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3]);
     }
 
+    #[test]
+    fn test_generate_thumbnail_inner_generates_on_cache_miss() {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        // テスト用の小さなPNG画像ファイルを作成
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_file_path = temp_dir.path().join("test_img.png");
+        let img = image::RgbImage::new(100, 100);
+        img.save(&temp_file_path).unwrap();
+
+        let path_str = temp_file_path.to_string_lossy().to_string();
+        let res = super::generate_thumbnail_inner(&path_str, 12345, &pool);
+        assert!(!res.is_empty(), "キャッシュミス時でも自動生成されたサムネイルが返却されること");
+        assert!(res.starts_with(&[0xFF, 0xD8]), "生成されたサムネイルはJPEG形式であること");
+
+        // DB に保存されていることを確認
+        let conn = pool.get().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT count(*) FROM cache WHERE thumbnail IS NOT NULL",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "キャッシュDBに保存されていること");
+    }
+
     /// PLAN.md Sec 5.2: アスペクト比条件（portrait, landscape, square）の動的SQL生成テスト
     #[test]
     fn test_smart_folder_aspect_ratio_bounds() {
@@ -7591,14 +7687,16 @@ mod viewer_tests {
         app_state.rebuild_all_indices(&files);
         app_state.rebuild_filtered_indices(&files);
 
-        // 1. O(1) mtime 逆引き検証（プレフィックスあり・なし両対応）
+        // 1. O(1) mtime 逆引き検証（プレフィックスあり・なし、スラッシュ区切り両対応）
         assert_eq!(app_state.get_mtime("\\\\?\\C:\\images\\img1.png"), Some(1700000001));
         assert_eq!(app_state.get_mtime("C:\\images\\img1.png"), Some(1700000001));
+        assert_eq!(app_state.get_mtime("C:/images/img1.png"), Some(1700000001));
         assert_eq!(app_state.get_mtime("C:\\images\\img2.webp"), Some(1700000002));
+        assert_eq!(app_state.get_mtime("C:/images/img2.webp"), Some(1700000002));
         assert_eq!(app_state.get_mtime("C:\\images\\non_existent.png"), None);
 
-        // 2. mark_thumbnail_cached による O(1) フラグ更新検証
-        app_state.mark_thumbnail_cached("C:\\images\\img1.png");
+        // 2. mark_thumbnail_cached による O(1) フラグ更新検証（スラッシュ区切り対応含む）
+        app_state.mark_thumbnail_cached("C:/images/img1.png");
         {
             let all = app_state.all_files.lock().unwrap();
             assert!(all[0].has_thumbnail_cache, "all_files のキャッシュフラグが更新されること");

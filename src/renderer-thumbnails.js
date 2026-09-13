@@ -228,83 +228,164 @@ class ThumbnailWorkerPool {
       }
 
       try {
-        const urlWithBuster = assetUrl.includes('?') ? assetUrl + '&_t=' + Date.now() : assetUrl + '?_t=' + Date.now();
-        const response = await fetch(urlWithBuster, { signal: controller.signal, cache: 'no-store' });
-        if (!response.ok) throw new Error("Fetch failed: " + response.status);
-        const blob = await response.blob();
-        
-        // ヘッダーから元画像サイズを軽量抽出してダウンサンプリング目標寸法を算出
-        const dims = await getImageDimensionsFromBlob(blob);
-        let targetWidth = 0;
-        let targetHeight = 0;
-        let originalWidth = (dims && dims.width > 0) ? dims.width : 0;
-        let originalHeight = (dims && dims.height > 0) ? dims.height : 0;
-
-        if (dims && dims.width > 0 && dims.height > 0) {
-          if (dims.width > 384 || dims.height > 384) {
-            const ratio = Math.min(384 / dims.width, 384 / dims.height);
-            targetWidth = Math.max(1, Math.round(dims.width * ratio));
-            targetHeight = Math.max(1, Math.round(dims.height * ratio));
-          } else {
-            targetWidth = dims.width;
-            targetHeight = dims.height;
+        let blob = null;
+        // 1. Fetch API による画像バイナリ取得試行（キャッシュバイパス）
+        try {
+          const urlWithBuster = assetUrl.includes('?') ? assetUrl + '&_t=' + Date.now() : assetUrl + '?_t=' + Date.now();
+          const response = await fetch(urlWithBuster, { signal: controller.signal, cache: 'no-store' });
+          if (response.ok) {
+            blob = await response.blob();
           }
+        } catch (fetchErr) {
+          // fetch失敗（Windows 8.1 / Chromium 109 のカスタムプロトコル制約等）
         }
 
-        // Chromium 109環境の安全レース制御
-        const decodeRace = (promise) => Promise.race([
-          promise,
-          new Promise((_, r) => setTimeout(() => r(new Error("createImageBitmap timed out")), 4000))
-        ]);
-
-        // ネイティブダウンサンプリング: Chromium デコーダーが 384px 枠内に直接デコードするため
-        // 巨大な等倍バッファ（数十MB）のメモリ展開とGC負荷を根絶し、デコード時間を極小化
-        // 高品質サンプリング ('high') を指定して縮小時の細部損失を防止
-        let sourceElement;
-        if (targetWidth > 0 && targetHeight > 0) {
+        // 2. Tauri IPC readBinaryFile による確実なバイナリ取得フォールバック
+        if (!blob && window.veloceAPI && typeof window.veloceAPI.readBinaryFile === 'function') {
           try {
-            sourceElement = await decodeRace(createImageBitmap(blob, {
-              resizeWidth: targetWidth,
-              resizeHeight: targetHeight,
-              resizeQuality: 'high'
-            }));
-          } catch (optErr) {
-            sourceElement = await decodeRace(createImageBitmap(blob));
+            const rawBytes = await window.veloceAPI.readBinaryFile(filePath);
+            if (rawBytes && rawBytes.length > 0) {
+              const lower = filePath.toLowerCase();
+              const mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+              blob = new Blob([rawBytes], { type: mime });
+            }
+          } catch (readErr) {
+            // readBinaryFile fallback
           }
-        } else {
-          sourceElement = await decodeRace(createImageBitmap(blob));
         }
 
-        if (sourceElement instanceof Error) throw sourceElement;
-        if (originalWidth === 0 && originalHeight === 0 && sourceElement) {
-          originalWidth = sourceElement.width;
-          originalHeight = sourceElement.height;
+        let sourceElement = null;
+        let originalWidth = 0;
+        let originalHeight = 0;
+
+        if (blob) {
+          // ヘッダーから元画像サイズを軽量抽出して目標寸法を算出
+          const dims = await getImageDimensionsFromBlob(blob);
+          let targetWidth = 0;
+          let targetHeight = 0;
+          if (dims && dims.width > 0 && dims.height > 0) {
+            originalWidth = dims.width;
+            originalHeight = dims.height;
+            if (dims.width > 384 || dims.height > 384) {
+              const ratio = Math.min(384 / dims.width, 384 / dims.height);
+              targetWidth = Math.max(1, Math.round(dims.width * ratio));
+              targetHeight = Math.max(1, Math.round(dims.height * ratio));
+            } else {
+              targetWidth = dims.width;
+              targetHeight = dims.height;
+            }
+          }
+
+          // Chromium 109環境の安全レース制御 (2000ms)
+          const decodeRace = (promise) => Promise.race([
+            promise,
+            new Promise((_, r) => setTimeout(() => r(new Error("createImageBitmap timed out")), 2000))
+          ]);
+
+          if (typeof createImageBitmap === 'function') {
+            try {
+              if (targetWidth > 0 && targetHeight > 0) {
+                try {
+                  sourceElement = await decodeRace(createImageBitmap(blob, {
+                    resizeWidth: targetWidth,
+                    resizeHeight: targetHeight,
+                    resizeQuality: 'high'
+                  }));
+                } catch (e) {
+                  sourceElement = await decodeRace(createImageBitmap(blob));
+                }
+              } else {
+                sourceElement = await decodeRace(createImageBitmap(blob));
+              }
+            } catch (bmpErr) {
+              // createImageBitmap 失敗・タイムアウト時は HTMLImageElement にフォールバック
+            }
+          }
+
+          // HTMLImageElement による Blob フォールバックデコード
+          if (!sourceElement && typeof Image !== 'undefined') {
+            const blobObjUrl = URL.createObjectURL(blob);
+            try {
+              sourceElement = await new Promise((res, rej) => {
+                const img = new Image();
+                img.onload = () => res(img);
+                img.onerror = () => rej(new Error("Image element failed to decode blob"));
+                img.src = blobObjUrl;
+              });
+            } finally {
+              setTimeout(() => URL.revokeObjectURL(blobObjUrl), 1000);
+            }
+          }
+        } else if (typeof Image !== 'undefined') {
+          // Blobが取得できなかった場合: 直接 HTMLImageElement で assetUrl をロード
+          sourceElement = await new Promise((res, rej) => {
+            const img = new Image();
+            img.onload = () => res(img);
+            img.onerror = () => rej(new Error("Image element failed to load assetUrl"));
+            img.src = assetUrl;
+          });
         }
 
-        let width = sourceElement.width;
-        let height = sourceElement.height;
+        if (!sourceElement) throw new Error("Failed to load source image for thumbnail");
+
+        const srcW = sourceElement.naturalWidth || sourceElement.width || 0;
+        const srcH = sourceElement.naturalHeight || sourceElement.height || 0;
+        if (originalWidth === 0 && originalHeight === 0) {
+          originalWidth = srcW;
+          originalHeight = srcH;
+        }
+
+        let width = srcW;
+        let height = srcH;
         if (width > 384 || height > 384) {
           const ratio = Math.min(384 / width, 384 / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
+          width = Math.max(1, Math.round(width * ratio));
+          height = Math.max(1, Math.round(height * ratio));
         }
         width = Math.max(1, width);
         height = Math.max(1, height);
-        
-        const canvas = new OffscreenCanvas(width, height);
-        const ctx = canvas.getContext('2d');
-        // 高品質バイキュービック補間
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.fillStyle = THUMBNAIL_CANVAS_BG;
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(sourceElement, 0, 0, width, height);
-        
-        const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.90 });
-        sourceElement.close();
-        
+
+        // Canvas によるリサイズ & JPEG変換
+        let outBlob = null;
+        if (typeof OffscreenCanvas !== 'undefined') {
+          try {
+            const canvas = new OffscreenCanvas(width, height);
+            const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.fillStyle = THUMBNAIL_CANVAS_BG;
+            ctx.fillRect(0, 0, width, height);
+            ctx.drawImage(sourceElement, 0, 0, width, height);
+            if (typeof canvas.convertToBlob === 'function') {
+              outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.90 });
+            }
+          } catch (offErr) {
+            // OffscreenCanvas fallback
+          }
+        }
+
+        // DOM Canvas によるフォールバック
+        if (!outBlob && typeof document !== 'undefined') {
+          const domCanvas = document.createElement('canvas');
+          domCanvas.width = width;
+          domCanvas.height = height;
+          const ctx = domCanvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.fillStyle = THUMBNAIL_CANVAS_BG;
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(sourceElement, 0, 0, width, height);
+          outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/jpeg', 0.90));
+        }
+
+        if (sourceElement.close && typeof sourceElement.close === 'function') {
+          sourceElement.close();
+        }
+
+        if (!outBlob) throw new Error("Failed to encode thumbnail to blob");
+
         const blobUrl = URL.createObjectURL(outBlob);
-        
+
         // Base64 変換の遅延評価（Lazy Promise）:
         // バイナリストリーム送信時は FileReader による不要な Base64 文字列生成とヒープ割り当て・GCを完全に回避する
         let cachedBase64Promise = null;
@@ -465,6 +546,16 @@ function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
  * @returns {Promise<string|null>} 保存完了後の即時参照用URL（またはnull）
  */
 export async function saveThumbnailBinary(filePath, blob, base64Promise) {
+  let b64Promise = base64Promise;
+  if (!b64Promise && blob && typeof FileReader !== 'undefined') {
+    b64Promise = new Promise((resolveB64, rejectB64) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolveB64(reader.result);
+      reader.onerror = () => rejectB64(new Error("FileReader failed"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
   const port = window.videoServerPort;
   if (port && typeof fetch === 'function' && blob) {
     try {
@@ -486,9 +577,9 @@ export async function saveThumbnailBinary(filePath, blob, base64Promise) {
   }
 
   // フォールバック: 従来の Base64 + Tauri IPC
-  if (base64Promise && typeof base64Promise.then === 'function') {
+  if (b64Promise && typeof b64Promise.then === 'function') {
     try {
-      const b64 = await base64Promise;
+      const b64 = await b64Promise;
       if (window.veloceAPI && typeof window.veloceAPI.saveThumbnail === 'function') {
         return await window.veloceAPI.saveThumbnail(filePath, b64);
       }
@@ -828,49 +919,69 @@ export class ThumbnailQueueManager {
 
       // 2. キャッシュがない場合、非同期に生成
       if (!url) {
-        const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
-        const { url: blobUrl, blob: outBlob, base64Promise, width, height } = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
-        
-        // 生成完了後のバイナリ直接送信（またはフォールバック保存）は、フォルダ移動（signal.aborted）にかかわらず確実にコミットする
-        saveThumbnailBinary(filePath, outBlob, base64Promise).then((savedUrl) => {
-          if (signal.aborted) return;
-          const lightUrl = savedUrl || blobUrl;
-          if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
-            appState.thumbnailUrls.set(filePath, lightUrl);
-            if (window.evictThumbnailCache) window.evictThumbnailCache();
+        let genResult = null;
+        try {
+          const assetUrl = getStreamUrl(filePath, window.veloceAPI.convertFileSrc(filePath));
+          genResult = await thumbnailWorkerPool.generate(filePath, assetUrl, signal);
+        } catch (workerErr) {
+          // フロントエンド生成失敗時は、直ちに Rust バックエンド (generate_image_thumbnail_sync) で救済
+          console.warn(`[Thumbnail] Worker generation failed for ${filePath.split('\\').pop()}, recovering via Rust:`, workerErr);
+          if (window.veloceAPI && typeof window.veloceAPI.getThumbnail === 'function') {
+            try {
+              url = await window.veloceAPI.getThumbnail(filePath);
+            } catch (rustErr) {
+              console.warn(`[Thumbnail] Rust recovery also failed:`, rustErr);
+            }
           }
-        }).catch(err => console.warn('Cache save error:', err));
+          if (!url) {
+            throw workerErr;
+          }
+        }
 
-        if (signal.aborted) {
+        if (genResult) {
+          const { url: blobUrl, blob: outBlob, base64Promise, width, height } = genResult;
+          
+          // 生成完了後のバイナリ直接送信（またはフォールバック保存）は、フォルダ移動（signal.aborted）にかかわらず確実にコミットする
+          saveThumbnailBinary(filePath, outBlob, base64Promise).then((savedUrl) => {
+            if (signal.aborted) return;
+            const lightUrl = savedUrl || blobUrl;
+            if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
+              appState.thumbnailUrls.set(filePath, lightUrl);
+              if (window.evictThumbnailCache) window.evictThumbnailCache();
+            }
+          }).catch(err => console.warn('Cache save error:', err));
+
+          if (signal.aborted) {
+            if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
+              appState.rebuiltPaths.delete(filePath);
+            }
+            return;
+          }
+
+          if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
+            URL.revokeObjectURL(blobUrl);
+            throw new Error('Task invalidated by file-changed');
+          }
+          
+          appState.thumbnailUrls.set(filePath, blobUrl);
+          evictThumbnailCache();
+          this.updateDOM(filePath, blobUrl);
+
+          if (width > 0 && height > 0) {
+            const uiMgr = window.uiManager || (typeof uiManager !== 'undefined' ? uiManager : null);
+            if (uiMgr && typeof uiMgr.updateFileDimensions === 'function') {
+              uiMgr.updateFileDimensions(filePath, width, height);
+            }
+            if (window.veloceAPI && typeof window.veloceAPI.updateFileDimensions === 'function') {
+              window.veloceAPI.updateFileDimensions(filePath, width, height);
+            }
+          }
+          
           if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
             appState.rebuiltPaths.delete(filePath);
           }
-          return;
+          return; // 早期リターン
         }
-
-        if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
-          URL.revokeObjectURL(blobUrl);
-          throw new Error('Task invalidated by file-changed');
-        }
-        
-        appState.thumbnailUrls.set(filePath, blobUrl);
-        evictThumbnailCache();
-        this.updateDOM(filePath, blobUrl);
-
-        if (width > 0 && height > 0) {
-          const uiMgr = window.uiManager || (typeof uiManager !== 'undefined' ? uiManager : null);
-          if (uiMgr && typeof uiMgr.updateFileDimensions === 'function') {
-            uiMgr.updateFileDimensions(filePath, width, height);
-          }
-          if (window.veloceAPI && typeof window.veloceAPI.updateFileDimensions === 'function') {
-            window.veloceAPI.updateFileDimensions(filePath, width, height);
-          }
-        }
-        
-        if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
-          appState.rebuiltPaths.delete(filePath);
-        }
-        return; // 早期リターン
       }
 
       if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
@@ -916,13 +1027,28 @@ export class ThumbnailQueueManager {
         }
 
         if (fallbackToSvg) {
-          // 3回失敗: SVGフォールバックを表示し、thumbnailUrlsにもセットして無限リトライを防ぐ
-          const fallbackUrl = BROKEN_MP4_FALLBACK_URL;
-          appState.thumbnailUrls.set(filePath, fallbackUrl);
-          if (window.evictThumbnailCache) window.evictThumbnailCache();
-          this.updateDOM(filePath, fallbackUrl);
-          if (this._retryMap) this._retryMap.delete(filePath);
-          console.warn(`[Thumbnail] Gave up after 3 retries: ${filePath.split('\\').pop()}`);
+          // 3回失敗時: SVGフォールバック直前に Rust バックエンドからの最終救済を試行
+          let rustRecoveredUrl = null;
+          try {
+            if (window.veloceAPI && typeof window.veloceAPI.getThumbnail === 'function') {
+              rustRecoveredUrl = await window.veloceAPI.getThumbnail(filePath);
+            }
+          } catch (e) {}
+
+          if (rustRecoveredUrl) {
+            appState.thumbnailUrls.set(filePath, rustRecoveredUrl);
+            if (window.evictThumbnailCache) window.evictThumbnailCache();
+            this.updateDOM(filePath, rustRecoveredUrl);
+            if (this._retryMap) this._retryMap.delete(filePath);
+          } else {
+            // 壊れた画像など本当に生成不可能な場合のみ画像アイコンフォールバック
+            const fallbackUrl = BROKEN_MP4_FALLBACK_URL;
+            appState.thumbnailUrls.set(filePath, fallbackUrl);
+            if (window.evictThumbnailCache) window.evictThumbnailCache();
+            this.updateDOM(filePath, fallbackUrl);
+            if (this._retryMap) this._retryMap.delete(filePath);
+            console.warn(`[Thumbnail] Gave up after 3 retries: ${filePath.split('\\').pop()}`);
+          }
         }
 
         if (typeof window.markThumbnailCompleted === 'function') {
@@ -943,29 +1069,55 @@ export class ThumbnailQueueManager {
   updateDOM(filePath, url) {
     // uiManager._domByPath (Map) から O(1) で要素を取得する
     const uiMgr = window.uiManager || uiManager;
-    const wrapper = (uiMgr && uiMgr._domByPath) ? uiMgr._domByPath.get(filePath) : null;
+    let wrapper = (uiMgr && uiMgr._domByPath) ? uiMgr._domByPath.get(filePath) : null;
+    if (!wrapper && uiMgr && uiMgr._domByPath) {
+      // パス区切り文字（/ と \）の差異を吸収して再探索
+      const normPath = filePath.replace(/\\/g, '/').toLowerCase();
+      for (const [p, w] of uiMgr._domByPath.entries()) {
+        if (p.replace(/\\/g, '/').toLowerCase() === normPath) {
+          wrapper = w;
+          break;
+        }
+      }
+    }
+
     if (wrapper) {
       const img = wrapper.children[0]; // .thumbnail-img
       if (img) {
         img.src = url;
-        img.onload = function () {
-          if (wrapper.dataset.filepath === filePath) {
-            this.classList.remove('loading');
+        const normWrapper = (wrapper.dataset.filepath || '').replace(/\\/g, '/').toLowerCase();
+        const normTarget = (filePath || '').replace(/\\/g, '/').toLowerCase();
+        const isMatch = () => normWrapper === normTarget;
+
+        if (img.complete && img.naturalWidth > 0) {
+          if (isMatch()) {
+            img.classList.remove('loading');
             wrapper.classList.remove('loading');
           }
-        };
-        img.onerror = function () {
-          if (wrapper.dataset.filepath !== filePath) return;
-          this.classList.remove('loading');
-          wrapper.classList.remove('loading');
-          const fallback = window.veloceAPI.convertFileSrc(filePath);
-          if (this.src !== fallback && !this.src.startsWith('asset://')) {
-            if (window.appState && window.appState.thumbnailUrls) {
-              window.appState.thumbnailUrls.set(filePath, fallback);
+        } else {
+          img.onload = function () {
+            if (isMatch()) {
+              this.classList.remove('loading');
+              wrapper.classList.remove('loading');
             }
-            this.src = fallback;
+          };
+          img.onerror = function () {
+            if (!isMatch()) return;
+            this.classList.remove('loading');
+            wrapper.classList.remove('loading');
+            const fallback = window.veloceAPI.convertFileSrc(filePath);
+            if (this.src !== fallback && !this.src.startsWith('asset://')) {
+              if (window.appState && window.appState.thumbnailUrls) {
+                window.appState.thumbnailUrls.set(filePath, fallback);
+              }
+              this.src = fallback;
+            }
+          };
+          if (img.complete && img.naturalWidth > 0 && isMatch()) {
+            img.classList.remove('loading');
+            wrapper.classList.remove('loading');
           }
-        };
+        }
       }
       return;
     }

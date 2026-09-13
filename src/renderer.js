@@ -482,6 +482,7 @@ async function rebuildSelectedCache() {
       const files = await window.veloceAPI.getFilesByIndices(indices);
       for (const file of files) {
         pathsToRebuild.push(file.path);
+        file.hasThumbnailCache = false;
         if (appState.thumbnailUrls.has(file.path)) {
           const oldUrl = appState.thumbnailUrls.get(file.path);
           if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
@@ -493,6 +494,7 @@ async function rebuildSelectedCache() {
         const file = await window.veloceAPI.getFileByIndex(index);
         if (file) {
           pathsToRebuild.push(file.path);
+          file.hasThumbnailCache = false;
           if (appState.thumbnailUrls.has(file.path)) {
             const oldUrl = appState.thumbnailUrls.get(file.path);
             if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
@@ -1309,6 +1311,7 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
       const files = await window.veloceAPI.getItems(i, size);
       for (const file of files) {
         pathsToRebuild.push(file.path);
+        file.hasThumbnailCache = false;
         if (appState.thumbnailUrls.has(file.path)) {
           const oldUrl = appState.thumbnailUrls.get(file.path);
           if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);

@@ -13,7 +13,7 @@ rust-version = "1.77.2"
 tauri-build = { version = "1", features = [] }
 
 [dependencies]
-tauri = { version = "1", features = [ "dialog-open",
+tauri = { version = "1", features = [ "fs-read-file", "dialog-open",
     "devtools",
     "fs-copy-file",
     "fs-create-dir",
