@@ -1299,7 +1299,7 @@ class UIManager {
   }
 
   updateVirtualList(force = false) {
-    this._runWithUpdateLock('list', async () => {
+    return this._runWithUpdateLock('list', async () => {
       if (!this.elements.fileListBody) return;
     const container = document.getElementById('center-top');
     const tbody = this.elements.fileListBody;
@@ -1487,10 +1487,9 @@ class UIManager {
       }
     }
 
-    // Chromium 109 / WebView2 環境において、DOM要素の差分更新直後にスクロール位置を変更した際の再描画遅延を防ぐため同期レイアウトを確定
-    void tbody.offsetHeight;
-
+    // スクロール位置を同期復元する場合のみレイアウトを確定させ、ジャンプ時の描画遅延を防止（通常スクロール時の不要Reflowを排除）
     if (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) {
+      void tbody.offsetHeight;
       container.scrollTop = appState.savedScrollTopList;
       appState.savedScrollTopList = 0;
     }
@@ -1498,7 +1497,7 @@ class UIManager {
   }
 
   updateVirtualGrid(force = false) {
-    this._runWithUpdateLock('grid', async () => {
+    return this._runWithUpdateLock('grid', async () => {
       if (!this.elements.thumbnailGrid) return;
     const container = this.elements.thumbnailGrid;
 
@@ -1632,8 +1631,11 @@ class UIManager {
     // DOMの再構築（要素の再利用）
     const targetCount = endIndex - startIndex + 1;
 
+    let domStructureChanged = false;
+
     // 足りない要素を追加
     while (content.children.length < targetCount) {
+      domStructureChanged = true;
       const wrapper = document.createElement('div');
       wrapper.className = 'thumbnail-item';
       wrapper.dataset.isVisible = 'true';
@@ -1667,7 +1669,10 @@ class UIManager {
       if (!file) continue;
 
       const wrapper = content.children[i - startIndex];
-      wrapper.style.display = ''; // プールから復帰して確実に表示する
+      if (wrapper.style.display !== '') {
+        wrapper.style.display = ''; // プールから復帰して確実に表示する
+        domStructureChanged = true;
+      }
       // children[] 固定インデックスで直アクセス（querySelector廃止でO(subtree)走査を排除）
       const img   = wrapper.children[0]; // .thumbnail-img
       const label = wrapper.children[1]; // .thumbnail-label
@@ -1859,6 +1864,7 @@ class UIManager {
       const unusedWrapper = content.children[i];
       if (unusedWrapper.style.display !== 'none') {
         unusedWrapper.style.display = 'none';
+        domStructureChanged = true;
         if (unusedWrapper.dataset.filepath && this._domByPath) {
           this._domByPath.delete(unusedWrapper.dataset.filepath);
           unusedWrapper.dataset.filepath = '';
@@ -1868,8 +1874,10 @@ class UIManager {
       }
     }
 
-    // Chromium 109 / WebView2 において、DOM Pool 要素の display 切り替え直後のスタイル確定を行い、次フレームでの不要な再描画遅延を防止
-    void content.offsetHeight;
+    // DOM構造の変化（要素新規生成・表示非表示切替）または強制更新時のみ同期レイアウトを確定し、通常スクロール時の不要Reflowを根絶
+    if (domStructureChanged || force) {
+      void content.offsetHeight;
+    }
 
     // visiblePathSet を _domByPath から構築（_domByPath はループ内 L1671 で既に最新化済み）
     const newVisibleSet = new Set();
