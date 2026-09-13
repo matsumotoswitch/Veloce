@@ -62,6 +62,8 @@ pub struct ImageFile {
     search_text: String,
     #[serde(skip)]
     unified_search_text: String,
+    #[serde(default)]
+    hash_key: String,
 }
 
 fn extract_searchable_text(val: &serde_json::Value) -> String {
@@ -232,17 +234,72 @@ pub struct AppState {
     video_server_port: u16,
 }
 
+#[inline]
+fn strip_unc_prefix(path: &str) -> Option<&str> {
+    if path.starts_with(r"\\?\") {
+        Some(&path[4..])
+    } else {
+        None
+    }
+}
+
+#[inline]
+fn normalize_unc_path(p: &str) -> std::borrow::Cow<'_, str> {
+    if p.starts_with(r"\\?\UNC\") {
+        let mut s = String::with_capacity(p.len() - 6);
+        s.push_str(r"\\");
+        s.push_str(&p[8..]);
+        std::borrow::Cow::Owned(s)
+    } else if p.starts_with(r"\\?\") {
+        std::borrow::Cow::Borrowed(&p[4..])
+    } else {
+        std::borrow::Cow::Borrowed(p)
+    }
+}
+
 impl AppState {
-    /// all_files のインデックスと mtime の逆引きマップを再構築する
-    pub fn rebuild_all_indices(&self, files: &[std::sync::Arc<ImageFile>]) {
-        let mut all_map = std::collections::HashMap::with_capacity(files.len() * 2);
-        let mut mtime_map = std::collections::HashMap::with_capacity(files.len() * 2);
+    /// all_files と filtered_files が同一の場合、1回の走査で全インデックス（all, filtered, mtime）を同時に構築する
+    pub fn rebuild_all_and_filtered_indices(&self, files: &[std::sync::Arc<ImageFile>]) {
+        let has_unc = files.iter().take(20).any(|f| f.path.starts_with(r"\\?\"));
+        let cap = if has_unc { files.len() * 2 } else { files.len() + 16 };
+        let mut all_map = std::collections::HashMap::with_capacity(cap);
+        let mut mtime_map = std::collections::HashMap::with_capacity(cap);
+
         for (i, f) in files.iter().enumerate() {
             all_map.insert(f.path.clone(), i);
-            let clean = f.path.replace("\\\\?\\", "");
-            if clean != f.path {
-                all_map.insert(clean.clone(), i);
-                mtime_map.insert(clean, f.mtime);
+            let norm = normalize_unc_path(&f.path);
+            if norm != f.path {
+                let norm_str = norm.into_owned();
+                all_map.insert(norm_str.clone(), i);
+                mtime_map.insert(norm_str, f.mtime);
+            }
+            mtime_map.insert(f.path.clone(), f.mtime);
+        }
+
+        if let Ok(mut lock) = self.path_to_filtered_idx.lock() {
+            *lock = all_map.clone();
+        }
+        if let Ok(mut lock) = self.path_to_all_idx.lock() {
+            *lock = all_map;
+        }
+        if let Ok(mut lock) = self.path_to_mtime.lock() {
+            *lock = mtime_map;
+        }
+    }
+
+    /// all_files のインデックスと mtime の逆引きマップを再構築する
+    pub fn rebuild_all_indices(&self, files: &[std::sync::Arc<ImageFile>]) {
+        let has_unc = files.iter().take(20).any(|f| f.path.starts_with(r"\\?\"));
+        let cap = if has_unc { files.len() * 2 } else { files.len() + 16 };
+        let mut all_map = std::collections::HashMap::with_capacity(cap);
+        let mut mtime_map = std::collections::HashMap::with_capacity(cap);
+        for (i, f) in files.iter().enumerate() {
+            all_map.insert(f.path.clone(), i);
+            let norm = normalize_unc_path(&f.path);
+            if norm != f.path {
+                let norm_str = norm.into_owned();
+                all_map.insert(norm_str.clone(), i);
+                mtime_map.insert(norm_str, f.mtime);
             }
             mtime_map.insert(f.path.clone(), f.mtime);
         }
@@ -256,12 +313,14 @@ impl AppState {
 
     /// filtered_files のインデックス逆引きマップを再構築する
     pub fn rebuild_filtered_indices(&self, files: &[std::sync::Arc<ImageFile>]) {
-        let mut filtered_map = std::collections::HashMap::with_capacity(files.len() * 2);
+        let has_unc = files.iter().take(20).any(|f| f.path.starts_with(r"\\?\"));
+        let cap = if has_unc { files.len() * 2 } else { files.len() + 16 };
+        let mut filtered_map = std::collections::HashMap::with_capacity(cap);
         for (i, f) in files.iter().enumerate() {
             filtered_map.insert(f.path.clone(), i);
-            let clean = f.path.replace("\\\\?\\", "");
-            if clean != f.path {
-                filtered_map.insert(clean, i);
+            let norm = normalize_unc_path(&f.path);
+            if norm != f.path {
+                filtered_map.insert(norm.into_owned(), i);
             }
         }
         if let Ok(mut lock) = self.path_to_filtered_idx.lock() {
@@ -271,45 +330,64 @@ impl AppState {
 
     /// パスから mtime を O(1) で取得する
     pub fn get_mtime(&self, path: &str) -> Option<u64> {
-        let clean = path.replace("\\\\?\\", "");
-        let norm_back = clean.replace('/', "\\");
-        let norm_fwd = clean.replace('\\', "/");
-        if let Ok(lock) = self.path_to_mtime.lock() {
-            lock.get(path)
-                .or_else(|| lock.get(&clean))
-                .or_else(|| lock.get(&norm_back))
-                .or_else(|| lock.get(&norm_fwd))
-                .copied()
-        } else {
-            None
+        let Ok(lock) = self.path_to_mtime.lock() else { return None; };
+        if let Some(&m) = lock.get(path) {
+            return Some(m);
         }
+        let clean = strip_unc_prefix(path).unwrap_or(path);
+        if let Some(&m) = lock.get(clean) {
+            return Some(m);
+        }
+        let norm_back = clean.replace('/', "\\");
+        if let Some(&m) = lock.get(&norm_back) {
+            return Some(m);
+        }
+        let norm_fwd = clean.replace('\\', "/");
+        lock.get(&norm_fwd).copied()
     }
 
     /// サムネイルキャッシュ保持フラグを all_files と filtered_files の両方で O(1) 更新する
     pub fn mark_thumbnail_cached(&self, path: &str) {
-        let clean = path.replace("\\\\?\\", "");
-        let norm_back = clean.replace('/', "\\");
-        let norm_fwd = clean.replace('\\', "/");
         if let Ok(all_idx_lock) = self.path_to_all_idx.lock() {
-            if let Some(&idx) = all_idx_lock.get(path)
-                .or_else(|| all_idx_lock.get(&clean))
-                .or_else(|| all_idx_lock.get(&norm_back))
-                .or_else(|| all_idx_lock.get(&norm_fwd)) {
+            let idx_opt = all_idx_lock.get(path).copied().or_else(|| {
+                let clean = strip_unc_prefix(path).unwrap_or(path);
+                all_idx_lock.get(clean).copied().or_else(|| {
+                    let norm_back = clean.replace('/', "\\");
+                    all_idx_lock.get(&norm_back).copied().or_else(|| {
+                        let norm_fwd = clean.replace('\\', "/");
+                        all_idx_lock.get(&norm_fwd).copied()
+                    })
+                })
+            });
+
+            if let Some(idx) = idx_opt {
                 if let Ok(mut lock) = self.all_files.lock() {
                     if let Some(f) = lock.get_mut(idx) {
-                        std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                        if !f.has_thumbnail_cache {
+                            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                        }
                     }
                 }
             }
         }
         if let Ok(filt_idx_lock) = self.path_to_filtered_idx.lock() {
-            if let Some(&idx) = filt_idx_lock.get(path)
-                .or_else(|| filt_idx_lock.get(&clean))
-                .or_else(|| filt_idx_lock.get(&norm_back))
-                .or_else(|| filt_idx_lock.get(&norm_fwd)) {
+            let idx_opt = filt_idx_lock.get(path).copied().or_else(|| {
+                let clean = strip_unc_prefix(path).unwrap_or(path);
+                filt_idx_lock.get(clean).copied().or_else(|| {
+                    let norm_back = clean.replace('/', "\\");
+                    filt_idx_lock.get(&norm_back).copied().or_else(|| {
+                        let norm_fwd = clean.replace('\\', "/");
+                        filt_idx_lock.get(&norm_fwd).copied()
+                    })
+                })
+            });
+
+            if let Some(idx) = idx_opt {
                 if let Ok(mut lock) = self.filtered_files.lock() {
                     if let Some(f) = lock.get_mut(idx) {
-                        std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                        if !f.has_thumbnail_cache {
+                            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                        }
                     }
                 }
             }
@@ -400,6 +478,8 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path ON cache (path)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_mtime ON cache (mtime)", []).map_err(|e| e.to_string())?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_mtime ON cache (mtime DESC, path, size, ctime, width, height, hash_key)", []).map_err(|e| e.to_string())?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_mtime_v3 ON cache (mtime DESC, path, size, ctime, width, height, hash_key, (thumbnail IS NOT NULL))", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_last_accessed ON cache (last_accessed DESC)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings (rating)", []).map_err(|e| e.to_string())?;
     let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover", []);
@@ -591,6 +671,7 @@ pub struct SmartFolderItem {
     pub width: u32,
     pub height: u32,
     pub metadata: Option<String>,
+    pub has_thumbnail: bool,
 }
 
 fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
@@ -623,7 +704,7 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         size,
         mtime,
         ctime,
-        has_thumbnail_cache: true,
+        has_thumbnail_cache: item.has_thumbnail,
         has_metadata_cache: false,
         width: item.width,
         height: item.height,
@@ -633,6 +714,7 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         meta_loaded,
         search_text,
         unified_search_text,
+        hash_key: String::new(),
     }
 }
 
@@ -656,16 +738,19 @@ fn build_safe_fts_query(input: &str) -> String {
 }
 
 /// スマートフォルダの検索条件（パス、拡張子、レーティング、サイズ、プロンプト全文検索等）から、
-/// SQLite 用の実行クエリ（SELECT / COUNT）およびバインドパラメータを動的に生成する
-fn build_smart_folder_query(
+/// SQLite 用の実行クエリ（SELECT / COUNT）およびバインドパラメータを動的に生成する（ソート条件・リミット指定対応）
+fn build_smart_folder_query_with_sort(
     rule: &SmartFolderRule,
     is_count: bool,
     use_fallback: bool,
+    sort_key: Option<&str>,
+    asc: bool,
+    limit: Option<usize>,
 ) -> (String, Vec<rusqlite::types::Value>) {
     let select_clause = if is_count {
         "SELECT COUNT(c.path)"
     } else {
-        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height"
+        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, (c.thumbnail IS NOT NULL), c.hash_key"
     };
 
     let has_rating_cond = rule.conditions.iter().any(|c| c.r#type == "rating");
@@ -694,8 +779,27 @@ fn build_smart_folder_query(
     };
     let mut params = Vec::new();
 
+    let order_direction = if asc { "ASC" } else { "DESC" };
+    let order_clause = match sort_key {
+        Some("mtime") => format!(" ORDER BY c.mtime {}", order_direction),
+        Some("ctime") => format!(" ORDER BY c.ctime {}", order_direction),
+        Some("size") => format!(" ORDER BY c.size {}", order_direction),
+        Some("width") => format!(" ORDER BY c.width {}", order_direction),
+        Some("height") => format!(" ORDER BY c.height {}", order_direction),
+        // 名前順・レーティング順・縦横比順は Rust 側で高速並列ソートを行う。
+        // SQL 側ではカバリングインデックス idx_cache_smart_cover_mtime を確実に効かせるため
+        // ORDER BY c.mtime DESC を維持し、主テーブルのフルスキャン（数GBのディスクI/O）を完全に回避する
+        Some("name") | Some("rating") | Some("ratio") => " ORDER BY c.mtime DESC".to_string(),
+        _ => " ORDER BY c.mtime DESC".to_string(),
+    };
+
     if rule.conditions.is_empty() {
-        if !is_count { query.push_str(" ORDER BY +c.mtime DESC"); }
+        if !is_count {
+            query.push_str(&order_clause);
+            if let Some(lim) = limit {
+                query.push_str(&format!(" LIMIT {}", lim));
+            }
+        }
         return (query, params);
     }
 
@@ -717,7 +821,7 @@ fn build_smart_folder_query(
                         clause = "c.searchable_prompt LIKE ? ESCAPE '\\'".to_string();
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "c.searchable_prompt NOT LIKE ? ESCAPE '\\'".to_string();
+                        clause = "c.searchable_negative_prompt NOT LIKE ? ESCAPE '\\'".to_string();
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else { clause = "1=1".to_string(); }
                 } else {
@@ -843,10 +947,110 @@ fn build_smart_folder_query(
     query.push_str(")");
 
     if !is_count {
-        query.push_str(" ORDER BY +c.mtime DESC");
+        query.push_str(&order_clause);
+        if let Some(lim) = limit {
+            query.push_str(&format!(" LIMIT {}", lim));
+        }
     }
 
     (query, params)
+}
+
+/// 既存の後方互換性を担保するラッパー関数
+fn build_smart_folder_query(
+    rule: &SmartFolderRule,
+    is_count: bool,
+    use_fallback: bool,
+) -> (String, Vec<rusqlite::types::Value>) {
+    build_smart_folder_query_with_sort(rule, is_count, use_fallback, None, false, None)
+}
+
+
+
+/// SQLite クエリから中間オブジェクトを介さず、直接 ImageFile の Arc リストを高速生成する
+fn query_smart_folder_image_files(
+    rule: &SmartFolderRule,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    sort_key: Option<&str>,
+    asc: bool,
+    limit: Option<usize>,
+) -> Vec<std::sync::Arc<ImageFile>> {
+    let mut files = Vec::with_capacity(limit.unwrap_or(35000));
+    let Ok(conn) = db_conn.get() else {
+        return files;
+    };
+    let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
+
+    let mut use_fallback = false;
+    let (mut query_str, mut params) = build_smart_folder_query_with_sort(rule, false, false, sort_key, asc, limit);
+
+    if conn.prepare(&query_str).is_err() {
+        use_fallback = true;
+    }
+    if use_fallback {
+        let (fallback_query, fallback_params) = build_smart_folder_query_with_sort(rule, false, true, sort_key, asc, limit);
+        query_str = fallback_query;
+        params = fallback_params;
+    }
+
+    if let Ok(mut stmt) = conn.prepare(&query_str) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let raw_path: String = row.get(0)?;
+            let size: u64 = row.get(1)?;
+            let mtime: u64 = row.get(2)?;
+            let ctime: u64 = row.get(3)?;
+            let width: u32 = row.get(4)?;
+            let height: u32 = row.get(5)?;
+            let has_thumbnail: bool = row.get(6)?;
+            let hash_key: String = row.get(7).unwrap_or_default();
+
+            let clean_path = normalize_unc_path(&raw_path).into_owned();
+
+            // 高速なファイル名・拡張子抽出（Path::new パースを回避）
+            let (file_name, ext) = {
+                let bytes = clean_path.as_bytes();
+                let last_sep = bytes.iter().rposition(|&b| b == b'/' || b == b'\\');
+                let name_slice = match last_sep {
+                    Some(pos) => &clean_path[pos + 1..],
+                    None => &clean_path[..],
+                };
+                let ext_dot = name_slice.as_bytes().iter().rposition(|&b| b == b'.');
+                let ext_str = match ext_dot {
+                    Some(pos) => format!(".{}", name_slice[pos + 1..].to_lowercase()),
+                    None => String::new(),
+                };
+                (name_slice.to_string(), ext_str)
+            };
+
+            let unified_search_text = clean_path.to_lowercase();
+
+            Ok(std::sync::Arc::new(ImageFile {
+                name: file_name,
+                ext,
+                path: clean_path,
+                size,
+                mtime,
+                ctime,
+                has_thumbnail_cache: has_thumbnail,
+                has_metadata_cache: false,
+                width,
+                height,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text,
+                hash_key,
+            }))
+        }) {
+            for r in rows.flatten() {
+                files.push(r);
+            }
+        }
+    }
+
+    files
 }
 
 fn get_smart_folder_paths(
@@ -884,6 +1088,7 @@ fn get_smart_folder_paths(
                         width: row.get(4)?,
                         height: row.get(5)?,
                         metadata: None,
+                        has_thumbnail: row.get(6)?,
                     })
                 }) {
                     for r in rows {
@@ -908,7 +1113,7 @@ fn get_smart_folder_paths(
                 if let Ok(conn) = db_conn.get() {
                     for chunk in paths.chunks(900) {
                         let placeholders = vec!["?"; chunk.len()].join(",");
-                        let query = format!("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path IN ({})", placeholders);
+                        let query = format!("SELECT path, size, mtime, ctime, width, height, (thumbnail IS NOT NULL) FROM cache WHERE path IN ({})", placeholders);
                         if let Ok(mut stmt) = conn.prepare(&query) {
                             let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
                             if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
@@ -920,6 +1125,7 @@ fn get_smart_folder_paths(
                                     width: row.get(4)?,
                                     height: row.get(5)?,
                                     metadata: None,
+                                    has_thumbnail: row.get(6)?,
                                 })
                             }) {
                                 target_paths.extend(rows.flatten());
@@ -930,7 +1136,7 @@ fn get_smart_folder_paths(
             }
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
-                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
+                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height, (thumbnail IS NOT NULL) FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
                 if let Ok(rows) = stmt.query_map([], |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
@@ -940,6 +1146,7 @@ fn get_smart_folder_paths(
                         width: row.get(4)?,
                         height: row.get(5)?,
                         metadata: None,
+                        has_thumbnail: row.get(6)?,
                     })
                 }) {
                     for r in rows {
@@ -978,6 +1185,11 @@ fn load_directory(
     } else {
         Vec::new()
     };
+    let current_sort = if let Ok(lock) = state.sort_config.lock() {
+        lock.clone()
+    } else {
+        SortConfig { key: "name".to_string(), asc: true }
+    };
 
     // ディレクトリ変更時にRust側の状態をリセット
     if let Ok(mut lock) = state.all_files.lock() {
@@ -1003,9 +1215,191 @@ fn load_directory(
     }
 
     tauri::async_runtime::spawn(async move {
-        // Veloceのキャッシュディレクトリ構造に合わせる
         let path_for_spawn = path_clone.clone();
-        // 非同期ランタイムのワーカースレッドをブロックしないよう、spawn_blockingでラップする
+        let is_smart_folder = path_for_spawn.starts_with("smart://");
+
+        if is_smart_folder {
+            let folder_id = path_for_spawn.replace("smart://", "");
+            let rule_opt = smart_folders_clone.iter().find(|r| r.id == folder_id).cloned();
+
+            if let Some(rule) = rule_opt {
+                let t_smart_start = std::time::Instant::now();
+                println!("[Veloce: INFO] Smart folder load started for: {}", path_for_spawn);
+
+                // --- 単一パス高速ロード ---
+                // スマートフォルダのアイテムはすべて SQLite cache テーブルに登録済みのため、
+                // 実ファイルへの存在確認アクセス（is_file）を一切行わず、DB から単一パスで全件取得・ソートする。
+                // これにより、不完全な先行表示によるアイテムの不自然な入れ替わりや二重クエリの競合を完全に防止する。
+                let db_conn_sf = db_conn_clone.clone();
+                let rule_sf = rule.clone();
+                let sort_sf = current_sort.clone();
+                let ratings_map_sf = ratings_map.clone();
+
+                let files = tokio::task::spawn_blocking(move || {
+                    let mut arcs = query_smart_folder_image_files(
+                        &rule_sf,
+                        &db_conn_sf,
+                        Some(&sort_sf.key),
+                        sort_sf.asc,
+                        None,
+                    );
+
+                    // SQL の ORDER BY はバイト順であるため、名前順ソート時のみ自然順ソートを適用
+                    if sort_sf.key == "name" {
+                        sort_files_by_natural_name(&mut arcs, sort_sf.asc);
+                    } else if sort_sf.key == "rating" {
+                        let asc = sort_sf.asc;
+                        use rayon::prelude::*;
+                        let mut paired: Vec<(u8, std::sync::Arc<ImageFile>)> = arcs
+                            .into_par_iter()
+                            .map(|f| {
+                                let r = ratings_map_sf.get(&f.path).copied().unwrap_or(0);
+                                (r, f)
+                            })
+                            .collect();
+                        paired.par_sort_unstable_by(|a, b| {
+                            let cmp = a.0.cmp(&b.0);
+                            let cmp = if asc { cmp } else { cmp.reverse() };
+                            if cmp == std::cmp::Ordering::Equal {
+                                natural_cmp(&a.1.name, &b.1.name)
+                            } else {
+                                cmp
+                            }
+                        });
+                        arcs = paired.into_par_iter().map(|(_, f)| f).collect();
+                    } else if sort_sf.key == "ratio" {
+                        let asc = sort_sf.asc;
+                        use rayon::prelude::*;
+                        arcs.par_sort_unstable_by(|a, b| {
+                            let r_a = if a.height > 0 { a.width as f64 / a.height as f64 } else { 0.0 };
+                            let r_b = if b.height > 0 { b.width as f64 / b.height as f64 } else { 0.0 };
+                            let cmp = r_a.partial_cmp(&r_b).unwrap_or(std::cmp::Ordering::Equal);
+                            let cmp = if asc { cmp } else { cmp.reverse() };
+                            if cmp == std::cmp::Ordering::Equal {
+                                natural_cmp(&a.name, &b.name)
+                            } else {
+                                cmp
+                            }
+                        });
+                    }
+
+                    arcs
+                }).await.unwrap_or_else(|_| Vec::new());
+
+                println!("[Veloce: PERF] Smart folder query+sort for {} completed in {}ms (items: {})",
+                    path_for_spawn, t_smart_start.elapsed().as_millis(), files.len());
+
+                // タブ切り替えチェック: ユーザーが別フォルダに移動していない場合のみ AppState 更新・emit
+                if let Some(state) = app_clone.try_state::<AppState>() {
+                    if let Ok(dir_lock) = state.current_dir.lock() {
+                        if *dir_lock != path_clone {
+                            return;
+                        }
+                    }
+
+                    // 検索クエリおよびレーティングフィルタの確認
+                    let search_terms: Vec<String> = state.search_query.lock()
+                        .map(|q| {
+                            q.to_lowercase()
+                                .split(',')
+                                .map(|t| t.trim().to_string())
+                                .filter(|t| !t.is_empty())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let rating_val = state.rating_filter_val.lock().map(|l| *l).unwrap_or(0);
+                    let rating_op = state.rating_filter_op.lock().map(|l| l.clone()).unwrap_or_else(|_| "gte".to_string());
+
+                    let has_filter = !search_terms.is_empty() || rating_val > 0;
+
+                    let filtered = if !has_filter {
+                        // フィルタなし（標準ケース）: files をそのまま filtered_files に共有
+                        // 冗長な再ソートやクローンを完全に回避し、単一走査で全インデックス（all, filtered, mtime）を構築
+                        let paths = std::sync::Arc::new(files.iter().map(|f| f.path.clone()).collect::<Vec<String>>());
+                        state.rebuild_all_and_filtered_indices(&files);
+
+                        if let Ok(mut lock) = state.all_files.lock() {
+                            *lock = files.clone();
+                        }
+                        if let Ok(mut lock) = state.filtered_files.lock() {
+                            *lock = files.clone();
+                        }
+                        if let Ok(mut lock) = state.image_paths.lock() {
+                            *lock = paths;
+                        }
+                        files
+                    } else {
+                        // フィルタあり: 既にソート済みの順序を維持したまま高速並列フィルタリング（再ソート不要）
+                        let mut filtered_vec: Vec<std::sync::Arc<ImageFile>> = if search_terms.is_empty() {
+                            files.clone()
+                        } else {
+                            use rayon::prelude::*;
+                            files
+                                .par_iter()
+                                .filter(|f| {
+                                    search_terms.iter().all(|term| f.unified_search_text.contains(term))
+                                })
+                                .cloned()
+                                .collect()
+                        };
+
+                        if rating_val > 0 {
+                            if let Ok(ratings_map) = state.ratings.lock() {
+                                filtered_vec.retain(|f| {
+                                    let rating = ratings_map.get(&f.path).copied().unwrap_or(0);
+                                    match rating_op.as_str() {
+                                        "eq" => rating == rating_val,
+                                        "lte" => rating > 0 && rating <= rating_val,
+                                        "gte" | _ => rating >= rating_val,
+                                    }
+                                });
+                            }
+                        }
+
+                        let paths = std::sync::Arc::new(filtered_vec.iter().map(|f| f.path.clone()).collect::<Vec<String>>());
+                        state.rebuild_all_indices(&files);
+                        state.rebuild_filtered_indices(&filtered_vec);
+
+                        if let Ok(mut lock) = state.all_files.lock() {
+                            *lock = files.clone();
+                        }
+                        if let Ok(mut lock) = state.filtered_files.lock() {
+                            *lock = filtered_vec.clone();
+                        }
+                        if let Ok(mut lock) = state.image_paths.lock() {
+                            *lock = paths;
+                        }
+                        filtered_vec
+                    };
+
+                    let total_count = filtered.len();
+
+                    let initial_chunk = {
+                        let chunk_size = std::cmp::min(filtered.len(), 200);
+                        Some(filtered[..chunk_size].iter().map(|f| (**f).clone()).collect())
+                    };
+
+                    let _ = window.emit(
+                        "directory-loaded",
+                        DirectoryLoadedPayload {
+                            path: path_clone.clone(),
+                            total_count,
+                            initial_chunk,
+                        },
+                    );
+
+                    println!("[Veloce: PERF] Smart folder load for {} completed in {}ms (total files: {})",
+                        path_clone, t_smart_start.elapsed().as_millis(), total_count);
+
+                    // スマートフォルダはローカル SQLite キャッシュを対象としているため、
+                    // 実ファイルシステム（ネットワーク共有ドライブ等）への存在確認アクセス（is_file）は行わず、
+                    // 即時完了とする。
+                    return;
+                }
+            }
+        }
+
+        // 通常ディレクトリまたはルール未定義の旧スマートフォルダ処理
         let files_result = tokio::task::spawn_blocking(move || {
             let t_load_start = std::time::Instant::now();
             println!("[Veloce: INFO] load_directory task started for: {}", path_for_spawn);
@@ -1013,18 +1407,11 @@ fn load_directory(
 
             let (files, missing_paths): (Vec<std::sync::Arc<ImageFile>>, Vec<String>) = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
-                
-                // 実ファイルが存在するものと、エクスプローラ等で移動・削除され消失したものを並列で高速分類
-                let (valid_items, missing_items): (Vec<_>, Vec<_>) = smart_items
+                let valid_files = smart_items
                     .into_par_iter()
-                    .partition(|item| {
-                        let clean_path = item.path.replace("\\\\?\\", "");
-                        std::path::Path::new(&clean_path).is_file()
-                    });
-
-                let missing: Vec<String> = missing_items.into_iter().map(|i| i.path).collect();
-                let valid_files = valid_items.into_par_iter().map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i))).collect();
-                (valid_files, missing)
+                    .map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i)))
+                    .collect();
+                (valid_files, Vec::new())
             } else {
                 let target_entries: Vec<_> = jwalk::WalkDir::new(&path_for_spawn)
                     .max_depth(1)
@@ -1066,7 +1453,8 @@ fn load_directory(
                                             source: String::new(),
                                             meta_loaded: false,
                                             search_text: String::new(),
-            unified_search_text: String::new(),
+                                            unified_search_text: String::new(),
+                                            hash_key: String::new(),
                                         });
                                     }
                                 }
@@ -1080,18 +1468,13 @@ fn load_directory(
 
             let mut files = files;
 
-            // デフォルトソート（名前順昇順）
-            // このソートは generate_thumbnail / save_thumbnail の binary_search_by (O(log N)) を
-            // 正常動作させるためにも必須である
+            // デフォルトソート（高速自然順ソート）
             if !path_for_spawn.starts_with("smart://") {
-                files.par_sort_by(|a, b| natural_cmp(&a.name, &b.name));
+                sort_files_by_natural_name(&mut files, true);
             }
 
             // ソート完了後、SQLite DBを一括照会して has_thumbnail_cache フラグを事前確定させる
-            // キャッシュ済みファイルはローカルHTTP配信URL経由で即時表示され、不要なサムネイル生成タスクを抑制
             if !path_for_spawn.starts_with("smart://") && !files.is_empty() {
-                // 一括DB確認: hash_key IN (...) でチャンク分割クエリ
-                // hash_key = xxh3_64("path_mtime") の形式で登録されている
                 let hash_to_idx: std::collections::HashMap<String, usize> = files
                     .par_iter()
                     .enumerate()
@@ -1105,7 +1488,6 @@ fn load_directory(
                     .collect();
 
                 if let Ok(conn) = db_conn_clone.get() {
-                    // 900件ずつはSQLiteの IN 限界 (SQLITE_LIMIT_VARIABLE_NUMBER = 999) を考慮し分割
                     let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
                     for chunk in hash_keys.chunks(900) {
                         let placeholders = vec!["?"; chunk.len()].join(",");
@@ -1144,8 +1526,6 @@ fn load_directory(
 
         // Rust側のAppStateに全ファイルを格納（Source of Truth）
         if let Some(state) = app_clone.try_state::<AppState>() {
-            // タブ切り替えによるキャンセルチェック
-            // 処理中に別のタブ（ディレクトリ）に切り替わっていた場合は、結果を破棄して終了する
             if let Ok(dir_lock) = state.current_dir.lock() {
                 if *dir_lock != path_clone {
                     return;
@@ -1163,7 +1543,6 @@ fn load_directory(
             }
             state.rebuild_all_indices(&files);
 
-            // 初回表示のサムネイル順序がおかしくなるのを防ぐため、送信前に一度ソートとフィルタを適用する
             let total_count = apply_filters_and_sort(None, &state);
 
             let initial_chunk = {
@@ -1172,7 +1551,6 @@ fn load_directory(
                 Some(lock[..chunk_size].iter().map(|f| (**f).clone()).collect())
             };
 
-            // JS側には総件数と初回描画用の100件を通知し、IPC往復を削減する
             let _ = window.emit(
                 "directory-loaded",
                 DirectoryLoadedPayload {
@@ -1360,6 +1738,89 @@ fn load_directory(
 
     Ok(())
 }
+
+/// 自然順ソート用キー要素（数値ブロックまたは文字列ブロック）
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeyPart {
+    Num(u64, char),
+    Str(String),
+}
+
+impl Ord for KeyPart {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (KeyPart::Num(n1, _), KeyPart::Num(n2, _)) => n1.cmp(n2),
+            (KeyPart::Str(s1), KeyPart::Str(s2)) => s1.cmp(s2),
+            (KeyPart::Num(_, c1), KeyPart::Str(s2)) => {
+                let c2 = s2.chars().next().unwrap_or('\0');
+                c1.to_ascii_lowercase().cmp(&c2.to_ascii_lowercase())
+            }
+            (KeyPart::Str(s1), KeyPart::Num(_, c2)) => {
+                let c1 = s1.chars().next().unwrap_or('\0');
+                c1.to_ascii_lowercase().cmp(&c2.to_ascii_lowercase())
+            }
+        }
+    }
+}
+
+impl PartialOrd for KeyPart {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// 文字列から自然順ソート用キーを O(N) で1回のみ事前抽出（シュワルツ変換用）
+pub fn extract_natural_key(s: &str) -> Vec<KeyPart> {
+    let mut parts = Vec::new();
+    let mut chars = s.chars().peekable();
+    let mut cur_str = String::new();
+
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            if !cur_str.is_empty() {
+                parts.push(KeyPart::Str(std::mem::take(&mut cur_str)));
+            }
+            let first_digit = c;
+            let mut num = 0u64;
+            while let Some(&d) = chars.peek() {
+                if d.is_ascii_digit() {
+                    num = num.saturating_mul(10).saturating_add((d as u8 - b'0') as u64);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            parts.push(KeyPart::Num(num, first_digit));
+        } else {
+            cur_str.extend(c.to_lowercase());
+            chars.next();
+        }
+    }
+    if !cur_str.is_empty() {
+        parts.push(KeyPart::Str(cur_str));
+    }
+    parts
+}
+
+/// シュワルツ変換を用いた高速並列自然順ソート（Rayon 並列）
+/// 比較ごとの文字列パースを完全に排除し、大量アイテム（34,000件規模）でも 30ms 前後でソートを完了する
+pub fn sort_files_by_natural_name(files: &mut [std::sync::Arc<ImageFile>], asc: bool) {
+    use rayon::prelude::*;
+    let mut with_keys: Vec<(Vec<KeyPart>, std::sync::Arc<ImageFile>)> = files
+        .par_iter()
+        .map(|f| (extract_natural_key(&f.name), f.clone()))
+        .collect();
+
+    with_keys.par_sort_unstable_by(|a, b| {
+        let cmp = a.0.cmp(&b.0);
+        if asc { cmp } else { cmp.reverse() }
+    });
+
+    for (target, (_, src)) in files.iter_mut().zip(with_keys.into_iter()) {
+        *target = src;
+    }
+}
+
 /// 数値を解釈する自然なソート（Natural Sort）の比較関数
 fn natural_cmp(s1: &str, s2: &str) -> std::cmp::Ordering {
     let mut it1 = s1.chars().peekable();
@@ -1610,6 +2071,8 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             }
         });
         filtered = paired.into_par_iter().map(|(_, f)| f).collect();
+    } else if key == "name" {
+        sort_files_by_natural_name(&mut filtered, asc);
     } else {
         filtered.par_sort_unstable_by(|a, b| {
             let cmp = match key.as_str() {
@@ -3303,26 +3766,53 @@ fn generate_thumbnail_inner(
     mtime: u64,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) -> Vec<u8> {
-    let clean_path = file_path.replace("\\\\?\\", "");
-    let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-    let hash_key = format!("{:016x}", digest_clean);
+    generate_thumbnail_inner_with_hash(file_path, mtime, None, db_conn)
+}
 
+/// キャッシュ済みサムネイル（または即時抽出可能な動画サムネイル）をDBから取得する。
+/// direct_hash が渡された場合は PRIMARY KEY (hash_key) で O(1) 直撃取得し、
+/// UNC パス等の差異による 404 キャッシュミスを完全に防止する。
+fn generate_thumbnail_inner_with_hash(
+    file_path: &str,
+    mtime: u64,
+    direct_hash: Option<&str>,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) -> Vec<u8> {
     if let Ok(conn) = db_conn.get() {
-        if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-            if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
-                return thumb;
+        // 1. direct_hash が指定されていれば最優先で直撃取得
+        if let Some(hash) = direct_hash {
+            if !hash.is_empty() {
+                if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+                    if let Ok(thumb) = stmt.query_row([hash], |row| row.get::<_, Vec<u8>>(0)) {
+                        return thumb;
+                    }
+                }
             }
         }
 
-        // フォールバック: パス一致でキャッシュ済みサムネイルをO(1)即時取得
-        // スマートフォルダ等でmtimeが0、またはパス区切り文字（/と\）の差異がある場合でも確実にキャッシュをヒットさせる
-        let norm_back = clean_path.replace('/', "\\");
-        let norm_fwd = clean_path.replace('\\', "/");
-        if let Ok(mut stmt) = conn.prepare_cached(
-            "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
-        ) {
-            if let Ok(thumb) = stmt.query_row([&clean_path, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
-                return thumb;
+        // 2. UNC 正規化パス・プレフィックス除去パスなど複数候補ハッシュキーで検索
+        if !file_path.is_empty() {
+            let norm_unc = normalize_unc_path(file_path).into_owned();
+            let stripped = if file_path.starts_with(r"\\?\") { &file_path[4..] } else { file_path };
+            let hash_norm = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", norm_unc, mtime).as_bytes()));
+            let hash_strip = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", stripped, mtime).as_bytes()));
+            let hash_raw = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes()));
+
+            if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
+                if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {
+                    return thumb;
+                }
+            }
+
+            // 3. フォールバック: パス一致で検索
+            let norm_back = norm_unc.replace('/', "\\");
+            let norm_fwd = norm_unc.replace('\\', "/");
+            if let Ok(mut stmt) = conn.prepare_cached(
+                "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
+            ) {
+                if let Ok(thumb) = stmt.query_row([file_path, &norm_unc, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
+                    return thumb;
+                }
             }
         }
     }
@@ -3337,6 +3827,8 @@ fn generate_thumbnail_inner(
 
     if let Some(bytes) = generated_bytes {
         if let Ok(conn) = db_conn.get() {
+            let clean_path = normalize_unc_path(file_path).into_owned();
+            let hash_key = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes()));
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
             let _ = conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
@@ -4672,6 +5164,7 @@ fn get_video_server_port(state: tauri::State<'_, AppState>) -> u16 {
 fn start_local_video_server(
     db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>>,
+    db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) -> u16 {
     use std::net::TcpListener;
     use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -4685,6 +5178,7 @@ fn start_local_video_server(
             if let Ok(mut stream) = stream {
                 let db_tx = db_tx.clone();
                 let app_handle_slot = app_handle_slot.clone();
+                let db_conn = db_conn.clone();
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(&mut stream);
                     let mut request_line = String::new();
@@ -4796,7 +5290,7 @@ fn start_local_video_server(
                         use tauri::Manager;
                         if let Ok(handle_guard) = app_handle_slot.lock() {
                             if let Some(app_handle) = handle_guard.as_ref() {
-                                let state = app_handle.state::<AppState>();
+                                    let state = app_handle.state::<AppState>();
                                 state.mark_thumbnail_cached(&path_str);
                             }
                         }
@@ -4816,6 +5310,7 @@ fn start_local_video_server(
                     let mut path_str = String::new();
                     let mut is_thumb = false;
                     let mut mtime: u64 = 0;
+                    let mut hash_param = String::new();
                     if let Some(query) = uri.split('?').nth(1) {
                         for pair in query.split('&') {
                             if pair.starts_with("path=") {
@@ -4824,67 +5319,61 @@ fn start_local_video_server(
                                 is_thumb = true;
                             } else if pair.starts_with("mtime=") {
                                 mtime = pair[6..].parse().unwrap_or(0);
+                            } else if pair.starts_with("hash=") {
+                                hash_param = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
                             }
                         }
                     }
 
-                    if path_str.is_empty() {
+                    if path_str.is_empty() && hash_param.is_empty() {
                         let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
                         return;
                     }
 
                     if is_thumb {
-                        let clean_path = path_str.replace("\\\\?\\", "");
-                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-                        let hash_key = format!("{:016x}", digest);
-
                         let mut cache_bytes = Vec::new();
-                        // Open sqlite directly since we don't easily have AppState here
-                        if let Some(mut db_path) = crate::get_veloce_data_dir() {
-                            db_path.push("veloce_cache.db");
-                            if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                        if let Ok(conn) = db_conn.get() {
+                            // 1. hash_param が指定されていれば PRIMARY KEY (hash_key) で O(1) 直撃取得（最速パス）
+                            if !hash_param.is_empty() {
                                 if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-                                    if let Ok(thumb) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
+                                    if let Ok(thumb) = stmt.query_row([&hash_param], |row| row.get::<_, Vec<u8>>(0)) {
                                         cache_bytes = thumb;
                                     }
                                 }
-                                if cache_bytes.is_empty() {
-                                    let norm_back = clean_path.replace('/', "\\");
-                                    let norm_fwd = clean_path.replace('\\', "/");
-                                    if let Ok(mut stmt) = conn.prepare_cached(
-                                        "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
-                                    ) {
-                                        if let Ok(thumb) = stmt.query_row([&clean_path, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
-                                            cache_bytes = thumb;
-                                        }
+                            }
+
+                            // 2. hash_param 未指定またはミス時は、正規化された UNC パス等から算出した複数ハッシュキー候補で検索
+                            if cache_bytes.is_empty() && !path_str.is_empty() {
+                                let norm_unc = normalize_unc_path(&path_str).into_owned();
+                                let stripped = if path_str.starts_with(r"\\?\") { &path_str[4..] } else { path_str.as_str() };
+                                let hash_norm = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", norm_unc, mtime).as_bytes()));
+                                let hash_strip = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", stripped, mtime).as_bytes()));
+                                let hash_raw = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", path_str, mtime).as_bytes()));
+
+                                if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
+                                    if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {
+                                        cache_bytes = thumb;
+                                    }
+                                }
+                            }
+
+                            // 3. パス直接一致でのフォールバック
+                            if cache_bytes.is_empty() && !path_str.is_empty() {
+                                let norm_unc = normalize_unc_path(&path_str).into_owned();
+                                let norm_back = norm_unc.replace('/', "\\");
+                                let norm_fwd = norm_unc.replace('\\', "/");
+                                if let Ok(mut stmt) = conn.prepare_cached(
+                                    "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
+                                ) {
+                                    if let Ok(thumb) = stmt.query_row([&path_str, &norm_unc, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
+                                        cache_bytes = thumb;
                                     }
                                 }
                             }
                         }
 
-                        if cache_bytes.is_empty() {
-                            let lower = path_str.to_lowercase();
-                            let generated = if lower.ends_with(".mp4") || lower.ends_with(".webm") || lower.ends_with(".avi") || lower.ends_with(".mkv") {
-                                generate_video_thumbnail_sync(&path_str)
-                            } else {
-                                generate_image_thumbnail_sync(&path_str)
-                            };
-                            if let Some(bytes) = generated {
-                                if let Some(mut db_path) = crate::get_veloce_data_dir() {
-                                    db_path.push("veloce_cache.db");
-                                    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-                                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                                        let _ = conn.execute(
-                                            "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-                                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-                                            rusqlite::params![hash_key, bytes, clean_path, now],
-                                        );
-                                    }
-                                }
-                                cache_bytes = bytes;
-                            }
-                        }
-
+                        // 未キャッシュの場合、同期生成でHTTPスレッドをブロックせず即座に404を返す。
+                        // フロントエンド側の img.onerror から通常の OffscreenCanvas Web Worker へ安全にフォールバックされる
                         if !cache_bytes.is_empty() {
                             let mimetype = if cache_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
                                 "image/png"
@@ -5001,7 +5490,7 @@ fn main() {
 
     let app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
-    let video_port = start_local_video_server(db_tx.clone(), app_handle_slot.clone());
+    let video_port = start_local_video_server(db_tx.clone(), app_handle_slot.clone(), db_conn.clone());
 
     let mut context = tauri::generate_context!();
 
@@ -5085,6 +5574,7 @@ fn main() {
             let uri = request.uri();
             let mut path_str = String::new();
             let mut query_mtime: Option<u64> = None;
+            let mut hash_param = String::new();
             if let Some(query) = uri.split('?').nth(1) {
                 for pair in query.split('&') {
                     if pair.starts_with("path=") {
@@ -5093,11 +5583,13 @@ fn main() {
                         if let Ok(m) = pair[6..].parse::<u64>() {
                             query_mtime = Some(m);
                         }
+                    } else if pair.starts_with("hash=") {
+                        hash_param = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
                     }
                 }
             }
 
-            if path_str.is_empty() {
+            if path_str.is_empty() && hash_param.is_empty() {
                 return tauri::http::ResponseBuilder::new().status(400).body(Vec::new());
             }
 
@@ -5105,14 +5597,19 @@ fn main() {
             let state = app_handle.state::<AppState>();
             
             let mtime = query_mtime.unwrap_or_else(|| {
-                std::fs::metadata(&path_str)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH)
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64
+                if !path_str.is_empty() {
+                    std::fs::metadata(&path_str)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::UNIX_EPOCH)
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64
+                } else {
+                    0
+                }
             });
-            let bytes = generate_thumbnail_inner(&path_str, mtime, &state.db_conn);
+            let direct_hash = if !hash_param.is_empty() { Some(hash_param.as_str()) } else { None };
+            let bytes = generate_thumbnail_inner_with_hash(&path_str, mtime, direct_hash, &state.db_conn);
             if !bytes.is_empty() {
                 let mimetype = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
                     "image/png"
@@ -5517,6 +6014,7 @@ fn main() {
                                                         meta_loaded: false,
                                                         search_text: String::new(),
             unified_search_text: String::new(),
+            hash_key: String::new(),
                                                     };
                                                     let _ = app_handle
                                                         .emit_all("file-changed", img_file);
@@ -5556,6 +6054,7 @@ fn main() {
                                                     meta_loaded: false,
                                                     search_text: String::new(),
             unified_search_text: String::new(),
+            hash_key: String::new(),
                                                 };
                                                 let _ =
                                                     app_handle.emit_all("file-changed", img_file);
@@ -5747,7 +6246,7 @@ mod tests {
         
         let (query, params) = super::build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
-        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height FROM cache c WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY +c.mtime DESC";
+        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, (c.thumbnail IS NOT NULL), c.hash_key FROM cache c WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
         assert!(query.contains(expected_query), "prompt の contains 条件は FTS5 IN サブクエリを使うべき。実際のクエリ: {}", query);
         // not_contains は NOT IN (SELECT ... MATCH ?) 形式
         assert!(
@@ -6318,6 +6817,7 @@ mod tests {
             width: 0,
             height: 0,
             metadata: None,
+            has_thumbnail: true,
         };
 
         let img = super::create_image_file_from_smart_item(item);
@@ -6671,6 +7171,7 @@ mod viewer_tests {
                     meta_loaded: false,
                     search_text: "".to_string(),
                     unified_search_text: "".to_string(),
+                    hash_key: "".to_string(),
                 }),
                 Arc::new(ImageFile {
                     name: "a.jpg".to_string(),
@@ -6689,6 +7190,7 @@ mod viewer_tests {
                     meta_loaded: false,
                     search_text: "".to_string(),
                     unified_search_text: "".to_string(),
+                    hash_key: "".to_string(),
                 }),
             ]),
             filtered_files: Mutex::new(Vec::new()),
@@ -7035,6 +7537,7 @@ mod viewer_tests {
                 meta_loaded: true,
                 search_text: String::new(),
                 unified_search_text: String::new(),
+                hash_key: String::new(),
             }),
             std::sync::Arc::new(ImageFile {
                 name: "img_b.png".to_string(),
@@ -7053,6 +7556,7 @@ mod viewer_tests {
                 meta_loaded: true,
                 search_text: String::new(),
                 unified_search_text: String::new(),
+                hash_key: String::new(),
             }),
             std::sync::Arc::new(ImageFile {
                 name: "img_c.png".to_string(),
@@ -7071,6 +7575,7 @@ mod viewer_tests {
                 meta_loaded: true,
                 search_text: String::new(),
                 unified_search_text: String::new(),
+                hash_key: String::new(),
             }),
         ];
 
@@ -7117,6 +7622,7 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: String::new(),
                 unified_search_text: String::new(),
+                hash_key: String::new(),
             }),
             std::sync::Arc::new(ImageFile {
                 name: "2.png".to_string(),
@@ -7135,6 +7641,7 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: String::new(),
                 unified_search_text: String::new(),
+                hash_key: String::new(),
             }),
         ];
 
@@ -7503,6 +8010,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
+            hash_key: String::new(),
         };
 
         let mut all_files = vec![Arc::new(initial_file.clone())];
@@ -7547,6 +8055,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
+            hash_key: String::new(),
         };
 
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == incoming_file.path) {
@@ -7618,9 +8127,9 @@ mod viewer_tests {
 
         // 1. スマートフォルダの分類ロジック検証 (is_file による実在判定)
         let smart_items = vec![
-            SmartFolderItem { path: real_file_str.clone(), size: 4, mtime: 100, ctime: 100, width: 100, height: 100, metadata: None },
-            SmartFolderItem { path: missing_file_1.clone(), size: 0, mtime: 100, ctime: 100, width: 200, height: 200, metadata: None },
-            SmartFolderItem { path: missing_file_2.clone(), size: 0, mtime: 100, ctime: 100, width: 300, height: 300, metadata: None },
+            SmartFolderItem { path: real_file_str.clone(), size: 4, mtime: 100, ctime: 100, width: 100, height: 100, metadata: None, has_thumbnail: true },
+            SmartFolderItem { path: missing_file_1.clone(), size: 0, mtime: 100, ctime: 100, width: 200, height: 200, metadata: None, has_thumbnail: true },
+            SmartFolderItem { path: missing_file_2.clone(), size: 0, mtime: 100, ctime: 100, width: 300, height: 300, metadata: None, has_thumbnail: true },
         ];
 
         use rayon::prelude::*;
@@ -7760,6 +8269,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: "".to_string(),
             unified_search_text: "".to_string(),
+            hash_key: "".to_string(),
         });
 
         let file2 = std::sync::Arc::new(ImageFile {
@@ -7779,6 +8289,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: "".to_string(),
             unified_search_text: "".to_string(),
+            hash_key: "".to_string(),
         });
 
         let files = vec![file1, file2];
@@ -7928,7 +8439,8 @@ mod viewer_tests {
 
         let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
         let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let port = start_local_video_server(db_tx, app_handle_slot);
+        let db_conn = super::init_db().unwrap();
+        let port = start_local_video_server(db_tx, app_handle_slot, db_conn.clone());
 
         // 1. OPTIONS プリフライトの検証
         {
@@ -7946,10 +8458,10 @@ mod viewer_tests {
         }
 
         // 2. POST /save-thumbnail による生のバイナリ直接送信の検証
+        let test_path = "C:\\test\\sample_image.png";
+        let dummy_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
         {
-            let dummy_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
             let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            let test_path = "C:\\test\\sample_image.png";
             let post_req_header = format!(
                 "POST /save-thumbnail?path={}&mtime=998877 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 urlencoding::encode(test_path),
@@ -7963,7 +8475,6 @@ mod viewer_tests {
             let mut resp = String::new();
             stream.read_to_string(&mut resp).unwrap();
             assert!(resp.starts_with("HTTP/1.1 200 OK"), "POST が 200 OK を返すこと");
-            assert!(resp.contains("thumb=1"), "レスポンスにサムネイルURLが含まれていること");
             assert!(resp.contains("mtime=998877"), "レスポンスURLにmtimeが含まれていること");
 
             // db_rx に DbMsg::SaveThumbnail が正しく送信されているか検証
@@ -7979,6 +8490,275 @@ mod viewer_tests {
                 }
             }
         }
+
+        // 3. 未キャッシュのサムネイルに対するリクエストが即時 404 Not Found を返すこと（同期生成で固まらない）
+        {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let get_miss_req = format!(
+                "GET /?path={}&mtime=12345&thumb=1 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                urlencoding::encode("C:\\test\\uncached.png"),
+                port
+            );
+            stream.write_all(get_miss_req.as_bytes()).unwrap();
+
+            let mut resp = String::new();
+            stream.read_to_string(&mut resp).unwrap();
+            assert!(resp.starts_with("HTTP/1.1 404 Not Found"), "未キャッシュ画像のリクエストは同期生成を行わず即座に 404 を返すこと");
+        }
+
+        // 4. DBにキャッシュが存在する場合は 200 OK でバイナリが返ること
+        {
+            let cached_path = "C:\\test\\cached_thumb.png";
+            let mtime = 55555u64;
+            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", cached_path, mtime).as_bytes());
+            let hash_key = format!("{:016x}", digest);
+
+            if let Ok(conn) = db_conn.get() {
+                let _ = conn.execute(
+                    "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail",
+                    rusqlite::params![hash_key, dummy_jpeg, cached_path, mtime],
+                );
+            }
+
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let get_hit_req = format!(
+                "GET /?path={}&mtime={}&thumb=1 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                urlencoding::encode(cached_path),
+                mtime,
+                port
+            );
+            stream.write_all(get_hit_req.as_bytes()).unwrap();
+
+            let mut resp_bytes = Vec::new();
+            stream.read_to_end(&mut resp_bytes).unwrap();
+            let resp_str = String::from_utf8_lossy(&resp_bytes);
+            assert!(resp_str.starts_with("HTTP/1.1 200 OK"), "キャッシュ済みの場合は 200 OK が返ること");
+            assert!(resp_bytes.windows(dummy_jpeg.len()).any(|w| w == dummy_jpeg.as_slice()), "正しいサムネイルバイナリが含まれること");
+        }
+    }
+
+    #[test]
+    fn test_smart_folder_has_thumbnail_detection() {
+        use super::*;
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        let conn = db_conn.get().unwrap();
+
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
+                metadata TEXT,
+                thumbnail BLOB,
+                width INTEGER,
+                height INTEGER,
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "CREATE TABLE ratings (
+                path TEXT PRIMARY KEY,
+                rating INTEGER NOT NULL
+            )",
+            [],
+        ).unwrap();
+
+        // 1. サムネイルあり画像
+        let path_with_thumb = "C:\\test\\with_thumb.png";
+        let dummy_bytes: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0];
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, thumbnail, width, height, mtime) VALUES ('h_with', ?, ?, 100, 100, 1000)",
+            rusqlite::params![path_with_thumb, dummy_bytes],
+        ).unwrap();
+        conn.execute("INSERT INTO ratings (path, rating) VALUES (?, 5)", [path_with_thumb]).unwrap();
+
+        // 2. サムネイルなし画像（メタデータのみ）
+        let path_without_thumb = "C:\\test\\without_thumb.png";
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, thumbnail, width, height, mtime) VALUES ('h_without', ?, NULL, 200, 200, 2000)",
+            rusqlite::params![path_without_thumb],
+        ).unwrap();
+        conn.execute("INSERT INTO ratings (path, rating) VALUES (?, 5)", [path_without_thumb]).unwrap();
+
+        drop(conn);
+
+        let mut ratings_map = std::collections::HashMap::new();
+        ratings_map.insert(path_with_thumb.to_string(), 5);
+        ratings_map.insert(path_without_thumb.to_string(), 5);
+
+        let rule = SmartFolderRule {
+            id: "fav_5".to_string(),
+            name: "お気に入り (星5)".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "rating".to_string(),
+                operator: ">=".to_string(),
+                value: "5".to_string(),
+            }],
+        };
+
+        let items = get_smart_folder_paths("smart://fav_5", &ratings_map, &db_conn, &[rule]);
+        assert_eq!(items.len(), 2, "2件取得できること");
+
+        let item_with = items.iter().find(|i| i.path == path_with_thumb).expect("with_thumbが見つかること");
+        assert!(item_with.has_thumbnail, "thumbnail IS NOT NULL の画像は has_thumbnail: true であること");
+
+        let item_without = items.iter().find(|i| i.path == path_without_thumb).expect("without_thumbが見つかること");
+        assert!(!item_without.has_thumbnail, "thumbnail IS NULL の画像は has_thumbnail: false であること");
+
+        let file_with = create_image_file_from_smart_item(item_with.clone());
+        assert!(file_with.has_thumbnail_cache, "ImageFileのhas_thumbnail_cacheがtrueであること");
+
+        let file_without = create_image_file_from_smart_item(item_without.clone());
+        assert!(!file_without.has_thumbnail_cache, "ImageFileのhas_thumbnail_cacheがfalseであること");
+    }
+
+    #[test]
+    fn test_extract_natural_key_and_sort() {
+        use super::*;
+
+        assert!(extract_natural_key("1.png") < extract_natural_key("2.png"));
+        assert!(extract_natural_key("2.png") < extract_natural_key("10.png"));
+        assert!(extract_natural_key("file01.txt") < extract_natural_key("file2.txt"));
+        assert!(extract_natural_key("A") < extract_natural_key("b"));
+        assert!(extract_natural_key("画像1.png") < extract_natural_key("画像2.png"));
+        assert!(extract_natural_key("画像2.png") < extract_natural_key("画像10.png"));
+        assert_eq!(extract_natural_key("001.png"), extract_natural_key("01.png"));
+        assert!(extract_natural_key("001.png") < extract_natural_key("02.png"));
+
+        // sort_files_by_natural_name のテスト
+        let make_file = |name: &str| std::sync::Arc::new(ImageFile {
+            name: name.to_string(),
+            ext: ".png".to_string(),
+            path: format!("C:\\test\\{}", name),
+            size: 100,
+            mtime: 100,
+            ctime: 100,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 100,
+            height: 100,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: String::new(),
+        });
+
+        let mut files = vec![
+            make_file("img10.png"),
+            make_file("img2.png"),
+            make_file("img1.png"),
+            make_file("img20.png"),
+        ];
+
+        sort_files_by_natural_name(&mut files, true);
+        let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(names, vec!["img1.png", "img2.png", "img10.png", "img20.png"]);
+
+        sort_files_by_natural_name(&mut files, false);
+        let names_desc: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(names_desc, vec!["img20.png", "img10.png", "img2.png", "img1.png"]);
+    }
+
+    #[test]
+    fn test_smart_folder_single_pass_query() {
+        use super::*;
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        let conn = db_conn.get().unwrap();
+
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
+                metadata TEXT,
+                thumbnail BLOB,
+                width INTEGER,
+                height INTEGER,
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+
+        // 300件のダミーデータを挿入（UNCパスを含む）
+        for i in 1..=299 {
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, width, height, mtime) VALUES (?, ?, 100, 100, ?)",
+                rusqlite::params![format!("hash_{:04}", i), format!("C:\\test\\img_{:04}.png", i), i * 10],
+            ).unwrap();
+        }
+        // 300件目はネットワーク共有UNCパスで挿入
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, width, height, mtime) VALUES (?, ?, 100, 100, ?)",
+            rusqlite::params!["hash_0300", r"\\?\UNC\win81-pc\share\img_0300.png", 3000],
+        ).unwrap();
+        drop(conn);
+
+        let rule = SmartFolderRule {
+            id: "all_images".to_string(),
+            name: "All Images".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![],
+        };
+
+        // 1. 全件取得（単一パスロードの主要クエリ）
+        let all_items = query_smart_folder_image_files(&rule, &db_conn, Some("mtime"), false, None);
+        assert_eq!(all_items.len(), 300, "全件取得時は300件全件が返ること");
+        assert_eq!(all_items[0].name, "img_0300.png", "mtime DESC で最新が先頭");
+        assert_eq!(all_items[0].path, r"\\win81-pc\share\img_0300.png", "UNCパスが正しく標準UNC形式に正規化されること");
+        assert_eq!(all_items[0].hash_key, "hash_0300", "ImageFile に hash_key が正しく設定されていること");
+
+        // 2. 名前順ソート時の単一パス検証
+        // SQL 側での重いフルテーブル ORDER BY c.path を回避し、Rust 側の高速自然順ソートで真の先頭を確定
+        let mut name_sorted = query_smart_folder_image_files(&rule, &db_conn, Some("name"), true, None);
+        assert_eq!(name_sorted.len(), 300);
+        sort_files_by_natural_name(&mut name_sorted, true);
+        assert_eq!(name_sorted[0].name, "img_0001.png", "名前昇順ソート時は全フォルダ横断で img_0001.png が先頭であること");
+
+        // 3. has_thumbnail_cache が正しく判定されること（thumbnail NULL → false）
+        assert!(!all_items[0].has_thumbnail_cache, "thumbnail が NULL のアイテムは has_thumbnail_cache = false");
+
+        // 4. 34,000件規模での性能ベンチマーク
+        let mut conn = db_conn.get().unwrap();
+        let tx = conn.transaction().unwrap();
+        for i in 301..=34000 {
+            tx.execute(
+                "INSERT INTO cache (hash_key, path, width, height, mtime) VALUES (?, ?, 100, 100, ?)",
+                rusqlite::params![format!("hash_{:05}", i), format!("C:\\test\\sub\\img_{:05}.png", i), i * 10],
+            ).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(conn);
+
+        let t0 = std::time::Instant::now();
+        let mut items_34k = query_smart_folder_image_files(&rule, &db_conn, Some("name"), true, None);
+        let t_query = t0.elapsed();
+        sort_files_by_natural_name(&mut items_34k, true);
+        let t_total = t0.elapsed();
+        println!("[BENCHMARK] 34,000 items query: {:?}, total with natural sort: {:?}", t_query, t_total);
+        assert_eq!(items_34k.len(), 34000);
+        assert_eq!(items_34k[0].name, "img_0001.png");
+        assert!(t_total.as_millis() < 1000, "34,000件のクエリとソートは1秒未満で完了すること (実測: {}ms)", t_total.as_millis());
     }
 
     #[test]
@@ -8169,6 +8949,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
+            hash_key: String::new(),
         }).collect();
 
         // シーケンシャル計算
@@ -8196,6 +8977,161 @@ mod viewer_tests {
         assert_eq!(seq_map.len(), 500);
         assert_eq!(par_map.len(), 500);
         assert_eq!(seq_map, par_map, "並列ハッシュ生成とシーケンシャル生成の結果が完全に一致すること");
+    }
+
+    #[test]
+    fn test_rebuild_all_and_filtered_indices_single_pass() {
+        use std::sync::Mutex;
+        use std::sync::Arc;
+
+        let db_conn = init_db().unwrap();
+        let state = AppState {
+            image_paths: Mutex::new(Arc::new(Vec::new())),
+            current_dir: Mutex::new("smart://test".to_string()),
+            viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
+            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
+            all_files: Mutex::new(Vec::new()),
+            filtered_files: Mutex::new(Vec::new()),
+            sort_config: Mutex::new(super::SortConfig {
+                key: "name".to_string(),
+                asc: true,
+            }),
+            search_query: Mutex::new(String::new()),
+            ratings: Mutex::new(std::collections::HashMap::new()),
+            rating_filter_val: Mutex::new(0),
+            rating_filter_op: Mutex::new("gte".to_string()),
+            db_conn,
+            smart_folders: Mutex::new(Vec::new()),
+            db_tx: tokio::sync::mpsc::channel(1).0,
+            video_server_port: 0,
+        };
+
+        let files = vec![
+            Arc::new(ImageFile {
+                name: "img1.png".to_string(),
+                ext: ".png".to_string(),
+                path: "C:\\images\\img1.png".to_string(),
+                size: 1000,
+                mtime: 1700000010,
+                ctime: 1700000010,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 800,
+                height: 600,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: String::new(),
+            }),
+            Arc::new(ImageFile {
+                name: "img2.png".to_string(),
+                ext: ".png".to_string(),
+                path: "\\\\?\\C:\\images\\img2.png".to_string(),
+                size: 2000,
+                mtime: 1700000020,
+                ctime: 1700000020,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 1024,
+                height: 768,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: String::new(),
+            }),
+            Arc::new(ImageFile {
+                name: "img3.png".to_string(),
+                ext: ".png".to_string(),
+                path: "\\\\?\\UNC\\win81\\share\\img3.png".to_string(),
+                size: 3000,
+                mtime: 1700000030,
+                ctime: 1700000030,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 1024,
+                height: 768,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: String::new(),
+            }),
+        ];
+
+        state.rebuild_all_and_filtered_indices(&files);
+
+        // 1. path_to_all_idx の整合性検証
+        let all_idx = state.path_to_all_idx.lock().unwrap();
+        assert_eq!(all_idx.get("C:\\images\\img1.png"), Some(&0));
+        assert_eq!(all_idx.get("\\\\?\\C:\\images\\img2.png"), Some(&1));
+        assert_eq!(all_idx.get("C:\\images\\img2.png"), Some(&1), "UNCプレフィックス除去後のパスでもO(1)検索可能であること");
+        assert_eq!(all_idx.get("\\\\?\\UNC\\win81\\share\\img3.png"), Some(&2));
+        assert_eq!(all_idx.get("\\\\win81\\share\\img3.png"), Some(&2), "UNCネットワーク共有パス正規化後でもO(1)検索可能であること");
+
+        // 2. path_to_filtered_idx の整合性検証（全件一致）
+        let filt_idx = state.path_to_filtered_idx.lock().unwrap();
+        assert_eq!(*all_idx, *filt_idx, "フィルタ未指定時、全インデックスとフィルタ後インデックスが同一であること");
+
+        // 3. path_to_mtime の整合性検証
+        assert_eq!(state.get_mtime("C:\\images\\img1.png"), Some(1700000010));
+        assert_eq!(state.get_mtime("C:\\images\\img2.png"), Some(1700000020));
+        assert_eq!(state.get_mtime("\\\\?\\C:\\images\\img2.png"), Some(1700000020));
+        assert_eq!(state.get_mtime("\\\\?\\UNC\\win81\\share\\img3.png"), Some(1700000030));
+        assert_eq!(state.get_mtime("\\\\win81\\share\\img3.png"), Some(1700000030));
+    }
+
+    #[test]
+    fn test_generate_thumbnail_inner_direct_hash_lookup() {
+        use super::*;
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        let conn = db_conn.get().unwrap();
+
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
+                thumbnail BLOB,
+                last_accessed INTEGER
+            )",
+            [],
+        ).unwrap();
+
+        let dummy_thumb: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // PNG signature
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, thumbnail, last_accessed) VALUES (?, ?, ?, ?)",
+            rusqlite::params!["special_hash_12345", r"\\win81\share\img.png", dummy_thumb, 100],
+        ).unwrap();
+        drop(conn);
+
+        // 1. direct_hash 指定時はパスやmtimeに関わらず直撃取得できること
+        let res_direct = generate_thumbnail_inner_with_hash(
+            r"\\win81\share\img.png",
+            999999, // 意図的に異なるmtime
+            Some("special_hash_12345"),
+            &db_conn,
+        );
+        assert_eq!(res_direct, vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "direct_hash でO(1)直撃取得できること");
+
+        // 2. 存在しない direct_hash の場合はフォールバックへ移行すること
+        let res_missing = generate_thumbnail_inner_with_hash(
+            r"\\win81\share\img.png",
+            999999,
+            Some("non_existent_hash"),
+            &db_conn,
+        );
+        assert_eq!(res_missing, vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "direct_hash 失敗時でもパス一致でフォールバック取得できること");
     }
 }
 

@@ -3313,15 +3313,15 @@ window.addEventListener('DOMContentLoaded', async () => {
       appState.totalCount = payload.totalCount;
       if (payload.initialChunk) {
         appState.initialChunk = payload.initialChunk;
+        // 通常のディレクトリ読み込み時は全件トーストは表示せず、トップ進捗バー等で必要なアイテムのみ進捗管理する
+        appState.thumbnailTotalRequested = 0;
+        appState.thumbnailCompleted = 0;
+        appState.thumbnailCounted.clear();
+        
+        // ソート順変更時などにもキューと現在実行中のタスクをリセットし、
+        // 画面に新たに表示されたアイテムが即座に生成枠を獲得できるようにする
+        if (window.thumbnailManager) window.thumbnailManager.clear();
       }
-      // 通常のディレクトリ読み込み時は全件トーストは表示せず、トップ進捗バー等で必要なアイテムのみ進捗管理する
-      appState.thumbnailTotalRequested = 0;
-      appState.thumbnailCompleted = 0;
-      appState.thumbnailCounted.clear();
-      
-      // ソート順変更時などにもキューと現在実行中のタスクをリセットし、
-      // 画面に新たに表示されたアイテムが即座に生成枠を獲得できるようにする
-      if (window.thumbnailManager) window.thumbnailManager.clear();
       
       // ディレクトリ読み込み完了時はRust側ですでにソート・フィルタが適用され
       // initialChunk (最大100件) が同梱されているため、100msのdebounce待機や
