@@ -2062,8 +2062,11 @@ fn get_full_metadata_for_path_with_stat_inner(
     }
 
     let lower_path = file_path.to_lowercase();
-    let (raw_description, mut raw_comment, raw_parameters, mut source, width, height): (String, String, String, String, u32, u32) = if lower_path.ends_with(".png") {
-        let (chunks, w, h) = parse_png_chunks_with_dimensions(file_path);
+    let is_png = lower_path.ends_with(".png");
+    let mut png_color_type = 0u8;
+    let (raw_description, mut raw_comment, raw_parameters, mut source, width, height): (String, String, String, String, u32, u32) = if is_png {
+        let (chunks, w, h, ct) = parse_png_chunks_with_dimensions(file_path);
+        png_color_type = ct;
         let desc = chunks
             .get("Description")
             .or(chunks.get("ImageDescription"))
@@ -2151,9 +2154,19 @@ fn get_full_metadata_for_path_with_stat_inner(
     };
 
     // EXIF等でプロンプトが見つからなかった場合、Stealthメタデータを試行
+    // PNGの場合、アルファチャンネルを持たないカラータイプ（RGB=2, Grayscale=0, Palette=3等）は
+    // アルファ最下位ビットを使用するStealth PNGInfoが存在し得ないため、フルデコードを完全スキップ
     if raw_comment.trim().is_empty() && raw_description.trim().is_empty() {
-        if let Some(stealth) = extract_stealth_pnginfo(file_path) {
-            raw_comment = stealth;
+        let can_have_stealth = if is_png {
+            png_color_type == 6 || png_color_type == 4
+        } else {
+            lower_path.ends_with(".webp")
+        };
+
+        if can_have_stealth {
+            if let Some(stealth) = extract_stealth_pnginfo(file_path) {
+                raw_comment = stealth;
+            }
         }
     }
 
@@ -2423,10 +2436,11 @@ fn build_metadata_cache_row(
     }
 }
 
-fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<String, String>, u32, u32) {
+fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<String, String>, u32, u32, u8) {
     let mut chunks = std::collections::HashMap::new();
     let mut width = 0;
     let mut height = 0;
+    let mut color_type = 0u8;
     if let Ok(file) = std::fs::File::open(path) {
         if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
             let buffer = &mmap[..];
@@ -2448,6 +2462,9 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
                     if chunk_type == b"IHDR" && len >= 8 {
                         width = u32::from_be_bytes(data[0..4].try_into().unwrap_or_default());
                         height = u32::from_be_bytes(data[4..8].try_into().unwrap_or_default());
+                        if len >= 10 {
+                            color_type = data[9];
+                        }
                     } else if chunk_type == b"tEXt" {
                         if let Some(null_idx) = data.iter().position(|&b| b == 0) {
                             let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
@@ -2459,7 +2476,7 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
                             let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
                             let mut off = null_idx + 1;
                             if off + 2 <= data.len() {
-                                let comp_flag = data[off];
+                                 let comp_flag = data[off];
                                 off += 2;
                                 if let Some(n1) = data[off..].iter().position(|&b| b == 0) {
                                     off += n1 + 1; // skip lang tag
@@ -2488,7 +2505,7 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
             }
         }
     }
-    (chunks, width, height)
+    (chunks, width, height, color_type)
 }
 
 #[allow(dead_code)]
@@ -2499,7 +2516,7 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
 /// 画像・動画ファイルから軽量ヘッダー解析によりミリ秒未満で寸法(width, height)を取得する
 fn get_fast_dimensions_for_file(path: &str, ext_lower: &str) -> (u32, u32) {
     if ext_lower == "png" {
-        let (_, w, h) = parse_png_chunks_with_dimensions(path);
+        let (_, w, h, _) = parse_png_chunks_with_dimensions(path);
         (w, h)
     } else if ext_lower == "mp4" {
         parse_mp4_dimensions(path).unwrap_or((0, 0))
@@ -2618,8 +2635,53 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
 
 fn extract_stealth_pnginfo(path: &str) -> Option<String> {
     let lower_path = path.to_lowercase();
-    if !lower_path.ends_with(".png") && !lower_path.ends_with(".webp") {
+    let is_png = lower_path.ends_with(".png");
+    let is_webp = lower_path.ends_with(".webp");
+    if !is_png && !is_webp {
         return None;
+    }
+
+    // 1. PNGヘッダーの事前検査:
+    // IHDRチャンクのcolor_typeを先頭30バイトのみ読み込んで判定。
+    // アルファチャンネルを持たないカラータイプ（RGB=2, Grayscale=0, Palette=3等）は
+    // Stealth PNGInfoの埋め込み対象外のため、image::openによる巨大フルデコードを即座にスキップ
+    if is_png {
+        if let Ok(mut file) = std::fs::File::open(path) {
+            use std::io::Read;
+            let mut header = [0u8; 30];
+            if let Ok(n) = file.read(&mut header) {
+                if n >= 26 && &header[0..8] == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+                    if &header[12..16] == b"IHDR" {
+                        let color_type = header[25];
+                        if color_type != 6 && color_type != 4 {
+                            return None;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. WebPヘッダーの事前検査:
+    // RIFFチャンクヘッダーを読み込み、アルファチャンネルを持たないVP8 lossy画像やアルファフラグのないVP8Xを除外
+    if is_webp {
+        if let Ok(mut file) = std::fs::File::open(path) {
+            use std::io::Read;
+            let mut header = [0u8; 25];
+            if let Ok(n) = file.read(&mut header) {
+                if n >= 16 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP" {
+                    let chunk_type = &header[12..16];
+                    if chunk_type == b"VP8 " {
+                        return None;
+                    } else if chunk_type == b"VP8X" && n >= 21 {
+                        let flags = header[20];
+                        if (flags & 0x10) == 0 {
+                            return None;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     use flate2::read::GzDecoder;
@@ -6896,11 +6958,12 @@ mod viewer_tests {
         let test_file = temp_dir.join("test_veloce_ihdr_dim.png");
         std::fs::write(&test_file, &png_bytes).unwrap();
 
-        let (chunks, w, h): (std::collections::HashMap<String, String>, u32, u32) = parse_png_chunks_with_dimensions(&test_file.to_string_lossy());
+        let (chunks, w, h, color_type): (std::collections::HashMap<String, String>, u32, u32, u8) = parse_png_chunks_with_dimensions(&test_file.to_string_lossy());
         let _ = std::fs::remove_file(&test_file);
 
         assert_eq!(w, 1920);
         assert_eq!(h, 1080);
+        assert_eq!(color_type, 6, "ColorType 6 (RGBA) が正しく抽出されること");
         assert!(chunks.is_empty());
     }
 
@@ -7806,7 +7869,7 @@ mod viewer_tests {
         let test_file = temp_dir.join("test_veloce_memmap_png.png");
         std::fs::write(&test_file, &png_bytes).unwrap();
 
-        let (chunks, w, h) = parse_png_chunks_with_dimensions(&test_file.to_string_lossy());
+        let (chunks, w, h, _) = parse_png_chunks_with_dimensions(&test_file.to_string_lossy());
         let _ = std::fs::remove_file(&test_file);
 
         assert_eq!(w, 800, "IHDRからwidthがゼロコピー抽出されること");
@@ -7941,6 +8004,55 @@ mod viewer_tests {
         let _ = std::fs::remove_file(&test_file);
 
         assert_eq!(result.as_deref(), Some(sample_prompt), "Stealth PNGInfo からプロンプトが正確に解凍・抽出されること");
+    }
+
+    #[test]
+    fn test_stealth_pnginfo_skips_non_alpha_png() {
+        // アルファチャンネルを持たないRGB画像（ColorType 2）を作成
+        let width = 30u32;
+        let height = 30u32;
+        let mut img = image::RgbImage::new(width, height);
+        for pixel in img.pixels_mut() {
+            *pixel = image::Rgb([200, 100, 50]);
+        }
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_rgb_no_alpha.png");
+        img.save(&test_file).unwrap();
+
+        // 1. parse_png_chunks_with_dimensions で color_type == 2 (RGB) が検出されること
+        let (chunks, w, h, color_type) = parse_png_chunks_with_dimensions(&test_file.to_string_lossy());
+        assert_eq!(w, 30);
+        assert_eq!(h, 30);
+        assert_eq!(color_type, 2, "RGB画像のColorType 2が正しく検出されること");
+        assert!(chunks.is_empty());
+
+        // 2. extract_stealth_pnginfo がフルデコードを行わずヘッダー事前検査で即座に None を返すこと
+        let result = extract_stealth_pnginfo(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert!(result.is_none(), "非アルファPNGはStealth抽出の対象外として即座にNoneが返ること");
+    }
+
+    #[test]
+    fn test_stealth_pnginfo_skips_non_alpha_webp() {
+        // アルファチャンネルを持たないWebP（VP8 lossyチャンク）の最小バイナリ構造を作成
+        let mut webp_bytes = Vec::new();
+        webp_bytes.extend_from_slice(b"RIFF");
+        webp_bytes.extend_from_slice(&20u32.to_le_bytes()); // RIFF size
+        webp_bytes.extend_from_slice(b"WEBP");
+        webp_bytes.extend_from_slice(b"VP8 ");
+        webp_bytes.extend_from_slice(&8u32.to_le_bytes()); // VP8 chunk size
+        webp_bytes.extend_from_slice(&[0u8; 8]); // dummy VP8 data
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_non_alpha.webp");
+        std::fs::write(&test_file, &webp_bytes).unwrap();
+
+        let result = extract_stealth_pnginfo(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert!(result.is_none(), "VP8 lossy等の非アルファWebPは即座にNoneが返ること");
     }
 
     #[test]
