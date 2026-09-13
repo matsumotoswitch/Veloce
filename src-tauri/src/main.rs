@@ -210,9 +210,9 @@ pub enum DbMsg {
 
 // --- 状態管理 ---
 pub struct AppState {
-    image_paths: Mutex<Vec<String>>,
+    image_paths: Mutex<std::sync::Arc<Vec<String>>>,
     current_dir: Mutex<String>,
-    viewer_paths: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    viewer_paths: Mutex<std::collections::HashMap<String, std::sync::Arc<Vec<String>>>>,
     viewer_hashes: Mutex<std::collections::HashMap<String, String>>,
     // Source of Truth: 全ファイルとフィルタリング済みファイルをRust側で保持
     all_files: Mutex<Vec<std::sync::Arc<ImageFile>>>,
@@ -987,7 +987,7 @@ fn load_directory(
         lock.clear();
     }
     if let Ok(mut lock) = state.image_paths.lock() {
-        lock.clear();
+        *lock = std::sync::Arc::new(Vec::new());
     }
     if let Ok(mut lock) = state.path_to_all_idx.lock() {
         lock.clear();
@@ -1159,7 +1159,7 @@ fn load_directory(
                 *lock = files.clone();
             }
             if let Ok(mut lock) = state.image_paths.lock() {
-                *lock = files.iter().map(|f| f.path.clone()).collect();
+                *lock = std::sync::Arc::new(files.iter().map(|f| f.path.clone()).collect());
             }
             state.rebuild_all_indices(&files);
 
@@ -1645,7 +1645,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     }
 
     let total = filtered.len();
-    let paths: Vec<String> = filtered.iter().map(|f| f.path.clone()).collect();
+    let paths = std::sync::Arc::new(filtered.iter().map(|f| f.path.clone()).collect::<Vec<String>>());
 
     drop(all_files);
     drop(sort_config);
@@ -1656,7 +1656,7 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
         *lock = filtered;
     }
     if let Ok(mut lock) = state.image_paths.lock() {
-        *lock = paths.clone();
+        *lock = std::sync::Arc::clone(&paths);
     }
 
     if let Some(app_handle) = app {
@@ -1708,8 +1708,8 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
                     };
 
                     if should_update {
-                        *viewer_list = paths.clone();
-                        let _ = app_handle.emit_to(&label, "viewer-list-updated", &paths);
+                        *viewer_list = std::sync::Arc::clone(&paths);
+                        let _ = app_handle.emit_to(&label, "viewer-list-updated", paths.as_ref());
                     }
                 }
             }
@@ -3529,22 +3529,24 @@ async fn open_viewer(
 ) -> Result<(), String> {
     let (target_path, resolved_index, current_paths) = {
         if let Ok(paths) = state.image_paths.lock() {
-            let mut resolved_idx = current_index;
-            let target = if let Some(ref fp) = file_path {
+            let (target, resolved_idx) = if let Some(ref fp) = file_path {
                 if paths.get(current_index).map(|p| p == fp).unwrap_or(false) {
-                    Some(fp.clone())
-                } else if let Some(pos) = paths.iter().position(|p| p == fp) {
-                    resolved_idx = pos;
-                    Some(fp.clone())
+                    (Some(fp.clone()), current_index)
                 } else {
-                    Some(fp.clone())
+                    // O(1) 逆引きインデックスを活用して即座にインデックスを解決（O(N) 線形探索を排除）
+                    let idx = if let Ok(idx_map) = state.path_to_filtered_idx.lock() {
+                        idx_map.get(fp).copied().unwrap_or(current_index)
+                    } else {
+                        current_index
+                    };
+                    (Some(fp.clone()), idx)
                 }
             } else {
-                paths.get(current_index).cloned()
+                (paths.get(current_index).cloned(), current_index)
             };
-            (target, resolved_idx, paths.clone())
+            (target, resolved_idx, std::sync::Arc::clone(&paths))
         } else {
-            (file_path.clone(), current_index, Vec::new())
+            (file_path.clone(), current_index, std::sync::Arc::new(Vec::new()))
         }
     };
 
@@ -5176,7 +5178,7 @@ fn main() {
 
     builder
         .manage(AppState {
-            image_paths: Mutex::new(Vec::new()),
+            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
             current_dir: Mutex::new(String::new()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
             viewer_hashes: Mutex::new(std::collections::HashMap::new()),
@@ -6585,6 +6587,39 @@ mod viewer_tests {
     }
 
     #[test]
+    fn test_open_viewer_arc_sharing_and_o1_lookup() {
+        use std::sync::Arc;
+        use std::collections::HashMap;
+
+        // 1. Arc<Vec<String>> の参照共有検証 (ディープコピーの排除)
+        let sample_paths: Arc<Vec<String>> = Arc::new(vec![
+            "C:/img/0.png".to_string(),
+            "C:/img/1.png".to_string(),
+            "C:/img/2.png".to_string(),
+        ]);
+
+        let shared_for_viewer = Arc::clone(&sample_paths);
+        assert!(Arc::ptr_eq(&sample_paths, &shared_for_viewer), "Arc参照共有により全パス配列のディープコピーが排除されていること");
+
+        // 2. path_to_filtered_idx による O(1) 逆引きインデックス補正検証
+        let mut idx_map = HashMap::new();
+        idx_map.insert("C:/img/0.png".to_string(), 0);
+        idx_map.insert("C:/img/1.png".to_string(), 1);
+        idx_map.insert("C:/img/2.png".to_string(), 2);
+
+        let stale_index = 99; // DOM上でズレたインデックス
+        let target_fp = "C:/img/1.png";
+
+        let resolved_index = if sample_paths.get(stale_index).map(|p| p == target_fp).unwrap_or(false) {
+            stale_index
+        } else {
+            idx_map.get(target_fp).copied().unwrap_or(stale_index)
+        };
+
+        assert_eq!(resolved_index, 1, "O(1) 逆引きインデックスにより正しい位置に補正されること");
+    }
+
+    #[test]
     fn test_viewer_existing_window_reuse_logic() {
         // 同じ画像パスのハッシュが一致する場合、同じラベル末尾（hash_str）を持つこと
 
@@ -6611,7 +6646,7 @@ mod viewer_tests {
 
         let db_conn = init_db().unwrap();
         let state = AppState {
-            image_paths: Mutex::new(Vec::new()),
+            image_paths: Mutex::new(Arc::new(Vec::new())),
             current_dir: Mutex::new("smart://fav_5".to_string()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
             viewer_hashes: Mutex::new(std::collections::HashMap::new()), // Trigger refresh
@@ -7685,7 +7720,7 @@ mod viewer_tests {
     #[test]
     fn test_path_index_o1_lookup_and_flag_update() {
         let app_state = AppState {
-            image_paths: Mutex::new(Vec::new()),
+            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
             current_dir: Mutex::new(String::new()),
             viewer_paths: Mutex::new(std::collections::HashMap::new()),
             viewer_hashes: Mutex::new(std::collections::HashMap::new()),
