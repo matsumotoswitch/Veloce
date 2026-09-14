@@ -192,6 +192,16 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     expect(viewerState.isMetadataVisible).toBe(false);
   });
 
+  it('P キー押下ではオーバーレイの開閉がトグルされないこと（Iキーのみに統一）', () => {
+    expect(viewerState.isMetadataVisible).toBe(false);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p' }));
+    expect(viewerState.isMetadataVisible).toBe(false);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'P' }));
+    expect(viewerState.isMetadataVisible).toBe(false);
+  });
+
   it('オーバーレイ表示中に Escape キーを押すとオーバーレイのみが閉じ、closeWindow は呼ばれないこと', () => {
     toggleMetadataOverlay(true);
     expect(viewerState.isMetadataVisible).toBe(true);

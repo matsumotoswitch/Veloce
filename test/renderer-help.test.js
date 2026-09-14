@@ -146,5 +146,24 @@ describe('renderer-help.js', () => {
 
       expect(document.getElementById('license-overlay')).toBeNull();
     });
+
+    it('should include rating, tag copy, and I key in help shortcut tables', () => {
+      toggleHelpOverlay(true);
+      const overlay = document.getElementById('help-overlay');
+      const mainContent = overlay.querySelector('#help-main');
+      const viewerContent = overlay.querySelector('#help-viewer');
+
+      // メイン画面のテーブル確認
+      expect(mainContent.textContent).toContain('タグをクリック');
+      expect(mainContent.textContent).toContain('プロンプトタグをコピー');
+      expect(mainContent.textContent).toContain('Ctrl + Tab / Ctrl + PageDown');
+
+      // ビューワー画面のテーブル確認
+      expect(viewerContent.textContent).toContain('0 〜 5');
+      expect(viewerContent.textContent).toContain('表示中の画像にレーティングを設定');
+      expect(viewerContent.textContent).toContain('メタデータオーバーレイの表示 / 非表示');
+      expect(viewerContent.innerHTML).toContain('<kbd>I</kbd>');
+      expect(viewerContent.innerHTML).not.toContain('<kbd>P</kbd>');
+    });
   });
 });

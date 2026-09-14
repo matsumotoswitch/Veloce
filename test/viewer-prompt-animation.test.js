@@ -105,18 +105,22 @@ describe('Viewer Prompt Overlay Animation (Pop & Hide)', () => {
     expect(overlay.classList.contains('prompt-hide')).toBe(false);
   });
 
-  it('p および P キーでプロンプトオーバーレイの開閉がトグルされること', () => {
+  it('i および I キーでプロンプトオーバーレイの開閉がトグルされ、Pキーでは開かないこと', () => {
     expect(viewerState.isMetadataVisible).toBe(false);
 
-    // 'p' キーで表示
+    // 'p' キーでは開かないこと
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p' }));
+    expect(viewerState.isMetadataVisible).toBe(false);
+
+    // 'i' キーで表示
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'i' }));
     expect(viewerState.isMetadataVisible).toBe(true);
     const overlay = document.getElementById('viewer-metadata-overlay');
     expect(overlay.classList.contains('show')).toBe(true);
     expect(overlay.classList.contains('prompt-pop')).toBe(true);
 
-    // 'P' キーで消去
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'P' }));
+    // 'I' キーで消去
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'I' }));
     expect(viewerState.isMetadataVisible).toBe(false);
     expect(overlay.classList.contains('prompt-hide')).toBe(true);
   });

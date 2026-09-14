@@ -1666,8 +1666,6 @@ window.addEventListener('keydown', async (e) => {
       viewerState.isBorderVisible = !viewerState.isBorderVisible;
       viewerUI.applyBorderVisibility();
       break;
-    case 'p':
-    case 'P':
     case 'i':
     case 'I':
       e.preventDefault();

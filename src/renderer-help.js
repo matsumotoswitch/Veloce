@@ -205,8 +205,8 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>現在のフォルダ内のすべての画像を選択</td></tr>
         <tr><td><kbd>Ctrl</kbd> / <kbd>Shift</kbd> + クリック</td><td>画像の複数選択</td></tr>
         <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>フォルダ移動履歴の「戻る」 / 「進む」</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>PageDown</kbd></td><td>次のタブへ切り替え</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> / <kbd>PageUp</kbd></td><td>前のタブへ切り替え</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>PageDown</kbd></td><td>次のタブへ切り替え</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>PageUp</kbd></td><td>前のタブへ切り替え</td></tr>
       </table>
 
       <h3 class="help-group-title">ファイル操作</h3>
@@ -215,8 +215,9 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>F2</kbd></td><td>選択中のファイル/フォルダの名前を変更</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>選択中のファイル/フォルダを安全にゴミ箱へ移動</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>直前のファイル/フォルダ名の変更を元に戻す</td></tr>
-        <tr><td><kbd>0</kbd> 〜 <kbd>5</kbd></td><td>選択中の画像にレーティング（星の数）を設定 / 解除</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>直前の操作（移動・削除・名前変更）を元に戻す</td></tr>
+        <tr><td><kbd>0</kbd> 〜 <kbd>5</kbd></td><td>選択中の画像にレーティングを設定 / 解除</td></tr>
+        <tr><td><kbd>タグをクリック</kbd></td><td>プロンプトタグをコピー（<kbd>Ctrl</kbd> + クリックで追加コピー）</td></tr>
       </table>
 
       <h3 class="help-group-title">ツール・表示</h3>
@@ -226,7 +227,7 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>A</kbd></td><td>開いているビューアーウィンドウを横一列に整列</td></tr>
         <tr><td><kbd>D</kbd></td><td>選択した2枚の画像の情報を比較 (Diffモーダル)</td></tr>
         <tr><td><kbd>F1</kbd> / <kbd>H</kbd></td><td>ヘルプの表示 / 非表示</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>各種モーダル・ヘルプ・メニューを閉じる</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>各種モーダル・ヘルプ・メニューを閉じる（検索時はキーワードをクリア）</td></tr>
       </table>
     </div>
 
@@ -257,6 +258,7 @@ export function toggleHelpOverlay(forceShow) {
 
       <h3 class="help-group-title">ウィンドウ・操作</h3>
       <table class="help-table">
+        <tr><td><kbd>0</kbd> 〜 <kbd>5</kbd></td><td>表示中の画像にレーティングを設定 / 解除</td></tr>
         <tr><td><kbd>F11</kbd></td><td>フルスクリーン表示切り替え</td></tr>
         <tr><td><kbd>A</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
         <tr><td><kbd>B</kbd></td><td>ウィンドウ枠（ボーダー）・UIの表示切替</td></tr>
@@ -264,6 +266,7 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>S</kbd></td><td>動画のシークバーの表示 / 非表示</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>画像をゴミ箱に移動し、次の画像を表示</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
+        <tr><td><kbd>タグをクリック</kbd></td><td>（オーバーレイ時）プロンプトタグをコピー（<kbd>Ctrl</kbd> + クリックで追加コピー）</td></tr>
         <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>
       </table>
     </div>
