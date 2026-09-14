@@ -1231,25 +1231,37 @@ fn load_directory(
                 // 実ファイルへの存在確認アクセス（is_file）を一切行わず、DB から単一パスで全件取得・ソートする。
                 // これにより、不完全な先行表示によるアイテムの不自然な入れ替わりや二重クエリの競合を完全に防止する。
                 let db_conn_sf = db_conn_clone.clone();
+                let db_conn_for_query = db_conn_clone.clone();
                 let rule_sf = rule.clone();
                 let sort_sf = current_sort.clone();
                 let ratings_map_sf = ratings_map.clone();
 
-                let files = tokio::task::spawn_blocking(move || {
-                    let mut arcs = query_smart_folder_image_files(
+                let (files, missing_paths) = tokio::task::spawn_blocking(move || {
+                    let arcs = query_smart_folder_image_files(
                         &rule_sf,
-                        &db_conn_sf,
+                        &db_conn_for_query,
                         Some(&sort_sf.key),
                         sort_sf.asc,
                         None,
                     );
+
+                    // 実ファイルが存在するものと、エクスプローラー等で削除・移動され消失したものを並列で判定
+                    use rayon::prelude::*;
+                    let (valid_files, missing_items): (Vec<_>, Vec<_>) = arcs
+                        .into_par_iter()
+                        .partition(|f| {
+                            let clean = strip_unc_prefix(&f.path).unwrap_or(&f.path);
+                            std::path::Path::new(clean).is_file()
+                        });
+
+                    let missing_paths: Vec<String> = missing_items.into_iter().map(|f| f.path.clone()).collect();
+                    let mut arcs = valid_files;
 
                     // SQL の ORDER BY はバイト順であるため、名前順ソート時のみ自然順ソートを適用
                     if sort_sf.key == "name" {
                         sort_files_by_natural_name(&mut arcs, sort_sf.asc);
                     } else if sort_sf.key == "rating" {
                         let asc = sort_sf.asc;
-                        use rayon::prelude::*;
                         let mut paired: Vec<(u8, std::sync::Arc<ImageFile>)> = arcs
                             .into_par_iter()
                             .map(|f| {
@@ -1269,7 +1281,6 @@ fn load_directory(
                         arcs = paired.into_par_iter().map(|(_, f)| f).collect();
                     } else if sort_sf.key == "ratio" {
                         let asc = sort_sf.asc;
-                        use rayon::prelude::*;
                         arcs.par_sort_unstable_by(|a, b| {
                             let r_a = if a.height > 0 { a.width as f64 / a.height as f64 } else { 0.0 };
                             let r_b = if b.height > 0 { b.width as f64 / b.height as f64 } else { 0.0 };
@@ -1283,8 +1294,8 @@ fn load_directory(
                         });
                     }
 
-                    arcs
-                }).await.unwrap_or_else(|_| Vec::new());
+                    (arcs, missing_paths)
+                }).await.unwrap_or_else(|_| (Vec::new(), Vec::new()));
 
                 println!("[Veloce: PERF] Smart folder query+sort for {} completed in {}ms (items: {})",
                     path_for_spawn, t_smart_start.elapsed().as_millis(), files.len());
@@ -1391,9 +1402,34 @@ fn load_directory(
                     println!("[Veloce: PERF] Smart folder load for {} completed in {}ms (total files: {})",
                         path_clone, t_smart_start.elapsed().as_millis(), total_count);
 
-                    // スマートフォルダはローカル SQLite キャッシュを対象としているため、
-                    // 実ファイルシステム（ネットワーク共有ドライブ等）への存在確認アクセス（is_file）は行わず、
-                    // 即時完了とする。
+                    // 消失したファイルが検出された場合、DBキャッシュおよびレーティングから非同期で自動クリーンアップ（Self-Healing）
+                    if !missing_paths.is_empty() {
+                        let db_pool = db_conn_sf.clone();
+                        let missing_to_purge = missing_paths.clone();
+                        let app_handle_for_purge = app_clone.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let missing_for_db = missing_to_purge.clone();
+                            let purged = tokio::task::spawn_blocking(move || {
+                                if let Ok(mut conn) = db_pool.get() {
+                                    purge_missing_files_from_cache(&mut conn, &missing_for_db).unwrap_or(0)
+                                } else {
+                                    0
+                                }
+                            }).await.unwrap_or(0);
+
+                            if purged > 0 {
+                                if let Some(state) = app_handle_for_purge.try_state::<AppState>() {
+                                    if let Ok(mut r_lock) = state.ratings.lock() {
+                                        for p in &missing_to_purge {
+                                            r_lock.remove(p);
+                                        }
+                                    }
+                                }
+                                let _ = app_handle_for_purge.emit_all("smart-folder-purged", ());
+                            }
+                        });
+                    }
+
                     return;
                 }
             }
@@ -1407,11 +1443,15 @@ fn load_directory(
 
             let (files, missing_paths): (Vec<std::sync::Arc<ImageFile>>, Vec<String>) = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
-                let valid_files = smart_items
+                let (valid_items, missing_items): (Vec<_>, Vec<_>) = smart_items
                     .into_par_iter()
-                    .map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i)))
-                    .collect();
-                (valid_files, Vec::new())
+                    .partition(|item| {
+                        let clean = strip_unc_prefix(&item.path).unwrap_or(&item.path);
+                        std::path::Path::new(clean).is_file()
+                    });
+                let missing: Vec<String> = missing_items.into_iter().map(|i| i.path).collect();
+                let valid_files = valid_items.into_par_iter().map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i))).collect();
+                (valid_files, missing)
             } else {
                 let target_entries: Vec<_> = jwalk::WalkDir::new(&path_for_spawn)
                     .max_depth(1)
