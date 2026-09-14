@@ -1236,8 +1236,8 @@ fn load_directory(
                 let sort_sf = current_sort.clone();
                 let ratings_map_sf = ratings_map.clone();
 
-                let (files, missing_paths) = tokio::task::spawn_blocking(move || {
-                    let arcs = query_smart_folder_image_files(
+                let (files, head_valid, head_missing, all_paths_for_bg_purge) = tokio::task::spawn_blocking(move || {
+                    let mut arcs = query_smart_folder_image_files(
                         &rule_sf,
                         &db_conn_for_query,
                         Some(&sort_sf.key),
@@ -1245,23 +1245,12 @@ fn load_directory(
                         None,
                     );
 
-                    // 実ファイルが存在するものと、エクスプローラー等で削除・移動され消失したものを並列で判定
-                    use rayon::prelude::*;
-                    let (valid_files, missing_items): (Vec<_>, Vec<_>) = arcs
-                        .into_par_iter()
-                        .partition(|f| {
-                            let clean = strip_unc_prefix(&f.path).unwrap_or(&f.path);
-                            std::path::Path::new(clean).is_file()
-                        });
-
-                    let missing_paths: Vec<String> = missing_items.into_iter().map(|f| f.path.clone()).collect();
-                    let mut arcs = valid_files;
-
                     // SQL の ORDER BY はバイト順であるため、名前順ソート時のみ自然順ソートを適用
                     if sort_sf.key == "name" {
                         sort_files_by_natural_name(&mut arcs, sort_sf.asc);
                     } else if sort_sf.key == "rating" {
                         let asc = sort_sf.asc;
+                        use rayon::prelude::*;
                         let mut paired: Vec<(u8, std::sync::Arc<ImageFile>)> = arcs
                             .into_par_iter()
                             .map(|f| {
@@ -1281,6 +1270,7 @@ fn load_directory(
                         arcs = paired.into_par_iter().map(|(_, f)| f).collect();
                     } else if sort_sf.key == "ratio" {
                         let asc = sort_sf.asc;
+                        use rayon::prelude::*;
                         arcs.par_sort_unstable_by(|a, b| {
                             let r_a = if a.height > 0 { a.width as f64 / a.height as f64 } else { 0.0 };
                             let r_b = if b.height > 0 { b.width as f64 / b.height as f64 } else { 0.0 };
@@ -1294,8 +1284,30 @@ fn load_directory(
                         });
                     }
 
-                    (arcs, missing_paths)
-                }).await.unwrap_or_else(|_| (Vec::new(), Vec::new()));
+                    // --- ハイブリッド即時表示フェーズ ---
+                    // ソート後の先頭200件（初期表示チャンク）のみ同期的に is_file() を判定
+                    // 200件であれば共有ドライブ（SMB）でもわずか20〜30msで完了し、初期画面にゴーストが出るのを防ぐ
+                    let check_len = std::cmp::min(arcs.len(), 200);
+                    let mut head_valid = Vec::with_capacity(check_len);
+                    let mut head_missing = Vec::new();
+
+                    for f in &arcs[..check_len] {
+                        let clean = strip_unc_prefix(&f.path).unwrap_or(&f.path);
+                        if std::path::Path::new(clean).is_file() {
+                            head_valid.push((**f).clone());
+                        } else {
+                            head_missing.push(f.path.clone());
+                        }
+                    }
+
+                    // バックグラウンドパージ用: 201件目以降のパス一覧
+                    let mut all_paths_for_bg_purge = Vec::with_capacity(arcs.len());
+                    for f in &arcs[check_len..] {
+                        all_paths_for_bg_purge.push(f.path.clone());
+                    }
+
+                    (arcs, head_valid, head_missing, all_paths_for_bg_purge)
+                }).await.unwrap_or_else(|_| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
 
                 println!("[Veloce: PERF] Smart folder query+sort for {} completed in {}ms (items: {})",
                     path_for_spawn, t_smart_start.elapsed().as_millis(), files.len());
@@ -1385,7 +1397,10 @@ fn load_directory(
 
                     let total_count = filtered.len();
 
-                    let initial_chunk = {
+                    let initial_chunk = if !has_filter && !head_missing.is_empty() {
+                        // フィルタなしで先頭に消失ファイルがあった場合、同期検証済みの head_valid を先頭チャンクとして使用
+                        Some(head_valid)
+                    } else {
                         let chunk_size = std::cmp::min(filtered.len(), 200);
                         Some(filtered[..chunk_size].iter().map(|f| (**f).clone()).collect())
                     };
@@ -1402,16 +1417,34 @@ fn load_directory(
                     println!("[Veloce: PERF] Smart folder load for {} completed in {}ms (total files: {})",
                         path_clone, t_smart_start.elapsed().as_millis(), total_count);
 
-                    // 消失したファイルが検出された場合、DBキャッシュおよびレーティングから非同期で自動クリーンアップ（Self-Healing）
-                    if !missing_paths.is_empty() {
-                        let db_pool = db_conn_sf.clone();
-                        let missing_to_purge = missing_paths.clone();
-                        let app_handle_for_purge = app_clone.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let missing_for_db = missing_to_purge.clone();
+                    // --- 非同期バックグラウンドパージフェーズ（Self-Healing）---
+                    // 画面表示後、裏側の非同期タスクで残りの全件（約33,800件）を静かに存在確認し、
+                    // 外部で削除された消失ファイルを自動パージする
+                    let db_pool = db_conn_sf.clone();
+                    let app_handle_for_purge = app_clone.clone();
+                    let head_missing_to_purge = head_missing;
+                    let remaining_paths = all_paths_for_bg_purge;
+
+                    tauri::async_runtime::spawn(async move {
+                        let mut missing_for_db = head_missing_to_purge;
+
+                        if !remaining_paths.is_empty() {
+                            use rayon::prelude::*;
+                            let tail_missing: Vec<String> = remaining_paths
+                                .into_par_iter()
+                                .filter(|path| {
+                                    let clean = strip_unc_prefix(path).unwrap_or(path);
+                                    !std::path::Path::new(clean).is_file()
+                                })
+                                .collect();
+                            missing_for_db.extend(tail_missing);
+                        }
+
+                        if !missing_for_db.is_empty() {
+                            let missing_for_db_clone = missing_for_db.clone();
                             let purged = tokio::task::spawn_blocking(move || {
                                 if let Ok(mut conn) = db_pool.get() {
-                                    purge_missing_files_from_cache(&mut conn, &missing_for_db).unwrap_or(0)
+                                    purge_missing_files_from_cache(&mut conn, &missing_for_db_clone).unwrap_or(0)
                                 } else {
                                     0
                                 }
@@ -1420,15 +1453,15 @@ fn load_directory(
                             if purged > 0 {
                                 if let Some(state) = app_handle_for_purge.try_state::<AppState>() {
                                     if let Ok(mut r_lock) = state.ratings.lock() {
-                                        for p in &missing_to_purge {
+                                        for p in &missing_for_db {
                                             r_lock.remove(p);
                                         }
                                     }
                                 }
                                 let _ = app_handle_for_purge.emit_all("smart-folder-purged", ());
                             }
-                        });
-                    }
+                        }
+                    });
 
                     return;
                 }

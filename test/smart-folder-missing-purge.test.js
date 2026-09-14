@@ -14,14 +14,15 @@ describe('Smart Folder Pure Cache Load & Self-Healing Logic', () => {
       expect(mainRsContent).toContain('DELETE FROM ratings WHERE path IN');
     });
 
-    it('should filter smart items by is_file() concurrently using rayon in load_directory', () => {
-      expect(mainRsContent).toContain('partition(|f|');
+    it('should synchronously verify head items using is_file() for immediate paint while gathering remaining paths', () => {
+      expect(mainRsContent).toContain('check_len = std::cmp::min(arcs.len(), 200)');
       expect(mainRsContent).toContain('std::path::Path::new(clean).is_file()');
+      expect(mainRsContent).toContain('all_paths_for_bg_purge');
     });
 
-    it('should trigger background purge and emit smart-folder-purged event when missing files are found in smart folder', () => {
-      expect(mainRsContent).toContain('if !missing_paths.is_empty()');
-      expect(mainRsContent).toContain('purge_missing_files_from_cache(&mut conn, &missing_for_db)');
+    it('should trigger asynchronous background purge for missing files and emit smart-folder-purged event', () => {
+      expect(mainRsContent).toContain('if !missing_for_db.is_empty()');
+      expect(mainRsContent).toContain('purge_missing_files_from_cache(&mut conn, &missing_for_db_clone)');
       expect(mainRsContent).toContain('app_handle_for_purge.emit_all("smart-folder-purged", ())');
     });
 
