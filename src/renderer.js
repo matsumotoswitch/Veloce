@@ -210,11 +210,7 @@ async function refreshFileList(showToast = false) {
   // フォルダ切り替え時にサムネイル読み込み中のトーストを強制的に消去
   appState.thumbnailTotalRequested = 0;
   appState.thumbnailCompleted = 0;
-  const tToast = document.getElementById('toast-thumbnail-progress');
-  if (tToast) {
-    tToast.classList.remove('show');
-    setTimeout(() => { if (tToast.parentElement) tToast.remove(); }, 300);
-  }
+  uiManager.dismissToast('thumbnail-progress');
 
   if (uiManager.elements.searchBar) {
     uiManager.elements.searchBar.value = '';
@@ -259,11 +255,7 @@ function updateMetadataToast() {
   const current = appState.metadataCompleted;
 
   if (total === 0 || current >= total) {
-    const t = document.getElementById('toast-metadata-load');
-    if (t) {
-      t.classList.remove('show');
-      setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-    }
+    uiManager.dismissToast('metadata-load');
     return;
   }
 
@@ -814,19 +806,11 @@ export async function openDiffModal(indices) {
       window.veloceAPI.parseMetadata(file1.path),
       window.veloceAPI.parseMetadata(file2.path)
     ]);
-    const t = document.getElementById('toast-diff-loading');
-    if (t) {
-      t.classList.remove('show');
-      setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-    }
+    uiManager.dismissToast('diff-loading');
     uiManager.showDiffModal(file1, file2, meta1, meta2);
   } catch (err) {
     console.error('Failed to load diff metadata:', err);
-    const t = document.getElementById('toast-diff-loading');
-    if (t) {
-      t.classList.remove('show');
-      setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-    }
+    uiManager.dismissToast('diff-loading');
     uiManager.showToast('比較データの読み込みに失敗しました。', 3000, null, 'warning');
   }
 }
@@ -874,11 +858,7 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
 
       if (window.thumbnailManager) window.thumbnailManager.unshiftPreload(pathsToRebuild);
 
-      const toastEl = document.getElementById('toast-rebuild-folder');
-      if (toastEl) {
-        toastEl.classList.remove('show');
-        setTimeout(() => { if (toastEl.parentElement) toastEl.remove(); }, 300);
-      }
+      uiManager.dismissToast('rebuild-folder');
 
       if (typeof window.updateThumbnailToast === 'function') window.updateThumbnailToast();
       if (typeof window.processNextTask === 'function') window.processNextTask();
@@ -2429,11 +2409,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
       
       setTimeout(() => {
-        const t = document.getElementById('toast-dir-load-progress');
-        if (t) {
-          t.classList.remove('show');
-          setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-        }
+        uiManager.dismissToast('dir-load-progress');
       }, 100);
     });
   }

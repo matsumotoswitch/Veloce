@@ -522,11 +522,7 @@ window.updateThumbnailToast = function updateThumbnailToast() {
       // フォールバック: 3秒間進捗がなければ強制的にトーストを消去（スタック防止）
       clearTimeout(appState.thumbnailToastTimeout);
       appState.thumbnailToastTimeout = setTimeout(() => {
-        const t = document.getElementById('toast-thumbnail-progress');
-        if (t) {
-          t.classList.remove('show');
-          setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-        }
+        uiManager.dismissToast('thumbnail-progress');
         appState.thumbnailTotalRequested = 0;
         appState.thumbnailCompleted = 0;
         appState.lastThumbnailToastTime = 0;
@@ -535,11 +531,7 @@ window.updateThumbnailToast = function updateThumbnailToast() {
       uiManager.showToast(`サムネイル読込完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
       clearTimeout(appState.thumbnailToastTimeout);
       appState.thumbnailToastTimeout = setTimeout(() => {
-        const t = document.getElementById('toast-thumbnail-progress');
-        if (t) {
-          t.classList.remove('show');
-          setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-        }
+        uiManager.dismissToast('thumbnail-progress');
         appState.thumbnailTotalRequested = 0;
         appState.thumbnailCompleted = 0;
         appState.lastThumbnailToastTime = 0;

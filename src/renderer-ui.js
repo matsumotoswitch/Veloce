@@ -716,7 +716,8 @@ class UIManager {
       this.toastContainer = container;
     }
 
-    let toast = id ? document.getElementById(`toast-${id}`) : null;
+    const elementId = id ? (id.startsWith('toast-') ? id : `toast-${id}`) : null;
+    let toast = elementId ? document.getElementById(elementId) : null;
 
     if (toast) {
       toast.textContent = message;
@@ -725,7 +726,7 @@ class UIManager {
     } else {
       toast = document.createElement('div');
       toast.className = 'toast-message';
-      if (id) toast.id = `toast-${id}`;
+      if (elementId) toast.id = elementId;
       toast.textContent = message;
       this.toastContainer.appendChild(toast);
     }
@@ -749,6 +750,68 @@ class UIManager {
           if (toast.parentElement) toast.remove();
         }, 300);
       }, duration);
+    }
+  }
+
+  /**
+   * トースト通知を画面に表示する静的ヘルパー。
+   * @param {string} message - 表示するメッセージ
+   * @param {number} [duration=3000] - 表示する時間(ミリ秒)
+   * @param {string|null} [id=null] - トーストの一意なID
+   * @param {string} [type='info'] - トーストの種類 ('info', 'success', 'warning', 'error')
+   */
+  static showToast(message, duration = 3000, id = null, type = 'info') {
+    if (typeof uiManager !== 'undefined' && uiManager) {
+      uiManager.showToast(message, duration, id, type);
+    }
+  }
+
+  /**
+   * 指定したIDのトースト通知を消去します。
+   * フェードアウトアニメーション（300ms）完了後にDOMから要素を削除します。
+   * @param {string} id - トーストの一意なID（接頭辞 'toast-' の有無を問わず指定可能）
+   */
+  dismissToast(id) {
+    if (!id) return;
+    const elementId = id.startsWith('toast-') ? id : `toast-${id}`;
+    const toast = document.getElementById(elementId);
+    if (toast) {
+      if (toast.timeoutId) {
+        clearTimeout(toast.timeoutId);
+        toast.timeoutId = null;
+      }
+      toast.classList.remove('show');
+      setTimeout(() => {
+        if (toast.parentElement) {
+          toast.remove();
+        }
+      }, 300);
+    }
+  }
+
+  /**
+   * 指定したIDのトースト通知を消去する静的ヘルパー。
+   * @param {string} id - トーストの一意なID（接頭辞 'toast-' の有無を問わず指定可能）
+   */
+  static dismissToast(id) {
+    if (typeof uiManager !== 'undefined' && uiManager) {
+      uiManager.dismissToast(id);
+    } else {
+      if (!id) return;
+      const elementId = id.startsWith('toast-') ? id : `toast-${id}`;
+      const toast = document.getElementById(elementId);
+      if (toast) {
+        if (toast.timeoutId) {
+          clearTimeout(toast.timeoutId);
+          toast.timeoutId = null;
+        }
+        toast.classList.remove('show');
+        setTimeout(() => {
+          if (toast.parentElement) {
+            toast.remove();
+          }
+        }, 300);
+      }
     }
   }
 
