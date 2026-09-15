@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { appState } from '../src/renderer-state.js';
+import {
+  checkBookmarkOverflow,
+  renderFavorites,
+  initBookmarkEvents
+} from '../src/renderer-bookmarks.js';
 
 describe('Bookmark Bar Overflow Logic', () => {
   beforeEach(() => {
@@ -23,15 +28,6 @@ describe('Bookmark Bar Overflow Logic', () => {
     Object.defineProperty(list, 'scrollWidth', { value: 300, configurable: true });
     Object.defineProperty(list, 'clientWidth', { value: 200, configurable: true });
 
-    // Simulate checkBookmarkOverflow logic
-    const checkBookmarkOverflow = () => {
-      if (list.scrollWidth > list.clientWidth) {
-        overflowBtn.style.display = 'flex';
-      } else {
-        overflowBtn.style.display = 'none';
-      }
-    };
-
     checkBookmarkOverflow();
     expect(overflowBtn.style.display).toBe('flex');
   });
@@ -44,17 +40,27 @@ describe('Bookmark Bar Overflow Logic', () => {
     Object.defineProperty(list, 'scrollWidth', { value: 150, configurable: true });
     Object.defineProperty(list, 'clientWidth', { value: 200, configurable: true });
 
-    // Simulate checkBookmarkOverflow logic
-    const checkBookmarkOverflow = () => {
-      if (list.scrollWidth > list.clientWidth) {
-        overflowBtn.style.display = 'flex';
-      } else {
-        overflowBtn.style.display = 'none';
-      }
-    };
-
     checkBookmarkOverflow();
     expect(overflowBtn.style.display).toBe('none');
+  });
+
+  it('should render empty message when favorites list is empty', () => {
+    appState.favorites = [];
+    renderFavorites();
+    const list = document.getElementById('bookmark-list');
+    expect(list.querySelector('.bookmark-empty-msg')).not.toBeNull();
+  });
+
+  it('should render favorite items with bookmark-item class', () => {
+    appState.favorites = [
+      { id: '1', name: 'Fav1', path: '/path/1', icon: 'FAV_STAR' }
+    ];
+    renderFavorites();
+    const list = document.getElementById('bookmark-list');
+    const item = list.querySelector('.bookmark-item');
+    expect(item).not.toBeNull();
+    expect(item.dataset.path).toBe('/path/1');
+    expect(item.querySelector('.bookmark-icon-fav')).not.toBeNull();
   });
 
   it('should detect hidden items correctly for dropdown', () => {

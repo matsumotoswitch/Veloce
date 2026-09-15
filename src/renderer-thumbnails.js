@@ -24,8 +24,28 @@ import { appState } from './renderer-state.js';
 import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL } from './renderer-ui.js';
 import { getStreamUrl, debounce } from './utils.js';
 
-/** サムネイルCanvas塗りつぶし背景色 (var(--bg-darker) と同一のカラー値) */
-const THUMBNAIL_CANVAS_BG = '#1e1e1e';
+/**
+ * サムネイルCanvas塗りつぶし背景色 (var(--bg-darker) から動的解決)
+ * Canvas context では CSS 変数を直接解釈できないため、getComputedStyle で取得してキャッシュする。
+ * @type {string|null}
+ */
+let cachedThumbnailCanvasBg = null;
+
+export function getThumbnailCanvasBg() {
+  if (cachedThumbnailCanvasBg) return cachedThumbnailCanvasBg;
+  if (typeof window !== 'undefined' && typeof document !== 'undefined' && window.getComputedStyle && document.documentElement) {
+    const val = window.getComputedStyle(document.documentElement).getPropertyValue('--bg-darker');
+    if (val && val.trim()) {
+      cachedThumbnailCanvasBg = val.trim();
+      return cachedThumbnailCanvasBg;
+    }
+  }
+  return '#1e1e1e';
+}
+
+export function resetThumbnailCanvasBg() {
+  cachedThumbnailCanvasBg = null;
+}
 
 /**
  * Blob から安全にヘッダーバイト列を取得するヘルパー関数
@@ -353,7 +373,7 @@ class ThumbnailWorkerPool {
             const ctx = canvas.getContext('2d');
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
-            ctx.fillStyle = THUMBNAIL_CANVAS_BG;
+            ctx.fillStyle = getThumbnailCanvasBg();
             ctx.fillRect(0, 0, width, height);
             ctx.drawImage(sourceElement, 0, 0, width, height);
             if (typeof canvas.convertToBlob === 'function') {
@@ -372,7 +392,7 @@ class ThumbnailWorkerPool {
           const ctx = domCanvas.getContext('2d');
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
-          ctx.fillStyle = THUMBNAIL_CANVAS_BG;
+          ctx.fillStyle = getThumbnailCanvasBg();
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(sourceElement, 0, 0, width, height);
           outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/jpeg', 0.90));

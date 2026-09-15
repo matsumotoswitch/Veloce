@@ -63,6 +63,25 @@ import {
   initDirTreeDnd,
   initFavoritesDnd
 } from './renderer-dnd.js';
+import { initResizers } from './renderer-resizer.js';
+import { renderFavorites, initBookmarkEvents } from './renderer-bookmarks.js';
+import {
+  initFileOps,
+  renameSelectedFolder,
+  deleteSelectedFolder,
+  renameSelectedFile,
+  rebuildSelectedCache,
+  deleteSelectedFiles,
+  performUndo
+} from './renderer-file-ops.js';
+import {
+  initFolderTree,
+  scrollTreeItemIntoView,
+  createTreeNode,
+  expandTreeToPath,
+  refreshTree,
+  handleTreeNavigation
+} from './renderer-folder-tree.js';
 
 export {
   showMenuWithAnimation,
@@ -74,7 +93,13 @@ export {
   showEditFavoriteModal,
   handleItemDragStart,
   getPathsFromDragEventAsync,
-  updateDragTooltip
+  updateDragTooltip,
+  initFolderTree,
+  scrollTreeItemIntoView,
+  createTreeNode,
+  expandTreeToPath,
+  refreshTree,
+  handleTreeNavigation
 };
 
 // 開発者ツールショートカット (F12, Ctrl+Shift+I 等) の無効化
@@ -96,8 +121,6 @@ const CONFIG = {
 // タブ機能の状態初期化
 appState.tabs = [];
 appState.activeTabIndex = -1;
-
-const resizingState = { left: false, right: false, center: false, leftTop: false, rightTop: false };
 
 const contextMenuManager = new ContextMenuManager();
 window.contextMenuManager = contextMenuManager;
@@ -209,69 +232,7 @@ async function refreshFileList(showToast = false) {
   }
 }
 
-async function refreshTree() {
-  if (!window.veloceAPI.getDrives) return;
-  const scrollTop = uiManager.elements.dirTree.scrollTop;
-  const scrollLeft = uiManager.elements.dirTree.scrollLeft;
-
-  const expandedPaths = Array.from(uiManager.elements.dirTree.querySelectorAll('.tree-children.expanded'))
-    .map(ul => ul.previousElementSibling?.dataset?.path)
-    .filter(Boolean);
-
-  const tempContainer = document.createElement('div');
-  const ul = document.createElement('ul');
-  ul.className = 'tree-root';
-  const drives = await window.veloceAPI.getDrives();
-  for (const drive of drives) {
-    ul.appendChild(createTreeNode({ name: drive, path: drive }, true));
-  }
-  tempContainer.appendChild(ul);
-
-  expandedPaths.sort((a, b) => a.length - b.length);
-  for (const p of expandedPaths) {
-    await expandTreeToPath(p, true, tempContainer);
-    const escapedPath = CSS.escape(p);
-    const itemDiv = tempContainer.querySelector(`.tree-item[data-path="${escapedPath}"]`);
-    if (itemDiv && itemDiv.expandNode) {
-      await itemDiv.expandNode();
-    }
-  }
-
-  if (appState.currentDirectory) {
-    await expandTreeToPath(appState.currentDirectory, true, tempContainer);
-  }
-
-  uiManager.elements.dirTree.replaceChildren(ul);
-  uiManager.elements.dirTree.scrollTop = scrollTop;
-  uiManager.elements.dirTree.scrollLeft = scrollLeft;
-}
-
-/**
- * フォルダツリー要素を安全にスクロール表示する
- * ネイティブの scrollIntoView() による祖先要素（body/window全体）の不正なスクロール暴走を防ぐため、
- * 親コンテナ（#directories-section）の scrollTop のみを直接計算して操作する
- * @param {HTMLElement} itemDiv - 表示対象のツリーアイテム要素
- * @param {'center'|'nearest'} [block='center'] - スクロール位置
- */
-function scrollTreeItemIntoView(itemDiv, block = 'center') {
-  if (!itemDiv) return;
-  const container = itemDiv.closest('#directories-section') || itemDiv.closest('#dir-tree');
-  if (!container) return;
-
-  const itemRect = itemDiv.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
-
-  if (block === 'center') {
-    const targetScrollTop = container.scrollTop + (itemRect.top - containerRect.top) - (containerRect.height / 2) + (itemRect.height / 2);
-    container.scrollTop = Math.max(0, targetScrollTop);
-  } else {
-    if (itemRect.top < containerRect.top) {
-      container.scrollTop = Math.max(0, container.scrollTop - (containerRect.top - itemRect.top));
-    } else if (itemRect.bottom > containerRect.bottom) {
-      container.scrollTop = container.scrollTop + (itemRect.bottom - containerRect.bottom);
-    }
-  }
-}
+// (refreshTree, scrollTreeItemIntoView, expandTreeToPath are modularized into renderer-folder-tree.js)
 
 /**
  * タブ要素を安全に横スクロール表示する
@@ -289,52 +250,6 @@ function scrollTabIntoView(tabEl) {
     container.scrollLeft = Math.max(0, container.scrollLeft - (contRect.left - tabRect.left));
   } else if (tabRect.right > contRect.right) {
     container.scrollLeft = container.scrollLeft + (tabRect.right - contRect.right);
-  }
-}
-
-async function expandTreeToPath(targetPath, disableScroll = false, rootElement = document) {
-  if (!targetPath || targetPath === 'PC') return;
-
-  const searchRoot = rootElement === document ? document.getElementById('dir-tree') : rootElement;
-  if (!searchRoot) return;
-
-  if (targetPath.startsWith('smart://')) {
-    const activeItem = searchRoot.querySelector('.tree-item.selected');
-    if (activeItem) activeItem.classList.remove('selected');
-    return;
-  }
-
-  const separator = '\\';
-  const parts = targetPath.split(separator).filter(p => p !== '');
-  let pathsToExpand = [];
-
-  let current = parts[0] + separator;
-  pathsToExpand.push(current);
-  for (let i = 1; i < parts.length; i++) {
-    current += parts[i];
-    pathsToExpand.push(current);
-    current += separator;
-  }
-
-  for (let i = 0; i < pathsToExpand.length; i++) {
-    const p = pathsToExpand[i];
-    const escapedPath = CSS.escape(p);
-    const itemDiv = searchRoot.querySelector(`.tree-item[data-path="${escapedPath}"]`);
-
-    if (itemDiv) {
-      if (i === pathsToExpand.length - 1) {
-        const activeItem = searchRoot.querySelector('.tree-item.selected');
-        if (activeItem) activeItem.classList.remove('selected');
-        itemDiv.classList.add('selected');
-        if (!disableScroll) {
-          scrollTreeItemIntoView(itemDiv, 'center');
-        }
-      } else {
-        if (itemDiv.expandNode) await itemDiv.expandNode();
-      }
-    } else {
-      break;
-    }
   }
 }
 
@@ -356,318 +271,9 @@ function updateMetadataToast() {
 }
 
 
-async function renameSelectedFolder() {
-  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
-  if (!selectedFolderEl) return;
+// (File operations renameSelectedFolder/File, deleteSelectedFolder/Files, and rebuildSelectedCache are modularized into renderer-file-ops.js)
 
-  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
-  if (isRoot) {
-    showNotification('ドライブ名を変更することはできません。', 'warning');
-    return;
-  }
-
-  const oldPath = selectedFolderEl.dataset.path;
-  const oldName = selectedFolderEl.querySelector('.tree-label').textContent;
-
-  const newName = await uiManager.showPrompt('新しいフォルダ名を入力してください:', oldName);
-  if (newName !== null && newName !== oldName) {
-    if (newName.trim() === '') {
-      showNotification('フォルダ名を入力してください。', 'warning');
-      return;
-    }
-    if (/[\\/:*?"<>|]/.test(newName)) {
-      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
-      return;
-    }
-
-    const result = await window.veloceAPI.renameFolder(oldPath, newName);
-    if (result && result.success) {
-      appState.undoStack.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
-      showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
-      if (appState.currentDirectory.startsWith(oldPath)) {
-        appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
-      }
-      await refreshTree();
-    } else {
-      showNotification(`フォルダ名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
-    }
-  }
-}
-
-async function deleteSelectedFolder() {
-  const selectedFolderEl = document.querySelector('#dir-tree .tree-item.selected');
-  if (!selectedFolderEl) return;
-
-  const isRoot = selectedFolderEl.parentElement.parentElement.classList.contains('tree-root');
-  if (isRoot) {
-    showNotification('ドライブを削除することはできません。', 'warning');
-    return;
-  }
-
-  const oldPath = selectedFolderEl.dataset.path;
-  const folderName = selectedFolderEl.querySelector('.tree-label').textContent;
-
-  const isConfirmed = await uiManager.showConfirm(`本当にフォルダ「${folderName}」をゴミ箱に移動しますか？`);
-  if (isConfirmed) {
-    const result = await window.veloceAPI.trashFolder(oldPath);
-    if (result && result.success) {
-      showNotification(`フォルダ「${folderName}」をゴミ箱に移動しました`, 'warning');
-      if (appState.currentDirectory.startsWith(oldPath)) {
-        const sep = '\\';
-        const parts = oldPath.split(sep);
-        parts.pop();
-        let parentDir = parts.join(sep);
-        if (!parentDir.includes(sep)) parentDir += sep;
-        appState.currentDirectory = parentDir;
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
-        await refreshFileList();
-      }
-      await refreshTree();
-    } else {
-      showNotification(`フォルダの削除に失敗しました: ${result ? result.error : '不明なエラー'}`, 'warning');
-    }
-  }
-}
-
-async function renameSelectedFile() {
-  if (appState.selectedIndex > -1) {
-    const file = await window.veloceAPI.getFileByIndex(appState.selectedIndex);
-    if (!file) return;
-    const oldPath = file.path;
-    const newName = await uiManager.showPrompt('新しいファイル名を入力してください:', file.name, true);
-    if (newName !== null && newName !== file.name) {
-      if (newName.trim() === '') {
-        uiManager.showToast('ファイル名を入力してください。', 3000, 'file-rename', 'warning');
-        return;
-      }
-      if (/[\\/:*?"<>|]/.test(newName)) {
-        uiManager.showToast('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |', 3000, 'file-rename', 'warning');
-        return;
-      }
-
-      const result = await window.veloceAPI.renameFile(oldPath, newName);
-      if (result && result.success) {
-        appState.undoStack.push({ type: 'RENAME_FILE', oldPath, newPath: result.path });
-        uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
-
-        const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
-
-        file.path = result.path;
-        file.name = newName;
-        file.ext = newExt;
-
-        // Rust側に変更を通知
-        await window.veloceAPI.notifyFileChanged(file);
-
-        const oldUrl = appState.thumbnailUrls.get(oldPath);
-        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
-        appState.thumbnailUrls.delete(oldPath);
-        resetThumbnailPreloader();
-        scheduleRefresh();
-      } else {
-        uiManager.showToast(`ファイル名の変更に失敗しました: ${result ? result.error : '不明なエラー'}`, 3000, 'file-rename', 'warning');
-      }
-    }
-  }
-}
-
-async function rebuildSelectedCache() {
-  try {
-    if (appState.selection.size === 0) return;
-
-    const pathsToRebuild = [];
-    if (window.veloceAPI.getFilesByIndices) {
-      const indices = Array.from(appState.selection);
-      const files = await window.veloceAPI.getFilesByIndices(indices);
-      for (const file of files) {
-        pathsToRebuild.push(file.path);
-        file.hasThumbnailCache = false;
-        if (appState.thumbnailUrls.has(file.path)) {
-          const oldUrl = appState.thumbnailUrls.get(file.path);
-          if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
-          appState.thumbnailUrls.delete(file.path);
-        }
-      }
-    } else {
-      for (const index of appState.selection) {
-        const file = await window.veloceAPI.getFileByIndex(index);
-        if (file) {
-          pathsToRebuild.push(file.path);
-          file.hasThumbnailCache = false;
-          if (appState.thumbnailUrls.has(file.path)) {
-            const oldUrl = appState.thumbnailUrls.get(file.path);
-            if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
-            appState.thumbnailUrls.delete(file.path);
-          }
-        }
-      }
-    }
-
-    if (window.veloceAPI && window.veloceAPI.clearMetadataCache) {
-      await window.veloceAPI.clearMetadataCache(pathsToRebuild);
-
-      if (appState.thumbnailTotalRequested === 0) {
-        appState.thumbnailCompleted = 0;
-      }
-      appState.thumbnailTotalRequested += pathsToRebuild.length;
-
-      if (!appState.rebuiltPaths) appState.rebuiltPaths = new Set();
-      pathsToRebuild.forEach(p => {
-        appState.thumbnailCounted.delete(p);
-        appState.rebuiltPaths.add(p);
-      });
-
-      if (window.thumbnailManager) window.thumbnailManager.unshiftPreload(pathsToRebuild);
-
-      if (typeof window.updateThumbnailToast === 'function') window.updateThumbnailToast();
-      if (typeof window.processNextTask === 'function') window.processNextTask();
-    } else {
-      uiManager.showToast("エラー: APIが見つかりません", 5000, 'error');
-    }
-
-    if (typeof uiManager.updateVirtualGrid === 'function') {
-      uiManager.updateVirtualGrid(true);
-    }
-    if (typeof uiManager.updateVirtualList === 'function') {
-      uiManager.updateVirtualList(true);
-    }
-  } catch (err) {
-    uiManager.showToast("エラーが発生しました: " + err.toString(), 5000, 'error');
-  }
-}
-
-async function deleteSelectedFiles() {
-  if (appState.selection.size > 0) {
-    const pathsToDelete = [];
-    if (window.veloceAPI.getFilesByIndices) {
-      const indices = Array.from(appState.selection);
-      const files = await window.veloceAPI.getFilesByIndices(indices);
-      for (const f of files) {
-        pathsToDelete.push(f.path);
-      }
-    } else {
-      for (const i of appState.selection) {
-        const f = await window.veloceAPI.getFileByIndex(i);
-        if (f) pathsToDelete.push(f.path);
-      }
-    }
-
-    appState.selection.clear();
-    appState.selectedIndex = -1;
-    uiManager.updateSelectionUI();
-    clearMetadataUI();
-
-    let trashedCount = 0;
-    const total = pathsToDelete.length;
-    uiManager.showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
-
-    for (const path of pathsToDelete) {
-      try {
-        const success = await window.veloceAPI.trashFile(path);
-        if (success) {
-          trashedCount++;
-          await window.veloceAPI.notifyFileRemoved(path);
-        }
-      } catch (err) {
-        console.error('Failed to trash file:', err);
-      }
-    }
-
-    if (trashedCount > 0) {
-      uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
-
-
-      scheduleRefresh();
-    } else {
-      uiManager.showToast('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
-    }
-  }
-}
-
-let bookmarkOverflowMenu = null;
-
-function checkBookmarkOverflow() {
-  const bar = document.getElementById('bookmark-bar');
-  const list = document.getElementById('bookmark-list');
-  const overflowBtn = document.getElementById('bookmark-overflow-btn');
-  if (!bar || !list || !overflowBtn) return;
-
-  if (list.scrollWidth > list.clientWidth) {
-    overflowBtn.style.display = 'flex';
-  } else {
-    overflowBtn.style.display = 'none';
-    if (bookmarkOverflowMenu && bookmarkOverflowMenu.parentNode) {
-      bookmarkOverflowMenu.parentNode.removeChild(bookmarkOverflowMenu);
-      bookmarkOverflowMenu = null;
-    }
-  }
-}
-
-const bookmarkResizeObserver = new ResizeObserver(() => {
-  checkBookmarkOverflow();
-});
-
-window.addEventListener('click', (e) => {
-  if (bookmarkOverflowMenu && !e.target.closest('#bookmark-overflow-btn') && !e.target.closest('#bookmark-overflow-menu')) {
-    bookmarkOverflowMenu.classList.remove('show');
-  }
-});
-
-
-
-function renderFavorites() {
-  const container = document.getElementById('bookmark-list');
-  if (!container) return;
-  container.replaceChildren();
-
-  if (appState.favorites.length === 0) {
-    const emptyMsg = document.createElement('div');
-    emptyMsg.className = 'bookmark-empty-msg';
-    emptyMsg.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-      <span>フォルダをここにドラッグしてお気に入りに追加</span>
-    `;
-    container.appendChild(emptyMsg);
-
-    const btn = document.getElementById('bookmark-overflow-btn');
-    if (btn) btn.style.display = 'none';
-    return;
-  }
-
-  appState.favorites.forEach(fav => {
-    const itemDiv = document.createElement('div');
-    itemDiv.className = 'bookmark-item';
-    itemDiv.dataset.path = fav.path;
-    itemDiv.dataset.id = fav.id;
-    itemDiv.dataset.isFavorite = 'true';
-    itemDiv.draggable = true;
-
-    const icon = document.createElement('span');
-    if (fav.icon && ICON_SVGS[fav.icon]) {
-      icon.innerHTML = ICON_SVGS[fav.icon];
-      icon.classList.add(`icon-color-${fav.color || 'default'}`);
-    } else if (fav.icon && fav.icon.startsWith('FAV_')) {
-      icon.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
-      icon.style.color = 'var(--glow-gold)';
-    } else {
-      icon.innerHTML = UIManager.ICONS.FAV_STAR;
-    }
-    icon.style.display = 'flex';
-    icon.style.alignItems = 'center';
-
-    const label = document.createElement('span');
-    label.textContent = fav.name;
-
-    itemDiv.appendChild(icon);
-    itemDiv.appendChild(label);
-    container.appendChild(itemDiv);
-  });
-
-  if (typeof checkBookmarkOverflow === 'function') {
-    checkBookmarkOverflow();
-  }
-}
+// (Favorites bar rendering and overflow logic are modularized into renderer-bookmarks.js)
 
 // ============================================================================
 // 3. Core Business Logic & Helpers
@@ -781,118 +387,15 @@ const scheduleRefresh = debounce(async () => {
   }
 }, CONFIG.REFRESH_DELAY);
 
-function createTreeNode(folder, isRoot = false) {
-  const li = document.createElement('li');
-  li.className = 'tree-node';
+initFileOps({
+  refreshFileList,
+  refreshTree,
+  scheduleRefresh,
+  clearMetadataUI,
+  showNotification
+});
 
-  const itemDiv = document.createElement('div');
-  itemDiv.className = 'tree-item folder';
-  itemDiv.dataset.path = folder.path; // 展開用の目印としてパスを持たせる
-  itemDiv.dataset.name = folder.name;
-  itemDiv.dataset.isRoot = isRoot;
-  itemDiv.draggable = !isRoot; // ドライブ以外はドラッグ可能に
-
-  // 展開・折りたたみ用のトグルアイコン
-  const toggleIcon = document.createElement('span');
-  toggleIcon.className = 'tree-toggle toggle-icon';
-  toggleIcon.innerHTML = UIManager.ICONS.CHEVRON_RIGHT;
-
-  const icon = document.createElement('span');
-  icon.className = 'tree-icon';
-  icon.innerHTML = isRoot ? UIManager.ICONS.DRIVE : UIManager.ICONS.FOLDER;
-
-  const label = document.createElement('span');
-  label.className = 'tree-label';
-  label.textContent = isRoot ? folder.path : folder.name;
-
-  itemDiv.appendChild(toggleIcon);
-  itemDiv.appendChild(icon);
-  itemDiv.appendChild(label);
-  li.appendChild(itemDiv);
-
-  const childrenUl = document.createElement('ul');
-  childrenUl.className = 'tree-children collapsed';
-  childrenUl.style.display = 'none';
-  li.appendChild(childrenUl);
-
-  let isLoaded = false;
-
-  // ノードを展開してサブフォルダを遅延読み込みする処理
-  const expandNode = async () => {
-    if (!isLoaded) {
-      const subFolders = await window.veloceAPI.getFolders(folder.path);
-
-      // もし開いたフォルダ自身にサブフォルダがない場合は、自身の展開アイコンを隠して終了する
-      if (subFolders.length === 0) {
-        toggleIcon.style.visibility = 'hidden';
-        isLoaded = true;
-        return;
-      }
-
-      subFolders.forEach(subFolder => {
-        const childNode = createTreeNode(subFolder);
-        childrenUl.appendChild(childNode);
-
-        // 1つ下位のフォルダについて、更に下位フォルダ(孫)の有無を非同期で確認し、空ならアイコンを非表示にする
-        window.veloceAPI.getFolders(subFolder.path).then(grandChildren => {
-          if (grandChildren && grandChildren.length === 0) {
-            const childToggle = childNode.querySelector('.tree-toggle');
-            if (childToggle) childToggle.style.visibility = 'hidden';
-          }
-        }).catch(err => console.error('Failed to check subfolders:', err));
-      });
-      isLoaded = true;
-    }
-
-    // 中身のサブフォルダが存在する場合のみ、展開アニメーションとクラスの付与を行う
-    if (childrenUl.children.length > 0) {
-      childrenUl.style.display = 'block';
-      childrenUl.classList.remove('collapsed');
-      childrenUl.classList.add('expanded');
-      toggleIcon.classList.add('expanded');
-    }
-  };
-
-  // 外部から展開処理を呼び出せるように要素に紐付ける
-  itemDiv.expandNode = expandNode;
-
-  itemDiv.reloadFolder = async () => {
-    isLoaded = false;
-    childrenUl.replaceChildren();
-    const wasExpanded = childrenUl.classList.contains('expanded');
-
-    // サブフォルダの有無を事前に確認する
-    const subFolders = await window.veloceAPI.getFolders(folder.path);
-    if (subFolders.length === 0) {
-      toggleIcon.style.visibility = 'hidden';
-      childrenUl.style.display = 'none';
-      childrenUl.classList.remove('expanded');
-      childrenUl.classList.add('collapsed');
-      toggleIcon.classList.remove('expanded');
-      isLoaded = true;
-      return;
-    }
-
-    // サブフォルダがある場合はトグルアイコンを表示
-    toggleIcon.style.visibility = 'visible';
-
-    if (wasExpanded) {
-      await expandNode();
-    }
-  };
-
-  // ノードを折りたたむ処理
-  const collapseNode = () => {
-    childrenUl.style.display = 'none';
-    childrenUl.classList.remove('expanded');
-    childrenUl.classList.add('collapsed');
-    toggleIcon.classList.remove('expanded');
-  };
-  itemDiv.collapseNode = collapseNode;
-
-  return li;
-}
-
+// (createTreeNode is modularized into renderer-folder-tree.js)
 
 const TABLE_HEADERS = {
   name: '名前',
@@ -1225,12 +728,9 @@ const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager
   const oldPath = contextMenu.targetFolder.path;
   const newName = await uiManager.showPrompt('新しいフォルダ名を入力してください:', contextMenu.targetFolder.name);
   if (newName !== null && newName !== contextMenu.targetFolder.name) {
-    if (newName.trim() === '') {
-      showNotification('フォルダ名を入力してください。', 'warning');
-      return;
-    }
-    if (/[\\/:*?"<>|]/.test(newName)) {
-      showNotification('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |', 'warning');
+    const valResult = validateFilename(newName, 'フォルダ名');
+    if (!valResult.valid) {
+      showNotification(valResult.message, 'warning');
       return;
     }
 
@@ -1276,24 +776,42 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
 }, true, 'Delete');
 
 const menuRenameFile = createMenuItem('ファイル名を変更...', UIManager.ICONS.FILE_PEN, renameSelectedFile, false, 'F2');
-const menuDiffFiles = createMenuItem('2つの画像を比較...', UIManager.ICONS.DIFF, async () => {
-  if (appState.selection.size === 2) {
-    const indices = Array.from(appState.selection);
-    const file1 = await window.veloceAPI.getFileByIndex(indices[0]);
-    const file2 = await window.veloceAPI.getFileByIndex(indices[1]);
+/**
+ * 2つの画像を選択してDiff比較モーダルを開きます。
+ * @param {number[]} indices 比較対象の2つのアイテムインデックス
+ */
+export async function openDiffModal(indices) {
+  if (!indices || indices.length !== 2) return;
+  const file1 = await window.veloceAPI.getFileByIndex(indices[0]);
+  const file2 = await window.veloceAPI.getFileByIndex(indices[1]);
+  if (!file1 || !file2) return;
 
-    uiManager.showToast('比較データを読み込み中', 0, 'diff-loading', 'info');
-    Promise.all([
+  uiManager.showToast('比較データを読み込み中', 0, 'diff-loading', 'info');
+  try {
+    const [meta1, meta2] = await Promise.all([
       window.veloceAPI.parseMetadata(file1.path),
       window.veloceAPI.parseMetadata(file2.path)
-    ]).then(([meta1, meta2]) => {
-      const t = document.getElementById('toast-diff-loading');
-      if (t) {
-        t.classList.remove('show');
-        setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-      }
-      uiManager.showDiffModal(file1, file2, meta1, meta2);
-    });
+    ]);
+    const t = document.getElementById('toast-diff-loading');
+    if (t) {
+      t.classList.remove('show');
+      setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+    }
+    uiManager.showDiffModal(file1, file2, meta1, meta2);
+  } catch (err) {
+    console.error('Failed to load diff metadata:', err);
+    const t = document.getElementById('toast-diff-loading');
+    if (t) {
+      t.classList.remove('show');
+      setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
+    }
+    uiManager.showToast('比較データの読み込みに失敗しました。', 3000, null, 'warning');
+  }
+}
+
+const menuDiffFiles = createMenuItem('2つの画像を比較...', UIManager.ICONS.DIFF, async () => {
+  if (appState.selection.size === 2) {
+    await openDiffModal(Array.from(appState.selection));
   }
 }, false, 'D');
 const menuRebuildCache = createMenuItem('選択項目のキャッシュを再構築', UIManager.ICONS.REFRESH, rebuildSelectedCache);
@@ -2197,277 +1715,7 @@ initDirTreeDnd(uiManager.elements.dirTree, {
   showNotification
 });
 
-function setupResizer(resizer, type, cursor) {
-  if (!resizer) return;
-  resizer.addEventListener('mousedown', () => {
-    resizingState[type] = true;
-    resizer.classList.add('resizing');
-    document.body.style.cursor = cursor;
-    document.body.classList.add('is-resizing'); // ドラッグ中フラグを追加
-  });
-  createResizerToggle(resizer, type);
-}
-
-function createResizerToggle(resizer, type) {
-  const isHorizontal = type === 'center' || type === 'leftTop' || type === 'rightTop';
-  const btn = document.createElement('div');
-  btn.className = `resizer-toggle ${isHorizontal ? 'resizer-toggle-horizontal' : 'resizer-toggle-vertical'}`;
-
-  let openIcon;
-  if (type === 'left') openIcon = UIManager.ICONS.CHEVRON_LEFT;
-  else if (type === 'right') openIcon = UIManager.ICONS.CHEVRON_RIGHT;
-  else openIcon = UIManager.ICONS.CHEVRON_UP;
-
-  btn.innerHTML = openIcon;
-  let isVisible = true;
-  if (type === 'left') isVisible = appState.layout.leftVisible;
-  else if (type === 'right') isVisible = appState.layout.rightVisible;
-  else if (type === 'leftTop') isVisible = appState.layout.leftTopVisible;
-  else if (type === 'center') isVisible = !document.documentElement.getAttribute('data-center-collapsed');
-  
-  if (!isVisible) {
-    btn.classList.add('expanded');
-  }
-
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (type === 'left') {
-      appState.layout.leftVisible = !appState.layout.leftVisible;
-      if (appState.layout.leftVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
-      localStorage.setItem('leftVisible', appState.layout.leftVisible);
-      uiManager.applyLayout();
-    } else if (type === 'right') {
-      appState.layout.rightVisible = !appState.layout.rightVisible;
-      if (appState.layout.rightVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
-      localStorage.setItem('rightVisible', appState.layout.rightVisible);
-      uiManager.applyLayout();
-    } else if (type === 'center') {
-      const root = document.documentElement;
-      const isCollapsed = root.style.getPropertyValue('--top-height') === '0px';
-      if (isCollapsed) {
-        // 閉じる前の高さを復元（なければデフォルト250px）
-        const restoreHeight = localStorage.getItem('prevTopHeight') || '250px';
-        root.style.setProperty('--top-height', restoreHeight);
-        root.removeAttribute('data-center-collapsed');
-        localStorage.setItem('topHeight', restoreHeight);
-        btn.classList.remove('expanded');
-      } else {
-        // 閉じる直前の高さを prevTopHeight として退避させてから 0px にする
-        localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
-        root.style.setProperty('--top-height', '0px');
-        root.setAttribute('data-center-collapsed', 'true');
-        localStorage.setItem('topHeight', '0px');
-        btn.classList.add('expanded');
-      }
-    } else if (type === 'leftTop') {
-      const root = document.documentElement;
-      const isCollapsed = root.style.getPropertyValue('--left-top-height') === '0px';
-      if (isCollapsed) {
-        const restoreHeight = localStorage.getItem('prevLeftTopHeight') || '150px';
-        root.style.setProperty('--left-top-height', restoreHeight);
-        root.removeAttribute('data-left-top-collapsed');
-        localStorage.setItem('leftTopHeight', restoreHeight);
-        appState.layout.leftTopVisible = true;
-        btn.classList.remove('expanded');
-      } else {
-        localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
-        root.style.setProperty('--left-top-height', '0px');
-        root.setAttribute('data-left-top-collapsed', 'true');
-        localStorage.setItem('leftTopHeight', '0px');
-        appState.layout.leftTopVisible = false;
-        btn.classList.add('expanded');
-      }
-    } else if (type === 'rightTop') {
-      const root = document.documentElement;
-      const isCollapsed = root.style.getPropertyValue('--right-top-height') === '0px';
-      if (isCollapsed) {
-        const restoreHeight = localStorage.getItem('prevRightTopHeight') || '200px';
-        root.style.setProperty('--right-top-height', restoreHeight);
-        localStorage.setItem('rightTopHeight', restoreHeight);
-        appState.layout.rightTopVisible = true;
-        btn.classList.remove('expanded');
-      } else {
-        localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
-        root.style.setProperty('--right-top-height', '0px');
-        localStorage.setItem('rightTopHeight', '0px');
-        appState.layout.rightTopVisible = false;
-        btn.classList.add('expanded');
-      }
-    }
-  });
-
-  btn.addEventListener('mousedown', (e) => e.stopPropagation());
-
-  resizer.appendChild(btn);
-}
-
-setupResizer(uiManager.elements.resizerLeft, 'left', 'col-resize');
-setupResizer(uiManager.elements.resizerRight, 'right', 'col-resize');
-setupResizer(uiManager.elements.resizerCenter, 'center', 'row-resize');
-setupResizer(document.getElementById('resizer-left-pane'), 'leftTop', 'row-resize');
-setupResizer(document.getElementById('resizer-right-pane'), 'rightTop', 'row-resize');
-
-let resizerRafId = null;
-window.addEventListener('mousemove', (e) => {
-  if (!resizingState.left && !resizingState.right && !resizingState.center && !resizingState.leftTop && !resizingState.rightTop) return;
-
-  if (resizerRafId) cancelAnimationFrame(resizerRafId);
-  resizerRafId = requestAnimationFrame(() => {
-    if (resizingState.left) {
-      let newWidth = e.clientX;
-      if (newWidth < 50) {
-        if (appState.layout.leftVisible) {
-          appState.layout.leftVisible = false;
-          localStorage.setItem('leftVisible', 'false');
-          const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
-          if (btn) btn.classList.add('expanded');
-          uiManager.applyLayout();
-        }
-      } else {
-        newWidth = Math.max(100, Math.min(newWidth, window.innerWidth - 400));
-        appState.layout.leftWidth = newWidth;
-        if (!appState.layout.leftVisible) {
-          appState.layout.leftVisible = true;
-          localStorage.setItem('leftVisible', 'true');
-          const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
-          if (btn) btn.classList.remove('expanded');
-        }
-        uiManager.applyLayout();
-      }
-    } else if (resizingState.right) {
-      let newWidth = window.innerWidth - e.clientX;
-      if (newWidth < 50) {
-        if (appState.layout.rightVisible) {
-          appState.layout.rightVisible = false;
-          localStorage.setItem('rightVisible', 'false');
-          const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
-          if (btn) btn.classList.add('expanded');
-          uiManager.applyLayout();
-        }
-      } else {
-        newWidth = Math.max(150, Math.min(newWidth, window.innerWidth - 400));
-        appState.layout.rightWidth = newWidth;
-        if (!appState.layout.rightVisible) {
-          appState.layout.rightVisible = true;
-          localStorage.setItem('rightVisible', 'true');
-          const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
-          if (btn) btn.classList.remove('expanded');
-        }
-        uiManager.applyLayout();
-      }
-    } else if (resizingState.center) {
-      const centerPane = document.getElementById('center-pane');
-      const rect = centerPane.getBoundingClientRect();
-      let newHeight = e.clientY - rect.top;
-
-      if (newHeight < 50) {
-        const root = document.documentElement;
-        if (root.style.getPropertyValue('--top-height') !== '0px') {
-          localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
-          root.style.setProperty('--top-height', '0px');
-          root.setAttribute('data-center-collapsed', 'true');
-          localStorage.setItem('topHeight', '0px');
-          const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
-          if (btn) btn.classList.add('expanded');
-        }
-      } else {
-        newHeight = Math.max(50, Math.min(newHeight, rect.height - 50));
-        const root = document.documentElement;
-        root.style.setProperty('--top-height', `${newHeight}px`);
-        root.removeAttribute('data-center-collapsed');
-
-        const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
-        if (btn && btn.classList.contains('expanded')) {
-          btn.classList.remove('expanded');
-        }
-      }
-    } else if (resizingState.leftTop) {
-      const leftPane = document.getElementById('left-pane');
-      const rect = leftPane.getBoundingClientRect();
-      let newHeight = e.clientY - rect.top;
-
-      if (newHeight < 30) {
-        const root = document.documentElement;
-        if (root.style.getPropertyValue('--left-top-height') !== '0px') {
-          localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
-          root.style.setProperty('--left-top-height', '0px');
-          root.setAttribute('data-left-top-collapsed', 'true');
-          localStorage.setItem('leftTopHeight', '0px');
-          const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
-          if (btn) btn.classList.add('expanded');
-        }
-      } else {
-        newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
-        const root = document.documentElement;
-        root.style.setProperty('--left-top-height', `${newHeight}px`);
-        root.removeAttribute('data-left-top-collapsed');
-        appState.layout.leftTopHeight = newHeight;
-
-        const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
-        if (btn && btn.classList.contains('expanded')) {
-          btn.classList.remove('expanded');
-        }
-      }
-    } else if (resizingState.rightTop) {
-      const rightPane = document.getElementById('right-pane');
-      const rect = rightPane.getBoundingClientRect();
-      let newHeight = e.clientY - rect.top;
-
-      if (newHeight < 30) {
-        const root = document.documentElement;
-        if (root.style.getPropertyValue('--right-top-height') !== '0px') {
-          localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
-          root.style.setProperty('--right-top-height', '0px');
-          localStorage.setItem('rightTopHeight', '0px');
-          const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
-          if (btn) btn.classList.add('expanded');
-        }
-      } else {
-        newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
-        const root = document.documentElement;
-        root.style.setProperty('--right-top-height', `${newHeight}px`);
-        appState.layout.rightTopHeight = newHeight;
-
-        const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
-        if (btn && btn.classList.contains('expanded')) {
-          btn.classList.remove('expanded');
-        }
-      }
-    }
-  });
-});
-
-window.addEventListener('mouseup', () => {
-  if (resizingState.left) {
-    localStorage.setItem('leftWidth', appState.layout.leftWidth);
-    resizingState.left = false;
-    if (uiManager.elements.resizerLeft) uiManager.elements.resizerLeft.classList.remove('resizing');
-  }
-  if (resizingState.right) {
-    localStorage.setItem('rightWidth', appState.layout.rightWidth);
-    resizingState.right = false;
-    if (uiManager.elements.resizerRight) uiManager.elements.resizerRight.classList.remove('resizing');
-  }
-  if (resizingState.center) {
-    localStorage.setItem('topHeight', document.documentElement.style.getPropertyValue('--top-height'));
-    resizingState.center = false;
-    if (uiManager.elements.resizerCenter) uiManager.elements.resizerCenter.classList.remove('resizing');
-  }
-  if (resizingState.leftTop) {
-    localStorage.setItem('leftTopHeight', document.documentElement.style.getPropertyValue('--left-top-height'));
-    resizingState.leftTop = false;
-    const el = document.getElementById('resizer-left-pane');
-    if (el) el.classList.remove('resizing');
-  }
-  if (resizingState.rightTop) {
-    localStorage.setItem('rightTopHeight', document.documentElement.style.getPropertyValue('--right-top-height'));
-    resizingState.rightTop = false;
-    const el = document.getElementById('resizer-right-pane');
-    if (el) el.classList.remove('resizing');
-  }
-  document.body.style.cursor = 'default';
-  document.body.classList.remove('is-resizing'); // ドラッグ中フラグを解除
-});
+initResizers();
 
 function updateThumbnailSize() {
   const slider = uiManager.elements.thumbnailSizeSlider;
@@ -2713,23 +1961,7 @@ export const globalKeydownHandler = async (e) => {
   if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey) {
     e.preventDefault();
     if (appState.selection.size === 2) {
-      const indices = Array.from(appState.selection);
-      const file1 = await window.veloceAPI.getFileByIndex(indices[0]);
-      const file2 = await window.veloceAPI.getFileByIndex(indices[1]);
-
-      // 完全なメタデータを取得してからDiffモーダルを開く
-      uiManager.showToast('比較データを読み込み中', 0, 'diff-loading', 'info');
-      Promise.all([
-        window.veloceAPI.parseMetadata(file1.path),
-        window.veloceAPI.parseMetadata(file2.path)
-      ]).then(([meta1, meta2]) => {
-        const t = document.getElementById('toast-diff-loading');
-        if (t) {
-          t.classList.remove('show');
-          setTimeout(() => { if (t.parentElement) t.remove(); }, 300);
-        }
-        uiManager.showDiffModal(file1, file2, meta1, meta2);
-      });
+      await openDiffModal(Array.from(appState.selection));
     } else {
       uiManager.showToast('Diff機能を使用するには、Ctrlキーを押しながら画像を2つ選択してください。', 3000, null, 'warning');
     }
@@ -2957,103 +2189,7 @@ document.addEventListener('contextmenu', (e) => {
   if (typeof closeAllMenus === 'function') closeAllMenus(e);
 });
 
-async function handleTreeNavigation(key) {
-  const getVisibleTreeItems = (root) => {
-    let items = [];
-    const walk = (ul) => {
-      for (const li of ul.children) {
-        if (li.tagName.toLowerCase() !== 'li') continue;
-        const item = li.firstElementChild; // .tree-item is the first child
-        if (item && item.classList.contains('tree-item')) items.push(item);
-        const childrenUl = li.children[1]; // .tree-children is the second child
-        if (childrenUl && childrenUl.classList.contains('tree-children') && childrenUl.classList.contains('expanded')) {
-          walk(childrenUl);
-        }
-      }
-    };
-    for (const ul of root.children) {
-       if (ul.tagName.toLowerCase() === 'ul') walk(ul);
-    }
-    return items;
-  };
-
-  const rootEl = document.getElementById('dir-tree');
-  if (!rootEl) return;
-  const visibleItems = getVisibleTreeItems(rootEl);
-  if (visibleItems.length === 0) return;
-
-  const currentSelected = document.querySelector('#dir-tree .tree-item.selected');
-  let currentIndex = currentSelected ? visibleItems.indexOf(currentSelected) : -1;
-
-  if (currentIndex === -1) {
-    const currentItem = document.querySelector(`#dir-tree .tree-item[data-path="${CSS.escape(appState.currentDirectory)}"]`);
-    if (currentItem) currentIndex = visibleItems.indexOf(currentItem);
-    if (currentIndex === -1) currentIndex = 0;
-  }
-
-  const currentItem = visibleItems[currentIndex];
-  const childrenUl = currentItem.nextElementSibling;
-  const isExpanded = childrenUl && childrenUl.classList.contains('expanded');
-  const toggleIcon = currentItem.querySelector('.tree-toggle');
-  const hasChildren = toggleIcon && toggleIcon.style.visibility !== 'hidden';
-
-  const selectItem = async (item, autoExpand = false) => {
-    if (item) {
-      scrollTreeItemIntoView(item, 'nearest');
-    }
-
-    appState.selection.clear();
-    appState.selectedIndex = -1;
-    uiManager.updateSelectionUI();
-
-    const path = item.dataset.path;
-    if (window.veloceAPI.loadDirectory) {
-      if (window.veloceAPI.setViewParams) {
-        await appState.setViewParams();
-      }
-      const activeTab = appState.tabs[appState.activeTabIndex];
-      if (activeTab && activeTab.path !== path) {
-        activeTab.path = path;
-        activeTab.name = typeof getTabNameForPath === 'function' ? getTabNameForPath(path) : path.split(/[\\/]/).pop();
-        activeTab.scrollTop = 0;
-        appState.currentDirectory = path;
-        localStorage.setItem('currentDirectory', path);
-        uiManager.renderTabs();
-        if (typeof saveTabsState === 'function') saveTabsState();
-        refreshFileList(true);
-      }
-    }
-
-    if (autoExpand && !isExpanded) {
-      if (item.expandNode) await item.expandNode();
-    }
-
-    const activeItem = document.querySelector('#dir-tree .tree-item.selected');
-    if (activeItem) activeItem.classList.remove('selected');
-    item.classList.add('selected');
-  };
-
-  if (key === 'ArrowUp') {
-    if (currentIndex > 0) await selectItem(visibleItems[currentIndex - 1]);
-  } else if (key === 'ArrowDown') {
-    if (currentIndex < visibleItems.length - 1) await selectItem(visibleItems[currentIndex + 1]);
-  } else if (key === 'ArrowLeft') {
-    if (isExpanded) {
-      if (currentItem.collapseNode) currentItem.collapseNode();
-    } else {
-      const parentUl = currentItem.closest('ul.tree-children');
-      if (parentUl && parentUl.previousElementSibling && parentUl.previousElementSibling.classList.contains('tree-item')) {
-        await selectItem(parentUl.previousElementSibling);
-      }
-    }
-  } else if (key === 'ArrowRight') {
-    if (isExpanded) {
-      if (currentIndex < visibleItems.length - 1) await selectItem(visibleItems[currentIndex + 1]);
-    } else {
-      if (hasChildren && currentItem.expandNode) await currentItem.expandNode();
-    }
-  }
-}
+// (handleTreeNavigation is modularized into renderer-folder-tree.js)
 
 // ============================================================================
 // 5. Application Initialization
@@ -3098,92 +2234,35 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   initInspectorDelegation({ contextMenuManager });
 
-  const bar = document.getElementById('bookmark-list');
-  if (bar) bookmarkResizeObserver.observe(bar);
-
-  const overflowBtn = document.getElementById('bookmark-overflow-btn');
-  if (overflowBtn) {
-    overflowBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (bookmarkOverflowMenu && bookmarkOverflowMenu.classList.contains('show')) {
-        bookmarkOverflowMenu.classList.remove('show');
-        overflowBtn.classList.remove('open');
-        return;
-      }
-
-      const list = document.getElementById('bookmark-list');
-      const items = Array.from(list.children);
-      const listRect = list.getBoundingClientRect();
-      const hiddenItems = items.filter(item => {
-        const itemRect = item.getBoundingClientRect();
-        return itemRect.right > listRect.right;
-      });
-
-      if (hiddenItems.length === 0) return;
-
-      bookmarkOverflowMenu = document.getElementById('bookmark-overflow-menu');
-      if (!bookmarkOverflowMenu) {
-        bookmarkOverflowMenu = document.createElement('div');
-        bookmarkOverflowMenu.id = 'bookmark-overflow-menu';
-        document.body.appendChild(bookmarkOverflowMenu);
-      }
-      bookmarkOverflowMenu.replaceChildren();
-
-      hiddenItems.forEach(domItem => {
-        const path = domItem.dataset.path;
-        const fav = appState.favorites.find(f => f.path === path);
-        if (!fav) return;
-
-        let iconSvg = '';
-        if (fav.icon && ICON_SVGS[fav.icon]) {
-          iconSvg = ICON_SVGS[fav.icon];
-        } else if (fav.icon && fav.icon.startsWith('FAV_')) {
-          iconSvg = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
+  initBookmarkEvents({
+    onNavigate: async (path, name) => {
+      if (window.veloceAPI.loadDirectory) {
+        if (window.veloceAPI.setViewParams) {
+          await appState.setViewParams();
         }
+        const activeTab = appState.tabs[appState.activeTabIndex];
+        if (activeTab) {
+          activeTab.path = path;
+          activeTab.name = name;
+          activeTab.scrollTop = 0;
+          appState.currentDirectory = path;
+          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          if (window.uiManager) window.uiManager.renderTabs();
 
-        const menuItem = createMenuItem(fav.name, iconSvg, async () => {
-          bookmarkOverflowMenu.classList.remove('show');
-
-          if (window.veloceAPI.loadDirectory) {
-            if (window.veloceAPI.setViewParams) {
-              await appState.setViewParams();
-            }
-            const activeTab = appState.tabs[appState.activeTabIndex];
-            if (activeTab) {
-              activeTab.path = fav.path;
-              activeTab.name = fav.name;
-              activeTab.scrollTop = 0;
-              appState.currentDirectory = fav.path;
-              localStorage.setItem('currentDirectory', appState.currentDirectory);
-              if (window.uiManager) window.uiManager.renderTabs();
-
-              if (typeof saveTabsState === 'function') saveTabsState();
-              if (typeof refreshFileList === 'function') refreshFileList(true);
-              if (typeof expandTreeToPath === 'function') await expandTreeToPath(fav.path);
-            }
-          }
-        });
-
-        const iconSpan = menuItem.querySelector('svg, div');
-        if (iconSpan && iconSpan.tagName.toLowerCase() === 'svg') {
-          if (fav.icon && fav.icon.startsWith('FAV_')) {
-            iconSpan.style.color = 'var(--glow-gold)';
-          } else {
-            iconSpan.classList.add(`icon-color-${fav.color || 'default'}`);
-          }
+          if (typeof saveTabsState === 'function') saveTabsState();
+          if (typeof refreshFileList === 'function') refreshFileList(true);
+          if (typeof expandTreeToPath === 'function') await expandTreeToPath(path);
         }
+      }
+    }
+  });
 
-        bookmarkOverflowMenu.appendChild(menuItem);
-      });
-
-      const rect = e.currentTarget.getBoundingClientRect();
-      bookmarkOverflowMenu.style.top = `${rect.bottom + 4}px`;
-      bookmarkOverflowMenu.style.left = 'auto';
-      bookmarkOverflowMenu.style.right = `${window.innerWidth - rect.right}px`;
-      bookmarkOverflowMenu.classList.add('show');
-      overflowBtn.classList.add('open');
-    });
-  }
+  initFolderTree({
+    refreshFileList,
+    getTabNameForPath,
+    saveTabsState,
+    showNotification
+  });
 
   renderFavorites();
 
@@ -4421,58 +3500,5 @@ function initSmartFolders() {
   }
 }
 
-/**
- * 履歴（Undoスタック）から直前の操作を取り消す
- */
-async function performUndo() {
-  if (appState.undoStack.length === 0) {
-    uiManager.showToast('元に戻す操作はありません', 2000, 'undo', 'info');
-    return;
-  }
-
-  const action = appState.undoStack.pop();
-  try {
-    const { fs, path } = window.__TAURI__;
-
-    if (action.type === 'RENAME_FOLDER') {
-      const oldName = await path.basename(action.oldPath);
-      const result = await window.veloceAPI.renameFolder(action.newPath, oldName);
-      if (result.success) {
-        uiManager.showToast(`フォルダ名の変更を元に戻しました`, 3000, 'undo', 'success');
-        if (appState.currentDirectory.startsWith(action.newPath)) {
-          appState.currentDirectory = appState.currentDirectory.replace(action.newPath, action.oldPath);
-          localStorage.setItem('currentDirectory', appState.currentDirectory);
-        }
-        await refreshTree();
-      }
-    } else if (action.type === 'RENAME_FILE') {
-      const oldName = await path.basename(action.oldPath);
-      const result = await window.veloceAPI.renameFile(action.newPath, oldName);
-      if (result.success) {
-        uiManager.showToast(`ファイル名の変更を元に戻しました`, 3000, 'undo', 'success');
-        const oldUrl = appState.thumbnailUrls.get(action.newPath);
-        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
-        appState.thumbnailUrls.delete(action.newPath);
-        scheduleRefresh();
-      }
-    } else if (action.type === 'MOVE_FILE') {
-      const originalDir = await path.dirname(action.sourcePath);
-      const result = await window.veloceAPI.moveOrCopyFile(action.targetPath, originalDir, 'move');
-      if (result.success) {
-        uiManager.showToast(`ファイルの移動を元に戻しました`, 3000, 'undo', 'success');
-        scheduleRefresh();
-      }
-    } else if (action.type === 'COPY_FILE') {
-      await fs.removeFile(action.targetPath);
-      if (window.veloceAPI.notifyFileRemoved) {
-        await window.veloceAPI.notifyFileRemoved(action.targetPath);
-      }
-      uiManager.showToast(`ファイルのコピーを元に戻しました`, 3000, 'undo', 'success');
-      scheduleRefresh();
-    }
-  } catch (err) {
-    console.error('Undo failed:', err);
-    uiManager.showToast(`元に戻す操作に失敗しました`, 3000, 'undo', 'warning');
-  }
-}
+// (Undo logic performUndo is modularized into renderer-file-ops.js)
 

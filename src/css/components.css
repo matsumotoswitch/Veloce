@@ -936,4 +936,26 @@ th[data-sort] .sort-arrow.desc {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
+
+/* お気に入りアイコン表示 */
+.bookmark-icon {
+  display: flex;
+  align-items: center;
+}
+
+.bookmark-icon-fav {
+  color: var(--glow-gold);
+}
+
+/* ディレクトリツリー展開・折りたたみ */
+.tree-children.collapsed {
+  display: none;
+}
+
+.tree-children.expanded {
+  display: block;
+}
+
+.tree-toggle-hidden {
+  visibility: hidden;
+}

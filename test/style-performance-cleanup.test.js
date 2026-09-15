@@ -14,6 +14,8 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
   const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
   const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
   const thumbnailsJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-thumbnails.js'), 'utf-8');
+  const bookmarksJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-bookmarks.js'), 'utf-8');
+  const folderTreeJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-folder-tree.js'), 'utf-8');
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
 
   describe('1. Color Tokens & CSS Variables', () => {
@@ -110,17 +112,37 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
     });
 
     it('should eliminate inline style assignments in createTreeNode in renderer.js and consolidate tree icon styles in layout.css', () => {
-      // renderer.js
+      // renderer.js / renderer-folder-tree.js
       expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?itemDiv\.style\.display\s*=\s*'flex'/);
       expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?toggleIcon\.style\.display\s*=\s*'inline-flex'/);
       expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?icon\.style\.marginRight\s*=\s*'4px'/);
       expect(rendererJsContent).not.toMatch(/createTreeNode[\s\S]*?icon\.style\.color\s*=\s*'var\(--accent-hover\)'/);
+
+      expect(folderTreeJsContent).not.toMatch(/createTreeNode[\s\S]*?itemDiv\.style\.display\s*=\s*'flex'/);
+      expect(folderTreeJsContent).not.toMatch(/createTreeNode[\s\S]*?toggleIcon\.style\.display\s*=\s*'inline-flex'/);
+      expect(folderTreeJsContent).not.toMatch(/createTreeNode[\s\S]*?icon\.style\.marginRight\s*=\s*'4px'/);
+      expect(folderTreeJsContent).not.toMatch(/createTreeNode[\s\S]*?icon\.style\.color\s*=\s*'var\(--accent-hover\)'/);
 
       // layout.css
       expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*display:\s*inline-flex;/);
       expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*align-items:\s*center;/);
       expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*color:\s*var\(--accent-hover\);/);
       expect(cssContent).toMatch(/#dir-tree \.tree-item\[data-is-root="true"\] \.tree-icon\s*\{[^}]*color:\s*var\(--text-color\);/);
+    });
+
+    it('should use CSS classes for bookmark icons and tree node collapse/visibility instead of inline styles', () => {
+      // renderer.js / renderer-bookmarks.js / renderer-folder-tree.js
+      expect(rendererJsContent).not.toContain("icon.style.color = 'var(--glow-gold)'");
+      expect(rendererJsContent).not.toContain("toggleIcon.style.visibility = 'hidden'");
+      expect(folderTreeJsContent).not.toContain("toggleIcon.style.visibility = 'hidden'");
+      expect(bookmarksJsContent).toContain("icon.classList.add('bookmark-icon-fav')");
+      expect(folderTreeJsContent).toContain("toggleIcon.classList.add('tree-toggle-hidden')");
+
+      // components.css
+      expect(cssContent).toMatch(/\.bookmark-icon-fav\s*\{[^}]*color:\s*var\(--glow-gold\);/);
+      expect(cssContent).toMatch(/\.tree-toggle-hidden\s*\{[^}]*visibility:\s*hidden;/);
+      expect(cssContent).toMatch(/\.tree-children\.collapsed\s*\{[^}]*display:\s*none;/);
+      expect(cssContent).toMatch(/\.tree-children\.expanded\s*\{[^}]*display:\s*block;/);
     });
   });
 
@@ -176,13 +198,13 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
     });
 
     it('should use replaceChildren() instead of innerHTML = "" for DOM clearing to reduce GC and avoid HTML parser overhead', () => {
-      // renderer.js
+      // renderer.js / renderer-bookmarks.js / renderer-folder-tree.js
       expect(rendererJsContent).not.toMatch(/innerHTML\s*=\s*['"]['"]/);
-      expect(rendererJsContent).toContain('uiManager.elements.dirTree.replaceChildren(ul);');
-      expect(rendererJsContent).toContain('container.replaceChildren();');
-      expect(rendererJsContent).toContain('childrenUl.replaceChildren();');
+      expect(folderTreeJsContent).toContain('dirTreeEl.replaceChildren(ul);');
+      expect(bookmarksJsContent).toContain('container.replaceChildren();');
+      expect(folderTreeJsContent).toContain('childrenUl.replaceChildren();');
       expect(rendererJsContent).toContain('menu.replaceChildren();');
-      expect(rendererJsContent).toContain('bookmarkOverflowMenu.replaceChildren();');
+      expect(bookmarksJsContent).toContain('bookmarkOverflowMenu.replaceChildren();');
       expect(rendererJsContent).toContain('tabListMenu.replaceChildren();');
 
       // renderer-ui.js

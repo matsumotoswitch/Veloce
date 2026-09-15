@@ -91,6 +91,8 @@ describe('Style Unification and DOM Optimization Tests', () => {
     const inspectorCode = fs.readFileSync(rendererInspectorJsPath, 'utf-8');
     const dialogsCode = fs.readFileSync(rendererDialogsJsPath, 'utf-8');
 
+    const resizerCode = fs.readFileSync(path.join(rootDir, 'src', 'renderer-resizer.js'), 'utf-8');
+
     // style="..." 属性が一切存在しないこと
     const inlineStyleMatches = code.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
     expect(inlineStyleMatches).toBeNull();
@@ -98,6 +100,8 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(inspectorInlineStyleMatches).toBeNull();
     const dialogsInlineStyleMatches = dialogsCode.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
     expect(dialogsInlineStyleMatches).toBeNull();
+    const resizerInlineStyleMatches = resizerCode.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
+    expect(resizerInlineStyleMatches).toBeNull();
 
     // インスペクターコピーボタンで O(1) firstElementChild が使用されていること
     expect(inspectorCode).toContain('secEl.copyBtn = secEl.copyWrapper.firstElementChild;');
@@ -111,8 +115,8 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(dialogsCode).toContain('cond-path-input flex-1');
 
     // リサイザートグルがインラインCSSではなくクラスで指定されていること
-    expect(code).toContain('resizer-toggle ${isHorizontal ? \'resizer-toggle-horizontal\' : \'resizer-toggle-vertical\'}');
-    expect(code).not.toContain('btn.style.cssText =');
+    expect(resizerCode).toContain('resizer-toggle ${isHorizontal ? \'resizer-toggle-horizontal\' : \'resizer-toggle-vertical\'}');
+    expect(resizerCode).not.toContain('btn.style.cssText =');
 
     // 余計な「メタデータが含まれていないか、読み取れませんでした。」の警告テキストが削除されていること
     expect(code).not.toContain('メタデータが含まれていないか、読み取れませんでした。');

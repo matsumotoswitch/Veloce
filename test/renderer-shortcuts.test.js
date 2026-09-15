@@ -6,6 +6,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
   let globalKeydownHandler;
   let selectImage;
   let renderMultipleSelectionSummary;
+  let openDiffModal;
   let getSelectionRemoveAllRangesSpy;
 
   beforeAll(async () => {
@@ -40,6 +41,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
     globalKeydownHandler = renderer.globalKeydownHandler;
     selectImage = renderer.selectImage;
     renderMultipleSelectionSummary = renderer.renderMultipleSelectionSummary;
+    openDiffModal = renderer.openDiffModal;
   });
 
   beforeEach(() => {
@@ -279,6 +281,34 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       await globalKeydownHandler(event);
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(uiManager.showDiffModal).toHaveBeenCalled();
+    });
+
+    it('should show warning toast on D when selection size is not 2', async () => {
+      appState.selection.clear();
+      appState.selection.add(0);
+      const event = new window.KeyboardEvent('keydown', { key: 'd', cancelable: true });
+      await globalKeydownHandler(event);
+      expect(uiManager.showToast).toHaveBeenCalledWith(
+        'Diff機能を使用するには、Ctrlキーを押しながら画像を2つ選択してください。',
+        3000,
+        null,
+        'warning'
+      );
+    });
+
+    it('should openDiffModal directly and call showDiffModal', async () => {
+      expect(openDiffModal).toBeDefined();
+      await openDiffModal([0, 1]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(uiManager.showDiffModal).toHaveBeenCalled();
+    });
+
+    it('should not proceed in openDiffModal if indices length is not 2', async () => {
+      uiManager.showDiffModal.mockClear();
+      await openDiffModal([0]);
+      expect(uiManager.showDiffModal).not.toHaveBeenCalled();
+      await openDiffModal(null);
+      expect(uiManager.showDiffModal).not.toHaveBeenCalled();
     });
 
     it('should call navigateHistory on Alt+ArrowLeft/Right', async () => {

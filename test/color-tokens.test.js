@@ -231,11 +231,12 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
 
   it('should unify bookmark-overflow-menu and history-menu using show class instead of inline display/animation', () => {
     const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
-    expect(rendererJs).not.toContain("bookmarkOverflowMenu.style.display = 'block'");
-    expect(rendererJs).not.toContain("bookmarkOverflowMenu.style.transition =");
+    const bookmarksJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-bookmarks.js'), 'utf-8');
+    expect(bookmarksJs).not.toContain("bookmarkOverflowMenu.style.display = 'block'");
+    expect(bookmarksJs).not.toContain("bookmarkOverflowMenu.style.transition =");
     expect(rendererJs).not.toContain("overflowMenu.style.display = 'none'");
-    expect(rendererJs).toContain("bookmarkOverflowMenu.classList.add('show')");
-    expect(rendererJs).toContain("bookmarkOverflowMenu.classList.remove('show')");
+    expect(bookmarksJs).toContain("bookmarkOverflowMenu.classList.add('show')");
+    expect(bookmarksJs).toContain("bookmarkOverflowMenu.classList.remove('show')");
     expect(rendererJs).toContain("overflowMenu.classList.remove('show')");
   });
 
@@ -271,6 +272,29 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
   it('should use rgba(var(--accent-rgb), 0.35) for bookmark-item.selected gradient without hardcoded RGB values', () => {
     expect(cssContent).toMatch(/\.bookmark-item\.selected\s*\{[^}]*background:\s*linear-gradient\(135deg,\s*rgba\(var\(--accent-rgb\),\s*0\.25\),\s*rgba\(var\(--accent-rgb\),\s*0\.35\)\);/);
     expect(cssContent).not.toContain('rgba(28, 94, 105');
+  });
+
+  it('should dynamically resolve thumbnail canvas background from --bg-darker token instead of hardcoded hex', async () => {
+    const thumbnailsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-thumbnails.js'), 'utf-8');
+    expect(thumbnailsJs).not.toMatch(/const THUMBNAIL_CANVAS_BG = '#1e1e1e';/);
+    expect(thumbnailsJs).toContain('getThumbnailCanvasBg');
+
+    const { getThumbnailCanvasBg, resetThumbnailCanvasBg } = await import('../src/renderer-thumbnails.js');
+    resetThumbnailCanvasBg();
+
+    // Default fallback
+    expect(getThumbnailCanvasBg()).toBe('#1e1e1e');
+
+    // Dynamic resolution from getComputedStyle
+    resetThumbnailCanvasBg();
+    const origGetComputedStyle = window.getComputedStyle;
+    window.getComputedStyle = () => ({
+      getPropertyValue: (prop) => prop === '--bg-darker' ? '#121212' : ''
+    });
+
+    expect(getThumbnailCanvasBg()).toBe('#121212');
+    window.getComputedStyle = origGetComputedStyle;
+    resetThumbnailCanvasBg();
   });
 });
 

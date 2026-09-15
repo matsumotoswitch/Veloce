@@ -27,6 +27,24 @@ describe('Path Utils', () => {
         expect(result.message).toContain('以下の文字は使用できません');
       });
     });
+
+    it('should support custom targetType for error messages', () => {
+      const emptyFolder = validateFilename('', 'フォルダ名');
+      expect(emptyFolder.valid).toBe(false);
+      expect(emptyFolder.message).toBe('フォルダ名を入力してください。');
+
+      const invalidFolder = validateFilename('folder/name', 'フォルダ名');
+      expect(invalidFolder.valid).toBe(false);
+      expect(invalidFolder.message).toBe('フォルダ名に以下の文字は使用できません: \\ / : * ? " < > |');
+
+      const emptyFile = validateFilename('   ', 'ファイル名');
+      expect(emptyFile.valid).toBe(false);
+      expect(emptyFile.message).toBe('ファイル名を入力してください。');
+
+      const invalidFile = validateFilename('file?name', 'ファイル名');
+      expect(invalidFile.valid).toBe(false);
+      expect(invalidFile.message).toBe('ファイル名に以下の文字は使用できません: \\ / : * ? " < > |');
+    });
   });
 
   describe('checkPathExists', () => {
