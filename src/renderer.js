@@ -99,7 +99,8 @@ export {
   createTreeNode,
   expandTreeToPath,
   refreshTree,
-  handleTreeNavigation
+  handleTreeNavigation,
+  updateSortIndicators
 };
 
 // 開発者ツールショートカット (F12, Ctrl+Shift+I 等) の無効化
@@ -408,26 +409,45 @@ const TABLE_HEADERS = {
   rating: 'レーティング',
 };
 
+let cachedSortHeaders = null;
+export function resetCachedSortHeaders() {
+  cachedSortHeaders = null;
+}
+function getSortHeaders() {
+  if (!cachedSortHeaders || cachedSortHeaders.length === 0 || !cachedSortHeaders[0]?.isConnected) {
+    const table = uiManager?.elements?.fileTable || document.getElementById('file-table');
+    if (table) {
+      cachedSortHeaders = Array.from(table.querySelectorAll('th[data-sort]'));
+    }
+  }
+  return cachedSortHeaders || [];
+}
+
 function updateSortIndicators() {
-  document.querySelectorAll('th[data-sort]').forEach(th => {
+  const headers = getSortHeaders();
+  for (let i = 0; i < headers.length; i++) {
+    const th = headers[i];
     const key = th.dataset.sort;
-    if (TABLE_HEADERS[key]) {
-      let arrow = th.querySelector('.sort-arrow');
-      if (appState.sortConfig.key === key) {
-        if (!arrow) {
-          th.innerHTML = `${TABLE_HEADERS[key]}${UIManager.ICONS.SORT_ARROW || ''}`;
-          arrow = th.querySelector('.sort-arrow');
-        }
-        if (arrow) {
-          arrow.classList.toggle('asc', appState.sortConfig.asc);
-          arrow.classList.toggle('desc', !appState.sortConfig.asc);
-        }
-      } else {
-        if (arrow) arrow.remove();
-        th.textContent = TABLE_HEADERS[key];
+    const headerTitle = TABLE_HEADERS[key];
+    if (!headerTitle) continue;
+
+    let arrow = th.querySelector('.sort-arrow');
+    if (appState.sortConfig.key === key) {
+      if (!arrow) {
+        th.innerHTML = `${headerTitle}${UIManager.ICONS.SORT_ARROW || ''}`;
+        arrow = th.querySelector('.sort-arrow');
+      }
+      if (arrow) {
+        arrow.classList.toggle('asc', appState.sortConfig.asc);
+        arrow.classList.toggle('desc', !appState.sortConfig.asc);
+      }
+    } else {
+      if (arrow) arrow.remove();
+      if (th.textContent !== headerTitle) {
+        th.textContent = headerTitle;
       }
     }
-  });
+  }
 
   // ソートドロップダウンの表示も同期する
   updateSortSelectDropdown();
@@ -441,24 +461,26 @@ function updateSortSelectDropdown() {
   const label = document.getElementById('sort-select-label');
   if (!container || !label) return;
 
+  const menu = document.getElementById('sort-select-menu') || container.querySelector('.custom-select-menu');
+  const items = menu ? menu.children : container.querySelectorAll('.custom-select-item');
   const { key, asc } = appState.sortConfig;
-  const items = container.querySelectorAll('.custom-select-item');
   let matched = null;
 
-  items.forEach(item => {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     const itemKey = item.dataset.sortKey;
     const itemAsc = item.dataset.sortAsc === 'true';
     const isMatch = itemKey === key && itemAsc === asc;
     item.classList.toggle('selected', isMatch);
     if (isMatch) matched = item;
-  });
+  }
 
-  if (matched) {
-    label.textContent = matched.textContent;
-  } else {
-    // 完全一致がない場合はキー名だけ表示
-    const keyLabel = TABLE_HEADERS[key] || key;
-    label.textContent = keyLabel + (asc ? ' (昇順)' : ' (降順)');
+  const targetText = matched
+    ? matched.textContent
+    : (TABLE_HEADERS[key] || key) + (asc ? ' (昇順)' : ' (降順)');
+
+  if (label.textContent !== targetText) {
+    label.textContent = targetText;
   }
 }
 
@@ -1783,9 +1805,13 @@ window.addEventListener('beforeunload', () => {
   saveTabsState(); // アプリ終了時にも状態を保存する
 });
 
-document.querySelectorAll('th').forEach(th => {
-  th.addEventListener('click', () => {
+const fileTableHead = document.querySelector('#file-table thead') || document.getElementById('file-table');
+if (fileTableHead) {
+  fileTableHead.addEventListener('click', (e) => {
+    const th = e.target.closest('th[data-sort]');
+    if (!th) return;
     const key = th.dataset.sort;
+    if (!key) return;
     if (appState.sortConfig.key === key) {
       appState.sortConfig.asc = !appState.sortConfig.asc;
     } else {
@@ -1796,7 +1822,7 @@ document.querySelectorAll('th').forEach(th => {
     updateSortIndicators();
     scheduleRefresh();
   });
-});
+}
 
 /**
  * アプリケーション全体のグローバルキーボードショートカットハンドラー
@@ -2273,15 +2299,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     let pressTimer;
     let isLongPressed = false;
 
-    btn.removeAttribute('title');
-    btn.addEventListener('mouseenter', (e) => {
-      if (!btn.disabled) uiManager.showCustomTooltip(tooltipText, e.clientX, e.clientY);
-    });
-    btn.addEventListener('mousemove', (e) => {
-      if (!btn.disabled) uiManager.showCustomTooltip(tooltipText, e.clientX, e.clientY);
-    });
-    btn.addEventListener('mouseleave', () => {
-      uiManager.hideCustomTooltip();
+    uiManager.bindTooltip(btn, tooltipText, {
+      isDisabled: () => btn.disabled
     });
 
     btn.addEventListener('contextmenu', (e) => {
@@ -2330,16 +2349,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const reloadBtn = document.getElementById('nav-reload-btn');
   if (reloadBtn) {
     reloadBtn.innerHTML = UIManager.ICONS.RELOAD;
-    reloadBtn.removeAttribute('title');
-    reloadBtn.addEventListener('mouseenter', (e) => {
-      uiManager.showCustomTooltip('再読み込み', e.clientX, e.clientY);
-    });
-    reloadBtn.addEventListener('mousemove', (e) => {
-      uiManager.showCustomTooltip('再読み込み', e.clientX, e.clientY);
-    });
-    reloadBtn.addEventListener('mouseleave', () => {
-      uiManager.hideCustomTooltip();
-    });
+    uiManager.bindTooltip(reloadBtn, '再読み込み');
     reloadBtn.addEventListener('click', async () => {
       uiManager.hideCustomTooltip();
       reloadBtn.classList.remove('refreshing');
@@ -2594,15 +2604,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   };
 
   if (tabListBtn) {
-    tabListBtn.addEventListener('mouseenter', (e) => {
-      uiManager.showCustomTooltip('タブ一覧', e.clientX, e.clientY);
-    });
-    tabListBtn.addEventListener('mousemove', (e) => {
-      uiManager.showCustomTooltip('タブ一覧', e.clientX, e.clientY);
-    });
-    tabListBtn.addEventListener('mouseleave', () => {
-      uiManager.hideCustomTooltip();
-    });
+    uiManager.bindTooltip(tabListBtn, 'タブ一覧');
 
     tabListBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2781,16 +2783,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (uiManager.elements.searchClearBtn) {
     uiManager.elements.searchClearBtn.innerHTML = UIManager.ICONS.ERASER;
-    uiManager.elements.searchClearBtn.removeAttribute('title');
-    uiManager.elements.searchClearBtn.addEventListener('mouseenter', (e) => {
-      uiManager.showCustomTooltip('検索をクリア', e.clientX, e.clientY);
-    });
-    uiManager.elements.searchClearBtn.addEventListener('mousemove', (e) => {
-      uiManager.showCustomTooltip('検索をクリア', e.clientX, e.clientY);
-    });
-    uiManager.elements.searchClearBtn.addEventListener('mouseleave', () => {
-      uiManager.hideCustomTooltip();
-    });
+    uiManager.bindTooltip(uiManager.elements.searchClearBtn, '検索をクリア');
     uiManager.elements.searchClearBtn.addEventListener('click', () => {
       let changed = false;
       if (uiManager.elements.searchBar && uiManager.elements.searchBar.value !== '') {
@@ -2802,13 +2795,17 @@ window.addEventListener('DOMContentLoaded', async () => {
       const resetCustomSelectUI = (containerId, val) => {
         const container = document.getElementById(containerId);
         if (!container) return;
-        const items = container.querySelectorAll('.custom-select-item');
+        const menu = container.querySelector('.custom-select-menu');
+        const items = menu ? menu.children : container.querySelectorAll('.custom-select-item');
         const targetItem = Array.from(items).find(i => i.dataset.value == val);
         if (targetItem) {
-          items.forEach(i => i.classList.remove('selected'));
+          const prevSelected = container.querySelector('.custom-select-item.selected');
+          if (prevSelected) prevSelected.classList.remove('selected');
           targetItem.classList.add('selected');
           const label = container.querySelector('.custom-select-label');
-          if (label) label.textContent = targetItem.textContent;
+          if (label && label.textContent !== targetItem.textContent) {
+            label.textContent = targetItem.textContent;
+          }
         }
       };
 
@@ -2838,23 +2835,19 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (uiManager.elements.openCacheBtn) {
     uiManager.elements.openCacheBtn.innerHTML = UIManager.ICONS.FOLDER_OPEN;
-    uiManager.elements.openCacheBtn.removeAttribute('title');
     let openCacheText = 'キャッシュフォルダを開く';
-    uiManager.elements.openCacheBtn.addEventListener('mouseenter', async (e) => {
-      uiManager.showCustomTooltip(openCacheText, e.clientX, e.clientY);
-      if (window.veloceAPI.getCacheInfo) {
-        const info = await window.veloceAPI.getCacheInfo();
-        openCacheText = `キャッシュフォルダを開く\nパス: ${info.path}`;
-        if (uiManager.isTooltipVisible) {
-          uiManager.showCustomTooltip(openCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
+    uiManager.bindTooltip(uiManager.elements.openCacheBtn, () => openCacheText, {
+      onMouseEnter: async () => {
+        if (window.veloceAPI.getCacheInfo) {
+          const info = await window.veloceAPI.getCacheInfo();
+          if (info && info.path) {
+            openCacheText = `キャッシュフォルダを開く\nパス: ${info.path}`;
+            if (uiManager.isTooltipVisible) {
+              uiManager.showCustomTooltip(openCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
+            }
+          }
         }
       }
-    });
-    uiManager.elements.openCacheBtn.addEventListener('mousemove', (e) => {
-      uiManager.showCustomTooltip(openCacheText, e.clientX, e.clientY);
-    });
-    uiManager.elements.openCacheBtn.addEventListener('mouseleave', () => {
-      uiManager.hideCustomTooltip();
     });
     uiManager.elements.openCacheBtn.addEventListener('click', () => {
       uiManager.applyGlowEffect(uiManager.elements.openCacheBtn);
@@ -2865,24 +2858,20 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (uiManager.elements.clearCacheBtn) {
     uiManager.elements.clearCacheBtn.innerHTML = UIManager.ICONS.FLAME;
-    uiManager.elements.clearCacheBtn.removeAttribute('title');
     let clearCacheText = 'キャッシュを削除';
-    uiManager.elements.clearCacheBtn.addEventListener('mouseenter', async (e) => {
-      uiManager.showCustomTooltip(clearCacheText, e.clientX, e.clientY);
-      if (window.veloceAPI.getCacheInfo) {
-        const info = await window.veloceAPI.getCacheInfo();
-        const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
-        clearCacheText = `キャッシュを削除\n保存数: ${info.fileCount.toLocaleString()}ファイル\n合計サイズ: ${sizeMB} MB`;
-        if (uiManager.isTooltipVisible) {
-          uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
+    uiManager.bindTooltip(uiManager.elements.clearCacheBtn, () => clearCacheText, {
+      onMouseEnter: async () => {
+        if (window.veloceAPI.getCacheInfo) {
+          const info = await window.veloceAPI.getCacheInfo();
+          if (info) {
+            const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
+            clearCacheText = `キャッシュを削除\n保存数: ${info.fileCount.toLocaleString()}ファイル\n合計サイズ: ${sizeMB} MB`;
+            if (uiManager.isTooltipVisible) {
+              uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
+            }
+          }
         }
       }
-    });
-    uiManager.elements.clearCacheBtn.addEventListener('mousemove', (e) => {
-      uiManager.showCustomTooltip(clearCacheText, e.clientX, e.clientY);
-    });
-    uiManager.elements.clearCacheBtn.addEventListener('mouseleave', () => {
-      uiManager.hideCustomTooltip();
     });
     uiManager.elements.clearCacheBtn.addEventListener('click', async () => {
       uiManager.applyGlowEffect(uiManager.elements.clearCacheBtn);
@@ -2906,17 +2895,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (uiManager.elements.auditCacheBtn) {
     uiManager.elements.auditCacheBtn.innerHTML = UIManager.ICONS.DATABASE_ZAP;
-    uiManager.elements.auditCacheBtn.removeAttribute('title');
-    let auditCacheText = 'キャッシュの精査と修復';
-    uiManager.elements.auditCacheBtn.addEventListener('mouseenter', async (e) => {
-      uiManager.showCustomTooltip(auditCacheText, e.clientX, e.clientY);
-    });
-    uiManager.elements.auditCacheBtn.addEventListener('mousemove', (e) => {
-      uiManager.showCustomTooltip(auditCacheText, e.clientX, e.clientY);
-    });
-    uiManager.elements.auditCacheBtn.addEventListener('mouseleave', () => {
-      uiManager.hideCustomTooltip();
-    });
+    uiManager.bindTooltip(uiManager.elements.auditCacheBtn, 'キャッシュの精査と修復');
     uiManager.elements.auditCacheBtn.addEventListener('click', async () => {
       uiManager.applyGlowEffect(uiManager.elements.auditCacheBtn);
       uiManager.hideCustomTooltip();
@@ -3118,9 +3097,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     container.addEventListener('click', (e) => {
       e.stopPropagation();
-      document.querySelectorAll('.custom-select.open').forEach(el => {
-        if (el !== container) el.classList.remove('open');
-      });
+      const openSelect = document.querySelector('.custom-select.open');
+      if (openSelect && openSelect !== container) {
+        openSelect.classList.remove('open', 'open-up');
+      }
       container.classList.toggle('open');
     });
 
@@ -3158,12 +3138,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       e.stopPropagation();
       const isOpen = container.classList.contains('open');
 
-      document.querySelectorAll('.custom-select.open').forEach(el => {
-        if (el !== container) {
-          el.classList.remove('open');
-          el.classList.remove('open-up');
-        }
-      });
+      const openSelect = document.querySelector('.custom-select.open');
+      if (openSelect && openSelect !== container) {
+        openSelect.classList.remove('open', 'open-up');
+      }
 
       if (!isOpen) {
         container.classList.add('open');
@@ -3256,9 +3234,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }, true);
 
   document.addEventListener('click', () => {
-    document.querySelectorAll('.custom-select.open').forEach(el => {
-      el.classList.remove('open');
-    });
+    const openSelect = document.querySelector('.custom-select.open');
+    if (openSelect) {
+      openSelect.classList.remove('open', 'open-up');
+    }
   });
   if (currentTab.sortConfig) {
     appState.sortConfig = JSON.parse(JSON.stringify(currentTab.sortConfig));
@@ -3441,10 +3420,12 @@ function initSmartFolders() {
       if (!item) return;
 
       // 選択状態の更新（スマートフォルダはタブと状態が合わなくなるため選択状態を付与しない）
-      document.querySelectorAll('.smart-folder-item').forEach(el => el.classList.remove('selected'));
+      const prevSmartSelected = container.querySelector('.smart-folder-item.selected');
+      if (prevSmartSelected) prevSmartSelected.classList.remove('selected');
 
       // ツリー側の選択状態を解除
-      document.querySelectorAll('#dir-tree .tree-item.selected').forEach(el => el.classList.remove('selected'));
+      const prevTreeSelected = document.querySelector('#dir-tree .tree-item.selected');
+      if (prevTreeSelected) prevTreeSelected.classList.remove('selected');
 
       const fId = item.dataset.id;
       const f = appState.smartFolders.find(x => x.id === fId);

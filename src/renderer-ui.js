@@ -377,36 +377,17 @@ class UIManager {
         label.className = 'tab-label';
         tabEl.appendChild(label);
         
-        tabEl.addEventListener('mouseenter', (e) => {
+        this.bindTooltip(tabEl, () => {
           const currentTab = this.state.tabs[parseInt(tabEl.dataset.index, 10)];
-          if (currentTab) this.showCustomTooltip(`${currentTab.name}\n${currentTab.path}`, e.clientX, e.clientY);
-        });
-        tabEl.addEventListener('mousemove', (e) => {
-          const currentTab = this.state.tabs[parseInt(tabEl.dataset.index, 10)];
-          if (currentTab) this.showCustomTooltip(`${currentTab.name}\n${currentTab.path}`, e.clientX, e.clientY);
-        });
-        tabEl.addEventListener('mouseleave', () => {
-          this.hideCustomTooltip();
+          return currentTab ? `${currentTab.name}\n${currentTab.path}` : '';
         });
 
         const closeBtn = document.createElement('span');
         closeBtn.className = 'tab-close-btn';
         closeBtn.innerHTML = `<svg viewBox="0 0 10 10" width="8" height="8"><path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" stroke-width="1.5"/></svg>`;
-        closeBtn.addEventListener('mouseenter', (e) => {
-          e.stopPropagation();
-          this.showCustomTooltip('タブを閉じる', e.clientX, e.clientY);
-        });
-        closeBtn.addEventListener('mousemove', (e) => {
-          e.stopPropagation();
-          this.showCustomTooltip('タブを閉じる', e.clientX, e.clientY);
-        });
-        closeBtn.addEventListener('mouseleave', (e) => {
-          e.stopPropagation();
-          this.hideCustomTooltip();
-        });
+        this.bindTooltip(closeBtn, 'タブを閉じる', { stopPropagation: true });
         closeBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          this.hideCustomTooltip();
           if (window.onTabClose) window.onTabClose(parseInt(tabEl.dataset.index, 10));
         });
         tabEl.appendChild(closeBtn);
@@ -659,6 +640,57 @@ class UIManager {
 
     if (this.tooltipEl) {
       this.tooltipEl.classList.remove('show');
+    }
+  }
+
+  /**
+   * 要素にカスタムツールチップ（mouseenter, mousemove, mouseleave, click）を登録します。
+   * 重複するイベントリスナー定義を集約し、ボイラープレートを削減します。
+   * @param {HTMLElement} element - 対象要素
+   * @param {string | ((e?: MouseEvent) => string)} textOrFn - 表示テキストまたは動的テキスト取得関数
+   * @param {Object} [options] - 設定オプション
+   * @param {boolean} [options.stopPropagation] - イベント伝播を停止するか
+   * @param {() => boolean} [options.isDisabled] - ツールチップ表示を無効化する条件判定関数
+   * @param {(e: MouseEvent) => void} [options.onMouseEnter] - mouseenter 時に実行するコールバック
+   */
+  bindTooltip(element, textOrFn, options = {}) {
+    if (!element) return;
+    element.removeAttribute('title');
+
+    const resolveText = (e) => {
+      return typeof textOrFn === 'function' ? textOrFn(e) : textOrFn;
+    };
+
+    element.addEventListener('mouseenter', (e) => {
+      if (options.stopPropagation) e.stopPropagation();
+      if (options.isDisabled && options.isDisabled()) return;
+      if (element.disabled) return;
+      if (options.onMouseEnter) options.onMouseEnter(e);
+      const text = resolveText(e);
+      if (text) this.showCustomTooltip(text, e.clientX, e.clientY);
+    });
+
+    element.addEventListener('mousemove', (e) => {
+      if (options.stopPropagation) e.stopPropagation();
+      if (options.isDisabled && options.isDisabled()) return;
+      if (element.disabled) return;
+      const text = resolveText(e);
+      if (text) this.showCustomTooltip(text, e.clientX, e.clientY);
+    });
+
+    element.addEventListener('mouseleave', (e) => {
+      if (options.stopPropagation) e.stopPropagation();
+      this.hideCustomTooltip();
+    });
+
+    element.addEventListener('click', () => {
+      this.hideCustomTooltip();
+    });
+  }
+
+  static bindTooltip(element, textOrFn, options = {}) {
+    if (uiManager) {
+      uiManager.bindTooltip(element, textOrFn, options);
     }
   }
 
@@ -1180,16 +1212,7 @@ class UIManager {
     container.innerHTML = headerHtml + contentHtml;
 
     container.querySelectorAll('.diff-copy-btn').forEach(btn => {
-      btn.removeAttribute('title');
-      btn.addEventListener('mouseenter', (e) => {
-        this.showCustomTooltip('コピー', e.clientX, e.clientY);
-      });
-      btn.addEventListener('mousemove', (e) => {
-        this.showCustomTooltip('コピー', e.clientX, e.clientY);
-      });
-      btn.addEventListener('mouseleave', () => {
-        this.hideCustomTooltip();
-      });
+      this.bindTooltip(btn, 'コピー');
       btn.addEventListener('click', async (e) => {
         const target = e.currentTarget;
         const text = target.getAttribute('data-copy-text');
@@ -2126,24 +2149,7 @@ export function createFavoriteEditorUI(containerElement, initialIcon = 'star', i
       updatePreviewColor();
     });
     
-    // Tooltip logic
-    btn.addEventListener('mouseenter', (e) => {
-      const desc = ICON_DESCRIPTIONS[id] || id;
-      if (uiManager) {
-        uiManager.showCustomTooltip(desc, e.clientX, e.clientY);
-      }
-    });
-    btn.addEventListener('mousemove', (e) => {
-      const desc = ICON_DESCRIPTIONS[id] || id;
-      if (uiManager) {
-        uiManager.showCustomTooltip(desc, e.clientX, e.clientY);
-      }
-    });
-    btn.addEventListener('mouseleave', () => {
-      if (uiManager) {
-        uiManager.hideCustomTooltip();
-      }
-    });
+    UIManager.bindTooltip(btn, () => ICON_DESCRIPTIONS[id] || id);
     
     iconGrid.appendChild(btn);
   });

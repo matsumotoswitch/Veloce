@@ -184,11 +184,10 @@ export function showEditSmartFolderModal(sf, isNew = false, options = {}) {
           e.stopPropagation();
           const isOpen = customSelect.classList.contains('open');
 
-          modal.querySelectorAll('.custom-select.open').forEach(el => {
-            el.classList.remove('open');
-            el.classList.remove('open-up');
-          });
-          modal.querySelectorAll('.sf-condition-row.open-select').forEach(el => el.classList.remove('open-select'));
+          const openSelect = modal.querySelector('.custom-select.open');
+          if (openSelect) openSelect.classList.remove('open', 'open-up');
+          const openRow = modal.querySelector('.sf-condition-row.open-select');
+          if (openRow) openRow.classList.remove('open-select');
 
           if (!isOpen) {
             customSelect.classList.add('open');
@@ -205,11 +204,10 @@ export function showEditSmartFolderModal(sf, isNew = false, options = {}) {
           return;
         }
 
-        modal.querySelectorAll('.custom-select.open').forEach(el => {
-          el.classList.remove('open');
-          el.classList.remove('open-up');
-        });
-        modal.querySelectorAll('.sf-condition-row.open-select').forEach(el => el.classList.remove('open-select'));
+        const openSelect = modal.querySelector('.custom-select.open');
+        if (openSelect) openSelect.classList.remove('open', 'open-up');
+        const openRow = modal.querySelector('.sf-condition-row.open-select');
+        if (openRow) openRow.classList.remove('open-select');
 
         if (e.target.closest('.btn-remove-cond')) {
           const row = e.target.closest('.sf-condition-row');
