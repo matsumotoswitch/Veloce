@@ -143,4 +143,15 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(css).toMatch(/#file-table\s+th\s*\{[^}]*height:\s*var\(--header-height\);/);
     expect(css).toMatch(/\.inspector-header-layout\s*\{[^}]*height:\s*var\(--header-height\);/);
   });
+
+  it('verifies resizer-left-pane is removed from flow when left-top is collapsed to align folder header height with thumbnail controls', () => {
+    const css = getFullCssContent();
+
+    // #left-pane が position: relative を持っていること
+    expect(css).toMatch(/#left-pane\s*\{[^}]*position:\s*relative;/);
+
+    // 左上（スマートフォルダ）折りたたみ時に #resizer-left-pane が position: absolute でフロー外になり、フォルダヘッダーがサムネイルヘッダーと同一高さラインに整列すること
+    expect(css).toMatch(/:root\[data-left-top-collapsed="true"\]\s+#resizer-left-pane\s*\{[^}]*position:\s*absolute;/);
+    expect(css).toMatch(/:root\[data-left-top-collapsed="true"\]\s+#resizer-left-pane\s*\{[^}]*top:\s*0;/);
+  });
 });

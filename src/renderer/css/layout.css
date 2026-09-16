@@ -115,6 +115,7 @@ body.is-resizing .app-content {
   /* 幅が0になる時に中身がはみ出さないようにする */
   padding: 0;
   /* paddingをセクション側に移動 */
+  position: relative;
 }
 
 #right-pane {
@@ -238,6 +239,15 @@ body.is-resizing .app-content {
 :root[data-left-top-collapsed="true"] #smart-folders-section {
   padding: 0 !important;
   border-bottom: none !important;
+}
+
+:root[data-left-top-collapsed="true"] #resizer-left-pane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  /* Instead of display: none, remove it from flow so directories-section moves up to 0 */
 }
 
 :root[data-left-collapsed="true"] #smart-folders-list,
