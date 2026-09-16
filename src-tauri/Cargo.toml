@@ -14,7 +14,6 @@ tauri-build = { version = "1", features = [] }
 
 [dependencies]
 tauri = { version = "1", features = [ "fs-read-file", "dialog-open",
-    "devtools",
     "fs-copy-file",
     "fs-create-dir",
     "fs-read-dir",
@@ -36,7 +35,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 flate2 = "1.0"
 trash = "3.3"
 arboard = "3.3"
-image = { version = "0.25", features = ["webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 mimalloc = "0.1.48"
@@ -60,6 +59,7 @@ features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_F
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
+devtools = ["tauri/devtools"]
 
 # 開発モード(npm run tauri dev)でも画像デコードを高速にコンパイルし、サムネイル生成を高速化する設定
 [profile.dev.package."*"]
@@ -73,10 +73,23 @@ opt-level = 2
 # samplyを使うときは以下1行を無効にする
 strip = true
 
-opt-level = 3
+opt-level = "s"
 lto = "fat"
 codegen-units = 1
 panic = "abort"
+
+# サムネイル生成・リサイズ・ハッシュ計算等のホットパスは最高速（opt-level = 3）を維持
+[profile.release.package.fast_image_resize]
+opt-level = 3
+
+[profile.release.package.xxhash-rust]
+opt-level = 3
+
+[profile.release.package.mimalloc]
+opt-level = 3
+
+[profile.release.package.image]
+opt-level = 3
 
 [dev-dependencies]
 tempfile = "3.27.0"
