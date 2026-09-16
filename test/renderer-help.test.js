@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { parseLicenseMarkdown, toggleHelpOverlay, showLicenseDialog } from '../src/renderer-help.js';
+import { parseLicenseMarkdown, toggleHelpOverlay, showLicenseDialog } from '../src/renderer/renderer-help.js';
 
 describe('renderer-help.js', () => {
   beforeEach(() => {

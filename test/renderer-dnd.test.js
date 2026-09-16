@@ -8,8 +8,8 @@ import {
   initGlobalDndHandlers,
   initDirTreeDnd,
   initFavoritesDnd
-} from '../src/renderer-dnd.js';
-import { appState } from '../src/renderer-state.js';
+} from '../src/renderer/renderer-dnd.js';
+import { appState } from '../src/renderer/renderer-state.js';
 
 describe('renderer-dnd.js - Drag and Drop Management', () => {
   beforeEach(() => {

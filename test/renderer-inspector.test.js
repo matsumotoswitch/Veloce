@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
-import { uiManager } from '../src/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { uiManager } from '../src/renderer/renderer-ui.js';
 import {
   getInspectorSection,
   getInspectorTag,
@@ -13,7 +13,7 @@ import {
   renderMetadata,
   initInspectorDelegation,
   resetInspectorDelegationForTest
-} from '../src/renderer-inspector.js';
+} from '../src/renderer/renderer-inspector.js';
 
 describe('renderer-inspector.js', () => {
   beforeEach(() => {

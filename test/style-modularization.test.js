@@ -11,29 +11,29 @@ describe('style.css Modularization', () => {
   const styleCssContent = fs.readFileSync(styleCssPath, 'utf-8');
 
   const EXPECTED_MODULES = [
-    'variables.css',
-    'base.css',
-    'layout.css',
-    'components.css',
-    'dialogs.css',
-    'thumbnail.css',
-    'inspector.css',
-    'viewer.css'
+    { name: 'variables.css', relPath: 'common/css/variables.css' },
+    { name: 'base.css', relPath: 'common/css/base.css' },
+    { name: 'layout.css', relPath: 'renderer/css/layout.css' },
+    { name: 'components.css', relPath: 'renderer/css/components.css' },
+    { name: 'dialogs.css', relPath: 'renderer/css/dialogs.css' },
+    { name: 'thumbnail.css', relPath: 'renderer/css/thumbnail.css' },
+    { name: 'inspector.css', relPath: 'renderer/css/inspector.css' },
+    { name: 'viewer.css', relPath: 'viewer/viewer.css' }
   ];
 
   it('should import all 8 CSS modules in style.css', () => {
     for (const mod of EXPECTED_MODULES) {
-      const importStatement = `@import './css/${mod}';`;
-      expect(styleCssContent, `style.css must import ${mod}`).toContain(importStatement);
+      const importStatement = `@import './${mod.relPath}';`;
+      expect(styleCssContent, `style.css must import ${mod.name}`).toContain(importStatement);
     }
   });
 
-  it('should have all 8 sub-CSS files existing and non-empty in src/css/', () => {
+  it('should have all 8 sub-CSS files existing and non-empty in their domain subdirectories', () => {
     for (const mod of EXPECTED_MODULES) {
-      const filePath = path.join(cssDir, mod);
-      expect(fs.existsSync(filePath), `${mod} must exist in src/css/`).toBe(true);
+      const filePath = path.join(srcDir, mod.relPath);
+      expect(fs.existsSync(filePath), `${mod.name} must exist in src/${mod.relPath}`).toBe(true);
       const content = fs.readFileSync(filePath, 'utf-8');
-      expect(content.trim().length, `${mod} must not be empty`).toBeGreaterThan(50);
+      expect(content.trim().length, `${mod.name} must not be empty`).toBeGreaterThan(50);
     }
   });
 
@@ -52,10 +52,10 @@ describe('style.css Modularization', () => {
   it('should not contain emojis in any sub-CSS files', () => {
     const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
     for (const mod of EXPECTED_MODULES) {
-      const filePath = path.join(cssDir, mod);
+      const filePath = path.join(srcDir, mod.relPath);
       const content = fs.readFileSync(filePath, 'utf-8');
       const match = content.match(emojiRegex);
-      expect(match, `Emoji detected in ${mod}: ${match ? match[0] : ''}`).toBeNull();
+      expect(match, `Emoji detected in ${mod.name}: ${match ? match[0] : ''}`).toBeNull();
     }
   });
 
@@ -69,11 +69,11 @@ describe('style.css Modularization', () => {
 
   it('should parse all sub-CSS files and combined CSS without syntax errors via postcss', () => {
     for (const mod of EXPECTED_MODULES) {
-      const filePath = path.join(cssDir, mod);
+      const filePath = path.join(srcDir, mod.relPath);
       const content = fs.readFileSync(filePath, 'utf-8');
       expect(() => {
         postcss.parse(content, { from: filePath });
-      }, `Syntax error detected in ${mod}`).not.toThrow();
+      }, `Syntax error detected in ${mod.name}`).not.toThrow();
     }
 
     const fullCss = getFullCssContent();

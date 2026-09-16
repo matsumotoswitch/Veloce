@@ -6,16 +6,16 @@ import { getFullCssContent } from './helpers/css-helper.js';
 describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
   const cssContent = getFullCssContent();
   const htmlContent = fs.readFileSync(path.resolve(__dirname, '../src/index.html'), 'utf-8');
-  const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
-  const helpJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-help.js'), 'utf-8');
-  const inspectorJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-inspector.js'), 'utf-8');
-  const dndJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-dnd.js'), 'utf-8');
-  const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-context-menu.js'), 'utf-8');
-  const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
-  const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
-  const thumbnailsJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-thumbnails.js'), 'utf-8');
-  const bookmarksJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-bookmarks.js'), 'utf-8');
-  const folderTreeJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer-folder-tree.js'), 'utf-8');
+  const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
+  const helpJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-help.js'), 'utf-8');
+  const inspectorJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-inspector.js'), 'utf-8');
+  const dndJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-dnd.js'), 'utf-8');
+  const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-context-menu.js'), 'utf-8');
+  const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-ui.js'), 'utf-8');
+  const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer/viewer.js'), 'utf-8');
+  const thumbnailsJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-thumbnails.js'), 'utf-8');
+  const bookmarksJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-bookmarks.js'), 'utf-8');
+  const folderTreeJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-folder-tree.js'), 'utf-8');
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
 
   describe('1. Color Tokens & CSS Variables', () => {

@@ -20,21 +20,34 @@
   * **デバッグログとリリースビルド設計:** 開発・デバッグ時は Windows API の `AttachConsole(ATTACH_PARENT_PROCESS)` を用いて親プロセス（ターミナル）に接続し標準出力を表示。本番用リリースバイナリでは開発者ツール（DevTools）の起動をショートカットキー（F12, Ctrl+Shift+I等）を含めて無効化。
 * **フロントエンド:** Vite + Vanilla JS + HTML5 / CSS3
   * **UIフレームワーク不使用:** ReactやVueなどの仮想DOMは一切排除。生のDOM操作と Event Delegation（イベント委譲）、および DOM Pool 構造により極限まで軽量化。
-  * **モジュール分離アーキテクチャ:** 保守性と可読性を向上させるため、責務ごとに明確にモジュールを分離。
-    * `renderer.js`: アプリ全体のライフサイクル管理、グローバルショートカット、初期化統括
-    * `renderer-ui.js`: DOM構造管理、仮想スクロール制御、ツールチップ/トースト通知基盤、カスタムプロンプト
-    * `renderer-thumbnails.js`: Workerプールによる並列サムネイル生成、キャッシュ取得・保存パイプライン
-    * `renderer-folder-tree.js`: 左ペインのフォルダツリー走査、遅延読み込み、選択・展開状態同期
-    * `renderer-resizer.js`: ツリーペインおよびインスペクターペインのリサイズ操作、折りたたみ・展開制御、幅の永続化
-    * `renderer-bookmarks.js`: お気に入り（ブックマーク）の追加・編集・削除、ドラッグ＆ドロップ並び替え、バー描画
-    * `renderer-file-ops.js`: ファイル/フォルダの名前変更、ゴミ箱移動、Undo（元に戻す）スタック管理、キャッシュ再構築
-    * `renderer-inspector.js`: 右ペインのメタデータインスペクター表示、複数選択サマリー、タグコピー
-    * `renderer-tabs.js`: タブの生成・切替・複製・閉塞、タブ状態の永続化
-    * `renderer-dialogs.js`: モーダルダイアログ（お気に入り編集、スマートフォルダ編集、差分比較Diff等）
-    * `renderer-dnd.js`: サムネイルやフォルダのドラッグ＆ドロップ移動・コピー、競合検出
-    * `path-utils.js`: パス正規化、親ディレクトリ取得、ファイル名/フォルダ名バリデーションの一元管理（`validateFilename`）
-    * `viewer.js`: 独立画像ビューアーウィンドウのレンダリング・操作制御
-  * **CSS モジュール構成 (`style.css`):** 単一のマスターエントリポイントとして `style.css` を配置し、責務ごとに8つのサブモジュール（`variables.css`, `base.css`, `layout.css`, `components.css`, `dialogs.css`, `thumbnail.css`, `inspector.css`, `viewer.css`）を集約管理。インラインスタイルを排除して CSS クラスおよびカラートークン（CSS変数）に統一。
+  * **モジュール分離アーキテクチャ:** 保守性と可読性を向上させるため、ドメイン・責務ごとにディレクトリおよびモジュールを分離（`src/common/`, `src/renderer/`, `src/viewer/`）。
+    * **共通基盤 (`src/common/`):**
+      * `preload.js`: Tauri IPCブリッジ、起動初期化
+      * `utils.js`: 汎用ユーティリティ（デバウンス、DevTools無効化、ストリームURL等）
+      * `path-utils.js`: パス正規化、親ディレクトリ取得、ファイル名/フォルダ名バリデーションの一元管理（`validateFilename`）
+      * `metadata-format.js`: AIメタデータ解析（PNG/WebP）、プロンプトハイライト
+      * `dialog-base.js`: 共通ダイアログ基盤、キーボード/オーバーレイハンドラー
+    * **メインウィンドウ (`src/renderer/`):**
+      * `renderer.js`: アプリ全体のライフサイクル管理、グローバルショートカット、初期化統括
+      * `renderer-ui.js`: DOM構造管理、仮想スクロール制御、ツールチップ/トースト通知基盤、カスタムプロンプト
+      * `renderer-thumbnails.js`: Workerプールによる並列サムネイル生成、キャッシュ取得・保存パイプライン
+      * `renderer-folder-tree.js`: 左ペインのフォルダツリー走査、遅延読み込み、選択・展開状態同期
+      * `renderer-resizer.js`: ツリーペインおよびインスペクターペインのリサイズ操作、折りたたみ・展開制御、幅の永続化
+      * `renderer-bookmarks.js`: お気に入り（ブックマーク）の追加・編集・削除、ドラッグ＆ドロップ並び替え、バー描画
+      * `renderer-file-ops.js`: ファイル/フォルダの名前変更、ゴミ箱移動、Undo（元に戻す）スタック管理、キャッシュ再構築
+      * `renderer-inspector.js`: 右ペインのメタデータインスペクター表示、複数選択サマリー、タグコピー
+      * `renderer-tabs.js`: タブの生成・切替・複製・閉塞、タブ状態の永続化
+      * `renderer-dialogs.js`: モーダルダイアログ（お気に入り編集、スマートフォルダ編集、差分比較Diff等）
+      * `renderer-dnd.js`: サムネイルやフォルダのドラッグ＆ドロップ移動・コピー、競合検出
+      * `renderer-context-menu.js`: コンテキストメニュー構築・アニメーション
+      * `renderer-help.js`: ヘルプ・ライセンスダイアログ表示
+      * `favorite-icons.js`: お気に入り・フォルダ表示アイコン解決
+    * **独立画像ビューアー (`src/viewer/`):**
+      * `viewer.js`: 独立画像ビューアーウィンドウのレンダリング・操作制御
+      * `viewer-ui.js`: ビューアーUIオーケストレーション、グロー効果
+      * `viewer-state.js`: ビューアー状態管理
+      * `viewer.css`: ビューアー固有のスタイル定義（ビューアーフォルダ内にコロケーション）
+  * **CSS モジュール構成 (`style.css`):** 単一のマスターエントリポイントとして `style.css` を配置し、責務・ドメインごとに8つのサブモジュール（`common/css/variables.css`, `common/css/base.css`, `renderer/css/layout.css`, `renderer/css/components.css`, `renderer/css/dialogs.css`, `renderer/css/thumbnail.css`, `renderer/css/inspector.css`, `viewer/viewer.css`）を集約管理。インラインスタイルを排除して CSS クラスおよびカラートークン（CSS変数）に統一。
 * **ファイルハッシュ:** 暗号学的ハッシュではなく、極めて高速な非暗号学的ハッシュ `xxHash (xxh3_64)` をベースに「`パス_更新日時(mtime)`」から16進数16文字の `hash_key` を生成してキャッシュを一元管理。
 
 ### 1.2 動作環境要件
@@ -214,5 +227,5 @@
 * **場当たり的・カジュアルなコメントの排除:** 不具合修正時の一時的なチケットIDや「〜対策」等の短絡的コメントは一切残さず、修正理由をブラウザのレンダリングパイプライン（Chromium 109 / WebView2 同期Reflow）、OS API（Windows 8.1 論理ドライブビットマスク）、非同期並行排他制御（`_runWithUpdateLock`）などの**客観的な技術的根拠・設計意図としてコメントに昇華**する方針を徹底。
 * **Rust / JS 双方向でのドキュメンテーション標準化:**
   * **Rust (`src-tauri/src/main.rs`):** クレートレベル（`//!`）でmimalloc、SQLite WAL/mmap、xxh3_64、jwalk並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `save_thumbnail`, `parse_metadata`, `build_smart_folder_query` 等）には `///` doc comments を完備。
-  * **JavaScript (`src/*.js`):** `renderer-thumbnails.js`（Workerプール/タイムアウト/Blob URL即時描画）、`renderer-ui.js`（仮想スクロール/DOM Pool/排他ロック/ツールチップ・トースト基盤）、`viewer.js`（二重バッファリングDOM Swap/先行プリロード/Unsharp SVGフィルター）、`renderer-folder-tree.js`（ツリー走査/遅延展開）、`renderer-file-ops.js`（ファイル操作/Undo）、`renderer-bookmarks.js`（お気に入り管理）、`renderer-resizer.js`（ペインリサイズ）、`renderer.js`（ライフサイクル/グローバルショートカット統括）の各モジュールヘッダーおよび主要関数にJSDocと設計意図を網羅。
+  * **JavaScript (`src/common/`, `src/renderer/`, `src/viewer/`):** `renderer-thumbnails.js`（Workerプール/タイムアウト/Blob URL即時描画）、`renderer-ui.js`（仮想スクロール/DOM Pool/排他ロック/ツールチップ・トースト基盤）、`viewer.js`（二重バッファリングDOM Swap/先行プリロード/Unsharp SVGフィルター）、`renderer-folder-tree.js`（ツリー走査/遅延展開）、`renderer-file-ops.js`（ファイル操作/Undo）、`renderer-bookmarks.js`（お気に入り管理）、`renderer-resizer.js`（ペインリサイズ）、`renderer.js`（ライフサイクル/グローバルショートカット統括）の各モジュールヘッダーおよび主要関数にJSDocと設計意図を網羅。
 * **過度な誇張表現・絵文字の厳禁:** コメント内であっても「一瞬」「神速」「爆速」等の過度な誇張表現や絵文字（⭐など）は使用せず、客観的で落ち着いた技術的表現を用いる。

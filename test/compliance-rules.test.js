@@ -5,13 +5,26 @@ import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('AGENTS.md & PLAN.md Compliance and Regression Guard', () => {
   const srcDir = path.resolve(__dirname, '../src');
-  const jsFiles = fs.readdirSync(srcDir)
-    .filter(f => f.endsWith('.js'))
-    .map(f => ({ name: f, content: fs.readFileSync(path.join(srcDir, f), 'utf-8') }));
 
-  const htmlFiles = fs.readdirSync(srcDir)
-    .filter(f => f.endsWith('.html'))
-    .map(f => ({ name: f, content: fs.readFileSync(path.join(srcDir, f), 'utf-8') }));
+  const getAllFiles = (dir, ext) => {
+    let results = [];
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        results = results.concat(getAllFiles(fullPath, ext));
+      } else if (entry.isFile() && entry.name.endsWith(ext)) {
+        results.push({
+          name: path.relative(srcDir, fullPath).replace(/\\/g, '/'),
+          content: fs.readFileSync(fullPath, 'utf-8')
+        });
+      }
+    }
+    return results;
+  };
+
+  const jsFiles = getAllFiles(srcDir, '.js');
+  const htmlFiles = getAllFiles(srcDir, '.html');
 
   const cssContent = getFullCssContent();
 

@@ -4,8 +4,8 @@ import path from 'path';
 
 describe('Smart Folder Pure Cache Load & Self-Healing Logic', () => {
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
-  const preloadJsContent = fs.readFileSync(path.resolve(__dirname, '../src/preload.js'), 'utf-8');
-  const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+  const preloadJsContent = fs.readFileSync(path.resolve(__dirname, '../src/common/preload.js'), 'utf-8');
+  const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
 
   describe('1. Backend Logic (main.rs)', () => {
     it('should define purge_missing_files_from_cache function for database maintenance and self-healing', () => {

@@ -1,5 +1,5 @@
 import { viewerState } from './viewer-state.js';
-import { applyGlowEffect as glowElement } from './utils.js';
+import { applyGlowEffect as glowElement } from '../common/utils.js';
 
 /**
  * ビューア画面のUIとDOM操作を管理するクラス

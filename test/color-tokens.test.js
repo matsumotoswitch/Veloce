@@ -96,21 +96,21 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
   });
 
   it('should use var(--accent-hover) in layout.css for folder tree icons instead of hardcoded colors or inline styles in renderer.js', () => {
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
     expect(cssContent).toMatch(/#dir-tree \.tree-icon\s*\{[^}]*color:\s*var\(--accent-hover\);/);
     expect(rendererJs).not.toContain("icon.style.color = '#4da8da';");
     expect(rendererJs).not.toContain("icon.style.color = 'var(--accent-hover)';");
   });
 
   it('should use classList.toggle for inspector search match in renderer-inspector.js instead of inline #ffcc00 styling', () => {
-    const inspectorJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-inspector.js'), 'utf-8');
+    const inspectorJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-inspector.js'), 'utf-8');
     expect(inspectorJs).toContain("tagEl.classList.toggle('search-match', isMatch);");
     expect(inspectorJs).not.toContain("tagEl.style.color = '#ffcc00';");
     expect(inspectorJs).not.toContain("tagEl.style.border = '1px solid #ffcc00';");
   });
 
   it('should use shared BROKEN_MP4_FALLBACK_URL constant in renderer-thumbnails.js instead of inline btoa', () => {
-    const thumbnailsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-thumbnails.js'), 'utf-8');
+    const thumbnailsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-thumbnails.js'), 'utf-8');
     expect(thumbnailsJs).toContain('const fallbackUrl = BROKEN_MP4_FALLBACK_URL;');
     expect(thumbnailsJs).not.toContain("btoa(BROKEN_SVG)");
   });
@@ -138,8 +138,8 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
   });
 
   it('should not contain hardcoded technique hex colors in renderer.js or renderer-ui.js', () => {
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
-    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-ui.js'), 'utf-8');
 
     for (const code of [rendererJs, rendererUiJs]) {
       expect(code).not.toContain("color = '#4a9eff'");
@@ -151,14 +151,14 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
 
   it('should define table cell right alignments in style.css and avoid inline textAlign in renderer-ui.js', () => {
     expect(cssContent).toMatch(/#file-table td:nth-child\(3\)[^}]*text-align:\s*right;/);
-    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-ui.js'), 'utf-8');
     expect(rendererUiJs).not.toContain("tds[2].style.textAlign = 'right'");
   });
 
   it('should define .thumbnail-flash-effect in style.css and eliminate forced reflow getComputedStyle in renderer.js', () => {
     expect(cssContent).toMatch(/\.thumbnail-flash-effect\s*\{[^}]*position:\s*fixed;/);
     expect(cssContent).toMatch(/\.thumbnail-flash-effect\s*\{[^}]*border-radius:\s*var\(--radius-xs\);/);
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
     expect(rendererJs).not.toContain('window.getComputedStyle(el).borderRadius');
     expect(rendererJs).toContain("flash.className = 'thumbnail-flash-effect'");
   });
@@ -169,7 +169,7 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/\.tab-list-item \.tab-menu-item-name\s*\{/);
     expect(cssContent).toMatch(/\.tab-list-item \.tab-close-btn\s*\{/);
 
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
     expect(rendererJs).not.toContain("textContainer.style.display = 'flex'");
     expect(rendererJs).not.toContain("nameLabel.style.fontWeight =");
     expect(rendererJs).not.toContain("closeBtn.style.flexShrink = '0'");
@@ -177,13 +177,13 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
 
   it('should define #tab-container .tab-item .tab-icon in style.css and eliminate inline styles in renderer-ui.js', () => {
     expect(cssContent).toMatch(/#tab-container \.tab-item \.tab-icon\s*\{[^}]*margin-right:\s*6px;/);
-    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-ui.js'), 'utf-8');
     expect(rendererUiJs).not.toContain("iconSpan.style.marginRight = '6px'");
   });
 
   it('should define .tab-collapsing in style.css and eliminate multi-property inline style assignments in renderer-tabs.js', () => {
     expect(cssContent).toMatch(/#tab-container \.tab-item\.tab-collapsing\s*\{[^}]*transition:\s*min-width/);
-    const rendererTabsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-tabs.js'), 'utf-8');
+    const rendererTabsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-tabs.js'), 'utf-8');
     expect(rendererTabsJs).toContain("targetTabEl.classList.add('tab-collapsing')");
     expect(rendererTabsJs).not.toContain("targetTabEl.style.minWidth = '0'");
   });
@@ -203,14 +203,14 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
   it('should consolidate diff section headers in style.css and eliminate inline styles in renderer-ui.js', () => {
     expect(cssContent).toMatch(/\.diff-section h3\s*\{[^}]*display:\s*flex;/);
     expect(cssContent).toMatch(/\.diff-section h3 > span\s*\{[^}]*display:\s*flex;/);
-    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-ui.js'), 'utf-8');
     expect(rendererUiJs).not.toContain('style="display: flex; justify-content: space-between;');
   });
 
   it('should define .is-dragging in style.css and avoid inline opacity assignments in renderer.js and renderer-ui.js', () => {
     expect(cssContent).toMatch(/\.tab-item\.is-dragging,\s*\.bookmark-item\.is-dragging\s*\{[^}]*opacity:\s*0\.5/);
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
-    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-ui.js'), 'utf-8');
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
+    const rendererUiJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-ui.js'), 'utf-8');
     expect(rendererJs).not.toContain("itemDiv.style.opacity = '0.5'");
     expect(rendererUiJs).not.toContain("tabEl.style.opacity = '0.5'");
   });
@@ -218,20 +218,20 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
   it('should define unsharp-svg and viewer info-container gradient styles in style.css and eliminate inline styles in viewer.js', () => {
     expect(cssContent).toMatch(/\.unsharp-svg\s*\{[^}]*position:\s*absolute;/);
     expect(cssContent).toMatch(/\.viewer-body #window-controls:not\(\.has-gradient\)\s+\.window-info-container\s*\{[^}]*background-color:\s*rgba\(0,\s*0,\s*0,\s*0\.4\);/);
-    const viewerJs = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
+    const viewerJs = fs.readFileSync(path.resolve(__dirname, '../src/viewer/viewer.js'), 'utf-8');
     expect(viewerJs).not.toContain("svgElement.style.position = 'absolute'");
     expect(viewerJs).not.toContain("infoContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.4)'");
   });
 
   it('should eliminate forced reflow querySelector for table thead in scrollToIndex', () => {
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
     expect(rendererJs).not.toContain("document.querySelector('#file-table thead')?.getBoundingClientRect()");
     expect(rendererJs).toContain("const theadHeight = 32;");
   });
 
   it('should unify bookmark-overflow-menu and history-menu using show class instead of inline display/animation', () => {
-    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer.js'), 'utf-8');
-    const bookmarksJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-bookmarks.js'), 'utf-8');
+    const rendererJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
+    const bookmarksJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-bookmarks.js'), 'utf-8');
     expect(bookmarksJs).not.toContain("bookmarkOverflowMenu.style.display = 'block'");
     expect(bookmarksJs).not.toContain("bookmarkOverflowMenu.style.transition =");
     expect(rendererJs).not.toContain("overflowMenu.style.display = 'none'");
@@ -275,11 +275,11 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
   });
 
   it('should dynamically resolve thumbnail canvas background from --bg-darker token instead of hardcoded hex', async () => {
-    const thumbnailsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-thumbnails.js'), 'utf-8');
+    const thumbnailsJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-thumbnails.js'), 'utf-8');
     expect(thumbnailsJs).not.toMatch(/const THUMBNAIL_CANVAS_BG = '#1e1e1e';/);
     expect(thumbnailsJs).toContain('getThumbnailCanvasBg');
 
-    const { getThumbnailCanvasBg, resetThumbnailCanvasBg } = await import('../src/renderer-thumbnails.js');
+    const { getThumbnailCanvasBg, resetThumbnailCanvasBg } = await import('../src/renderer/renderer-thumbnails.js');
     resetThumbnailCanvasBg();
 
     // Default fallback

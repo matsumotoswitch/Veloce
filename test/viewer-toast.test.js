@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { showToast } from '../src/viewer.js';
+import { showToast } from '../src/viewer/viewer.js';
 
 describe('Viewer Toast Notification', () => {
   let dom;

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { UIManager, uiManager } from '../src/renderer-ui.js';
+import { UIManager, uiManager } from '../src/renderer/renderer-ui.js';
 
 describe('UIManager Toast Management (Section 3-B)', () => {
   let dom;

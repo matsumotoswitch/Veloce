@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
-import { uiManager } from '../src/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { uiManager } from '../src/renderer/renderer-ui.js';
 import {
   initFileOps,
   renameSelectedFolder,
@@ -9,7 +9,7 @@ import {
   rebuildSelectedCache,
   deleteSelectedFiles,
   performUndo
-} from '../src/renderer-file-ops.js';
+} from '../src/renderer/renderer-file-ops.js';
 
 describe('Renderer File Operations (renderer-file-ops.js)', () => {
   beforeEach(() => {

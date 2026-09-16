@@ -6,10 +6,10 @@ import { getFullCssContent } from './helpers/css-helper.js';
 describe('Style Unification and DOM Optimization Tests', () => {
   const rootDir = path.resolve(__dirname, '..');
   const indexHtmlPath = path.join(rootDir, 'src', 'index.html');
-  const rendererJsPath = path.join(rootDir, 'src', 'renderer.js');
-  const rendererInspectorJsPath = path.join(rootDir, 'src', 'renderer-inspector.js');
-  const rendererDialogsJsPath = path.join(rootDir, 'src', 'renderer-dialogs.js');
-  const rendererUiJsPath = path.join(rootDir, 'src', 'renderer-ui.js');
+  const rendererJsPath = path.join(rootDir, 'src', 'renderer', 'renderer.js');
+  const rendererInspectorJsPath = path.join(rootDir, 'src', 'renderer', 'renderer-inspector.js');
+  const rendererDialogsJsPath = path.join(rootDir, 'src', 'renderer', 'renderer-dialogs.js');
+  const rendererUiJsPath = path.join(rootDir, 'src', 'renderer', 'renderer-ui.js');
 
   it('verifies style.css color token definitions and zero hardcoded RGB values', () => {
     const css = getFullCssContent();
@@ -91,7 +91,7 @@ describe('Style Unification and DOM Optimization Tests', () => {
     const inspectorCode = fs.readFileSync(rendererInspectorJsPath, 'utf-8');
     const dialogsCode = fs.readFileSync(rendererDialogsJsPath, 'utf-8');
 
-    const resizerCode = fs.readFileSync(path.join(rootDir, 'src', 'renderer-resizer.js'), 'utf-8');
+    const resizerCode = fs.readFileSync(path.join(rootDir, 'src', 'renderer', 'renderer-resizer.js'), 'utf-8');
 
     // style="..." 属性が一切存在しないこと
     const inlineStyleMatches = code.match(/\bstyle\s*=\s*["'][^"']*["']/gi);

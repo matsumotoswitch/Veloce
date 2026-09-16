@@ -19,8 +19,8 @@
 
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
-import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect } from './utils.js';
-import { extractMetadataFields, parsePromptTags, buildInspectorSections } from './metadata-format.js';
+import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect } from '../common/utils.js';
+import { extractMetadataFields, parsePromptTags, buildInspectorSections } from '../common/metadata-format.js';
 
 blockDevtoolsShortcuts();
 

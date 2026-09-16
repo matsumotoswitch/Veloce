@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getFullCssContent } from './helpers/css-helper.js';
-import { viewerState } from '../src/viewer-state.js';
+import { viewerState } from '../src/viewer/viewer-state.js';
 import {
   createMetadataOverlay,
   toggleMetadataOverlay,
   updateMetadataOverlay
-} from '../src/viewer.js';
+} from '../src/viewer/viewer.js';
 
 describe('Viewer Metadata Overlay (A-4)', () => {
   beforeEach(() => {

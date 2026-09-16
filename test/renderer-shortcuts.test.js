@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
-import { uiManager } from '../src/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { uiManager } from '../src/renderer/renderer-ui.js';
 
 describe('Renderer Global Shortcuts & Focus Management', () => {
   let globalKeydownHandler;
@@ -37,7 +37,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
     uiManager.elements.thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
 
     // Dynamic import to ensure DOM is ready
-    const renderer = await import('../src/renderer.js');
+    const renderer = await import('../src/renderer/renderer.js');
     globalKeydownHandler = renderer.globalKeydownHandler;
     selectImage = renderer.selectImage;
     renderMultipleSelectionSummary = renderer.renderMultipleSelectionSummary;
@@ -419,7 +419,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
     it('should include I key and text copy descriptions in help table', () => {
       const fs = require('fs');
       const path = require('path');
-      const helpJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer-help.js'), 'utf-8');
+      const helpJs = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-help.js'), 'utf-8');
 
       // ビューアー画面のショートカットに I キーが含まれていること
       expect(helpJs).toContain('<tr><td><kbd>I</kbd></td><td>メタデータオーバーレイの表示 / 非表示</td></tr>');

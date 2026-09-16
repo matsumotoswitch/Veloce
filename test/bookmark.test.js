@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
+import { appState } from '../src/renderer/renderer-state.js';
 import {
   checkBookmarkOverflow,
   renderFavorites,
   initBookmarkEvents
-} from '../src/renderer-bookmarks.js';
+} from '../src/renderer/renderer-bookmarks.js';
 
 describe('Bookmark Bar Overflow Logic', () => {
   beforeEach(() => {

@@ -22,7 +22,7 @@
 
 import { appState } from './renderer-state.js';
 import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL } from './renderer-ui.js';
-import { getStreamUrl, debounce } from './utils.js';
+import { getStreamUrl, debounce } from '../common/utils.js';
 
 /**
  * サムネイルCanvas塗りつぶし背景色 (var(--bg-darker) から動的解決)

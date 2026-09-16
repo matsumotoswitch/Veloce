@@ -41,8 +41,8 @@ describe('Titlebar and Window Control Buttons Consistency', () => {
   });
 
   it('should define matching SVG icons with currentColor in UIManager and ViewerUI', async () => {
-    const { UIManager } = await import('../src/renderer-ui.js');
-    const { ViewerUI } = await import('../src/viewer-ui.js');
+    const { UIManager } = await import('../src/renderer/renderer-ui.js');
+    const { ViewerUI } = await import('../src/viewer/viewer-ui.js');
 
     expect(UIManager.ICONS.WINDOW_MINIMIZE).toBe(ViewerUI.ICONS.MINIMIZE);
     expect(UIManager.ICONS.WINDOW_MAXIMIZE).toBe(ViewerUI.ICONS.MAXIMIZE);

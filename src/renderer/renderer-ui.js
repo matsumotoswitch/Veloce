@@ -17,10 +17,10 @@
 // ============================================================================
 
 import { appState } from './renderer-state.js';
-import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml } from './utils.js';
-import { validateFilename, INVALID_FILENAME_RE } from './path-utils.js';
-import { showAppDialog } from './dialog-base.js';
-import { extractMetadataFields, parsePromptTags, formatRequestType } from './metadata-format.js';
+import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml } from '../common/utils.js';
+import { validateFilename, INVALID_FILENAME_RE } from '../common/path-utils.js';
+import { showAppDialog } from '../common/dialog-base.js';
+import { extractMetadataFields, parsePromptTags, formatRequestType } from '../common/metadata-format.js';
 
 const CHUNK_SIZE = 100;
 

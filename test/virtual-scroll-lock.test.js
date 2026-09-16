@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { UIManager } from '../src/renderer-ui.js';
-import { appState } from '../src/renderer-state.js';
+import { UIManager } from '../src/renderer/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
 
 describe('UIManager._runWithUpdateLock', () => {
   let rafSpy;

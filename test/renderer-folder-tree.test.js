@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
-import { uiManager } from '../src/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { uiManager } from '../src/renderer/renderer-ui.js';
 import {
   createTreeNode,
   expandTreeToPath,
@@ -8,7 +8,7 @@ import {
   refreshTree,
   handleTreeNavigation,
   initFolderTree
-} from '../src/renderer-folder-tree.js';
+} from '../src/renderer/renderer-folder-tree.js';
 
 describe('Renderer Folder Tree Controller (renderer-folder-tree.js)', () => {
   beforeEach(() => {

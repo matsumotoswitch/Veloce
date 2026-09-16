@@ -7,7 +7,7 @@
 
 import { appState } from './renderer-state.js';
 import { uiManager } from './renderer-ui.js';
-import { validateFilename } from './path-utils.js';
+import { validateFilename } from '../common/path-utils.js';
 import { resetThumbnailPreloader } from './renderer-thumbnails.js';
 
 let fileOpsCallbacks = {

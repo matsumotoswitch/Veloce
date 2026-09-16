@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
-import { uiManager } from '../src/renderer-ui.js';
+import { uiManager } from '../src/renderer/renderer-ui.js';
 
 describe('showMenuWithAnimation (Screen boundary clamp and animation)', () => {
   let showMenuWithAnimation;
@@ -21,7 +21,7 @@ describe('showMenuWithAnimation (Screen boundary clamp and animation)', () => {
     uiManager.elements.dirTree = document.getElementById('dir-tree');
     uiManager.elements.thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
 
-    const rendererModule = await import('../src/renderer.js');
+    const rendererModule = await import('../src/renderer/renderer.js');
     showMenuWithAnimation = rendererModule.showMenuWithAnimation;
   });
 

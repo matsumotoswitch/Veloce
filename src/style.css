@@ -7,21 +7,21 @@
  * Windows 8.1 / WebView2 (Chromium 109) 互換性を厳格に維持。
  *
  * モジュール構成:
- * - variables.css  : カラーパレット、CSSカスタムプロパティ
- * - base.css       : リセット、グローバル typography、スクロールバー
- * - layout.css     : アプリ全体のグリッド/フレックス分割、ペインレイアウト
- * - components.css : ツールバー、検索バー、ボタン、コンテキストメニュー、トースト
- * - dialogs.css    : モーダルダイアログ、設定画面、プロンプトUI
- * - thumbnail.css  : サムネイルグリッド、リストビュー、仮想スクロール項目
- * - inspector.css  : 右ペインのメタデータインスペクター、タグ表示
- * - viewer.css     : 独立画像ビューアー用スタイル
+ * - common/css/variables.css : カラーパレット、CSSカスタムプロパティ
+ * - common/css/base.css      : リセット、グローバル typography、スクロールバー
+ * - renderer/css/layout.css  : アプリ全体のグリッド/フレックス分割、ペインレイアウト
+ * - renderer/css/components.css : ツールバー、検索バー、ボタン、コンテキストメニュー、トースト
+ * - renderer/css/dialogs.css : モーダルダイアログ、設定画面、プロンプトUI
+ * - renderer/css/thumbnail.css : サムネイルグリッド、リストビュー、仮想スクロール項目
+ * - renderer/css/inspector.css : 右ペインのメタデータインスペクター、タグ表示
+ * - viewer/viewer.css        : 独立画像ビューアー用スタイル
  * ============================================================================ */
 
-@import './css/variables.css';
-@import './css/base.css';
-@import './css/layout.css';
-@import './css/components.css';
-@import './css/dialogs.css';
-@import './css/thumbnail.css';
-@import './css/inspector.css';
-@import './css/viewer.css';
+@import './common/css/variables.css';
+@import './common/css/base.css';
+@import './renderer/css/layout.css';
+@import './renderer/css/components.css';
+@import './renderer/css/dialogs.css';
+@import './renderer/css/thumbnail.css';
+@import './renderer/css/inspector.css';
+@import './viewer/viewer.css';

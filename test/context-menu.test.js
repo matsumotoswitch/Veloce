@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { initInspectorDelegation, resetInspectorDelegationForTest } from '../src/renderer-inspector.js';
+import { initInspectorDelegation, resetInspectorDelegationForTest } from '../src/renderer/renderer-inspector.js';
 
 describe('Context Menu (Inspector Header)', () => {
   let mockCmm;
@@ -114,7 +114,7 @@ describe('normalizeMenuItems (Separator Normalization)', () => {
   let normalizeMenuItems;
 
   beforeEach(async () => {
-    const mod = await import('../src/renderer-context-menu.js');
+    const mod = await import('../src/renderer/renderer-context-menu.js');
     normalizeMenuItems = mod.normalizeMenuItems;
   });
 
@@ -198,7 +198,7 @@ describe('ContextMenuManager', () => {
   let menuContainer;
 
   beforeEach(async () => {
-    const mod = await import('../src/renderer-context-menu.js');
+    const mod = await import('../src/renderer/renderer-context-menu.js');
     ContextMenuManager = mod.ContextMenuManager;
 
     document.body.innerHTML = '<div id="context-menu"></div>';

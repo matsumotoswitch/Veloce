@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ThumbnailQueueManager, cleanupContext } from '../src/renderer-thumbnails.js';
-import { appState } from '../src/renderer-state.js';
+import { ThumbnailQueueManager, cleanupContext } from '../src/renderer/renderer-thumbnails.js';
+import { appState } from '../src/renderer/renderer-state.js';
 
 describe('Thumbnail Generation Progress Bar (D-1)', () => {
   let manager;

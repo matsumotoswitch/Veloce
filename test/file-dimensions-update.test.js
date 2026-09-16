@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { UIManager } from '../src/renderer-ui.js';
-import '../src/renderer-state.js';
+import { UIManager } from '../src/renderer/renderer-ui.js';
+import '../src/renderer/renderer-state.js';
 
 describe('File Dimensions and Aspect Ratio Dynamic Update', () => {
   let uiManager;

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { initTabHandlers } from '../src/renderer-tabs.js';
-import { UIManager } from '../src/renderer-ui.js';
-import { appState } from '../src/renderer-state.js';
+import { initTabHandlers } from '../src/renderer/renderer-tabs.js';
+import { UIManager } from '../src/renderer/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
 
 describe('Tabs Functionality', () => {
   describe('Tab Scroll Position Retention', () => {
@@ -49,7 +49,7 @@ describe('Tabs Functionality', () => {
         loadDirectory: vi.fn()
       };
       
-      vi.mock('../src/path-utils.js', () => ({
+      vi.mock('../src/common/path-utils.js', () => ({
         checkPathExists: vi.fn().mockResolvedValue(true)
       }));
 

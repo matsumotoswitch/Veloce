@@ -5,8 +5,8 @@ import {
   showEditFavoriteModal,
   initModalHandlers,
   handleModalEscapeKey
-} from '../src/renderer-dialogs.js';
-import { appState, SmartFolderStore } from '../src/renderer-state.js';
+} from '../src/renderer/renderer-dialogs.js';
+import { appState, SmartFolderStore } from '../src/renderer/renderer-state.js';
 
 describe('renderer-dialogs.js - Modal and Dialog Management', () => {
   beforeEach(() => {

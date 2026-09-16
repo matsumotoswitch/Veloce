@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { appState } from '../src/renderer-state.js';
-import { UIManager, uiManager } from '../src/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { UIManager, uiManager } from '../src/renderer/renderer-ui.js';
 
 describe('DOM Query Optimization (Section 2-B)', () => {
   let dom;
@@ -67,7 +67,7 @@ describe('DOM Query Optimization (Section 2-B)', () => {
   });
 
   it('verifies updateSortIndicators caches th elements and avoids redundant querySelectorAll', async () => {
-    const renderer = await import('../src/renderer.js');
+    const renderer = await import('../src/renderer/renderer.js');
     if (renderer.resetCachedSortHeaders) {
       renderer.resetCachedSortHeaders();
     }

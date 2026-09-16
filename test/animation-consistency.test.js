@@ -4,12 +4,12 @@ import path from 'path';
 import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Animation and Transition Consistency', () => {
-  const srcCssDir = path.resolve(__dirname, '../src/css');
+  const srcDir = path.resolve(__dirname, '../src');
   const fullCss = getFullCssContent();
 
   it('should define @keyframes menuFadeIn in components.css and not in viewer.css', () => {
-    const componentsCss = fs.readFileSync(path.join(srcCssDir, 'components.css'), 'utf-8');
-    const viewerCss = fs.readFileSync(path.join(srcCssDir, 'viewer.css'), 'utf-8');
+    const componentsCss = fs.readFileSync(path.join(srcDir, 'renderer/css/components.css'), 'utf-8');
+    const viewerCss = fs.readFileSync(path.join(srcDir, 'viewer/viewer.css'), 'utf-8');
 
     // components.css で定義され、サブメニュー表示アニメーションとして使用されていること
     expect(componentsCss).toContain('@keyframes menuFadeIn');
@@ -20,17 +20,26 @@ describe('Animation and Transition Consistency', () => {
   });
 
   it('should have completely removed unused @keyframes staggeredFadeIn from base.css and all CSS files', () => {
-    const cssFiles = fs.readdirSync(srcCssDir).filter((f) => f.endsWith('.css'));
-    for (const file of cssFiles) {
-      const content = fs.readFileSync(path.join(srcCssDir, file), 'utf-8');
+    const allCssFiles = [
+      'common/css/variables.css',
+      'common/css/base.css',
+      'renderer/css/layout.css',
+      'renderer/css/components.css',
+      'renderer/css/dialogs.css',
+      'renderer/css/thumbnail.css',
+      'renderer/css/inspector.css',
+      'viewer/viewer.css'
+    ];
+    for (const file of allCssFiles) {
+      const content = fs.readFileSync(path.join(srcDir, file), 'utf-8');
       expect(content, `staggeredFadeIn must not be defined in ${file}`).not.toContain('staggeredFadeIn');
     }
     expect(fullCss).not.toContain('staggeredFadeIn');
   });
 
   it('should unify titlebar button hover transition (0.15s ease) between main window and viewer window', () => {
-    const layoutCss = fs.readFileSync(path.join(srcCssDir, 'layout.css'), 'utf-8');
-    const viewerCss = fs.readFileSync(path.join(srcCssDir, 'viewer.css'), 'utf-8');
+    const layoutCss = fs.readFileSync(path.join(srcDir, 'renderer/css/layout.css'), 'utf-8');
+    const viewerCss = fs.readFileSync(path.join(srcDir, 'viewer/viewer.css'), 'utf-8');
 
     // メイン画面タイトルバーボタン (.titlebar-button): 0.15s ease
     expect(layoutCss).toMatch(/\.titlebar-button\s*\{[^}]*transition:\s*background-color\s+0\.15s\s+ease,\s*color\s+0\.15s\s+ease;/);

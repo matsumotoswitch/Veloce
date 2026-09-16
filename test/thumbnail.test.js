@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import '../src/renderer-state.js';
+import '../src/renderer/renderer-state.js';
 
 describe('Thumbnail Cache Rebuild Bug Fixes', () => {
   beforeEach(() => {
@@ -412,7 +412,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
         { path: 'C:/media/cached2.png', name: 'cached2.png', mtime: 4000, hasThumbnailCache: true }
       ];
 
-      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      const { appState: sharedAppState } = await import('../src/renderer/renderer-state.js');
       sharedAppState.totalCount = testFiles.length;
       sharedAppState.initialChunk = testFiles;
       sharedAppState.thumbnailUrls.clear();
@@ -437,7 +437,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       gridContainer.appendChild(gridSpacer);
       gridContainer.appendChild(gridContent);
 
-      const { UIManager } = await import('../src/renderer-ui.js');
+      const { UIManager } = await import('../src/renderer/renderer-ui.js');
       const ui = new UIManager(sharedAppState);
       ui.elements.thumbnailGrid = gridContainer;
       ui.elements.thumbnailSizeSlider = { value: '180' };
@@ -481,7 +481,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
         { path: 'C:/media/cached2.png', name: 'cached2.png', mtime: 2000, hasThumbnailCache: true }
       ];
 
-      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      const { appState: sharedAppState } = await import('../src/renderer/renderer-state.js');
       sharedAppState.totalCount = testFiles.length;
       sharedAppState.initialChunk = testFiles;
       sharedAppState.thumbnailUrls.clear();
@@ -506,7 +506,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       gridContainer.appendChild(gridSpacer);
       gridContainer.appendChild(gridContent);
 
-      const { UIManager } = await import('../src/renderer-ui.js');
+      const { UIManager } = await import('../src/renderer/renderer-ui.js');
       const ui = new UIManager(sharedAppState);
       ui.elements.thumbnailGrid = gridContainer;
       ui.elements.thumbnailSizeSlider = { value: '180' };
@@ -527,7 +527,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('getImageDimensionsFromBlob should accurately parse PNG dimensions', async () => {
-      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      const { getImageDimensionsFromBlob } = await import('../src/renderer/renderer-thumbnails.js');
       // PNG: 1920 x 1080
       const pngHeader = new Uint8Array([
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
@@ -543,7 +543,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('getImageDimensionsFromBlob should accurately parse WebP (VP8X) dimensions', async () => {
-      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      const { getImageDimensionsFromBlob } = await import('../src/renderer/renderer-thumbnails.js');
       // WebP VP8X: width=1024, height=768 (stored as width-1 = 1023 (0x0003FF), height-1 = 767 (0x0002FF))
       const webpHeader = new Uint8Array([
         0x52, 0x49, 0x46, 0x46, // "RIFF"
@@ -561,7 +561,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('getImageDimensionsFromBlob should accurately parse JPEG SOF0 dimensions', async () => {
-      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      const { getImageDimensionsFromBlob } = await import('../src/renderer/renderer-thumbnails.js');
       // JPEG SOF0: height=600 (0x0258), width=800 (0x0320)
       const jpegHeader = new Uint8Array([
         0xFF, 0xD8,             // SOI
@@ -578,7 +578,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('getImageDimensionsFromBlob should safely return null for invalid or corrupted data', async () => {
-      const { getImageDimensionsFromBlob } = await import('../src/renderer-thumbnails.js');
+      const { getImageDimensionsFromBlob } = await import('../src/renderer/renderer-thumbnails.js');
       const corrupted = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
       const blob = new Blob([corrupted]);
       const dims = await getImageDimensionsFromBlob(blob);
@@ -586,7 +586,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('runTask should bypass getThumbnail IPC when skipDbCheck is true', async () => {
-      const { ThumbnailQueueManager } = await import('../src/renderer-thumbnails.js');
+      const { ThumbnailQueueManager } = await import('../src/renderer/renderer-thumbnails.js');
       const manager = new ThumbnailQueueManager(4);
       
       const getThumbnailSpy = vi.fn().mockResolvedValue(null);
@@ -594,7 +594,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       window.veloceAPI.saveThumbnail = vi.fn().mockResolvedValue('asset://saved');
       
       // Mock worker generate
-      const { thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const { thumbnailWorkerPool } = await import('../src/renderer/renderer-thumbnails.js');
       const generateSpy = vi.spyOn(thumbnailWorkerPool, 'generate').mockResolvedValue({
         url: 'blob:test',
         base64Promise: Promise.resolve('data:image/jpeg;base64,...')
@@ -621,7 +621,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('should use pre-encoded BROKEN_MP4_FALLBACK_URL without redundant btoa execution', async () => {
-      const { BROKEN_MP4_FALLBACK_URL } = await import('../src/renderer-ui.js');
+      const { BROKEN_MP4_FALLBACK_URL } = await import('../src/renderer/renderer-ui.js');
       expect(BROKEN_MP4_FALLBACK_URL).toBeDefined();
       expect(BROKEN_MP4_FALLBACK_URL).toMatch(/^data:image\/svg\+xml;base64,/);
     });
@@ -629,7 +629,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
 
   describe('Self-Healing Watchdog Process', () => {
     it('should early return and avoid DOM scans when in table/list mode or when idle and healthy', async () => {
-      const { checkThumbnailSelfHealing } = await import('../src/renderer-thumbnails.js');
+      const { checkThumbnailSelfHealing } = await import('../src/renderer/renderer-thumbnails.js');
 
       // 1. activeCenterPane が 'table' (リストビュー) の場合 -> 早期リターン 0
       window.appState = { activeCenterPane: 'table', dragState: { isAppDragging: false } };
@@ -691,7 +691,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('runTask should persist thumbnail via saveThumbnail even if aborted by folder navigation', async () => {
-      const { ThumbnailQueueManager, thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const { ThumbnailQueueManager, thumbnailWorkerPool } = await import('../src/renderer/renderer-thumbnails.js');
       const manager = new ThumbnailQueueManager(4);
 
       window.veloceAPI.getThumbnail = vi.fn().mockResolvedValue(null);
@@ -799,8 +799,8 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       } else if (!window.thumbnailManager.processNext) {
         window.thumbnailManager.processNext = vi.fn();
       }
-      const { appState: sharedAppState } = await import('../src/renderer-state.js');
-      const { UIManager } = await import('../src/renderer-ui.js');
+      const { appState: sharedAppState } = await import('../src/renderer/renderer-state.js');
+      const { UIManager } = await import('../src/renderer/renderer-ui.js');
 
       const fileA = { path: 'C:/media/a.png', name: 'a.png', mtime: 1000, hasThumbnailCache: true };
       const fileB = { path: 'C:/media/b.png', name: 'b.png', mtime: 2000, hasThumbnailCache: true };
@@ -865,8 +865,8 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       } else if (!window.thumbnailManager.processNext) {
         window.thumbnailManager.processNext = vi.fn();
       }
-      const { appState: sharedAppState } = await import('../src/renderer-state.js');
-      const { UIManager } = await import('../src/renderer-ui.js');
+      const { appState: sharedAppState } = await import('../src/renderer/renderer-state.js');
+      const { UIManager } = await import('../src/renderer/renderer-ui.js');
 
       sharedAppState.totalCount = 100;
       sharedAppState.initialChunk = null; // force veloceAPI.getItems
@@ -926,7 +926,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('saveThumbnailBinary should POST raw Blob directly to local video server when videoServerPort is available', async () => {
-      const { saveThumbnailBinary } = await import('../src/renderer-thumbnails.js');
+      const { saveThumbnailBinary } = await import('../src/renderer/renderer-thumbnails.js');
       window.videoServerPort = 54321;
 
       const mockFetch = vi.fn().mockResolvedValue({
@@ -948,7 +948,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('saveThumbnailBinary should fallback to base64Promise and window.veloceAPI.saveThumbnail when videoServerPort is absent', async () => {
-      const { saveThumbnailBinary } = await import('../src/renderer-thumbnails.js');
+      const { saveThumbnailBinary } = await import('../src/renderer/renderer-thumbnails.js');
       delete window.videoServerPort;
 
       const mockSaveThumbnail = vi.fn().mockResolvedValue('http://fallback-saved-url');
@@ -1000,7 +1000,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
 
     it('updateVirtualGrid should use local HTTP URL with thumb=1 when window.videoServerPort is available', async () => {
       window.videoServerPort = 12345;
-      const { appState: sharedAppState } = await import('../src/renderer-state.js');
+      const { appState: sharedAppState } = await import('../src/renderer/renderer-state.js');
       const testFiles = [{ path: 'C:/images/cached.png', name: 'cached.png', mtime: 55555, hasThumbnailCache: true }];
       sharedAppState.totalCount = testFiles.length;
       sharedAppState.initialChunk = testFiles;
@@ -1024,7 +1024,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       gridContainer.appendChild(gridSpacer);
       gridContainer.appendChild(gridContent);
 
-      const { UIManager } = await import('../src/renderer-ui.js');
+      const { UIManager } = await import('../src/renderer/renderer-ui.js');
       const ui = new UIManager(sharedAppState);
       ui.elements.thumbnailGrid = gridContainer;
       ui.elements.thumbnailSizeSlider = { value: '180' };
@@ -1041,7 +1041,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('updateDOM should normalize path slashes and immediately remove loading class if img.complete is true', async () => {
-      const { ThumbnailQueueManager } = await import('../src/renderer-thumbnails.js');
+      const { ThumbnailQueueManager } = await import('../src/renderer/renderer-thumbnails.js');
       const manager = new ThumbnailQueueManager(2);
       const wrapper = document.createElement('div');
       wrapper.dataset.filepath = 'C:\\images\\photo.png';
@@ -1068,7 +1068,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
 
     it('saveThumbnailBinary should fallback to base64 and save via IPC if videoServerPort is unset', async () => {
       delete window.videoServerPort;
-      const { saveThumbnailBinary } = await import('../src/renderer-thumbnails.js');
+      const { saveThumbnailBinary } = await import('../src/renderer/renderer-thumbnails.js');
       const mockSave = vi.fn().mockResolvedValue('http://127.0.0.1:9999/?saved=1');
       window.veloceAPI.saveThumbnail = mockSave;
 
@@ -1080,8 +1080,8 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     });
 
     it('runTask should immediately recover via Rust getThumbnail when worker generate throws', async () => {
-      const { appState } = await import('../src/renderer-state.js');
-      const { ThumbnailQueueManager, thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const { appState } = await import('../src/renderer/renderer-state.js');
+      const { ThumbnailQueueManager, thumbnailWorkerPool } = await import('../src/renderer/renderer-thumbnails.js');
       const manager = new ThumbnailQueueManager(2);
       const filePath = 'C:/test/rebuild_target.png';
 
@@ -1113,7 +1113,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
 
     it('thumbnailWorkerPool.generate should fallback to readBinaryFile when fetch fails', async () => {
       vi.useRealTimers();
-      const { thumbnailWorkerPool } = await import('../src/renderer-thumbnails.js');
+      const { thumbnailWorkerPool } = await import('../src/renderer/renderer-thumbnails.js');
       const filePath = 'C:/test/binary_fallback.png';
 
       // fetch を拒否モック

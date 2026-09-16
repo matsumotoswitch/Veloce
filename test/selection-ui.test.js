@@ -41,7 +41,7 @@ describe('UIManager.updateSelectionUI', () => {
     };
     
     // Import the module dynamically
-    const module = await import('../src/renderer-ui.js');
+    const module = await import('../src/renderer/renderer-ui.js');
     const { UIManager } = module;
     
     // Mock appState
@@ -117,7 +117,7 @@ describe('UIManager.updateSelectionUI', () => {
   });
 
   it('should format bytes into human-readable strings correctly', async () => {
-    const { formatBytesHuman } = await import('../src/renderer-ui.js');
+    const { formatBytesHuman } = await import('../src/renderer/renderer-ui.js');
     expect(formatBytesHuman(0)).toBe('0 B');
     expect(formatBytesHuman(500)).toBe('500 B');
     expect(formatBytesHuman(1024)).toBe('1.0 KB');

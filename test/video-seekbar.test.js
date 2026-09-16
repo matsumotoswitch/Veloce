@@ -30,7 +30,7 @@ describe('Video Seek Bar', () => {
 
   it('should toggle video seek bar on "s" keypress', async () => {
     // Dynamic import to load viewer.js and initialize event listeners
-    await import('../src/viewer.js');
+    await import('../src/viewer/viewer.js');
 
     // Give viewer.js time to attach listeners
     await new Promise(r => setTimeout(r, 50));
@@ -57,7 +57,7 @@ describe('Video Seek Bar', () => {
   });
 
   it('should prevent propagation of mouse events on seek bar', async () => {
-    await import('../src/viewer.js');
+    await import('../src/viewer/viewer.js');
     
     // Show seek bar
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }));
@@ -85,7 +85,7 @@ describe('Video Seek Bar', () => {
   });
 
   it('should use form-label class for favorite and smart folder icon editor sections', async () => {
-    const { createFavoriteEditorUI } = await import('../src/renderer-ui.js');
+    const { createFavoriteEditorUI } = await import('../src/renderer/renderer-ui.js');
     const container = document.createElement('div');
     createFavoriteEditorUI(container, 'star', 'default');
 

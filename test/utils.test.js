@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { debounce, escapeHtml, applyGlowEffect, blockDevtoolsShortcuts, getStreamUrl } from '../src/utils.js';
+import { debounce, escapeHtml, applyGlowEffect, blockDevtoolsShortcuts, getStreamUrl } from '../src/common/utils.js';
 
 describe('Utils', () => {
   describe('debounce', () => {

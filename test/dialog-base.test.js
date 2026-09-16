@@ -5,7 +5,7 @@ import {
   createDialogButtons,
   createDialogMessage,
   showAppDialog
-} from '../src/dialog-base.js';
+} from '../src/common/dialog-base.js';
 
 describe('Dialog Base UI', () => {
   let dom;

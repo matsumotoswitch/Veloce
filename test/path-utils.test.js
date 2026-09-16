@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { validateFilename, checkPathExists } from '../src/path-utils.js';
+import { validateFilename, checkPathExists } from '../src/common/path-utils.js';
 
 describe('Path Utils', () => {
   afterEach(() => {

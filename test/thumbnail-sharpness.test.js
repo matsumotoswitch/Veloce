@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { applySharpenFilter } from '../src/renderer-thumbnails.js';
+import { applySharpenFilter } from '../src/renderer/renderer-thumbnails.js';
 import { getFullCssContent } from './helpers/css-helper.js';
 
 describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mask, CSS Contrast)', () => {
   const rootDir = path.resolve(__dirname, '..');
-  const thumbnailsJsPath = path.join(rootDir, 'src', 'renderer-thumbnails.js');
+  const thumbnailsJsPath = path.join(rootDir, 'src', 'renderer', 'renderer-thumbnails.js');
   const mainRsPath = path.join(rootDir, 'src-tauri', 'src', 'main.rs');
 
   describe('1. applySharpenFilter algorithm test', () => {

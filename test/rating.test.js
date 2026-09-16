@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
+import { appState } from '../src/renderer/renderer-state.js';
 
 describe('Rating Feature', () => {
   beforeEach(() => {

@@ -130,7 +130,7 @@ describe('Viewer UI Visibility', () => {
   it('should export updateScaleDisplay to window object', async () => {
     // viewer.js をインポートして、window.updateScaleDisplay が定義されているか確認
     // 動的インポートを使用して、実際のモジュールロードをシミュレート
-    await import('../src/viewer.js');
+    await import('../src/viewer/viewer.js');
     expect(typeof window.updateScaleDisplay).toBe('function');
   });
 
@@ -138,7 +138,7 @@ describe('Viewer UI Visibility', () => {
     const fs = require('fs');
     const path = require('path');
     const cssContent = getFullCssContent();
-    const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
+    const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer/viewer.js'), 'utf-8');
 
     // CSSで window-filename と window-scale-display の font-size が同一（var(--font-size-base)）であること
     expect(cssContent).toMatch(/\.window-filename\s*\{[^}]*font-size:\s*var\(--font-size-base\);/);
@@ -159,7 +159,7 @@ describe('Viewer UI Visibility', () => {
   it('should use CSS transition token for #viewer-flash-effect and avoid inline cubic-bezier in viewer.js', () => {
     const fs = require('fs');
     const path = require('path');
-    const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer.js'), 'utf-8');
+    const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer/viewer.js'), 'utf-8');
     const cssContent = getFullCssContent();
 
     expect(cssContent).toMatch(/#viewer-flash-effect\s*\{[^}]*transition:\s*opacity\s+0\.6s\s+var\(--transition-glow\);/);

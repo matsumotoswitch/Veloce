@@ -170,14 +170,14 @@ describe('Viewer Prefetch Logic (Phase 1)', () => {
 
   describe('Phase 4: Smart Directional Preload Pipeline', () => {
     it('getPreloadDeltas should allocate directional offsets correctly', async () => {
-      const { getPreloadDeltas } = await import('../src/viewer.js');
+      const { getPreloadDeltas } = await import('../src/viewer/viewer.js');
       expect(getPreloadDeltas(1)).toEqual([1, 2, 3, -1]);
       expect(getPreloadDeltas(-1)).toEqual([-1, -2, -3, 1]);
       expect(getPreloadDeltas(0)).toEqual([1, -1, 2, -2]);
     });
 
     it('should prioritize forward indices (+1, +2, +3, -1) when lastDirection is 1', async () => {
-      const { getPreloadDeltas } = await import('../src/viewer.js');
+      const { getPreloadDeltas } = await import('../src/viewer/viewer.js');
       global.viewerState.currentIndex = 5;
       global.viewerState.totalImages = 10;
       global.viewerState.lastDirection = 1;
@@ -190,7 +190,7 @@ describe('Viewer Prefetch Logic (Phase 1)', () => {
     });
 
     it('should prioritize backward indices (-1, -2, -3, +1) when lastDirection is -1', async () => {
-      const { getPreloadDeltas } = await import('../src/viewer.js');
+      const { getPreloadDeltas } = await import('../src/viewer/viewer.js');
       global.viewerState.currentIndex = 5;
       global.viewerState.totalImages = 10;
       global.viewerState.lastDirection = -1;
@@ -203,7 +203,7 @@ describe('Viewer Prefetch Logic (Phase 1)', () => {
     });
 
     it('should wrap around circular boundaries correctly during forward fast scroll', async () => {
-      const { getPreloadDeltas } = await import('../src/viewer.js');
+      const { getPreloadDeltas } = await import('../src/viewer/viewer.js');
       global.viewerState.currentIndex = 9; // 末尾
       global.viewerState.totalImages = 10;
       global.viewerState.lastDirection = 1;
@@ -217,7 +217,7 @@ describe('Viewer Prefetch Logic (Phase 1)', () => {
     });
 
     it('should wrap around circular boundaries correctly during backward fast scroll', async () => {
-      const { getPreloadDeltas } = await import('../src/viewer.js');
+      const { getPreloadDeltas } = await import('../src/viewer/viewer.js');
       global.viewerState.currentIndex = 0; // 先頭
       global.viewerState.totalImages = 10;
       global.viewerState.lastDirection = -1;

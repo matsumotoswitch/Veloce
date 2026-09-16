@@ -19,7 +19,7 @@ import {
   highlightSearchTerms,
   buildInspectorSections,
   createSearchTermsRegex
-} from './metadata-format.js';
+} from '../common/metadata-format.js';
 
 // --- DOM Pool for Inspector ---
 const inspectorSectionPool = [];

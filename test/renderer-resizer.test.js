@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
-import { uiManager } from '../src/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { uiManager } from '../src/renderer/renderer-ui.js';
 import {
   resizingState,
   createResizerToggle,
   setupResizer,
   initResizers,
   initResizerGlobalEvents
-} from '../src/renderer-resizer.js';
+} from '../src/renderer/renderer-resizer.js';
 
 describe('Renderer Resizer Controller (renderer-resizer.js)', () => {
   beforeEach(() => {

@@ -7,7 +7,7 @@ import {
   createSearchTermsRegex,
   extractMetadataFields,
   buildInspectorSections
-} from '../src/metadata-format.js';
+} from '../src/common/metadata-format.js';
 
 describe('Metadata Format Utils', () => {
   describe('createSearchTermsRegex and highlightSearchTerms', () => {

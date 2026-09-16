@@ -28,7 +28,7 @@
 - **極限の軽量化**: メモリ割り当てやガベージコレクション（GC）の発生を最小限に抑えること。
 - **DOM Poolと再利用**: インスペクターやリスト等で大量のDOM要素を扱う際、要素の都度生成・破棄（GC発生の原因）を行わず、`display = 'none'` や `replaceChildren()` によるDOM要素の使い回し（DOM Poolアーキテクチャ）を徹底すること。
 - **Window Poolの活用**: 独立ビューアーを開く際は、ウィンドウの都度生成・破棄によるGCやWebView初期化遅延を避けるため、既存の非表示ウィンドウを再利用する Window Pool パターンを前提とすること。セッション開始時の `viewer-init-session` イベントで状態（キャッシュ、インデックス、パス等）を正しく同期・初期化すること。
-- **モジュール分離と責務管理**: サムネイル生成・キュー管理は `src/renderer-thumbnails.js`、UI表示・仮想スクロールは `src/renderer-ui.js`、状態管理は `src/renderer-state.js`、タブ管理は `src/renderer-tabs.js`、独立ビューアー制御は `src/viewer.js`、メタデータ解析は `src/metadata-format.js`、共通ダイアログ基盤は `src/dialog-base.js`、メインライフサイクル統括は `src/renderer.js` に分割されている。コード修正時は適切なモジュールに対して手を入れること。
+- **モジュール分離と責務管理**: サムネイル生成・キュー管理は `src/renderer/renderer-thumbnails.js`、UI表示・仮想スクロールは `src/renderer/renderer-ui.js`、状態管理は `src/renderer/renderer-state.js`、タブ管理は `src/renderer/renderer-tabs.js`、独立ビューアー制御は `src/viewer/viewer.js`、メタデータ解析は `src/common/metadata-format.js`、共通ダイアログ基盤は `src/common/dialog-base.js`、メインライフサイクル統括は `src/renderer/renderer.js` に分割されている。コード修正時は適切なモジュールに対して手を入れること。
 - **DOM操作の最適化**: `DocumentFragment` やイベント委譲（Event Delegation）を活用し、O(1)の差分更新を徹底すること。再計算（Reflow/Repaint）を誘発する非効率なDOM操作は避ける。
   - ループ処理内での `querySelector` は厳禁。あらかじめインデックスが自明な場合は `.children[i]` を用いて O(1) アクセスすること。
   - `style.height` や `textContent` 等の書き込みは、以前の値と異なる場合のみ行うこと（無条件に書き込むとブラウザのReflowがスケジュールされパフォーマンスが低下する）。

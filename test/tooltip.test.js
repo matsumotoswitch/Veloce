@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { UIManager, uiManager } from '../src/renderer-ui.js';
+import { UIManager, uiManager } from '../src/renderer/renderer-ui.js';
 
 describe('UIManager bindTooltip (Section 2-A)', () => {
   let dom;

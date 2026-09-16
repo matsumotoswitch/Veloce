@@ -15,9 +15,9 @@
 import { appState, SmartFolderStore } from './renderer-state.js';
 import { UIManager, uiManager, formatSize, formatBytesHuman, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
 import { ThumbnailQueueManager, thumbnailWorkerPool, evictThumbnailCache, cleanupContext, resetThumbnailPreloader } from './renderer-thumbnails.js';
-import { debounce, blockDevtoolsShortcuts, getStreamUrl } from './utils.js';
-import { validateFilename } from './path-utils.js';
-import { extractMetadataFields, highlightSearchTerms, buildInspectorSections, createSearchTermsRegex } from './metadata-format.js';
+import { debounce, blockDevtoolsShortcuts, getStreamUrl } from '../common/utils.js';
+import { validateFilename } from '../common/path-utils.js';
+import { extractMetadataFields, highlightSearchTerms, buildInspectorSections, createSearchTermsRegex } from '../common/metadata-format.js';
 import { resolvePathDisplay } from './favorite-icons.js';
 import {
   initTabHandlers,

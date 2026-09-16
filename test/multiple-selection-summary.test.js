@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
-import { appState } from '../src/renderer-state.js';
-import { uiManager } from '../src/renderer-ui.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { uiManager } from '../src/renderer/renderer-ui.js';
 
 describe('renderMultipleSelectionSummary (PLAN.md Sec 3.2)', () => {
   let inspectorContent;
@@ -31,7 +31,7 @@ describe('renderMultipleSelectionSummary (PLAN.md Sec 3.2)', () => {
     uiManager.elements.dirTree = document.getElementById('dir-tree');
     uiManager.elements.thumbnailSizeSlider = document.getElementById('thumbnail-size-slider');
 
-    const rendererModule = await import('../src/renderer.js');
+    const rendererModule = await import('../src/renderer/renderer.js');
     renderMultipleSelectionSummary = rendererModule.renderMultipleSelectionSummary;
   });
 

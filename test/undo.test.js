@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appState } from '../src/renderer-state.js';
-import { performUndo } from '../src/renderer-file-ops.js';
+import { appState } from '../src/renderer/renderer-state.js';
+import { performUndo } from '../src/renderer/renderer-file-ops.js';
 
 describe('Undo Functionality', () => {
   beforeEach(() => {
