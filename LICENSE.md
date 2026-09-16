@@ -58,9 +58,22 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 * **rayon** (https://github.com/rayon-rs/rayon)
 * **fast_image_resize** (https://github.com/cykooz/fast_image_resize)
 * **memmap2** (https://github.com/RazrFalcon/memmap2-rs)
+* **serde** (https://serde.rs/)
+* **arboard** (https://github.com/ArturKovacs/arboard)
+* **flate2** (https://github.com/rust-lang/flate2-rs)
+* **base64** (https://github.com/marshallpierce/rust-base64)
+* **windows-rs** (https://github.com/microsoft/windows-rs)
 
 ## 2. MIT License
 以下のソフトウェアおよび多くのフロントエンド・パッケージ（Vite等）は、MIT License の下で提供されています。
+
+* **mimalloc** (https://github.com/microsoft/mimalloc)
+* **rusqlite** (https://github.com/rusqlite/rusqlite)
+* **jwalk** (https://github.com/jessegrosjean/jwalk)
+* **trash** (https://github.com/Byron/trash-rs)
+* **tokio** (https://tokio.rs/)
+* **r2d2** (https://github.com/sfackler/r2d2)
+* **Vite** (https://vitejs.dev/)
 
 > **The MIT License (MIT)**
 > 
@@ -73,7 +86,7 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 ## 3. Apache License, Version 2.0
 以下のソフトウェア（Rust クレート等）は、Apache License 2.0 の下で提供されています。
 
-* **image** (Rust crate)
+* **image** (https://github.com/image-rs/image)
 
 > **Apache License, Version 2.0**
 > 
