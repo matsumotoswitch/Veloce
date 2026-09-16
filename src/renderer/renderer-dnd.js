@@ -12,8 +12,18 @@
 // 5. お気に入りバーへのフォルダドロップ（追加）およびドラッグ並び替え
 // ============================================================================
 
-import { appState } from './renderer-state.js';
+import { appState, dndState, fileOpsState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
+
+export { dndState };
+
+/**
+ * 現在アプリ内でアイテムがドラッグ中であるかを取得します。
+ * @returns {boolean}
+ */
+export function isAppDragging() {
+  return dndState.isAppDragging;
+}
 
 let dragTooltip = null;
 let dragTooltipText = null;
@@ -83,8 +93,8 @@ export function hideDragTooltip() {
  * @returns {Promise<string[]>} 抽出されたパスの配列
  */
 export async function getPathsFromDragEventAsync(e) {
-  if (appState.dragState.paths && appState.dragState.paths.length > 0) {
-    return [...appState.dragState.paths];
+  if (dndState.paths && dndState.paths.length > 0) {
+    return [...dndState.paths];
   }
 
   const indicesStr = e.dataTransfer.getData('application/json-indices');
@@ -160,10 +170,10 @@ export function handleItemDragStart(e, isGrid, callbacks = {}) {
   e.dataTransfer.setDragImage(emptyDragImage, 0, 0);
 
   const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-  appState.dragState.paths = [];
-  appState.dragState.indices = selectedIndices;
-  appState.dragState.isAppDragging = true;
-  appState.dragState.cachedRoot = getRoot(item.dataset.filepath || '');
+  dndState.paths = [];
+  dndState.indices = selectedIndices;
+  dndState.isAppDragging = true;
+  dndState.cachedRoot = getRoot(item.dataset.filepath || '');
 
   const count = selectedIndices.length;
   const text = count > 1 ? `${count} 個のアイテム` : '1 個のアイテム';
@@ -179,10 +189,10 @@ export function initGlobalDndHandlers(callbacks = {}) {
   const { refreshFileList = null } = callbacks;
 
   document.addEventListener('dragover', (e) => {
-    if (appState.dragState && appState.dragState.isAppDragging) {
-      const count = (appState.dragState.indices && appState.dragState.indices.length > 0)
-        ? appState.dragState.indices.length
-        : (appState.dragState.paths ? appState.dragState.paths.length : 0);
+    if (dndState && dndState.isAppDragging) {
+      const count = (dndState.indices && dndState.indices.length > 0)
+        ? dndState.indices.length
+        : (dndState.paths ? dndState.paths.length : 0);
       let text = count > 1 ? `${count} 個のアイテム` : '1 個のアイテム';
 
       const itemDiv = e.target.closest('#dir-tree .tree-item');
@@ -195,7 +205,7 @@ export function initGlobalDndHandlers(callbacks = {}) {
             actionStr = '移動';
           } else {
             const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-            const cachedRoot = appState.dragState.cachedRoot || (appState.dragState.paths && appState.dragState.paths.length > 0 ? getRoot(appState.dragState.paths[0]) : null);
+            const cachedRoot = dndState.cachedRoot || (dndState.paths && dndState.paths.length > 0 ? getRoot(dndState.paths[0]) : null);
             actionStr = cachedRoot === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
           }
         }
@@ -211,13 +221,13 @@ export function initGlobalDndHandlers(callbacks = {}) {
 
   document.addEventListener('dragend', async () => {
     hideDragTooltip();
-    appState.dragState.paths = [];
-    appState.dragState.indices = [];
-    appState.dragState.cachedRoot = null;
-    appState.dragState.isAppDragging = false;
+    dndState.paths = [];
+    dndState.indices = [];
+    dndState.cachedRoot = null;
+    dndState.isAppDragging = false;
 
-    if (appState.dragState.pendingRefresh) {
-      appState.dragState.pendingRefresh = false;
+    if (dndState.pendingRefresh) {
+      dndState.pendingRefresh = false;
       if (refreshFileList) {
         await refreshFileList();
       }
@@ -251,9 +261,9 @@ export function initDirTreeDnd(dirTreeElement, callbacks = {}) {
     e.dataTransfer.effectAllowed = 'copyMove';
 
     const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-    appState.dragState.paths = [itemDiv.dataset.path];
-    appState.dragState.cachedRoot = getRoot(itemDiv.dataset.path);
-    appState.dragState.isAppDragging = true;
+    dndState.paths = [itemDiv.dataset.path];
+    dndState.cachedRoot = getRoot(itemDiv.dataset.path);
+    dndState.isAppDragging = true;
   });
 
   dirTreeElement.addEventListener('dragenter', (e) => {
@@ -271,7 +281,7 @@ export function initDirTreeDnd(dirTreeElement, callbacks = {}) {
     e.preventDefault();
 
     let actionStr = 'コピー';
-    const hasItems = (appState.dragState.indices && appState.dragState.indices.length > 0) || (appState.dragState.paths && appState.dragState.paths.length > 0);
+    const hasItems = (dndState.indices && dndState.indices.length > 0) || (dndState.paths && dndState.paths.length > 0);
     if (hasItems) {
       if (e.ctrlKey) {
         actionStr = 'コピー';
@@ -279,7 +289,7 @@ export function initDirTreeDnd(dirTreeElement, callbacks = {}) {
         actionStr = '移動';
       } else {
         const getRoot = p => p.match(/^[A-Za-z]:/) ? p.match(/^[A-Za-z]:/)[0].toLowerCase() : '/';
-        const cachedRoot = appState.dragState.cachedRoot || (appState.dragState.paths && appState.dragState.paths.length > 0 ? getRoot(appState.dragState.paths[0]) : null);
+        const cachedRoot = dndState.cachedRoot || (dndState.paths && dndState.paths.length > 0 ? getRoot(dndState.paths[0]) : null);
         actionStr = cachedRoot === getRoot(itemDiv.dataset.path) ? '移動' : 'コピー';
       }
     }
@@ -356,9 +366,9 @@ export function initDirTreeDnd(dirTreeElement, callbacks = {}) {
           if (result && result.success) {
             successCount++;
             if (result.action === 'move') {
-              appState.undoStack.push({ type: 'MOVE_FILE', sourcePath: p, targetPath: result.targetPath });
+              fileOpsState.push({ type: 'MOVE_FILE', sourcePath: p, targetPath: result.targetPath });
             } else if (result.action === 'copy') {
-              appState.undoStack.push({ type: 'COPY_FILE', sourcePath: p, targetPath: result.targetPath });
+              fileOpsState.push({ type: 'COPY_FILE', sourcePath: p, targetPath: result.targetPath });
             }
           }
         }
@@ -366,8 +376,8 @@ export function initDirTreeDnd(dirTreeElement, callbacks = {}) {
           let msg = `${successCount}件のファイルを${actionStr}しました`;
           if (skipCount > 0) msg += `（${skipCount}件スキップ）`;
           if (uiManager.showToast) uiManager.showToast(msg, 3000, 'file-move');
-          if (appState.dragState.isAppDragging) {
-            appState.dragState.pendingRefresh = true;
+          if (dndState.isAppDragging) {
+            dndState.pendingRefresh = true;
           } else if (refreshFileList) {
             await refreshFileList();
           }

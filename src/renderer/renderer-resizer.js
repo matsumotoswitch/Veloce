@@ -6,7 +6,7 @@
 // アニメーションフレーム同期（requestAnimationFrame）を管理する。
 // ============================================================================
 
-import { appState } from './renderer-state.js';
+import { layoutState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
 
 export const resizingState = {
@@ -36,9 +36,9 @@ export function createResizerToggle(resizer, type) {
 
   btn.innerHTML = openIcon;
   let isVisible = true;
-  if (type === 'left') isVisible = appState.layout.leftVisible;
-  else if (type === 'right') isVisible = appState.layout.rightVisible;
-  else if (type === 'leftTop') isVisible = appState.layout.leftTopVisible;
+  if (type === 'left') isVisible = layoutState.leftVisible;
+  else if (type === 'right') isVisible = layoutState.rightVisible;
+  else if (type === 'leftTop') isVisible = layoutState.leftTopVisible;
   else if (type === 'center') isVisible = !document.documentElement.getAttribute('data-center-collapsed');
 
   if (!isVisible) {
@@ -48,14 +48,14 @@ export function createResizerToggle(resizer, type) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (type === 'left') {
-      appState.layout.leftVisible = !appState.layout.leftVisible;
-      if (appState.layout.leftVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
-      localStorage.setItem('leftVisible', appState.layout.leftVisible);
+      layoutState.leftVisible = !layoutState.leftVisible;
+      if (layoutState.leftVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
+      localStorage.setItem('leftVisible', layoutState.leftVisible);
       uiManager.applyLayout();
     } else if (type === 'right') {
-      appState.layout.rightVisible = !appState.layout.rightVisible;
-      if (appState.layout.rightVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
-      localStorage.setItem('rightVisible', appState.layout.rightVisible);
+      layoutState.rightVisible = !layoutState.rightVisible;
+      if (layoutState.rightVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
+      localStorage.setItem('rightVisible', layoutState.rightVisible);
       uiManager.applyLayout();
     } else if (type === 'center') {
       const root = document.documentElement;
@@ -81,14 +81,14 @@ export function createResizerToggle(resizer, type) {
         root.style.setProperty('--left-top-height', restoreHeight);
         root.removeAttribute('data-left-top-collapsed');
         localStorage.setItem('leftTopHeight', restoreHeight);
-        appState.layout.leftTopVisible = true;
+        layoutState.leftTopVisible = true;
         btn.classList.remove('expanded');
       } else {
         localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
         root.style.setProperty('--left-top-height', '0px');
         root.setAttribute('data-left-top-collapsed', 'true');
         localStorage.setItem('leftTopHeight', '0px');
-        appState.layout.leftTopVisible = false;
+        layoutState.leftTopVisible = false;
         btn.classList.add('expanded');
       }
     } else if (type === 'rightTop') {
@@ -98,13 +98,13 @@ export function createResizerToggle(resizer, type) {
         const restoreHeight = localStorage.getItem('prevRightTopHeight') || '200px';
         root.style.setProperty('--right-top-height', restoreHeight);
         localStorage.setItem('rightTopHeight', restoreHeight);
-        appState.layout.rightTopVisible = true;
+        layoutState.rightTopVisible = true;
         btn.classList.remove('expanded');
       } else {
         localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
         root.style.setProperty('--right-top-height', '0px');
         localStorage.setItem('rightTopHeight', '0px');
-        appState.layout.rightTopVisible = false;
+        layoutState.rightTopVisible = false;
         btn.classList.add('expanded');
       }
     }
@@ -144,8 +144,8 @@ export function initResizerGlobalEvents() {
       if (resizingState.left) {
         let newWidth = e.clientX;
         if (newWidth < 50) {
-          if (appState.layout.leftVisible) {
-            appState.layout.leftVisible = false;
+          if (layoutState.leftVisible) {
+            layoutState.leftVisible = false;
             localStorage.setItem('leftVisible', 'false');
             const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
             if (btn) btn.classList.add('expanded');
@@ -153,9 +153,9 @@ export function initResizerGlobalEvents() {
           }
         } else {
           newWidth = Math.max(100, Math.min(newWidth, window.innerWidth - 400));
-          appState.layout.leftWidth = newWidth;
-          if (!appState.layout.leftVisible) {
-            appState.layout.leftVisible = true;
+          layoutState.leftWidth = newWidth;
+          if (!layoutState.leftVisible) {
+            layoutState.leftVisible = true;
             localStorage.setItem('leftVisible', 'true');
             const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
             if (btn) btn.classList.remove('expanded');
@@ -165,8 +165,8 @@ export function initResizerGlobalEvents() {
       } else if (resizingState.right) {
         let newWidth = window.innerWidth - e.clientX;
         if (newWidth < 50) {
-          if (appState.layout.rightVisible) {
-            appState.layout.rightVisible = false;
+          if (layoutState.rightVisible) {
+            layoutState.rightVisible = false;
             localStorage.setItem('rightVisible', 'false');
             const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
             if (btn) btn.classList.add('expanded');
@@ -174,9 +174,9 @@ export function initResizerGlobalEvents() {
           }
         } else {
           newWidth = Math.max(150, Math.min(newWidth, window.innerWidth - 400));
-          appState.layout.rightWidth = newWidth;
-          if (!appState.layout.rightVisible) {
-            appState.layout.rightVisible = true;
+          layoutState.rightWidth = newWidth;
+          if (!layoutState.rightVisible) {
+            layoutState.rightVisible = true;
             localStorage.setItem('rightVisible', 'true');
             const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
             if (btn) btn.classList.remove('expanded');
@@ -229,7 +229,7 @@ export function initResizerGlobalEvents() {
           const root = document.documentElement;
           root.style.setProperty('--left-top-height', `${newHeight}px`);
           root.removeAttribute('data-left-top-collapsed');
-          appState.layout.leftTopHeight = newHeight;
+          layoutState.leftTopHeight = newHeight;
 
           const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
           if (btn && btn.classList.contains('expanded')) {
@@ -254,7 +254,7 @@ export function initResizerGlobalEvents() {
           newHeight = Math.max(30, Math.min(newHeight, rect.height - 30));
           const root = document.documentElement;
           root.style.setProperty('--right-top-height', `${newHeight}px`);
-          appState.layout.rightTopHeight = newHeight;
+          layoutState.rightTopHeight = newHeight;
 
           const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
           if (btn && btn.classList.contains('expanded')) {
@@ -267,12 +267,12 @@ export function initResizerGlobalEvents() {
 
   window.addEventListener('mouseup', () => {
     if (resizingState.left) {
-      localStorage.setItem('leftWidth', appState.layout.leftWidth);
+      localStorage.setItem('leftWidth', layoutState.leftWidth);
       resizingState.left = false;
       if (uiManager.elements.resizerLeft) uiManager.elements.resizerLeft.classList.remove('resizing');
     }
     if (resizingState.right) {
-      localStorage.setItem('rightWidth', appState.layout.rightWidth);
+      localStorage.setItem('rightWidth', layoutState.rightWidth);
       resizingState.right = false;
       if (uiManager.elements.resizerRight) uiManager.elements.resizerRight.classList.remove('resizing');
     }

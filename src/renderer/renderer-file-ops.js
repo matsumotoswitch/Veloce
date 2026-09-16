@@ -5,10 +5,35 @@
 // サムネイルキャッシュの再構築、および元に戻す（Undo）操作の実行を管理する。
 // ============================================================================
 
-import { appState } from './renderer-state.js';
+import { appState, fileOpsState } from './renderer-state.js';
 import { uiManager } from './renderer-ui.js';
 import { validateFilename } from '../common/path-utils.js';
 import { resetThumbnailPreloader } from './renderer-thumbnails.js';
+
+export { fileOpsState };
+
+/**
+ * Undoスタックに操作履歴を追加します。
+ * @param {Object} action
+ */
+export function pushUndoAction(action) {
+  fileOpsState.push(action);
+}
+
+/**
+ * Undoスタックから直前の操作履歴を取得・削除します。
+ * @returns {Object|undefined}
+ */
+export function popUndoAction() {
+  return fileOpsState.pop();
+}
+
+/**
+ * Undoスタックをクリアします。
+ */
+export function clearUndoStack() {
+  fileOpsState.clear();
+}
 
 let fileOpsCallbacks = {
   refreshFileList: () => {},
@@ -53,7 +78,7 @@ export async function renameSelectedFolder(callbacks = fileOpsCallbacks) {
 
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
-      appState.undoStack.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
+      fileOpsState.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
       callbacks.showNotification?.(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (appState.currentDirectory.startsWith(oldPath)) {
         appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
@@ -124,7 +149,7 @@ export async function renameSelectedFile(callbacks = fileOpsCallbacks) {
 
       const result = await window.veloceAPI.renameFile(oldPath, newName);
       if (result && result.success) {
-        appState.undoStack.push({ type: 'RENAME_FILE', oldPath, newPath: result.path });
+        fileOpsState.push({ type: 'RENAME_FILE', oldPath, newPath: result.path, oldName: file.name });
         uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
 
         const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
@@ -271,12 +296,12 @@ export async function deleteSelectedFiles(callbacks = fileOpsCallbacks) {
  * @param {Object} [callbacks=fileOpsCallbacks]
  */
 export async function performUndo(callbacks = fileOpsCallbacks) {
-  if (appState.undoStack.length === 0) {
+  if (fileOpsState.undoStack.length === 0) {
     uiManager.showToast('元に戻す操作はありません', 2000, 'undo', 'info');
     return;
   }
 
-  const action = appState.undoStack.pop();
+  const action = fileOpsState.pop();
   try {
     const { fs, path } = window.__TAURI__;
 
@@ -292,9 +317,9 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
         if (callbacks.refreshTree) await callbacks.refreshTree();
       }
     } else if (action.type === 'RENAME_FILE') {
-      const oldName = await path.basename(action.oldPath);
+      const oldName = action.oldName || (path ? await path.basename(action.oldPath) : action.oldPath.split(/[/\\]/).pop());
       const result = await window.veloceAPI.renameFile(action.newPath, oldName);
-      if (result.success) {
+      if (result && result.success) {
         uiManager.showToast('ファイル名の変更を元に戻しました', 3000, 'undo', 'success');
         const oldUrl = appState.thumbnailUrls.get(action.newPath);
         if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);

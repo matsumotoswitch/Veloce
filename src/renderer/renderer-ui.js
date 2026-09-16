@@ -16,7 +16,7 @@
 //    DOM置換直後のスタイル不整合を防ぐ同期Reflowや、O(1)のプロパティ直接代入を徹底。
 // ============================================================================
 
-import { appState } from './renderer-state.js';
+import { appState, dndState } from './renderer-state.js';
 import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml } from '../common/utils.js';
 import { validateFilename, INVALID_FILENAME_RE } from '../common/path-utils.js';
 import { showAppDialog } from '../common/dialog-base.js';
@@ -1434,7 +1434,7 @@ class UIManager {
       return;
     }
 
-    if (appState.dragState && appState.dragState.isAppDragging) {
+    if (dndState && dndState.isAppDragging) {
       return;
     }
 
@@ -1683,7 +1683,7 @@ class UIManager {
     }
 
     // ドラッグ中にDOMを再構築すると、ドラッグ元の要素が消滅して操作が強制キャンセルされるのを防ぐ
-    if (appState.dragState && appState.dragState.isAppDragging) {
+    if (dndState && dndState.isAppDragging) {
       return;
     }
 

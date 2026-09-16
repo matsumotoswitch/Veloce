@@ -74,6 +74,87 @@ export const SmartFolderStore = {
 };
 
 /**
+ * ドラッグ＆ドロップ操作の局所状態
+ */
+export const dndState = {
+  paths: [],
+  indices: [],
+  cachedRoot: null,
+  isAppDragging: false,
+  pendingRefresh: false,
+  reset() {
+    this.paths = [];
+    this.indices = [];
+    this.cachedRoot = null;
+    this.isAppDragging = false;
+  }
+};
+
+/**
+ * ファイル操作および Undo スタックの局所状態
+ */
+export const fileOpsState = {
+  undoStack: [],
+  push(action) {
+    this.undoStack.push(action);
+  },
+  pop() {
+    return this.undoStack.pop();
+  },
+  clear() {
+    this.undoStack.length = 0;
+  }
+};
+
+/**
+ * ウィンドウペイン分割およびレイアウト設定の局所状態
+ */
+export const layoutState = {
+  leftWidth: 200,             // 左ペインの幅(px)
+  rightWidth: 300,            // 右ペインの幅(px)
+  leftVisible: true,          // 左ペインの表示状態
+  rightVisible: true,         // 右ペインの表示状態
+  leftTopHeight: parseInt(localStorage.getItem('leftTopHeight') || '150', 10),
+  leftTopVisible: localStorage.getItem('leftTopVisible') !== 'false',
+  rightTopHeight: parseInt(localStorage.getItem('rightTopHeight') || '200', 10),
+  rightTopVisible: localStorage.getItem('rightTopVisible') !== 'false'
+};
+
+/**
+ * サムネイル生成キュー・進捗・URLキャッシュの局所状態
+ */
+export const thumbnailState = {
+  urls: new Map(),
+  visiblePathSet: new Set(),
+  preloadCursor: 0,
+  isPreloadRunning: false,
+  isFetchingPreload: false,
+  currentMetaBatchId: 0,
+  currentRenderId: 0,
+  progress: {
+    totalRequested: 0,
+    completed: 0,
+    counted: new Set(),
+    toastTimeout: null,
+    lastToastTime: 0
+  },
+  metadataProgress: {
+    targetCount: 0,
+    completed: 0
+  },
+  resetProgress() {
+    this.progress.totalRequested = 0;
+    this.progress.completed = 0;
+    this.progress.counted.clear();
+    if (this.progress.toastTimeout) {
+      clearTimeout(this.progress.toastTimeout);
+      this.progress.toastTimeout = null;
+    }
+    this.progress.lastToastTime = 0;
+  }
+};
+
+/**
  * メイン画面のアプリケーション全体の状態とデータを管理するクラス
  */
 class AppState {
@@ -104,50 +185,86 @@ class AppState {
     this.ratingFilterVal = 0;
     this.ratingFilterOp = 'gte';
 
-    // レイアウト状態の管理
-    this.layout = {
-      leftWidth: 200,             // 左ペインの幅(px)
-      rightWidth: 300,            // 右ペインの幅(px)
-      leftVisible: true,          // 左ペインの表示状態
-      rightVisible: true,         // 右ペインの表示状態
-      leftTopHeight: parseInt(localStorage.getItem('leftTopHeight') || '150', 10),
-      leftTopVisible: localStorage.getItem('leftTopVisible') !== 'false',
-      rightTopHeight: parseInt(localStorage.getItem('rightTopHeight') || '200', 10),
-      rightTopVisible: localStorage.getItem('rightTopVisible') !== 'false'
-    };
-
-    // ドラッグ状態の管理
-    this.dragState = {
-      paths: [],                  // ドラッグ中のファイルパスのリスト
-      isAppDragging: false,       // アプリ内からのドラッグかどうか
-      pendingRefresh: false       // ドラッグ終了後にリスト更新が必要かどうか
-    };
-
-    // システム状態・サムネイル管理
-    this.currentMetaBatchId = 0;     // 一括読み込み管理用ID
-    this.currentRenderId = 0;        // リスト描画のリクエストID
-    this.thumbnailUrls = new Map();  // サムネイル画像のURLキャッシュ（パス -> URL）
-    this.preloadCursor = 0;          // バックグラウンドプリロードの現在のインデックス
-    this.isPreloadRunning = false;   // プリロード処理が実行中かどうか
-    this.isFetchingPreload = false;  // 次のバッチのメタデータを取得中かどうか
-
-    // トースト通知状態管理
-    this.thumbnailTotalRequested = 0; // サムネイル生成リクエストの総数
-    this.thumbnailCompleted = 0;      // サムネイル生成完了数
-    this.thumbnailToastTimeout = null; // トースト通知を消すためのタイマー
-    this.thumbnailCounted = new Set(); // 完了済みとしてカウントしたファイルのセット
-    this.lastThumbnailToastTime = 0;  // 最後にトースト通知を更新した時刻
-    this.metadataTargetCount = 0;     // メタデータ取得リクエストの総数
-    this.metadataCompleted = 0;       // メタデータ取得完了数
-
-    // 仮想グリッドの可視アイテムを O(1) で引くための Set
-    // updateVirtualGrid() が更新し、ThumbnailQueueManager.processNext() が参照する
-    this.visiblePathSet = new Set();
-
     // 履歴管理
     this.isNavigatingHistory = false; // 履歴操作による遷移中のフラグ
-    this.undoStack = [];              // アンドゥ（元に戻す）用の操作履歴
   }
+
+  // --- 後方互換性ファサード (Subdomain Proxies) ---
+
+  // 1. D&D 状態プロキシ
+  get dragState() {
+    return dndState;
+  }
+  set dragState(val) {
+    if (val && typeof val === 'object') {
+      dndState.paths = val.paths || [];
+      dndState.indices = val.indices || [];
+      dndState.cachedRoot = val.cachedRoot !== undefined ? val.cachedRoot : null;
+      dndState.isAppDragging = !!val.isAppDragging;
+      dndState.pendingRefresh = !!val.pendingRefresh;
+    }
+  }
+
+  // 2. ファイル操作・Undoスタックプロキシ
+  get undoStack() {
+    return fileOpsState.undoStack;
+  }
+  set undoStack(val) {
+    fileOpsState.undoStack = Array.isArray(val) ? val : [];
+  }
+
+  // 3. レイアウト状態プロキシ
+  get layout() {
+    return layoutState;
+  }
+  set layout(val) {
+    if (val && typeof val === 'object') {
+      Object.assign(layoutState, val);
+    }
+  }
+
+  // 4. サムネイル・パイプライン進捗プロキシ
+  get thumbnailUrls() { return thumbnailState.urls; }
+  set thumbnailUrls(val) { thumbnailState.urls = val; }
+
+  get visiblePathSet() { return thumbnailState.visiblePathSet; }
+  set visiblePathSet(val) { thumbnailState.visiblePathSet = val; }
+
+  get preloadCursor() { return thumbnailState.preloadCursor; }
+  set preloadCursor(val) { thumbnailState.preloadCursor = val; }
+
+  get isPreloadRunning() { return thumbnailState.isPreloadRunning; }
+  set isPreloadRunning(val) { thumbnailState.isPreloadRunning = val; }
+
+  get isFetchingPreload() { return thumbnailState.isFetchingPreload; }
+  set isFetchingPreload(val) { thumbnailState.isFetchingPreload = val; }
+
+  get currentMetaBatchId() { return thumbnailState.currentMetaBatchId; }
+  set currentMetaBatchId(val) { thumbnailState.currentMetaBatchId = val; }
+
+  get currentRenderId() { return thumbnailState.currentRenderId; }
+  set currentRenderId(val) { thumbnailState.currentRenderId = val; }
+
+  get thumbnailTotalRequested() { return thumbnailState.progress.totalRequested; }
+  set thumbnailTotalRequested(val) { thumbnailState.progress.totalRequested = val; }
+
+  get thumbnailCompleted() { return thumbnailState.progress.completed; }
+  set thumbnailCompleted(val) { thumbnailState.progress.completed = val; }
+
+  get thumbnailToastTimeout() { return thumbnailState.progress.toastTimeout; }
+  set thumbnailToastTimeout(val) { thumbnailState.progress.toastTimeout = val; }
+
+  get thumbnailCounted() { return thumbnailState.progress.counted; }
+  set thumbnailCounted(val) { thumbnailState.progress.counted = val; }
+
+  get lastThumbnailToastTime() { return thumbnailState.progress.lastToastTime; }
+  set lastThumbnailToastTime(val) { thumbnailState.progress.lastToastTime = val; }
+
+  get metadataTargetCount() { return thumbnailState.metadataProgress.targetCount; }
+  set metadataTargetCount(val) { thumbnailState.metadataProgress.targetCount = val; }
+
+  get metadataCompleted() { return thumbnailState.metadataProgress.completed; }
+  set metadataCompleted(val) { thumbnailState.metadataProgress.completed = val; }
 
   /**
    * Rust側のSource of Truthにソート・検索条件を送信し、フィルタリング後の件数を取得します。

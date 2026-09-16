@@ -20,7 +20,7 @@
 //    5秒間隔で可視DOMを巡回し、読み込みスタック状態の要素を自動検知して再キュー。
 // ============================================================================
 
-import { appState } from './renderer-state.js';
+import { appState, thumbnailState } from './renderer-state.js';
 import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL } from './renderer-ui.js';
 import { getStreamUrl, debounce } from '../common/utils.js';
 
@@ -445,13 +445,13 @@ export const thumbnailWorkerPool = new ThumbnailWorkerPool();
 
 // Phase 4: Context Cleanup Strictness
 export function cleanupContext() {
-  if (appState && appState.thumbnailUrls) {
-    appState.thumbnailUrls.forEach(url => {
+  if (thumbnailState && thumbnailState.urls) {
+    thumbnailState.urls.forEach(url => {
       if (url && url.startsWith('blob:')) {
         URL.revokeObjectURL(url);
       }
     });
-    appState.thumbnailUrls.clear();
+    thumbnailState.urls.clear();
   }
   if (window.thumbnailManager) window.thumbnailManager.clear();
   
@@ -460,32 +460,26 @@ export function cleanupContext() {
   if (uiMgr && uiMgr._domByPath) uiMgr._domByPath.clear();
 
   // フォルダ移動時は以前のフォルダの再構築状態を確実に破棄する
-  if (appState) {
-    if (appState.rebuiltPaths) {
-      appState.rebuiltPaths.clear();
-      appState.rebuiltPaths = null;
-    }
-    appState.thumbnailTotalRequested = 0;
-    appState.thumbnailCompleted = 0;
-    if (appState.thumbnailCounted) {
-      appState.thumbnailCounted.clear();
-    }
+  if (appState && appState.rebuiltPaths) {
+    appState.rebuiltPaths.clear();
+    appState.rebuiltPaths = null;
   }
+  thumbnailState.resetProgress();
 }
 
 
 export const evictThumbnailCache = debounce((maxSize = 2000) => {
-  if (!appState || !appState.thumbnailUrls || appState.thumbnailUrls.size <= maxSize) return;
-  const toDelete = appState.thumbnailUrls.size - maxSize;
+  if (!thumbnailState || !thumbnailState.urls || thumbnailState.urls.size <= maxSize) return;
+  const toDelete = thumbnailState.urls.size - maxSize;
   let i = 0;
-  for (const [key, val] of appState.thumbnailUrls) {
+  for (const [key, val] of thumbnailState.urls) {
     // 表示中のアイテムはスキップ
-    if (appState.visiblePathSet && appState.visiblePathSet.has(key)) continue;
+    if (thumbnailState.visiblePathSet && thumbnailState.visiblePathSet.has(key)) continue;
     
     if (val && val.startsWith('blob:')) {
       URL.revokeObjectURL(val);
     }
-    appState.thumbnailUrls.delete(key);
+    thumbnailState.urls.delete(key);
     if (++i >= toDelete) break;
   }
 }, 100);
@@ -495,50 +489,46 @@ const THUMBNAIL_BATCH_SIZE = 8;
 
 export function resetThumbnailPreloader() {
   if (window.thumbnailManager) window.thumbnailManager.resetPreload();
-  appState.preloadCursor = 0;
+  thumbnailState.preloadCursor = 0;
 }
 
 window.markThumbnailCompleted = function markThumbnailCompleted(filePath) {
-  if (filePath && !appState.thumbnailCounted.has(filePath)) {
-    appState.thumbnailCounted.add(filePath);
-    appState.thumbnailCompleted++;
+  if (filePath && !thumbnailState.progress.counted.has(filePath)) {
+    thumbnailState.progress.counted.add(filePath);
+    thumbnailState.progress.completed++;
     window.updateThumbnailToast();
   }
 };
 
 window.updateThumbnailToast = function updateThumbnailToast() {
-  if (appState.thumbnailTotalRequested === 0) return;
+  if (thumbnailState.progress.totalRequested === 0) return;
 
   const now = Date.now();
   const THROTTLE_DELAY = 50; // 50msに1回まで更新を許可
 
   // 最後の更新から十分な時間が経過したか、または最後の1件の時のみUIを更新
-  if (now - appState.lastThumbnailToastTime > THROTTLE_DELAY || appState.thumbnailCompleted >= appState.thumbnailTotalRequested) {
-    appState.lastThumbnailToastTime = now;
+  if (now - thumbnailState.progress.lastToastTime > THROTTLE_DELAY || thumbnailState.progress.completed >= thumbnailState.progress.totalRequested) {
+    thumbnailState.progress.lastToastTime = now;
 
-    if (appState.thumbnailCompleted < appState.thumbnailTotalRequested) {
-      uiManager.showToast(`サムネイル読込中 (${appState.thumbnailCompleted}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress', 'info');
+    if (thumbnailState.progress.completed < thumbnailState.progress.totalRequested) {
+      uiManager.showToast(`サムネイル読込中 (${thumbnailState.progress.completed}/${thumbnailState.progress.totalRequested})`, 0, 'thumbnail-progress', 'info');
       
       // フォールバック: 3秒間進捗がなければ強制的にトーストを消去（スタック防止）
-      clearTimeout(appState.thumbnailToastTimeout);
-      appState.thumbnailToastTimeout = setTimeout(() => {
+      clearTimeout(thumbnailState.progress.toastTimeout);
+      thumbnailState.progress.toastTimeout = setTimeout(() => {
         uiManager.dismissToast('thumbnail-progress');
-        appState.thumbnailTotalRequested = 0;
-        appState.thumbnailCompleted = 0;
-        appState.lastThumbnailToastTime = 0;
+        thumbnailState.resetProgress();
       }, 3000);
     } else {
-      uiManager.showToast(`サムネイル読込完了 (${appState.thumbnailTotalRequested}/${appState.thumbnailTotalRequested})`, 0, 'thumbnail-progress');
-      clearTimeout(appState.thumbnailToastTimeout);
-      appState.thumbnailToastTimeout = setTimeout(() => {
+      uiManager.showToast(`サムネイル読込完了 (${thumbnailState.progress.totalRequested}/${thumbnailState.progress.totalRequested})`, 0, 'thumbnail-progress');
+      clearTimeout(thumbnailState.progress.toastTimeout);
+      thumbnailState.progress.toastTimeout = setTimeout(() => {
         uiManager.dismissToast('thumbnail-progress');
-        appState.thumbnailTotalRequested = 0;
-        appState.thumbnailCompleted = 0;
-        appState.lastThumbnailToastTime = 0;
+        thumbnailState.resetProgress();
       }, 1000);
     }
   }
-}
+};
 
 // 個別タスクのタイムアウト付きサムネイル取得
 function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
