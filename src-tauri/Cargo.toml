@@ -73,7 +73,8 @@ opt-level = 2
 # samplyを使うときは以下1行を無効にする
 strip = true
 
-opt-level = "s"
+# 実行速度を最優先（最高速・ループ展開・積極的インライン化）に設定
+opt-level = 3
 lto = "fat"
 codegen-units = 1
 panic = "abort"
