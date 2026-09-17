@@ -245,4 +245,71 @@ describe('Tabs Functionality', () => {
       expect(appState.tabs[2].id).toBe('tab3');
     });
   });
+
+  describe('Tab Bar Layout & New Tab Button Permanence', () => {
+    let uiManager;
+    let dom;
+
+    beforeEach(() => {
+      // 本番の HTML 構造（#tab-bar 配下に #tab-container と #new-tab-btn が兄弟要素として並ぶ）
+      dom = new JSDOM(
+        '<!DOCTYPE html><html><body>' +
+        '  <div class="titlebar">' +
+        '    <div id="tab-bar">' +
+        '      <div id="tab-container"></div>' +
+        '      <div id="new-tab-btn" class="new-tab-btn"></div>' +
+        '    </div>' +
+        '    <div class="titlebar-controls"><div id="titlebar-tab-list"></div></div>' +
+        '  </div>' +
+        '</body></html>',
+        { url: 'http://localhost' }
+      );
+      global.window = dom.window;
+      global.document = dom.window.document;
+      window.requestAnimationFrame = cb => cb();
+
+      appState.tabs = [
+        { id: 'tab1', path: 'C:/folder1', name: 'folder1' },
+        { id: 'tab2', path: 'C:/folder2', name: 'folder2' },
+        { id: 'tab3', path: 'C:/folder3', name: 'folder3' },
+        { id: 'tab4', path: 'C:/folder4', name: 'folder4' },
+        { id: 'tab5', path: 'C:/folder5', name: 'folder5' }
+      ];
+      appState.activeTabIndex = 0;
+
+      uiManager = new UIManager(appState);
+      uiManager.renderTabs();
+    });
+
+    it('should render tabs inside #tab-container while keeping #new-tab-btn in #tab-bar', () => {
+      const container = document.getElementById('tab-container');
+      const newTabBtn = document.getElementById('new-tab-btn');
+      const tabBar = document.getElementById('tab-bar');
+
+      expect(container).not.toBeNull();
+      expect(newTabBtn).not.toBeNull();
+      expect(tabBar).not.toBeNull();
+
+      // #tab-container の中にタブが5個レンダリングされていること
+      const tabsInContainer = container.querySelectorAll('.tab-item');
+      expect(tabsInContainer.length).toBe(5);
+
+      // #new-tab-btn は #tab-container の中ではなく #tab-bar の直下に存在すること（スクロールから隔離）
+      expect(newTabBtn.parentElement).toBe(tabBar);
+      expect(container.contains(newTabBtn)).toBe(false);
+    });
+
+    it('should correctly handle tab additions and updates without affecting #new-tab-btn', () => {
+      const container = document.getElementById('tab-container');
+      const newTabBtn = document.getElementById('new-tab-btn');
+
+      // 新しいタブを追加して再レンダリング
+      appState.tabs.push({ id: 'tab6', path: 'C:/folder6', name: 'folder6', isNew: true });
+      uiManager.renderTabs();
+
+      const tabsInContainer = container.querySelectorAll('.tab-item');
+      expect(tabsInContainer.length).toBe(6);
+      expect(container.contains(newTabBtn)).toBe(false);
+    });
+  });
 });

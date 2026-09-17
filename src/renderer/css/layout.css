@@ -809,16 +809,25 @@ table#file-table {
 
 
 /* --- タブのスタイル --- */
-#tab-container {
+#tab-bar {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 8px;
-  right: 192px;
+  right: 204px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
   -webkit-app-region: no-drag;
   background-color: transparent !important;
-  /* タイトルバーの背景を透過させて右上ボタンと統一 */
-  padding: 8px 12px 0 12px !important;
+  height: 40px;
+  max-height: 40px;
+}
+
+#tab-container {
+  position: relative;
+  background-color: transparent !important;
+  padding: 8px 0 0 0 !important;
   display: flex !important;
   gap: 0px !important;
   border-bottom: none !important;
@@ -830,6 +839,8 @@ table#file-table {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 #tab-container::-webkit-scrollbar {
@@ -1045,9 +1056,10 @@ table#file-table {
   max-width: 28px;
   padding: 0;
   margin-left: 8px;
-  margin-right: 12px;
+  margin-right: 8px;
   /* 右側のコントロール群としっかり隙間を空ける */
   align-self: center;
+  flex-shrink: 0;
   background: transparent !important;
   /* グレーの背景を完全に排除 */
   border: none !important;

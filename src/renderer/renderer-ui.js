@@ -467,14 +467,14 @@ class UIManager {
           if (window.onTabMove) window.onTabMove(parseInt(fromIndexStr, 10), parseInt(tabEl.dataset.index, 10), e.clientX >= midX);
         });
 
-        if (newTabBtn) {
+        if (newTabBtn && newTabBtn.parentNode === container) {
           container.insertBefore(tabEl, newTabBtn);
         } else {
           container.appendChild(tabEl);
         }
       } else {
         // Ensure the existing element is moved to the correct visual order
-        if (newTabBtn) {
+        if (newTabBtn && newTabBtn.parentNode === container) {
           container.insertBefore(tabEl, newTabBtn);
         } else {
           container.appendChild(tabEl);

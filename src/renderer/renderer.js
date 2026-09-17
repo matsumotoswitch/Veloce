@@ -2446,22 +2446,26 @@ window.addEventListener('DOMContentLoaded', async () => {
       uiManager.updateTabScrollState();
     });
 
+  }
+
+  const tabBar = document.getElementById('tab-bar') || tabContainer;
+  if (tabBar) {
     // --- イベント委譲(Event Delegation)によるタブ追加ボタンの制御 ---
-    // renderTabsによってボタンが再生成されてもイベントが失われないように、親要素でイベントを捕捉する
-    tabContainer.addEventListener('click', (e) => {
+    // タブバー配下にボタンが配置されていても確実にイベントを捕捉する
+    tabBar.addEventListener('click', (e) => {
       if (e.target.closest('#new-tab-btn')) {
         uiManager.hideCustomTooltip();
         if (window.onNewTabClick) window.onNewTabClick();
       }
     });
 
-    tabContainer.addEventListener('mouseover', (e) => {
+    tabBar.addEventListener('mouseover', (e) => {
       if (e.target.closest('#new-tab-btn')) {
         uiManager.showCustomTooltip('新しいタブを開く', e.clientX, e.clientY);
       }
     });
 
-    tabContainer.addEventListener('mouseout', (e) => {
+    tabBar.addEventListener('mouseout', (e) => {
       if (e.target.closest('#new-tab-btn')) {
         uiManager.hideCustomTooltip();
       }
