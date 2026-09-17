@@ -165,4 +165,23 @@ describe('Smart Folder Feature', () => {
     expect(newSf.conditions).toEqual(sf.conditions);
     expect(newSf.conditions).not.toBe(sf.conditions); // ディープコピーであることを確認
   });
+
+  it('should maintain sufficient width for condition dropdowns so labels are never clipped', () => {
+    // layout.css のルールを検証
+    const fs = require('fs');
+    const path = require('path');
+    const layoutCss = fs.readFileSync(path.resolve(__dirname, '../src/renderer/css/layout.css'), 'utf-8');
+
+    // .sf-condition-row .cond-type-select または .sf-cond-type-dim が 170px 以上の固定幅/min-width を持つこと
+    expect(layoutCss).toMatch(/\.cond-type-select[\s\S]*?width:\s*(17[0-9]|18[0-9]|19[0-9]|200)px/);
+    expect(layoutCss).toMatch(/\.cond-type-select[\s\S]*?min-width:\s*(17[0-9]|18[0-9]|19[0-9]|200)px/);
+
+    // .sf-condition-row .cond-op-select または .sf-cond-op-dim が 145px 以上の固定幅/min-width を持つこと
+    expect(layoutCss).toMatch(/\.cond-op-select[\s\S]*?width:\s*(1[4-9][0-9]|200)px/);
+    expect(layoutCss).toMatch(/\.cond-op-select[\s\S]*?min-width:\s*(1[4-9][0-9]|200)px/);
+
+    // flex-shrink: 0 で縮まないように保護されていること
+    expect(layoutCss).toMatch(/\.cond-type-select[\s\S]*?flex-shrink:\s*0/);
+    expect(layoutCss).toMatch(/\.cond-op-select[\s\S]*?flex-shrink:\s*0/);
+  });
 });

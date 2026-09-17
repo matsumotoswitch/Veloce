@@ -1182,14 +1182,21 @@ table#file-table {
   align-items: center;
 }
 
-.sf-cond-type-dim {
-  width: 160px;
+/* スマートフォルダ条件行のドロップダウン：詳細度を上げて components.css の .custom-select (88px) による上書きを防止し、文言が常に完全表示される幅を確保 */
+.sf-condition-row .cond-type-select,
+.sf-cond-row-layout .sf-cond-type-dim {
+  width: 175px;
+  min-width: 175px;
   height: 32px;
+  flex-shrink: 0;
 }
 
-.sf-cond-op-dim {
-  width: 130px;
+.sf-condition-row .cond-op-select,
+.sf-cond-row-layout .sf-cond-op-dim {
+  width: 150px;
+  min-width: 150px;
   height: 32px;
+  flex-shrink: 0;
 }
 
 .sf-cond-val-box {
@@ -1197,6 +1204,7 @@ table#file-table {
   flex: 1;
   gap: 4px;
   align-items: center;
+  min-width: 0;
 }
 
 .flex-1 {

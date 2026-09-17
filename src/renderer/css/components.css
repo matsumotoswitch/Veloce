@@ -776,12 +776,15 @@ th[data-sort] svg path {
 .custom-select-label {
   margin-right: 8px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .custom-select-arrow {
   color: var(--text-color);
   transition: transform 0.2s var(--transition-fast);
   transform: scale(1.2);
+  flex-shrink: 0;
 }
 
 .custom-select.open .custom-select-arrow {
