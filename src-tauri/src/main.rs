@@ -418,7 +418,7 @@ fn build_smart_folder_query_with_sort(
                         clause = "c.searchable_prompt LIKE ? ESCAPE '\\'".to_string();
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else if cond.operator == "not_contains" {
-                        clause = "c.searchable_negative_prompt NOT LIKE ? ESCAPE '\\'".to_string();
+                        clause = "c.searchable_prompt NOT LIKE ? ESCAPE '\\'".to_string();
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else { clause = "1=1".to_string(); }
                 } else {
@@ -5300,6 +5300,16 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_first_number() {
+        assert_eq!(extract_first_number("01_test.png"), Some(1));
+        assert_eq!(extract_first_number("123.jpg"), Some(123));
+        assert_eq!(extract_first_number("abc-0042-xyz"), Some(42));
+        assert_eq!(extract_first_number("no_numbers.png"), None);
+        assert_eq!(extract_first_number(""), None);
+        assert_eq!(extract_first_number("99999999999999999999999"), Some(u64::MAX));
+    }
+
+    #[test]
     fn test_natural_cmp() {
         assert_eq!(natural_cmp("1.png", "2.png"), Ordering::Less);
         assert_eq!(natural_cmp("2.png", "10.png"), Ordering::Less);
@@ -5308,6 +5318,9 @@ mod tests {
         assert_eq!(natural_cmp("v1.2", "v1.10"), Ordering::Less);
         assert_eq!(natural_cmp("a", "b"), Ordering::Less);
         assert_eq!(natural_cmp("A", "b"), Ordering::Less); // Case insensitive
+        assert_eq!(natural_cmp("file1", "file01"), Ordering::Equal);
+        assert_eq!(natural_cmp("img_9.png", "img_10.png"), Ordering::Less);
+        assert_eq!(natural_cmp("abc", "abd"), Ordering::Less);
     }
 
     #[test]
