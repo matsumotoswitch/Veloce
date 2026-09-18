@@ -330,6 +330,11 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
       const originalDir = await path.dirname(action.sourcePath);
       const result = await window.veloceAPI.moveOrCopyFile(action.targetPath, originalDir, 'move');
       if (result.success) {
+        if (appState && appState.ratings && appState.ratings[action.targetPath] !== undefined) {
+          const restoredPath = result.targetPath || action.sourcePath;
+          appState.ratings[restoredPath] = appState.ratings[action.targetPath];
+          delete appState.ratings[action.targetPath];
+        }
         uiManager.showToast('ファイルの移動を元に戻しました', 3000, 'undo', 'success');
         if (callbacks.scheduleRefresh) callbacks.scheduleRefresh();
       }

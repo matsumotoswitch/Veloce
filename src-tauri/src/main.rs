@@ -3872,6 +3872,62 @@ async fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
 
 
 
+/// ファイルの移動またはリネームに伴い、SQLite データベース内のキャッシュ・レーティング情報および
+/// メモリ上のレーティングマップを新しいファイルパスへ同期・アトミックに引き継ぐ。
+///
+/// 1. `ratings` テーブル内のパスレコードを新パスへ更新。
+/// 2. `cache` テーブルから旧パスの mtime と hash_key を取得し、新パスに基づく xxHash (xxh3_64) で
+///    新 hash_key を算出してレコードを更新。
+/// 3. メモリ上の `state.ratings` マップから旧キーを削除し、新キーへ登録。
+pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) {
+    let old_clean = normalize_unc_path(old_path).into_owned();
+    let new_clean = normalize_unc_path(new_path).into_owned();
+
+    // DBのレーティング更新
+    if let Ok(conn) = state.db_conn.get() {
+        let _ = conn.execute(
+            "UPDATE ratings SET path = ?1 WHERE path = ?2 COLLATE NOCASE OR path = ?3 COLLATE NOCASE",
+            rusqlite::params![&new_clean, old_path, &old_clean],
+        );
+
+        // キャッシュテーブルのパスおよび hash_key の引き継ぎ
+        if let Ok(mut stmt) = conn.prepare("SELECT mtime, hash_key FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE") {
+            if let Ok(mut rows) = stmt.query(rusqlite::params![old_path, &old_clean]) {
+                if let Ok(Some(row)) = rows.next() {
+                    let mtime: u64 = row.get(0).unwrap_or(0);
+                    let old_hash_key: String = row.get(1).unwrap_or_default();
+
+                    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", new_clean, mtime).as_bytes());
+                    let new_hash_key = format!("{:016x}", digest);
+
+                    let _ = conn.execute(
+                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
+                        rusqlite::params![&new_clean, &new_hash_key, &old_hash_key],
+                    );
+                }
+            }
+        }
+    }
+
+    // メモリ上のレーティングキャッシュの同期
+    if let Ok(mut lock) = state.ratings.lock() {
+        let rating = lock.remove(old_path).or_else(|| lock.remove(&old_clean));
+        if let Some(r) = rating {
+            lock.insert(new_clean.clone(), r);
+            if new_path != new_clean {
+                lock.insert(new_path.to_string(), r);
+            }
+        }
+    }
+}
+
+/// ファイル移動（ドラッグ＆ドロップ、Undo操作等）に伴う SQLite キャッシュおよびレーティング同期用 Tauri コマンド
+#[tauri::command]
+async fn sync_file_move(state: tauri::State<'_, AppState>, old_path: String, new_path: String) -> Result<(), String> {
+    sync_path_rename_in_db(&state, &old_path, &new_path);
+    Ok(())
+}
+
 #[tauri::command]
 async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_name: String) -> Result<String, String> {
     let old_path_clone = old_path.clone();
@@ -3909,36 +3965,8 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
     .await
     .unwrap_or_else(|e| Err(e.to_string()))?;
 
-    // DBとメモリのレーティングのパスを更新
-    if let Ok(conn) = state.db_conn.get() {
-        let _ = conn.execute(
-            "UPDATE ratings SET path = ?1 WHERE path = ?2",
-            rusqlite::params![&new_path_str, &old_path_clone],
-        );
-        
-        // キャッシュも新しいパスに引き継ぐ
-        if let Ok(mut stmt) = conn.prepare("SELECT mtime, hash_key FROM cache WHERE path = ? COLLATE NOCASE") {
-            if let Ok(mut rows) = stmt.query([&old_path_clone]) {
-                if let Ok(Some(row)) = rows.next() {
-                    let mtime: u64 = row.get(0).unwrap_or(0);
-                    let old_hash_key: String = row.get(1).unwrap_or_default();
-                    
-                    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", new_path_str, mtime).as_bytes());
-                    let new_hash_key = format!("{:016x}", digest);
-                    
-                    let _ = conn.execute(
-                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
-                        rusqlite::params![&new_path_str, &new_hash_key, &old_hash_key],
-                    );
-                }
-            }
-        }
-    }
-    if let Ok(mut lock) = state.ratings.lock() {
-        if let Some(rating) = lock.remove(&old_path_clone) {
-            lock.insert(new_path_str.clone(), rating);
-        }
-    }
+    // DBとメモリのレーティング・キャッシュのパスを更新
+    sync_path_rename_in_db(&state, &old_path_clone, &new_path_str);
 
     Ok(new_path_str)
 }
@@ -5230,6 +5258,7 @@ fn main() {
             copy_image_to_clipboard,
             get_license_text,
             rename_file,
+            sync_file_move,
             rename_folder,
             open_cache_folder,
             clear_cache,
@@ -8249,6 +8278,120 @@ mod viewer_tests {
             "コネクション枯渇・ロック競合時でも、指定タイムアウト内に安全に復帰すること。所要時間: {:?}",
             elapsed
         );
+    }
+
+    #[test]
+    fn test_sync_file_move_in_db() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_sync_move.db");
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path).with_init(|conn| {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS ratings (path TEXT PRIMARY KEY, rating INTEGER);
+                 CREATE TABLE IF NOT EXISTS cache (
+                     hash_key TEXT PRIMARY KEY,
+                     thumbnail BLOB,
+                     metadata TEXT,
+                     path TEXT,
+                     size INTEGER,
+                     mtime INTEGER,
+                     ctime INTEGER,
+                     width INTEGER,
+                     height INTEGER,
+                     prompt TEXT,
+                     negative_prompt TEXT,
+                     source TEXT,
+                     searchable_prompt TEXT,
+                     searchable_negative_prompt TEXT,
+                     last_accessed INTEGER
+                 );",
+            )
+        });
+        let pool = r2d2::Pool::builder().max_size(2).build(manager).unwrap();
+
+        let old_path = "C:\\images\\sub\\sample.png";
+        let new_path = "C:\\images\\moved\\sample.png";
+        let mtime: u64 = 1700000000;
+        let old_hash = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", old_path, mtime).as_bytes()));
+        let dummy_thumb: Vec<u8> = vec![10, 20, 30, 40];
+
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "INSERT INTO ratings (path, rating) VALUES (?1, ?2)",
+                rusqlite::params![old_path, 4],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![old_hash, dummy_thumb, old_path, mtime as i64, 1000],
+            ).unwrap();
+        }
+
+        let mut ratings_map = std::collections::HashMap::new();
+        ratings_map.insert(old_path.to_string(), 4);
+
+        let app_state = AppState {
+            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
+            current_dir: Mutex::new(String::new()),
+            viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
+            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
+            all_files: Mutex::new(Vec::new()),
+            filtered_files: Mutex::new(Vec::new()),
+            sort_config: Mutex::new(super::SortConfig {
+                key: "name".to_string(),
+                asc: true,
+            }),
+            search_query: Mutex::new(String::new()),
+            ratings: Mutex::new(ratings_map),
+            rating_filter_val: Mutex::new(0),
+            rating_filter_op: Mutex::new("gte".to_string()),
+            db_conn: pool,
+            smart_folders: Mutex::new(Vec::new()),
+            db_tx: tokio::sync::mpsc::channel(1).0,
+            video_server_port: 0,
+        };
+
+        sync_path_rename_in_db(&app_state, old_path, new_path);
+
+        // 検証1: DB ratings
+        let conn = app_state.db_conn.get().unwrap();
+        let old_rating_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM ratings WHERE path = ?1",
+            rusqlite::params![old_path],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(old_rating_count, 0, "旧パスのレーティングは削除されていること");
+
+        let new_rating: i64 = conn.query_row(
+            "SELECT rating FROM ratings WHERE path = ?1",
+            rusqlite::params![new_path],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(new_rating, 4, "新パスにレーティング値が引き継がれていること");
+
+        // 検証2: DB cache
+        let old_cache_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cache WHERE hash_key = ?1",
+            rusqlite::params![old_hash],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(old_cache_count, 0, "旧ハッシュキーのキャッシュは更新されていること");
+
+        let expected_new_hash = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", new_path, mtime).as_bytes()));
+        let (cached_path, cached_thumb): (String, Vec<u8>) = conn.query_row(
+            "SELECT path, thumbnail FROM cache WHERE hash_key = ?1",
+            rusqlite::params![expected_new_hash],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(cached_path, new_path, "キャッシュのパスが新パスになっていること");
+        assert_eq!(cached_thumb, vec![10, 20, 30, 40], "キャッシュのサムネイルデータが保持されていること");
+
+        // 検証3: メモリ上の ratings
+        let lock = app_state.ratings.lock().unwrap();
+        assert!(!lock.contains_key(old_path), "メモリ上から旧パスが削除されていること");
+        assert_eq!(lock.get(new_path).copied(), Some(4), "メモリ上で新パスにレーティングが反映されていること");
     }
 }
 

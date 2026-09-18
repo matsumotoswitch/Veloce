@@ -47,6 +47,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(parentDir: string, folderName: string) => Promise<{success: boolean, path?: string, error?: string}>} createFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
+ * @property {(oldPath: string, newPath: string) => Promise<void>} syncFileMove
  * @property {(folderPath: string) => Promise<{success: boolean, error?: string}>} trashFolder
  * @property {(sourcePath: string, targetDir: string, intent?: 'auto'|'copy'|'move') => Promise<{success: boolean, action: string, reason: string|null}>} moveOrCopyFile
  * @property {(paths: string[], destDir: string) => Promise<string[]>} checkConflicts
@@ -327,11 +328,18 @@ window.veloceAPI = {
    */
   trashFolder: (folderPath) => invoke('trash_folder', { folderPath }),
   /**
+   * ファイル移動に伴い、SQLite キャッシュおよびレーティングのパスを引き継ぎます。
+   * @param {string} oldPath - 移動前のファイルパス。
+   * @param {string} newPath - 移動後のファイルパス。
+   * @returns {Promise<void>}
+   */
+  syncFileMove: (oldPath, newPath) => invoke('sync_file_move', { oldPath, newPath }),
+  /**
    * ファイルを指定ディレクトリに移動またはコピーします。
    * @param {string} sourcePath - 元のファイルパス。
    * @param {string} targetDir - ドロップ先のディレクトリパス。
    * @param {'auto' | 'copy' | 'move'} [intent='auto'] - 強制的に実行するアクション
-   * @returns {Promise<object>} 処理結果 { success, action }。
+   * @returns {Promise<object>} 処理結果 { success, action, targetPath, reason }。
    */
   moveOrCopyFile: async (sourcePath, targetDir, intent = 'auto') => {
     const { fs, path } = window.__TAURI__;
@@ -364,6 +372,12 @@ window.veloceAPI = {
             // removeFileも失敗した場合は invoke('trash_file') でゴミ箱送りを試みる
             await invoke('trash_file', { filePath: sourcePath });
           }
+        }
+        // 移動成功時、SQLite のキャッシュおよびレーティングのパスをアトミックに同期
+        try {
+          await invoke('sync_file_move', { oldPath: sourcePath, newPath: targetPath });
+        } catch (syncErr) {
+          console.error('Failed to sync file move in DB:', syncErr);
         }
       }
       return { success: true, action, targetPath, reason: null };

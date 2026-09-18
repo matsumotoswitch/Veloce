@@ -366,6 +366,10 @@ export function initDirTreeDnd(dirTreeElement, callbacks = {}) {
           if (result && result.success) {
             successCount++;
             if (result.action === 'move') {
+              if (appState && appState.ratings && appState.ratings[p] !== undefined) {
+                appState.ratings[result.targetPath] = appState.ratings[p];
+                delete appState.ratings[p];
+              }
               fileOpsState.push({ type: 'MOVE_FILE', sourcePath: p, targetPath: result.targetPath });
             } else if (result.action === 'copy') {
               fileOpsState.push({ type: 'COPY_FILE', sourcePath: p, targetPath: result.targetPath });

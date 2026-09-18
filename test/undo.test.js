@@ -60,4 +60,26 @@ describe('Undo Functionality', () => {
     expect(window.veloceAPI.moveOrCopyFile).toHaveBeenCalledWith('/dest/file.png', '/source', 'move');
     expect(appState.undoStack.length).toBe(0);
   });
+
+  it('should pop and perform undo for MOVE_FILE and restore ratings in appState', async () => {
+    appState.ratings = { '/dest/file.png': 3 };
+    appState.undoStack.push({
+      type: 'MOVE_FILE',
+      sourcePath: '/source/file.png',
+      targetPath: '/dest/file.png'
+    });
+
+    window.veloceAPI.moveOrCopyFile.mockResolvedValue({
+      success: true,
+      action: 'move',
+      targetPath: '/source/file.png'
+    });
+
+    await performUndo();
+
+    expect(window.veloceAPI.moveOrCopyFile).toHaveBeenCalledWith('/dest/file.png', '/source', 'move');
+    expect(appState.ratings['/source/file.png']).toBe(3);
+    expect(appState.ratings['/dest/file.png']).toBeUndefined();
+    expect(appState.undoStack.length).toBe(0);
+  });
 });

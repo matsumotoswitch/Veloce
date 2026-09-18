@@ -156,6 +156,36 @@ describe('renderer-dnd.js - Drag and Drop Management', () => {
       item.dispatchEvent(new Event('dragleave', { bubbles: true }));
       expect(item.classList.contains('drop-target')).toBe(false);
     });
+
+    it('moves file and transfers rating to targetPath in appState.ratings', async () => {
+      const dirTree = document.getElementById('dir-tree');
+      initDirTreeDnd(dirTree);
+
+      appState.ratings = { 'C:/Photos/img1.png': 5 };
+      appState.dragState.paths = ['C:/Photos/img1.png'];
+      appState.dragState.isAppDragging = true;
+
+      window.veloceAPI.moveOrCopyFile.mockResolvedValue({
+        success: true,
+        action: 'move',
+        targetPath: 'C:/Dest/img1.png'
+      });
+
+      const item = dirTree.querySelector('.tree-item[data-path="C:/Photos"]');
+      const dropEvent = new Event('drop', { bubbles: true });
+      dropEvent.dataTransfer = {
+        types: ['text/plain'],
+        getData: vi.fn(() => 'C:/Photos/img1.png')
+      };
+      item.dispatchEvent(dropEvent);
+
+      // drop ハンドラー内の非同期 getPathsFromDragEventAsync と setTimeout を待機
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(window.veloceAPI.moveOrCopyFile).toHaveBeenCalledWith('C:/Photos/img1.png', 'C:/Photos', 'auto');
+      expect(appState.ratings['C:/Dest/img1.png']).toBe(5);
+      expect(appState.ratings['C:/Photos/img1.png']).toBeUndefined();
+    });
   });
 
   describe('initFavoritesDnd', () => {
