@@ -191,4 +191,63 @@ describe('Virtual Scroll Reflow Optimization', () => {
       }
     }
   });
+
+  it('updateVirtualList should synchronize appState.visiblePathSet with visible items in list mode', async () => {
+    appState.totalCount = 30;
+    appState.selection = new Set();
+    appState.ratings = {};
+    appState.dragState = { isAppDragging: false };
+    appState.initialChunk = null;
+    appState.savedScrollTopList = 0;
+    appState.visiblePathSet = new Set();
+
+    const files = Array.from({ length: 30 }, (_, i) => ({
+      path: `C:/files/list_file_${i}.png`,
+      name: `list_file_${i}.png`,
+      ext: '.png',
+      size: 2048,
+      mtime: 2000
+    }));
+
+    window.veloceAPI = {
+      getItems: vi.fn().mockImplementation((offset, limit) => Promise.resolve(files.slice(offset, offset + limit)))
+    };
+
+    const ui = new UIManager(appState);
+    const container = document.createElement('div');
+    container.id = 'center-top';
+    Object.defineProperty(container, 'clientHeight', { value: 280, configurable: true }); // ~10 rows visible
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const tbody = document.createElement('tbody');
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    ui.elements.fileListBody = tbody;
+
+    const originalGetElementById = document.getElementById;
+    document.getElementById = (id) => {
+      if (id === 'center-top') return container;
+      return originalGetElementById.call(document, id);
+    };
+
+    try {
+      await ui.updateVirtualList(true);
+
+      expect(appState.visiblePathSet).toBeInstanceOf(Set);
+      expect(appState.visiblePathSet.size).toBeGreaterThan(0);
+      expect(appState.visiblePathSet.has('C:/files/list_file_0.png')).toBe(true);
+
+      // totalCount が 0 になったとき、visiblePathSet がクリアされること
+      appState.totalCount = 0;
+      await ui.updateVirtualList(true);
+      expect(appState.visiblePathSet.size).toBe(0);
+    } finally {
+      document.getElementById = originalGetElementById;
+    }
+  });
 });
+

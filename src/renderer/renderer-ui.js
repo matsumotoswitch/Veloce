@@ -1412,6 +1412,8 @@ class UIManager {
 
     if (appState.totalCount === 0) {
       tbody.replaceChildren();
+      if (this._listDomByPath) this._listDomByPath.clear();
+      appState.visiblePathSet = new Set();
       this.lastListStartIndex = -1;
       this.lastListEndIndex = -1;
       return;
@@ -1573,6 +1575,15 @@ class UIManager {
       }
     }
 
+    // visiblePathSet を _listDomByPath から構築（リスト表示モード時の可視パス集合同期）
+    const newVisibleSet = new Set();
+    if (this._listDomByPath) {
+      for (const fp of this._listDomByPath.keys()) {
+        newVisibleSet.add(fp);
+      }
+    }
+    appState.visiblePathSet = newVisibleSet;
+
     // スクロール位置を同期復元する場合のみレイアウトを確定させ、ジャンプ時の描画遅延を防止（通常スクロール時の不要Reflowを排除）
     if (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) {
       void tbody.offsetHeight;
@@ -1621,6 +1632,8 @@ class UIManager {
 
     if (appState.totalCount === 0) {
       content.replaceChildren();
+      if (this._domByPath) this._domByPath.clear();
+      appState.visiblePathSet = new Set();
       spacer.style.height = '0px';
       const emptyContainer = container.querySelector('.empty-state-container');
       if (emptyContainer) {
