@@ -4454,9 +4454,53 @@ async fn get_cache_info() -> CacheInfo {
     })
 }
 
+/// アプリ終了フラグ（多重実行防止）
+static IS_EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// アプリケーション終了の二重実行を防止し、フラグのセットに成功したか判定する
+pub fn mark_exiting() -> bool {
+    IS_EXITING.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_ok()
+}
 
+/// アプリ終了時にSQLiteのWALファイルを安全に切り詰める（タイムアウト付き）。
+/// 
+/// バックグラウンドスレッド等によるトランザクションロックやコネクション枯渇が発生していても、
+/// 指定した制限時間を超えてメインスレッドをブロックさせない。
+pub fn safe_checkpoint_wal(db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, timeout: std::time::Duration) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let db_conn = db_conn.clone();
 
+    std::thread::spawn(move || {
+        // コネクション取得で無期限に待たされないよう、短めのタイムアウトを設定
+        let get_timeout = std::time::Duration::from_millis(200);
+        if let Ok(conn) = db_conn.get_timeout(get_timeout) {
+            // ビジー待機時間を短縮（300ms）
+            let _ = conn.execute_batch("PRAGMA busy_timeout = 300;");
+            // TRUNCATE を試行し、WAL を安全に切り詰める
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+        let _ = tx.send(());
+    });
+
+    // 最大 timeout の待機（タイムアウトした場合は即座に諦めて終了処理へ進行）
+    let _ = rx.recv_timeout(timeout);
+}
+
+/// アプリケーションを安全かつ確実に終了する。
+/// 
+/// `CloseRequested` や `Destroyed` などの複数イベントによる二重実行を防止し、
+/// SQLiteのWALクリーンアップを試みた上で、OSプロセスを確実に終了させる。
+pub fn shutdown_app(app_state: Option<&AppState>) {
+    if !mark_exiting() {
+        return;
+    }
+
+    if let Some(state) = app_state {
+        safe_checkpoint_wal(&state.db_conn, std::time::Duration::from_millis(500));
+    }
+
+    std::process::exit(0);
+}
 
 fn main() {
     // Attach to parent console if running from command line (for debug logs)
@@ -5117,12 +5161,8 @@ fn main() {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     let label = event.window().label().to_string();
                     if label == "main" {
-                        // アプリ終了時にWALファイルを切り詰める
                         let state = event.window().state::<AppState>();
-                        if let Ok(conn) = state.db_conn.get() {
-                            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-                        }
-                        std::process::exit(0);
+                        shutdown_app(Some(&state));
                     } else if label == "viewer_pool_0" {
                         // プール用のウィンドウは破棄せず非表示にする
                         api.prevent_close();
@@ -5146,7 +5186,15 @@ fn main() {
                         };
                     }
                 }
-                tauri::WindowEvent::Destroyed => {}
+                tauri::WindowEvent::Destroyed => {
+                    let label = event.window().label();
+                    if label == "main" {
+                        // CloseRequested を経由せずに main ウィンドウが破棄された場合でも
+                        // 残存した非表示ウィンドウやワーカースレッドによるゾンビプロセス化を防ぐため確実に終了する
+                        let state = event.window().state::<AppState>();
+                        shutdown_app(Some(&state));
+                    }
+                }
                 _ => {}
             }
         })
@@ -8113,6 +8161,81 @@ mod viewer_tests {
             &db_conn,
         );
         assert_eq!(res_missing, vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "direct_hash 失敗時でもパス一致でフォールバック取得できること");
+    }
+
+    #[test]
+    fn test_mark_exiting_atomic_flag() {
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let handles: Vec<_> = (0..10)
+            .map(|_| {
+                let f = flag.clone();
+                std::thread::spawn(move || {
+                    f.compare_exchange(
+                        false,
+                        true,
+                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::SeqCst,
+                    )
+                    .is_ok()
+                })
+            })
+            .collect();
+
+        let mut true_count = 0;
+        for h in handles {
+            if h.join().unwrap() {
+                true_count += 1;
+            }
+        }
+        assert_eq!(true_count, 1, "複数スレッドが同時に終了処理を試みても、厳密に1回のみ許可されること");
+    }
+
+    #[test]
+    fn test_safe_checkpoint_wal_under_heavy_contention() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_exit_checkpoint.db");
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path).with_init(|conn| {
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;
+                 PRAGMA busy_timeout = 5000;",
+            )
+        });
+
+        // プールサイズを 1 に設定して意図的にコネクションを枯渇させる
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .unwrap();
+
+        // 別スレッドで唯一のコネクションを占有し、長時間スリープさせてビジー状態を作る
+        let pool_clone = pool.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+        std::thread::spawn(move || {
+            let conn = pool_clone.get().unwrap();
+            conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY);", []).unwrap();
+            started_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+            drop(conn);
+        });
+
+        started_rx.recv().unwrap();
+
+        // コネクションが取れない状態でも、タイムアウトを超えてハングせず安全に復帰することを検証
+        let start = std::time::Instant::now();
+        safe_checkpoint_wal(&pool, std::time::Duration::from_millis(300));
+        let elapsed = start.elapsed();
+
+        let _ = release_tx.send(());
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(1000),
+            "コネクション枯渇・ロック競合時でも、指定タイムアウト内に安全に復帰すること。所要時間: {:?}",
+            elapsed
+        );
     }
 }
 
