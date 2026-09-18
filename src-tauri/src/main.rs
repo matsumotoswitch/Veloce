@@ -5249,7 +5249,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::natural_cmp;
+    use super::{extract_first_number, natural_cmp};
     use std::cmp::Ordering;
 
     #[test]

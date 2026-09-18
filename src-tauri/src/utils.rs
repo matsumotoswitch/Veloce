@@ -57,6 +57,29 @@ pub fn natural_cmp(s1: &str, s2: &str) -> Ordering {
     }
 }
 
+/// 文字列から最初に出現する連続した数値シーケンスを抽出し u64 として返却する
+/// （オーバーフロー時は u64::MAX に飽和）
+pub fn extract_first_number(s: &str) -> Option<u64> {
+    let mut num_str = String::new();
+    let mut in_number = false;
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            in_number = true;
+            num_str.push(c);
+        } else if in_number {
+            break;
+        }
+    }
+    if num_str.is_empty() {
+        None
+    } else {
+        match num_str.parse::<u64>() {
+            Ok(n) => Some(n),
+            Err(_) => Some(u64::MAX),
+        }
+    }
+}
+
 /// UNC プレフィックス (`\\?\`) を除去したスライスを返却する
 #[inline]
 pub fn strip_unc_prefix(path: &str) -> Option<&str> {
