@@ -7,6 +7,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
   let selectImage;
   let renderMultipleSelectionSummary;
   let openDiffModal;
+  let isModalOrOverlayOpen;
   let getSelectionRemoveAllRangesSpy;
 
   beforeAll(async () => {
@@ -42,6 +43,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
     selectImage = renderer.selectImage;
     renderMultipleSelectionSummary = renderer.renderMultipleSelectionSummary;
     openDiffModal = renderer.openDiffModal;
+    isModalOrOverlayOpen = renderer.isModalOrOverlayOpen;
   });
 
   beforeEach(() => {
@@ -430,6 +432,106 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
 
       // ビューアー画面の Esc にオーバーレイを閉じる旨が含まれていること
       expect(helpJs).toContain('<tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>');
+    });
+  });
+
+  describe('Modal & Dialog Shortcut Guard (Section 5)', () => {
+    let dummyDialog;
+
+    afterEach(() => {
+      if (dummyDialog && dummyDialog.parentNode) {
+        dummyDialog.remove();
+        dummyDialog = null;
+      }
+    });
+
+    it('isModalOrOverlayOpen correctly detects open modals and overlays', () => {
+      expect(isModalOrOverlayOpen()).toBe(false);
+
+      dummyDialog = document.createElement('div');
+      dummyDialog.className = 'dialog-overlay show';
+      document.body.appendChild(dummyDialog);
+      expect(isModalOrOverlayOpen()).toBe(true);
+
+      dummyDialog.className = 'dialog-overlay';
+      expect(isModalOrOverlayOpen()).toBe(false);
+    });
+
+    it('guards against 0-5 rating shortcuts when dialog-overlay is open', async () => {
+      dummyDialog = document.createElement('div');
+      dummyDialog.className = 'dialog-overlay show';
+      document.body.appendChild(dummyDialog);
+
+      appState.selectedIndex = 0;
+      appState.selection.add(0);
+
+      const event = new window.KeyboardEvent('keydown', { key: '5', cancelable: true });
+      await globalKeydownHandler(event);
+
+      expect(window.veloceAPI.getFileByIndex).not.toHaveBeenCalled();
+      expect(window.veloceAPI.setRating).not.toHaveBeenCalled();
+    });
+
+    it('guards against Delete key when dialog-overlay is open', async () => {
+      dummyDialog = document.createElement('div');
+      dummyDialog.className = 'dialog-overlay show';
+      document.body.appendChild(dummyDialog);
+
+      appState.selectedIndex = 0;
+      appState.selection.add(0);
+
+      const event = new window.KeyboardEvent('keydown', { key: 'Delete', cancelable: true });
+      await globalKeydownHandler(event);
+
+      expect(window.veloceAPI.trashFile).not.toHaveBeenCalled();
+      expect(window.deleteSelectedFiles).not.toHaveBeenCalled();
+    });
+
+    it('guards against F2 rename when modal is open', async () => {
+      dummyDialog = document.createElement('div');
+      dummyDialog.id = 'diff-modal';
+      dummyDialog.className = 'modal show';
+      document.body.appendChild(dummyDialog);
+
+      appState.selectedIndex = 0;
+      appState.selection.add(0);
+
+      const event = new window.KeyboardEvent('keydown', { key: 'F2', cancelable: true });
+      await globalKeydownHandler(event);
+
+      expect(window.renameSelectedFile).not.toHaveBeenCalled();
+    });
+
+    it('guards against viewer launch (Enter) and arrange (A) when help-overlay is open', async () => {
+      dummyDialog = document.createElement('div');
+      dummyDialog.id = 'help-overlay';
+      document.body.appendChild(dummyDialog);
+
+      appState.selectedIndex = 0;
+
+      const enterEvent = new window.KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+      await globalKeydownHandler(enterEvent);
+
+      const aEvent = new window.KeyboardEvent('keydown', { key: 'a', cancelable: true });
+      await globalKeydownHandler(aEvent);
+
+      expect(window.veloceAPI.arrangeViewers).not.toHaveBeenCalled();
+    });
+
+    it('guards against Diff modal (D) and refresh (F5) when edit-smart-folder-modal is open', async () => {
+      dummyDialog = document.createElement('div');
+      dummyDialog.id = 'edit-smart-folder-modal';
+      dummyDialog.className = 'dialog-overlay show';
+      document.body.appendChild(dummyDialog);
+
+      appState.selection.add(0);
+      appState.selection.add(1);
+
+      const dEvent = new window.KeyboardEvent('keydown', { key: 'd', cancelable: true });
+      await globalKeydownHandler(dEvent);
+
+      expect(uiManager.showDiffModal).not.toHaveBeenCalled();
+      expect(uiManager.showToast).not.toHaveBeenCalled();
     });
   });
 });

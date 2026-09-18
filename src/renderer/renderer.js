@@ -1805,9 +1805,21 @@ if (fileTableHead) {
 }
 
 /**
+ * モーダルやダイアログ、オーバーレイが現在表示中であるかを判定する。
+ * 背景の画像アイテムやフォルダツリーに対するショートカットキー貫通（誤削除、レーティング変更等）を防止するために使用。
+ * @returns {boolean} モーダル・ダイアログ表示中の場合は true
+ */
+export function isModalOrOverlayOpen() {
+  return Boolean(
+    document.querySelector('.modal.show, .dialog-overlay.show, #help-overlay, #license-overlay, #diff-modal.show, #edit-favorite-modal.show, #edit-smart-folder-modal.show')
+  );
+}
+
+/**
  * アプリケーション全体のグローバルキーボードショートカットハンドラー
  * 入力フォームフォーカス時の除外判定、モーダル/ダイアログのEscape優先制御、
- * タブ切り替え、ファイル操作、レーティング、およびグリッド内カーソル移動を統括ルーティングする
+ * モーダル表示中のキー貫通防止ガード、タブ切り替え、ファイル操作、レーティング、
+ * およびグリッド内カーソル移動を統括ルーティングする
  * @param {KeyboardEvent} e - キーイベントオブジェクト
  */
 export const globalKeydownHandler = async (e) => {
@@ -1859,50 +1871,7 @@ export const globalKeydownHandler = async (e) => {
     return;
   }
 
-  // 4. ヘルプオーバーレイのトグル (F1 または H)
-  if (e.key === 'F1' || e.key.toLowerCase() === 'h') {
-    e.preventDefault();
-    toggleHelpOverlay();
-    return;
-  }
-
-  // 5. レーティング設定 (0 〜 5)
-  // 単一または複数選択されたアイテムに対してトグル/更新を適用
-  if (['0', '1', '2', '3', '4', '5'].includes(e.key) && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-    let targetIndices = [];
-    if (appState.selection.size > 0) {
-      targetIndices = Array.from(appState.selection);
-    } else if (appState.selectedIndex !== -1) {
-      targetIndices = [appState.selectedIndex];
-    }
-
-    if (targetIndices.length > 0) {
-      e.preventDefault();
-      const rating = parseInt(e.key, 10);
-
-      // 並列でファイル情報を取得
-      const files = (await Promise.all(
-        targetIndices.map(idx => window.veloceAPI.getFileByIndex(idx))
-      )).filter(Boolean);
-
-      if (files.length > 0) {
-        const allHaveSameRating = files.every(f => (appState.ratings[f.path] || 0) === rating);
-        const newRating = allHaveSameRating ? 0 : rating;
-
-        // 1. IPC待機を待たずにUI側で即座に星表示アニメーションを更新（楽観的UI更新）
-        for (const file of files) {
-          applyRatingUI(file.path, newRating, true);
-        }
-
-        // 2. バックエンドへ並列非同期で永続化保存
-        if (window.veloceAPI.setRating) {
-          await Promise.all(files.map(file => window.veloceAPI.setRating(file.path, newRating)));
-        }
-      }
-      return;
-    }
-  }
-
+  // 4. Escape キーによるダイアログ・モーダル・メニューのクローズ処理
   if (e.key === 'Escape' || e.keyCode === 27) {
     // 汎用ダイアログ（プロンプトや確認等）の強制クローズ処理
     const dialogOverlays = document.querySelectorAll('.dialog-overlay.show');
@@ -1953,6 +1922,55 @@ export const globalKeydownHandler = async (e) => {
       if (overflowBtn) overflowBtn.classList.remove('open');
       const tabListBtn = document.getElementById('titlebar-tab-list');
       if (tabListBtn) tabListBtn.classList.remove('open');
+      return;
+    }
+  }
+
+  // 5. モーダル・ダイアログ・オーバーレイ表示中は、背後のアイテムに対するショートカットキー実行をガード
+  if (isModalOrOverlayOpen()) {
+    return;
+  }
+
+  // 6. ヘルプオーバーレイのトグル (F1 または H)
+  if (e.key === 'F1' || e.key.toLowerCase() === 'h') {
+    e.preventDefault();
+    toggleHelpOverlay();
+    return;
+  }
+
+  // 7. レーティング設定 (0 〜 5)
+  // 単一または複数選択されたアイテムに対してトグル/更新を適用
+  if (['0', '1', '2', '3', '4', '5'].includes(e.key) && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    let targetIndices = [];
+    if (appState.selection.size > 0) {
+      targetIndices = Array.from(appState.selection);
+    } else if (appState.selectedIndex !== -1) {
+      targetIndices = [appState.selectedIndex];
+    }
+
+    if (targetIndices.length > 0) {
+      e.preventDefault();
+      const rating = parseInt(e.key, 10);
+
+      // 並列でファイル情報を取得
+      const files = (await Promise.all(
+        targetIndices.map(idx => window.veloceAPI.getFileByIndex(idx))
+      )).filter(Boolean);
+
+      if (files.length > 0) {
+        const allHaveSameRating = files.every(f => (appState.ratings[f.path] || 0) === rating);
+        const newRating = allHaveSameRating ? 0 : rating;
+
+        // 1. IPC待機を待たずにUI側で即座に星表示アニメーションを更新（楽観的UI更新）
+        for (const file of files) {
+          applyRatingUI(file.path, newRating, true);
+        }
+
+        // 2. バックエンドへ並列非同期で永続化保存
+        if (window.veloceAPI.setRating) {
+          await Promise.all(files.map(file => window.veloceAPI.setRating(file.path, newRating)));
+        }
+      }
       return;
     }
   }
