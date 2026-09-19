@@ -297,7 +297,7 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     resetThumbnailCanvasBg();
   });
 
-  it('should differentiate inactive tabs from titlebar using var(--panel-bg), micro-borders, and tab gap', () => {
+  it('should differentiate inactive tabs from titlebar using var(--tab-inactive-bg), micro-borders, and tab gap', () => {
     // #tab-bar left offset for sufficient breathing room and drag space
     expect(cssContent).toMatch(/#tab-bar\s*\{[^}]*left:\s*20px;/);
 
@@ -305,12 +305,43 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/#tab-container\s*\{[^}]*gap:\s*2px/);
 
     // Inactive tab background tone from design system token
-    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*background-color:\s*var\(--panel-bg\)/);
+    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*background-color:\s*var\(--tab-inactive-bg\)/);
 
     // Subtle edge lines for inactive tabs to distinguish tab geometry from titlebar
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-top:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.08\)/);
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-left:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.05\)/);
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color\)/);
+  });
+
+  it('should strictly comply with user design requirements across all surface hierarchies', () => {
+    // 1. Darkest surface is titlebar background (#000000)
+    expect(cssContent).toContain('--titlebar-bg: #000000;');
+
+    // 2. Active tab uses --top-bar-bg and stands out
+    expect(cssContent).toMatch(/#tab-container \.tab-item\.active\s*\{[^}]*background-color:\s*var\(--top-bar-bg\)/);
+
+    // 3. Active tab and nav/toolbar share the exact same background
+    expect(cssContent).toMatch(/\.toolbar\s*\{[^}]*background-color:\s*var\(--top-bar-bg\);/);
+
+    // 4. Clear distinction: titlebar (0%) < inactive tab (9%) < active tab (18%)
+    expect(cssContent).toContain('--tab-inactive-bg: #121b1e;');
+    expect(cssContent).toContain('--top-bar-bg: #22343a;');
+    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*background-color:\s*var\(--tab-inactive-bg\)/);
+
+    // 5. Pane headers and resize handles share the exact same color (--panel-bg)
+    expect(cssContent).toContain('--panel-bg: #182529;');
+    expect(cssContent).toMatch(/\.pane-header\s*\{[^}]*background:\s*var\(--panel-bg\);/);
+    expect(cssContent).toMatch(/#file-table th\s*\{[^}]*background:\s*var\(--panel-bg\);/);
+    expect(cssContent).toMatch(/#thumbnail-controls\s*\{[^}]*background:\s*var\(--panel-bg\);/);
+    expect(cssContent).toMatch(/\.resizer\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
+    expect(cssContent).toMatch(/\.resizer-h\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
+
+    // 6. Hierarchy: bookmark-bar (18%) > pane headers (13%) > pane background (5%)
+    expect(cssContent).toMatch(/#bookmark-bar\s*\{[^}]*background-color:\s*var\(--top-bar-bg\);/);
+    expect(cssContent).toContain('--bg-color: #080d0f;');
+
+    // 7. Border visibility: boundary lines are distinctly brighter than panels and toolbars (#3b5057: ~29% lightness)
+    expect(cssContent).toContain('--border-color: #3b5057;');
   });
 });
 

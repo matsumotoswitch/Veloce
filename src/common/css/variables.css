@@ -11,12 +11,13 @@
   --font-family-base: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
   --font-family-mono: 'Consolas', monospace;
   font-family: var(--font-family-base);
-  --bg-color: #0b1012;
-  --bg-rgb: 11, 16, 18;
-  --panel-bg: #162226;
-  --panel-rgb: 22, 34, 38;
-  --top-bar-bg: #203036;
-  --border-color: #394346;
+  --bg-color: #080d0f;
+  --bg-rgb: 8, 13, 15;
+  --panel-bg: #182529;
+  --panel-rgb: 24, 37, 41;
+  --top-bar-bg: #22343a;
+  --tab-inactive-bg: #121b1e;
+  --border-color: #3b5057;
   --text-color: #cddbe0;
   --text-rgb: 205, 219, 224;
   --accent-color: #257e8c;
@@ -107,4 +108,4 @@
 .icon-color-cyan {
   color: var(--palette-cyan);
 }
-
+

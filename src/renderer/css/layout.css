@@ -858,7 +858,7 @@ table#file-table {
   flex-shrink: 0;
 
   /* 非アクティブタブ（タイトルバーとアクティブタブの中間の階層トーン） */
-  background-color: var(--panel-bg) !important;
+  background-color: var(--tab-inactive-bg) !important;
   color: var(--text-color) !important;
   border-left: 1px solid rgba(255, 255, 255, 0.05) !important;
   border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
@@ -1254,4 +1254,4 @@ table#file-table {
 #bookmark-overflow-btn {
   display: none;
 }
-
+
