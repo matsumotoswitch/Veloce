@@ -813,7 +813,7 @@ table#file-table {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 8px;
+  left: 20px;
   right: 204px;
   display: flex;
   align-items: center;
@@ -829,7 +829,7 @@ table#file-table {
   background-color: transparent !important;
   padding: 8px 0 0 0 !important;
   display: flex !important;
-  gap: 0px !important;
+  gap: 2px !important;
   border-bottom: none !important;
   /* 個別の下線を消去 */
   height: 40px;
@@ -857,12 +857,12 @@ table#file-table {
   min-width: 160px;
   flex-shrink: 0;
 
-  /* 非アクティブタブ（面と上部エッジの光で表現） */
-  background-color: var(--titlebar-bg) !important;
+  /* 非アクティブタブ（タイトルバーとアクティブタブの中間の階層トーン） */
+  background-color: var(--panel-bg) !important;
   color: var(--text-color) !important;
-  border-left: none !important;
-  border-right: none !important;
-  border-top: none !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-bottom: 1px solid var(--border-color) !important;
   /* #2b3d41: 通常時は下側にインスペクターとの境界線を持たせる */
   border-radius: 8px 8px 0 0 !important;

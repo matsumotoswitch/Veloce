@@ -296,5 +296,21 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     window.getComputedStyle = origGetComputedStyle;
     resetThumbnailCanvasBg();
   });
+
+  it('should differentiate inactive tabs from titlebar using var(--panel-bg), micro-borders, and tab gap', () => {
+    // #tab-bar left offset for sufficient breathing room and drag space
+    expect(cssContent).toMatch(/#tab-bar\s*\{[^}]*left:\s*20px;/);
+
+    // #tab-container gap for clear tab separation
+    expect(cssContent).toMatch(/#tab-container\s*\{[^}]*gap:\s*2px/);
+
+    // Inactive tab background tone from design system token
+    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*background-color:\s*var\(--panel-bg\)/);
+
+    // Subtle edge lines for inactive tabs to distinguish tab geometry from titlebar
+    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-top:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.08\)/);
+    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-left:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.05\)/);
+    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color\)/);
+  });
 });
 
