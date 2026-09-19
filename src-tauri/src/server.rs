@@ -223,6 +223,8 @@ pub fn start_local_video_server(
                         if !cache_bytes.is_empty() {
                             let mimetype = if cache_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
                                 "image/png"
+                            } else if cache_bytes.starts_with(b"RIFF") && cache_bytes.len() >= 12 && &cache_bytes[8..12] == b"WEBP" {
+                                "image/webp"
                             } else if cache_bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || cache_bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
                                 "image/svg+xml"
                             } else {

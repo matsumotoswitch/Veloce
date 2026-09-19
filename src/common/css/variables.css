@@ -63,6 +63,11 @@
   --bg-darker: #1e1e1e;
   --bg-darker-rgb: 30, 30, 30;
 
+  /* Checkerboard Pattern for Transparent Backgrounds */
+  --checkerboard-dark: #141f23;
+  --checkerboard-light: #223238;
+  --checkerboard-size: 16px;
+
   /* Palette Colors for Favorites & Smart Folders */
   --palette-default: #ececec;
   --palette-red: #ef4444;

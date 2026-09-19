@@ -48,6 +48,14 @@ html.viewer-html,
   max-height: 100%;
   object-fit: contain;
   -webkit-user-drag: none;
+  background-color: var(--checkerboard-dark);
+  background-image: conic-gradient(
+    var(--checkerboard-light) 0 25%,
+    var(--checkerboard-dark) 0 50%,
+    var(--checkerboard-light) 0 75%,
+    var(--checkerboard-dark) 0 100%
+  );
+  background-size: var(--checkerboard-size) var(--checkerboard-size);
 }
 
 .viewer-body #viewer-img.is-zoomed {

@@ -312,7 +312,8 @@ input[type="range"]:focus {
   position: relative;
   z-index: 1;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   overflow: visible;
   /* レイアウトの再計算をコンポーネント内に閉じ込め、高速化する（paintのcontainを解除してグローを描画可能にする） */
   contain: layout style;
@@ -329,13 +330,23 @@ input[type="range"]:focus {
 }
 
 .thumbnail-img {
-  width: 100%;
-  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
   object-fit: contain;
   pointer-events: none;
   border-radius: inherit;
   image-rendering: -webkit-optimize-contrast;
   transition: opacity 0.1s ease-out;
+  background-color: var(--checkerboard-dark);
+  background-image: conic-gradient(
+    var(--checkerboard-light) 0 25%,
+    var(--checkerboard-dark) 0 50%,
+    var(--checkerboard-light) 0 75%,
+    var(--checkerboard-dark) 0 100%
+  );
+  background-size: var(--checkerboard-size) var(--checkerboard-size);
 }
 
 .thumbnail-label {

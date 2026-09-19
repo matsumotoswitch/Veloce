@@ -1795,7 +1795,7 @@ class UIManager {
       if (wrapper._cachedItemSize !== itemSize) {
         wrapper._cachedItemSize = itemSize;
         wrapper.style.height = `${itemSize}px`;
-        img.style.height = `${itemSize}px`;
+        if (img.style.height) img.style.height = '';
       }
 
       // パスが変わった場合のみ内容を更新する

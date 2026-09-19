@@ -365,7 +365,16 @@ class ThumbnailWorkerPool {
         width = Math.max(1, width);
         height = Math.max(1, height);
 
-        // Canvas によるリサイズ & JPEG変換
+        // 透過をサポートする画像形式か判定（透過色を持つ場合はCanvasを塗りつぶさず透過WebP/PNGで出力）
+        const lowerPath = filePath.toLowerCase();
+        const supportsAlpha = lowerPath.endsWith('.png') ||
+                              lowerPath.endsWith('.webp') ||
+                              lowerPath.endsWith('.gif') ||
+                              lowerPath.endsWith('.svg') ||
+                              lowerPath.endsWith('.apng') ||
+                              lowerPath.endsWith('.avif');
+
+        // Canvas によるリサイズ & エンコード
         let outBlob = null;
         if (typeof OffscreenCanvas !== 'undefined') {
           try {
@@ -373,11 +382,24 @@ class ThumbnailWorkerPool {
             const ctx = canvas.getContext('2d');
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
-            ctx.fillStyle = getThumbnailCanvasBg();
-            ctx.fillRect(0, 0, width, height);
+            if (!supportsAlpha) {
+              ctx.fillStyle = getThumbnailCanvasBg();
+              ctx.fillRect(0, 0, width, height);
+            }
             ctx.drawImage(sourceElement, 0, 0, width, height);
             if (typeof canvas.convertToBlob === 'function') {
-              outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.90 });
+              if (supportsAlpha) {
+                try {
+                  outBlob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.90 });
+                  if (!outBlob) {
+                    outBlob = await canvas.convertToBlob({ type: 'image/png' });
+                  }
+                } catch (webpErr) {
+                  outBlob = await canvas.convertToBlob({ type: 'image/png' });
+                }
+              } else {
+                outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.90 });
+              }
             }
           } catch (offErr) {
             // OffscreenCanvas fallback
@@ -392,10 +414,25 @@ class ThumbnailWorkerPool {
           const ctx = domCanvas.getContext('2d');
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
-          ctx.fillStyle = getThumbnailCanvasBg();
-          ctx.fillRect(0, 0, width, height);
+          if (!supportsAlpha) {
+            ctx.fillStyle = getThumbnailCanvasBg();
+            ctx.fillRect(0, 0, width, height);
+          }
           ctx.drawImage(sourceElement, 0, 0, width, height);
-          outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/jpeg', 0.90));
+          if (supportsAlpha) {
+            try {
+              outBlob = await new Promise((res) => {
+                domCanvas.toBlob((b) => {
+                  if (b) res(b);
+                  else domCanvas.toBlob(res, 'image/png');
+                }, 'image/webp', 0.90);
+              });
+            } catch (webpErr) {
+              outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/png'));
+            }
+          } else {
+            outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/jpeg', 0.90));
+          }
         }
 
         if (sourceElement.close && typeof sourceElement.close === 'function') {

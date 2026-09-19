@@ -3164,9 +3164,9 @@ fn sharpen_rgb_buffer(buffer: &mut [u8], width: u32, height: u32, amount: f32) {
 
 fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
     if let Ok(img) = image::open(path_str) {
-        let rgb_img = img.to_rgb8();
-        let width = rgb_img.width();
-        let height = rgb_img.height();
+        let has_alpha = img.color().has_alpha();
+        let width = img.width();
+        let height = img.height();
         
         let mut dst_width = width;
         let mut dst_height = height;
@@ -3180,17 +3180,25 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
         use fast_image_resize as fr;
 
         if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
+            let (pixel_type, raw_pixels, color_type, format) = if has_alpha {
+                let rgba = img.to_rgba8();
+                (fr::PixelType::U8x4, rgba.into_raw(), image::ColorType::Rgba8, image::ImageFormat::Png)
+            } else {
+                let rgb = img.to_rgb8();
+                (fr::PixelType::U8x3, rgb.into_raw(), image::ColorType::Rgb8, image::ImageFormat::Jpeg)
+            };
+
             if let Ok(src_image) = fr::images::Image::from_vec_u8(
                 src_width.get(),
                 src_height.get(),
-                rgb_img.into_raw(),
-                fr::PixelType::U8x3,
+                raw_pixels,
+                pixel_type,
             ) {
                 if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
                     let mut dst_image = fr::images::Image::new(
                         dst_w_nz.get(),
                         dst_h_nz.get(),
-                        fr::PixelType::U8x3,
+                        pixel_type,
                     );
                     let mut resizer = fr::Resizer::new();
                     // Lanczos3 高品質補間により縮小時のディテール損失を最小化
@@ -3207,8 +3215,8 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
                             &buffer,
                             dst_width,
                             dst_height,
-                            image::ColorType::Rgb8,
-                            image::ImageFormat::Jpeg,
+                            color_type,
+                            format,
                         ).is_ok() {
                             return Some(bytes);
                         }
