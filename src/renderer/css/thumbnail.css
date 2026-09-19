@@ -7,6 +7,7 @@
   background: var(--panel-bg);
   padding: 0 8px;
   height: var(--header-height);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: flex-end;

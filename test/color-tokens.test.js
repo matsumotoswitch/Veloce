@@ -352,5 +352,10 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/#custom-rating-val-container\s*\{[^}]*width:\s*108px;/);
     expect(cssContent).toMatch(/#custom-rating-op-container\s*\{[^}]*width:\s*96px;/);
   });
+
+  it('should unify thumbnail-controls header height and border-bottom with other pane headers', () => {
+    expect(cssContent).toMatch(/#thumbnail-controls\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color\);/);
+    expect(cssContent).toMatch(/#thumbnail-controls\s*\{[^}]*height:\s*var\(--header-height\);/);
+  });
 });
 
