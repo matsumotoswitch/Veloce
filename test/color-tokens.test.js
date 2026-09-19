@@ -347,5 +347,10 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     // 7. Border visibility: boundary lines are distinctly brighter than panels and toolbars (#3b5057: ~29% lightness)
     expect(cssContent).toContain('--border-color: #3b5057;');
   });
+
+  it('should allocate sufficient width for rating filter dropdowns to prevent label truncation', () => {
+    expect(cssContent).toMatch(/#custom-rating-val-container\s*\{[^}]*width:\s*108px;/);
+    expect(cssContent).toMatch(/#custom-rating-op-container\s*\{[^}]*width:\s*96px;/);
+  });
 });
 

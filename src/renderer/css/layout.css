@@ -1194,6 +1194,15 @@ table#file-table {
   margin-left: 8px;
 }
 
+/* レーティングドロップダウンの幅設定：「指定なし」「ちょうど」等のラベルが省略されず完全表示される幅を確保 */
+#custom-rating-val-container {
+  width: 108px;
+}
+
+#custom-rating-op-container {
+  width: 96px;
+}
+
 .top-left-controls {
   margin-right: auto;
   display: flex;
