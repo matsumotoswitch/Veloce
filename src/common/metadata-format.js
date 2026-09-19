@@ -30,6 +30,35 @@ export function formatRequestType(reqType) {
 }
 
 /**
+ * キャラクター配置座標リスト（centers / center / coords）を正規化して抽出します。
+ * @param {Object} cp
+ * @returns {Array<{x: number, y: number}>}
+ */
+export function parseCharacterCenters(cp) {
+  if (!cp || typeof cp !== 'object') return [];
+  const rawList = Array.isArray(cp.centers)
+    ? cp.centers
+    : (cp.center
+      ? [cp.center]
+      : (cp.coords
+        ? (Array.isArray(cp.coords) ? cp.coords : [cp.coords])
+        : []));
+
+  const results = [];
+  for (const item of rawList) {
+    if (!item) continue;
+    if (typeof item === 'object') {
+      const x = Number(item.x !== undefined ? item.x : item[0]);
+      const y = Number(item.y !== undefined ? item.y : item[1]);
+      if (!isNaN(x) && !isNaN(y)) {
+        results.push({ x, y });
+      }
+    }
+  }
+  return results;
+}
+
+/**
  * 画像ファイルとメタデータからインスペクター/Diff共通の構造を抽出します。
  * @param {object} file
  * @param {object} meta
@@ -68,6 +97,7 @@ export function extractMetadataFields(file, meta = {}) {
   if (p && typeof p === 'object' && !Array.isArray(p.nodes) && Object.values(p).some(v => v && typeof v === 'object' && v.class_type)) {
     return parseComfyUIPromptFormat(file, meta, p);
   }
+
   // --- A1111 / Forge 解析 ---
   let a1111Candidate = p.rawParameters || p.Description || p.prompt || file.prompt || meta.prompt;
   if (typeof a1111Candidate === 'string') {
@@ -89,16 +119,34 @@ export function extractMetadataFields(file, meta = {}) {
   };
 
   if (Array.isArray(p.characterPrompts)) {
-    data.chars = p.characterPrompts.map(cp => ({ prompt: cp.prompt || '', uc: cp.uc || '' }));
+    data.chars = p.characterPrompts.map(cp => ({
+      prompt: cp.prompt || '',
+      uc: cp.uc || '',
+      centers: parseCharacterCenters(cp)
+    }));
   } else if (Array.isArray(file.charPrompts)) {
     data.chars = file.charPrompts.map(cp => ({
       prompt: (cp && typeof cp === 'object' && cp.prompt) ? cp.prompt : String(cp),
-      uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : ''
+      uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : '',
+      centers: parseCharacterCenters(cp)
     }));
   }
 
+  const charPositions = [];
+  data.chars.forEach((c, i) => {
+    if (c.centers && c.centers.length > 0) {
+      charPositions.push({
+        index: i + 1,
+        centers: c.centers
+      });
+    }
+  });
+  data.charPositions = charPositions;
+
   const w = p.width || meta.width || file.width;
   const h = p.height || meta.height || file.height;
+  data.width = w;
+  data.height = h;
   const res = (w && h) ? `${formatMetadataNumber(w)}x${formatMetadataNumber(h)}` : null;
 
   let sampler = p.sampler || file.sampler || null;
@@ -117,6 +165,9 @@ export function extractMetadataFields(file, meta = {}) {
     rawParameters: p.rawParameters ?? file.rawParameters ?? null
   };
 
+  data.width = w || null;
+  data.height = h || null;
+
   return data;
 }
 
@@ -131,19 +182,22 @@ export function parsePromptTags(text) {
 }
 
 /**
- * 検索語に一致する部分をハイライトします。
-/**
  * 検索語の配列からハイライト用の単一正規表現を生成します。
  * タグごとの重複コンパイルを排除し、パフォーマンスを最適化します。
  * @param {string[]} terms
  * @returns {RegExp|null}
  */
 export function createSearchTermsRegex(terms) {
-  if (!terms || terms.length === 0) return null;
-  const validTerms = terms.map(t => typeof t === 'string' ? t.trim() : String(t || '')).filter(Boolean);
+  if (!terms || !Array.isArray(terms) || terms.length === 0) return null;
+  const validTerms = terms.map(t => String(t).trim()).filter(Boolean);
   if (validTerms.length === 0) return null;
-  const pattern = validTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  return new RegExp(`(${pattern})`, 'gi');
+  // 特殊文字をエスケープして正規表現パターンを構築
+  const escaped = validTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  try {
+    return new RegExp(`(${escaped})`, 'gi');
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -164,7 +218,7 @@ export function highlightSearchTerms(text, termsOrRegex) {
 /**
  * インスペクター用のセクション定義をデータから生成します。
  * @param {ReturnType<typeof extractMetadataFields>} data
- * @returns {Array<{title: string, value: *, isParam?: boolean}>}
+ * @returns {Array<{title: string, value: *, isParam?: boolean, isPosition?: boolean}>}
  */
 export function buildInspectorSections(data) {
   const sections = [
@@ -191,6 +245,18 @@ export function buildInspectorSections(data) {
     { title: '除外したい要素の強さ', value: data.params.uncond_scale, isParam: true },
     { title: '生成パラメータ (Raw)', value: data.params.rawParameters, isRaw: true }
   );
+
+  // キャラクター位置指定データが存在する場合、各種パラメータの下に「位置」セクションを追加
+  if (data.charPositions && data.charPositions.length > 0) {
+    sections.push({
+      title: '位置',
+      value: data.charPositions,
+      isPosition: true,
+      width: data.width,
+      height: data.height,
+      charPositions: data.charPositions
+    });
+  }
 
   return sections;
 }

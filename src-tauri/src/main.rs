@@ -2400,6 +2400,15 @@ fn get_full_metadata_for_path_with_stat_inner(
                                 }
                             }
                         }
+                        // キャラクター位置座標 (centers / center) の抽出
+                        if let Some(centers) = p.get("centers") {
+                            char_obj.insert("centers".to_string(), centers.clone());
+                        } else if let Some(center) = p.get("center") {
+                            char_obj.insert(
+                                "centers".to_string(),
+                                serde_json::Value::Array(vec![center.clone()]),
+                            );
+                        }
                         char_prompts_arr.push(serde_json::Value::Object(char_obj));
                     }
 

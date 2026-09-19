@@ -120,4 +120,144 @@
   font-size: 0.9em;
   border: 1px solid var(--danger-red);
 }
-
+/* --- キャラクター位置プレビュー (Character Positioning) --- */
+.inspector-position-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.inspector-position-map-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  background-color: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  box-sizing: border-box;
+  overflow: visible;
+  min-height: 60px;
+}
+
+.inspector-position-map {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: var(--radius-xs);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  background-color: var(--checkerboard-dark);
+  background-image: conic-gradient(
+    var(--checkerboard-light) 0 25%,
+    var(--checkerboard-dark) 0 50%,
+    var(--checkerboard-light) 0 75%,
+    var(--checkerboard-dark) 0 100%
+  );
+  background-size: var(--checkerboard-size) var(--checkerboard-size);
+}
+
+.inspector-position-bg-img {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-xs);
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.inspector-position-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xs);
+  font-weight: bold;
+  color: var(--text-light);
+  border: 2px solid var(--text-light);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+  line-height: 1;
+}
+
+.char-marker-1 {
+  background-color: var(--color-tag-char-ref);
+}
+
+.char-marker-2 {
+  background-color: var(--color-tag-inpainting);
+}
+
+.char-marker-3 {
+  background-color: var(--color-tag-vibe);
+}
+
+.char-marker-4 {
+  background-color: var(--color-tag-img2img);
+}
+
+.char-marker-other {
+  background-color: var(--accent-color);
+}
+
+.inspector-position-coords {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.inspector-coord-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background-color: rgba(var(--text-rgb), 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  font-size: var(--font-size-xs);
+  color: var(--text-color);
+}
+
+.inspector-coord-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--text-light);
+  border: 1px solid var(--text-light);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.inspector-coord-text {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-color);
+  flex: 1;
+}
+/* インスペクター最下部スペーサー（スクロール終端での余白を確実に確保） */
+.inspector-bottom-spacer {
+  height: 20px;
+  min-height: 20px;
+  flex-shrink: 0;
+  width: 100%;
+  pointer-events: none;
+}

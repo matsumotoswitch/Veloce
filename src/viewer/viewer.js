@@ -234,7 +234,7 @@ export function createMetadataOverlay() {
  * @param {string|null} [subLabel=null]
  * @returns {HTMLElement}
  */
-function createInspectorSectionElement(title, value, isParam = false, isRaw = false, subLabel = null) {
+function createInspectorSectionElement(title, value, isParam = false, isRaw = false, subLabel = null, isPosition = false, sectionObj = null, filePath = null) {
   const section = document.createElement('div');
   section.className = 'inspector-section inspector-section-block';
 
@@ -273,7 +273,7 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
   const copyBtn = document.createElement('span');
   copyBtn.className = 'diff-copy-btn';
   copyBtn.title = 'コピー';
-  copyBtn.setAttribute('data-copy-text', String(value));
+  copyBtn.setAttribute('data-copy-text', typeof value === 'object' ? JSON.stringify(value) : String(value));
   copyBtn.innerHTML = COPY_ICON_SVG;
   copyWrapper.appendChild(copyBtn);
 
@@ -284,7 +284,78 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
   const box = document.createElement('div');
   box.tabIndex = -1;
 
-  if (isRaw) {
+  if (isPosition && sectionObj && sectionObj.charPositions) {
+    box.className = 'inspector-position-block';
+    const mapWrapper = document.createElement('div');
+    mapWrapper.className = 'inspector-position-map-wrapper';
+
+    const map = document.createElement('div');
+    map.className = 'inspector-position-map';
+
+    const imgWidth = sectionObj.width;
+    const imgHeight = sectionObj.height;
+    if (imgWidth && imgHeight) {
+      map.style.aspectRatio = `${imgWidth} / ${imgHeight}`;
+    }
+
+    // 背景画像: 現在表示中のビューアー画像
+    const currentImg = document.getElementById('viewer-img');
+    const thumbUrl = (currentImg && currentImg.src) || (filePath && window.veloceAPI && window.veloceAPI.convertFileSrc(filePath)) || '';
+    if (thumbUrl) {
+      const bgImg = document.createElement('img');
+      bgImg.className = 'inspector-position-bg-img';
+      bgImg.src = thumbUrl;
+      bgImg.onload = () => {
+        if (bgImg.naturalWidth && bgImg.naturalHeight && (!sectionObj.width || !sectionObj.height)) {
+          map.style.aspectRatio = `${bgImg.naturalWidth} / ${bgImg.naturalHeight}`;
+        }
+      };
+      map.appendChild(bgImg);
+    }
+
+    const coordsContainer = document.createElement('div');
+    coordsContainer.className = 'inspector-position-coords';
+
+    const copyLines = [];
+    sectionObj.charPositions.forEach((cp) => {
+      const charNum = cp.index;
+      const colorClass = charNum <= 4 ? `char-marker-${charNum}` : 'char-marker-other';
+
+      cp.centers.forEach((center) => {
+        const marker = document.createElement('div');
+        marker.className = `inspector-position-marker ${colorClass}`;
+        marker.style.left = `${(center.x * 100).toFixed(2)}%`;
+        marker.style.top = `${(center.y * 100).toFixed(2)}%`;
+        marker.textContent = String(charNum);
+        map.appendChild(marker);
+
+        const coordItem = document.createElement('div');
+        coordItem.className = 'inspector-coord-item';
+
+        const badge = document.createElement('span');
+        badge.className = `inspector-coord-badge ${colorClass}`;
+        badge.textContent = String(charNum);
+
+        const text = document.createElement('span');
+        text.className = 'inspector-coord-text';
+        const xPct = (center.x * 100).toFixed(1);
+        const yPct = (center.y * 100).toFixed(1);
+        text.textContent = `X: ${xPct}%, Y: ${yPct}% (${center.x.toFixed(3)}, ${center.y.toFixed(3)})`;
+
+        coordItem.appendChild(badge);
+        coordItem.appendChild(text);
+        coordsContainer.appendChild(coordItem);
+
+        copyLines.push(`キャラ ${charNum}: X: ${center.x.toFixed(3)}, Y: ${center.y.toFixed(3)} (${xPct}%, ${yPct}%)`);
+      });
+    });
+
+    mapWrapper.appendChild(map);
+    box.appendChild(mapWrapper);
+    box.appendChild(coordsContainer);
+
+    copyBtn.setAttribute('data-copy-text', copyLines.join('\n'));
+  } else if (isRaw) {
     box.className = 'prompt-look raw-box';
     box.textContent = String(value);
   } else if (isParam) {
@@ -419,8 +490,21 @@ export async function updateMetadataOverlay() {
 
     // 2. メタデータ各セクション
     for (const sec of visibleSections) {
-      fragment.appendChild(createInspectorSectionElement(sec.title, sec.value, !!sec.isParam, !!sec.isRaw, sec.subLabel || null));
+      fragment.appendChild(createInspectorSectionElement(
+        sec.title,
+        sec.value,
+        !!sec.isParam,
+        !!sec.isRaw,
+        sec.subLabel || null,
+        !!sec.isPosition,
+        sec,
+        filePath
+      ));
     }
+
+    const spacer = document.createElement('div');
+    spacer.className = 'inspector-bottom-spacer';
+    fragment.appendChild(spacer);
 
     contentEl.replaceChildren(fragment);
   } catch (err) {

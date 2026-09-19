@@ -147,6 +147,11 @@ export function clearMetadataUI() {
   if (headerPath) {
     headerPath.style.display = 'none';
   }
+
+  const spacer = document.getElementById('inspector-bottom-spacer');
+  if (spacer) {
+    spacer.style.display = 'none';
+  }
 }
 
 /**
@@ -221,6 +226,15 @@ export async function renderMultipleSelectionSummary() {
   }
 
   if (sec2.root.parentNode !== container) container.appendChild(sec2.root);
+
+  let spacer = document.getElementById('inspector-bottom-spacer');
+  if (!spacer) {
+    spacer = document.createElement('div');
+    spacer.id = 'inspector-bottom-spacer';
+    spacer.className = 'inspector-bottom-spacer';
+  }
+  spacer.style.display = 'block';
+  container.appendChild(spacer);
 }
 
 /**
@@ -396,7 +410,86 @@ export async function renderMetadata(file, options = {}) {
 
       let sectionHasMatch = false;
 
-      if (section.isRaw) {
+      if (section.isPosition) {
+        secEl.box.className = 'inspector-position-block';
+        secEl.box.style.cssText = '';
+        secEl.box.replaceChildren();
+
+        const mapWrapper = document.createElement('div');
+        mapWrapper.className = 'inspector-position-map-wrapper';
+
+        const map = document.createElement('div');
+        map.className = 'inspector-position-map';
+
+        const imgWidth = section.width;
+        const imgHeight = section.height;
+        if (imgWidth && imgHeight) {
+          map.style.aspectRatio = `${imgWidth} / ${imgHeight}`;
+        }
+
+        // 背景画像（サムネイルまたは元画像URL）
+        const thumbUrl = (appState?.thumbnailUrls?.get(file.path)) ||
+                         (window.appState?.thumbnailUrls?.get(file.path)) ||
+                         (window.veloceAPI && window.veloceAPI.convertFileSrc(file.path)) || '';
+        if (thumbUrl) {
+          const bgImg = document.createElement('img');
+          bgImg.className = 'inspector-position-bg-img';
+          bgImg.src = thumbUrl;
+          bgImg.onload = () => {
+            if (bgImg.naturalWidth && bgImg.naturalHeight && (!section.width || !section.height)) {
+              map.style.aspectRatio = `${bgImg.naturalWidth} / ${bgImg.naturalHeight}`;
+            }
+          };
+          map.appendChild(bgImg);
+        }
+
+        const coordsContainer = document.createElement('div');
+        coordsContainer.className = 'inspector-position-coords';
+
+        const copyLines = [];
+
+        section.charPositions.forEach((cp) => {
+          const charNum = cp.index;
+          const colorClass = charNum <= 4 ? `char-marker-${charNum}` : 'char-marker-other';
+
+          cp.centers.forEach((center) => {
+            const marker = document.createElement('div');
+            marker.className = `inspector-position-marker ${colorClass}`;
+            marker.style.left = `${(center.x * 100).toFixed(2)}%`;
+            marker.style.top = `${(center.y * 100).toFixed(2)}%`;
+            marker.textContent = String(charNum);
+            map.appendChild(marker);
+
+            const coordItem = document.createElement('div');
+            coordItem.className = 'inspector-coord-item';
+
+            const badge = document.createElement('span');
+            badge.className = `inspector-coord-badge ${colorClass}`;
+            badge.textContent = String(charNum);
+
+            const text = document.createElement('span');
+            text.className = 'inspector-coord-text';
+            const xPct = (center.x * 100).toFixed(1);
+            const yPct = (center.y * 100).toFixed(1);
+            text.textContent = `X: ${xPct}%, Y: ${yPct}% (${center.x.toFixed(3)}, ${center.y.toFixed(3)})`;
+
+            coordItem.appendChild(badge);
+            coordItem.appendChild(text);
+            coordsContainer.appendChild(coordItem);
+
+            copyLines.push(`キャラ ${charNum}: X: ${center.x.toFixed(3)}, Y: ${center.y.toFixed(3)} (${xPct}%, ${yPct}%)`);
+          });
+        });
+
+        mapWrapper.appendChild(map);
+        secEl.box.appendChild(mapWrapper);
+        secEl.box.appendChild(coordsContainer);
+
+        const copyText = copyLines.join('\n');
+        if (secEl.copyBtn) {
+          secEl.copyBtn.setAttribute('data-copy-text', copyText);
+        }
+      } else if (section.isRaw) {
         secEl.box.className = 'prompt-look raw-box';
         secEl.box.style.cssText = '';
         const rawText = String(section.value);
@@ -483,7 +576,21 @@ export async function renderMetadata(file, options = {}) {
         secEl.box.style.cssText = '';
         secEl.box.textContent = rawMetaStr;
         if (secEl.root.parentNode !== container) container.appendChild(secEl.root);
+        hasContent = true;
       }
+    }
+
+    let spacer = document.getElementById('inspector-bottom-spacer');
+    if (!spacer) {
+      spacer = document.createElement('div');
+      spacer.id = 'inspector-bottom-spacer';
+      spacer.className = 'inspector-bottom-spacer';
+    }
+    if (hasContent) {
+      spacer.style.display = 'block';
+      container.appendChild(spacer);
+    } else {
+      spacer.style.display = 'none';
     }
 
     initInspectorDelegation(options);
