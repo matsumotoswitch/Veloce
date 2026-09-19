@@ -311,5 +311,42 @@ describe('Tabs Functionality', () => {
       expect(tabsInContainer.length).toBe(6);
       expect(container.contains(newTabBtn)).toBe(false);
     });
+
+    it('should manage overflow classes cleanly: solid left when at start, solid right when at end', () => {
+      const container = document.getElementById('tab-container');
+      const newTabBtn = document.getElementById('new-tab-btn');
+
+      // 1. オーバーフローなし（全タブ表示中）: 両端ともフェードなし（きっちり100%表示）
+      Object.defineProperty(container, 'scrollWidth', { value: 500, configurable: true });
+      Object.defineProperty(container, 'clientWidth', { value: 500, configurable: true });
+      container.scrollLeft = 0;
+      uiManager.updateTabScrollState();
+      expect(container.classList.contains('has-overflow-left')).toBe(false);
+      expect(container.classList.contains('has-overflow-right')).toBe(false);
+      expect(newTabBtn.classList.contains('is-overflowing')).toBe(false);
+
+      // 2. 左端表示時（右にスクロール余地あり）: 左端はきっちり表示、右端のみフェード
+      Object.defineProperty(container, 'scrollWidth', { value: 1000, configurable: true });
+      Object.defineProperty(container, 'clientWidth', { value: 500, configurable: true });
+      container.scrollLeft = 0;
+      uiManager.updateTabScrollState();
+      expect(container.classList.contains('has-overflow-left')).toBe(false);
+      expect(container.classList.contains('has-overflow-right')).toBe(true);
+      expect(newTabBtn.classList.contains('is-overflowing')).toBe(true);
+
+      // 3. 中間スクロール時: 左右両端ともフェード
+      container.scrollLeft = 250;
+      uiManager.updateTabScrollState();
+      expect(container.classList.contains('has-overflow-left')).toBe(true);
+      expect(container.classList.contains('has-overflow-right')).toBe(true);
+      expect(newTabBtn.classList.contains('is-overflowing')).toBe(true);
+
+      // 4. 右端表示時（左にスクロール余地あり、右端到達）: 左端のみフェード、右端はきっちり表示
+      container.scrollLeft = 500;
+      uiManager.updateTabScrollState();
+      expect(container.classList.contains('has-overflow-left')).toBe(true);
+      expect(container.classList.contains('has-overflow-right')).toBe(false);
+      expect(newTabBtn.classList.contains('is-overflowing')).toBe(false);
+    });
   });
 });

@@ -311,6 +311,10 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-top:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.08\)/);
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-left:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.05\)/);
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color\)/);
+
+    // Smooth horizontal gradient masks on #tab-container when overflowing to connect boundaries seamlessly without clipping
+    expect(cssContent).toMatch(/#tab-container\.has-overflow-left[^{]*\{[^}]*-webkit-mask-image:\s*linear-gradient\(/);
+    expect(cssContent).toMatch(/#tab-container\.has-overflow-right[^{]*\{[^}]*-webkit-mask-image:\s*linear-gradient\(/);
   });
 
   it('should strictly comply with user design requirements across all surface hierarchies', () => {

@@ -289,17 +289,25 @@ class UIManager {
     }
   }
 
-  // タブのスクロール状態をチェックし、グラデーションの表示/非表示を切り替える
+  // タブのスクロール状態をチェックし、左右端のグラデーションフェードの表示/非表示を切り替える
   updateTabScrollState() {
     const container = document.getElementById('tab-container');
-    const newTabBtn = document.getElementById('new-tab-btn');
-    if (!container || !newTabBtn) return;
+    if (!container) return;
 
-    const scrollRight = container.scrollWidth - container.clientWidth - container.scrollLeft;
-    if (container.scrollWidth > container.clientWidth && scrollRight > 2) {
-      newTabBtn.classList.add('is-overflowing');
-    } else {
-      newTabBtn.classList.remove('is-overflowing');
+    const scrollLeft = container.scrollLeft;
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    const scrollRight = maxScroll - scrollLeft;
+    const hasOverflow = container.scrollWidth > container.clientWidth + 1;
+
+    const hasLeft = hasOverflow && scrollLeft > 2;
+    const hasRight = hasOverflow && scrollRight > 2;
+
+    container.classList.toggle('has-overflow-left', hasLeft);
+    container.classList.toggle('has-overflow-right', hasRight);
+
+    const newTabBtn = document.getElementById('new-tab-btn');
+    if (newTabBtn) {
+      newTabBtn.classList.toggle('is-overflowing', hasRight);
     }
   }
 
