@@ -154,4 +154,12 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(css).toMatch(/:root\[data-left-top-collapsed="true"\]\s+#resizer-left-pane\s*\{[^}]*position:\s*absolute;/);
     expect(css).toMatch(/:root\[data-left-top-collapsed="true"\]\s+#resizer-left-pane\s*\{[^}]*top:\s*0;/);
   });
+
+  it('verifies resizer-left-pane offsets its height via negative margin so folder header height is identical whether smart folders are shown or collapsed', () => {
+    const css = getFullCssContent();
+
+    // スマートフォルダ表示時でもフォルダヘッダー高さ(32px)がリサイザー(4px)で膨らまないよう、
+    // #resizer-left-pane に margin-bottom: -4px が設定されていること
+    expect(css).toMatch(/#resizer-left-pane\s*\{[^}]*margin-bottom:\s*-4px;/);
+  });
 });

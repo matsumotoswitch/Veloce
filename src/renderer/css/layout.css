@@ -241,11 +241,16 @@ body.is-resizing .app-content {
   border-bottom: none !important;
 }
 
+#resizer-left-pane {
+  margin-bottom: -4px;
+}
+
 :root[data-left-top-collapsed="true"] #resizer-left-pane {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
+  margin-bottom: 0;
   z-index: 100;
   /* Instead of display: none, remove it from flow so directories-section moves up to 0 */
 }
