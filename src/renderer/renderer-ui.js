@@ -1173,6 +1173,30 @@ class UIManager {
 
       const boxClass = isParam ? "prompt-look param-box" : "prompt-look";
 
+      const isCopyable = title === 'プロンプト' ||
+                         title === '除外したい要素' ||
+                         title.endsWith('プロンプト') ||
+                         title.endsWith('除外したい要素');
+      const copyBtn1Html = isCopyable && v1 !== '-' ? UIManager.createCopyButtonHTML(v1) : '';
+      const copyBtn2Html = isCopyable && v2 !== '-' ? UIManager.createCopyButtonHTML(v2) : '';
+
+      let body1Html = '';
+      let body2Html = '';
+
+      if (isParam) {
+        const renderParamText = (val, mode) => {
+          if (val === '-') return '<span class="diff-tag-empty">なし</span>';
+          if (!hasDiff) return `<span class="diff-param-text">${val}</span>`;
+          const diffClass = mode === 'left' ? 'removed' : 'added';
+          return `<span class="diff-param-text ${diffClass}">${val}</span>`;
+        };
+        body1Html = renderParamText(v1, 'left');
+        body2Html = renderParamText(v2, 'right');
+      } else {
+        body1Html = renderTags(tags1, set2, 'left');
+        body2Html = renderTags(tags2, set1, 'right');
+      }
+
       const getSubLabelHtml = (sub) => {
         if (!sub || sub === 'Text to Image') return '';
         const labels = sub.split(' + ');
@@ -1204,9 +1228,9 @@ class UIManager {
                   <span>${title}</span>
                   ${sub1Html}
                 </span>
-                ${UIManager.createCopyButtonHTML(v1)}
+                ${copyBtn1Html}
               </h3>
-              <div class="${boxClass}">${renderTags(tags1, set2, 'left')}</div>
+              <div class="${boxClass}">${body1Html}</div>
             </div>
           </div>
           <div class="diff-column">
@@ -1216,9 +1240,9 @@ class UIManager {
                   <span>${title}</span>
                   ${sub2Html}
                 </span>
-                ${UIManager.createCopyButtonHTML(v2)}
+                ${copyBtn2Html}
               </h3>
-              <div class="${boxClass}">${renderTags(tags2, set1, 'right')}</div>
+              <div class="${boxClass}">${body2Html}</div>
             </div>
           </div>
         </div>
@@ -1308,7 +1332,7 @@ class UIManager {
         const blockHtml = `
           <div class="prompt-look inspector-position-block">
             <div class="inspector-position-mode-row">
-              <span class="diff-tag common ${modeModifier}">${modeText}</span>
+              <span class="inspector-position-mode-text ${modeModifier}">${modeText}</span>
             </div>
             <div class="inspector-position-map-wrapper">
               <div class="inspector-position-map" ${aspectAttr}>
@@ -1362,7 +1386,6 @@ class UIManager {
             <div class="diff-section">
               <h3 class="${titleClass}">
                 <span>位置</span>
-                ${UIManager.createCopyButtonHTML(block1.copyText)}
               </h3>
               ${block1.html}
             </div>
@@ -1371,7 +1394,6 @@ class UIManager {
             <div class="diff-section">
               <h3 class="${titleClass}">
                 <span>位置</span>
-                ${UIManager.createCopyButtonHTML(block2.copyText)}
               </h3>
               ${block2.html}
             </div>

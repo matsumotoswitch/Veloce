@@ -400,13 +400,19 @@ export async function renderMetadata(file, options = {}) {
       const secEl = getInspectorSection();
       secEl.title.textContent = section.title;
 
-      if (!secEl.copyBtn) {
-        secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
-        secEl.copyBtn = secEl.copyWrapper.firstElementChild;
+      // プロンプトや除外要素など、コピーが想定されるセクションのみコピーボタンを表示
+      const isCopyable = !!section.copyable;
+      if (isCopyable) {
+        if (!secEl.copyBtn) {
+          secEl.copyWrapper.innerHTML = UIManager.createCopyButtonHTML(section.value);
+          secEl.copyBtn = secEl.copyWrapper.firstElementChild;
+        } else {
+          secEl.copyBtn.setAttribute('data-copy-text', section.value);
+        }
+        secEl.copyWrapper.style.display = 'flex';
       } else {
-        secEl.copyBtn.setAttribute('data-copy-text', section.value);
+        secEl.copyWrapper.style.display = 'none';
       }
-      secEl.copyWrapper.style.display = 'flex';
 
       let sectionHasMatch = false;
 
@@ -415,12 +421,12 @@ export async function renderMetadata(file, options = {}) {
         secEl.box.style.cssText = '';
         secEl.box.replaceChildren();
 
-        // モード表示（囲い内部のタグチップ）
+        // モード表示（四角い枠線なしのテキスト表示）
         const modeText = section.positionMode || (section.useCoords === false ? 'AIにおまかせ' : 'カスタム');
         const modeRow = document.createElement('div');
         modeRow.className = 'inspector-position-mode-row';
         const modeTag = document.createElement('span');
-        modeTag.className = `diff-tag common ${section.useCoords === false ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
+        modeTag.className = `inspector-position-mode-text ${section.useCoords === false ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
         modeTag.textContent = modeText;
         modeRow.appendChild(modeTag);
         secEl.box.appendChild(modeRow);
@@ -440,7 +446,7 @@ export async function renderMetadata(file, options = {}) {
         // 背景画像（サムネイルまたは元画像URL）
         const thumbUrl = (appState?.thumbnailUrls?.get(file.path)) ||
                          (window.appState?.thumbnailUrls?.get(file.path)) ||
-                         (window.veloceAPI && window.veloceAPI.convertFileSrc(file.path)) || '';
+                         (typeof window.veloceAPI?.convertFileSrc === 'function' ? window.veloceAPI.convertFileSrc(file.path) : '') || '';
         if (thumbUrl) {
           const bgImg = document.createElement('img');
           bgImg.className = 'inspector-position-bg-img';
@@ -455,8 +461,6 @@ export async function renderMetadata(file, options = {}) {
 
         const coordsContainer = document.createElement('div');
         coordsContainer.className = 'inspector-position-coords';
-
-        const copyLines = [];
 
         section.charPositions.forEach((cp) => {
           const charNum = cp.index;
@@ -486,19 +490,12 @@ export async function renderMetadata(file, options = {}) {
             coordItem.appendChild(badge);
             coordItem.appendChild(text);
             coordsContainer.appendChild(coordItem);
-
-            copyLines.push(`キャラ ${charNum}: X: ${center.x.toFixed(3)}, Y: ${center.y.toFixed(3)} (${xPct}%, ${yPct}%)`);
           });
         });
 
         mapWrapper.appendChild(map);
         secEl.box.appendChild(mapWrapper);
         secEl.box.appendChild(coordsContainer);
-
-        const copyText = copyLines.join('\n');
-        if (secEl.copyBtn) {
-          secEl.copyBtn.setAttribute('data-copy-text', copyText);
-        }
       } else if (section.isRaw) {
         secEl.box.className = 'prompt-look raw-box';
         secEl.box.style.cssText = '';
@@ -514,11 +511,26 @@ export async function renderMetadata(file, options = {}) {
         } else {
           secEl.box.textContent = rawText;
         }
+      } else if (section.isParam) {
+        secEl.box.className = 'prompt-look param-box';
+        secEl.box.style.cssText = '';
+        const paramText = String(section.value);
+
+        if (termsRegex) {
+          termsRegex.lastIndex = 0;
+          const isMatch = termsRegex.test(paramText);
+          if (isMatch) {
+            sectionHasMatch = true;
+          }
+          secEl.box.innerHTML = highlightSearchTerms(paramText, termsRegex);
+        } else {
+          secEl.box.textContent = paramText;
+        }
       } else {
-        secEl.box.className = section.isParam ? 'prompt-look param-box' : 'prompt-look';
+        secEl.box.className = 'prompt-look';
         secEl.box.style.cssText = '';
 
-        const tags = section.isParam ? [String(section.value)] : String(section.value).split(/[,\n\r]+/).map(t => t.trim()).filter(t => t);
+        const tags = String(section.value).split(/[,\n\r]+/).map(t => t.trim()).filter(t => t);
         for (const t of tags) {
           const tagEl = getInspectorTag();
 

@@ -123,14 +123,33 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     const boxes = content.querySelectorAll('.prompt-look');
     expect(boxes.length).toBeGreaterThan(0);
 
-    // コピーボタンが配置されていること
+    // コピーボタンがプロンプトセクションにのみ配置され、パラメータ等には存在しないこと
     const copyBtns = content.querySelectorAll('.diff-copy-btn');
     expect(copyBtns.length).toBeGreaterThan(0);
+
+    const sections = content.querySelectorAll('.inspector-section-block');
+    sections.forEach(sec => {
+      const titleSpan = sec.querySelector('.inspector-title-wrapper span');
+      const title = titleSpan ? titleSpan.textContent : '';
+      const hasCopy = !!sec.querySelector('.diff-copy-btn');
+      if (title === 'プロンプト' || title === '除外したい要素') {
+        expect(hasCopy, `Copy button should exist for ${title}`).toBe(true);
+      } else {
+        expect(hasCopy, `Copy button should NOT exist for ${title}`).toBe(false);
+      }
+    });
 
     // パラメータ（Seed, Steps 等）が表示されていること
     expect(content.textContent).toContain('123456789');
     expect(content.textContent).toContain('k_euler');
     expect(content.textContent).toContain('28');
+
+    // パラメータ項目（param-box）には四角い diff-tag が付いていないこと
+    const paramBoxes = content.querySelectorAll('.prompt-look.param-box');
+    expect(paramBoxes.length).toBeGreaterThan(0);
+    paramBoxes.forEach(box => {
+      expect(box.querySelector('.diff-tag')).toBeNull();
+    });
   });
 
   it('コピーボタンをクリックしたときにセクション内容がクリップボードにコピーされること', async () => {

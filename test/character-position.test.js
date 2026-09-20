@@ -389,8 +389,9 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       // Check mode element within the single container
       const modeRow = positionBlock.querySelector('.inspector-position-mode-row');
       expect(modeRow).not.toBeNull();
+      expect(modeRow.querySelector('.diff-tag')).toBeNull();
 
-      const modeTag = modeRow.querySelector('.diff-tag.common');
+      const modeTag = modeRow.querySelector('.inspector-position-mode-text');
       expect(modeTag).not.toBeNull();
       expect(modeTag.textContent).toBe('AIにおまかせ');
       expect(modeTag.classList.contains('inspector-position-mode--auto')).toBe(true);
@@ -426,8 +427,9 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
 
       const modeRow = positionBlock.querySelector('.inspector-position-mode-row');
       expect(modeRow).not.toBeNull();
+      expect(modeRow.querySelector('.diff-tag')).toBeNull();
 
-      const modeTag = modeRow.querySelector('.diff-tag.common');
+      const modeTag = modeRow.querySelector('.inspector-position-mode-text');
       expect(modeTag).not.toBeNull();
       expect(modeTag.textContent).toBe('カスタム');
       expect(modeTag.classList.contains('inspector-position-mode--custom')).toBe(true);
@@ -533,8 +535,10 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(posHeaders[0].classList.contains('has-diff')).toBe(true);
 
       const posBlocks = container.querySelectorAll('.inspector-position-block');
-      expect(posBlocks[0].querySelector('.diff-tag').textContent).toBe('AIにおまかせ');
-      expect(posBlocks[1].querySelector('.diff-tag').textContent).toBe('カスタム');
+      expect(posBlocks[0].querySelector('.inspector-position-mode-text').textContent).toBe('AIにおまかせ');
+      expect(posBlocks[1].querySelector('.inspector-position-mode-text').textContent).toBe('カスタム');
+      expect(posBlocks[0].querySelector('.inspector-position-mode-row .diff-tag')).toBeNull();
+      expect(posBlocks[1].querySelector('.inspector-position-mode-row .diff-tag')).toBeNull();
     });
 
     it('should render position block on one side and "なし" on the other when only one file has positions', () => {
@@ -562,6 +566,95 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       const posHeaders = Array.from(container.querySelectorAll('.diff-section h3')).filter(h => h.textContent.includes('位置'));
       expect(posHeaders.length).toBe(2);
       expect(posHeaders[0].classList.contains('has-diff')).toBe(true);
+    });
+
+    it('should not render copy button on position header or parameter headers in showDiffModal', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = {
+        prompt: 'girl',
+        negativePrompt: 'bad',
+        params: {
+          seed: 100,
+          steps: 28,
+          characterPrompts: [{ prompt: 'girl', uc: 'worst quality', centers: [{ x: 0.5, y: 0.5 }] }]
+        }
+      };
+      const meta2 = {
+        prompt: 'girl',
+        negativePrompt: 'bad',
+        params: {
+          seed: 200,
+          steps: 28,
+          characterPrompts: [{ prompt: 'girl', uc: 'worst quality', centers: [{ x: 0.5, y: 0.5 }] }]
+        }
+      };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const sections = container.querySelectorAll('.diff-section');
+
+      sections.forEach(sec => {
+        const titleSpan = sec.querySelector('h3 > span > span') || sec.querySelector('h3 > span');
+        const title = titleSpan ? titleSpan.textContent.trim() : '';
+        const copyBtn = sec.querySelector('h3 .diff-copy-btn');
+
+        if (
+          title === 'プロンプト' ||
+          title === '除外したい要素' ||
+          title.endsWith('プロンプト') ||
+          title.endsWith('除外したい要素')
+        ) {
+          expect(copyBtn, `Copy button should exist on ${title}`).not.toBeNull();
+        } else if (title) {
+          expect(copyBtn, `Copy button should NOT exist on ${title}`).toBeNull();
+        }
+      });
+    });
+
+    it('should render parameter sections with diff-param-text without diff-tag chips in showDiffModal', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = {
+        prompt: 'masterpiece, 1girl',
+        negativePrompt: 'low quality, bad anatomy',
+        params: {
+          seed: 12345,
+          steps: 28
+        }
+      };
+      const meta2 = {
+        prompt: 'masterpiece, 1girl',
+        negativePrompt: 'low quality, bad anatomy',
+        params: {
+          seed: 67890,
+          steps: 28
+        }
+      };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const paramBoxes = container.querySelectorAll('.prompt-look.param-box');
+      expect(paramBoxes.length).toBeGreaterThan(0);
+
+      paramBoxes.forEach(box => {
+        // パラメータボックス内には四角い diff-tag が存在しないこと
+        const diffTag = box.querySelector('.diff-tag');
+        expect(diffTag).toBeNull();
+
+        // 代わりに diff-param-text（または diff-tag-empty）が存在すること
+        const paramText = box.querySelector('.diff-param-text, .diff-tag-empty');
+        expect(paramText).not.toBeNull();
+      });
+
+      // プロンプトボックスには diff-tag が存在すること
+      const promptBoxes = container.querySelectorAll('.prompt-look:not(.param-box):not(.inspector-position-block)');
+      expect(promptBoxes.length).toBeGreaterThan(0);
+      promptBoxes.forEach(box => {
+        expect(box.querySelectorAll('.diff-tag').length).toBeGreaterThan(0);
+      });
     });
 
     it('should not render position section when neither file has character positions', () => {

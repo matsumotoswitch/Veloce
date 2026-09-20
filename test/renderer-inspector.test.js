@@ -158,6 +158,71 @@ describe('renderer-inspector.js', () => {
 
       delete window.veloceAPI;
     });
+
+    it('should show copy button only on prompt and negative prompt sections and hide it on other parameter sections', async () => {
+      window.veloceAPI = {
+        convertFileSrc: vi.fn(p => p),
+        parseMetadata: vi.fn().mockResolvedValue({
+          source: 'NovelAI',
+          prompt: '1girl, smile',
+          negativePrompt: 'lowres, bad anatomy',
+          width: 512,
+          height: 768,
+          params: {
+            seed: 12345,
+            steps: 28,
+            sampler: 'k_euler',
+            characterPrompts: [
+              { prompt: 'girl 1', uc: 'bad', centers: [{ x: 0.5, y: 0.5 }] }
+            ]
+          }
+        })
+      };
+
+      const file = { path: 'C:\\test\\chara.png', width: 512, height: 768 };
+      await renderMetadata(file);
+
+      const container = document.getElementById('inspector-content');
+      const sections = container.querySelectorAll('.inspector-section-block');
+      expect(sections.length).toBeGreaterThan(0);
+
+      let verifiedPrompt = false;
+      let verifiedParam = false;
+
+      sections.forEach(sec => {
+        const titleText = sec.querySelector('.inspector-title-wrapper span')?.textContent || '';
+        const copyWrapper = sec.querySelector('.inspector-copy-wrapper');
+        const isCopyVisible = copyWrapper && copyWrapper.style.display !== 'none';
+
+        if (
+          titleText === 'プロンプト' ||
+          titleText === '除外したい要素' ||
+          titleText === 'キャラクター 1 プロンプト' ||
+          titleText === 'キャラクター 1 除外したい要素'
+        ) {
+          expect(isCopyVisible, `Copy button should be visible for "${titleText}"`).toBe(true);
+          // プロンプト項目は diff-tag で囲われていること
+          const tags = sec.querySelectorAll('.diff-tag');
+          expect(tags.length, `Prompt section "${titleText}" should have diff-tag`).toBeGreaterThan(0);
+          verifiedPrompt = true;
+        } else {
+          expect(isCopyVisible, `Copy button should be hidden for "${titleText}"`).toBe(false);
+          // パラメータ項目（param-box）は diff-tag で囲われず直接テキスト表示されること
+          const paramBox = sec.querySelector('.prompt-look.param-box');
+          if (paramBox) {
+            const innerTag = paramBox.querySelector('.diff-tag');
+            expect(innerTag, `Parameter section "${titleText}" should NOT have diff-tag`).toBeNull();
+            expect(paramBox.textContent.trim().length).toBeGreaterThan(0);
+          }
+          verifiedParam = true;
+        }
+      });
+
+      expect(verifiedPrompt).toBe(true);
+      expect(verifiedParam).toBe(true);
+
+      delete window.veloceAPI;
+    });
   });
 
   describe('initInspectorDelegation & Header Path Context Menu', () => {

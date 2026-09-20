@@ -224,7 +224,7 @@ export function highlightSearchTerms(text, termsOrRegex) {
 /**
  * インスペクター用のセクション定義をデータから生成します。
  * @param {ReturnType<typeof extractMetadataFields>} data
- * @returns {Array<{title: string, value: *, isParam?: boolean, isPosition?: boolean}>}
+ * @returns {Array<{title: string, value: *, isParam?: boolean, isPosition?: boolean, copyable?: boolean}>}
  */
 export function buildInspectorSections(data) {
   const sections = [
@@ -232,13 +232,13 @@ export function buildInspectorSections(data) {
   ];
 
   sections.push(
-    { title: 'プロンプト', value: data.prompt },
-    { title: '除外したい要素', value: data.negativePrompt }
+    { title: 'プロンプト', value: data.prompt, copyable: true },
+    { title: '除外したい要素', value: data.negativePrompt, copyable: true }
   );
 
   data.chars.forEach((c, i) => {
-    sections.push({ title: `キャラクター ${i + 1} プロンプト`, value: c.prompt });
-    sections.push({ title: `キャラクター ${i + 1} 除外したい要素`, value: c.uc });
+    sections.push({ title: `キャラクター ${i + 1} プロンプト`, value: c.prompt, copyable: true });
+    sections.push({ title: `キャラクター ${i + 1} 除外したい要素`, value: c.uc, copyable: true });
   });
 
   sections.push(

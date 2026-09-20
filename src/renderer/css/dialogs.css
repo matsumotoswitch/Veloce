@@ -555,6 +555,24 @@ input:-webkit-autofill:focus {
   border: 1px solid var(--border-color);
 }
 
+/* Diffモーダル内のパラメータテキスト表示（四角いタグ枠なし） */
+.diff-param-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-color);
+  user-select: text;
+  word-break: break-all;
+}
+
+.diff-param-text.added {
+  color: var(--accent-hover);
+  font-weight: 500;
+}
+
+.diff-param-text.removed {
+  color: var(--danger-red);
+  font-weight: 500;
+}
+
 /* Diffモーダル内のサムネイル表示用 */
 .diff-thumbnail-container {
   display: flex;

@@ -138,6 +138,13 @@
   width: 100%;
 }
 
+.inspector-position-mode-text {
+  font-size: var(--font-size-xs);
+  color: var(--text-color);
+  user-select: text;
+  line-height: 1.4;
+}
+
 .inspector-position-map-wrapper {
   display: flex;
   justify-content: center;
@@ -230,10 +237,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px;
-  background-color: rgba(var(--text-rgb), 0.04);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-xs);
+  padding: 2px 0;
   font-size: var(--font-size-xs);
   color: var(--text-color);
 }

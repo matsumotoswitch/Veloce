@@ -267,18 +267,23 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
     titleWrapper.appendChild(subWrapper);
   }
 
-  const copyWrapper = document.createElement('div');
-  copyWrapper.className = 'inspector-copy-wrapper';
-
-  const copyBtn = document.createElement('span');
-  copyBtn.className = 'diff-copy-btn';
-  copyBtn.title = 'コピー';
-  copyBtn.setAttribute('data-copy-text', typeof value === 'object' ? JSON.stringify(value) : String(value));
-  copyBtn.innerHTML = COPY_ICON_SVG;
-  copyWrapper.appendChild(copyBtn);
-
   h3.appendChild(titleWrapper);
-  h3.appendChild(copyWrapper);
+
+  const isCopyable = !!sectionObj?.copyable;
+  if (isCopyable) {
+    const copyWrapper = document.createElement('div');
+    copyWrapper.className = 'inspector-copy-wrapper';
+
+    const copyBtn = document.createElement('span');
+    copyBtn.className = 'diff-copy-btn';
+    copyBtn.title = 'コピー';
+    copyBtn.setAttribute('data-copy-text', typeof value === 'object' ? JSON.stringify(value) : String(value));
+    copyBtn.innerHTML = COPY_ICON_SVG;
+    copyWrapper.appendChild(copyBtn);
+
+    h3.appendChild(copyWrapper);
+  }
+
   section.appendChild(h3);
 
   const box = document.createElement('div');
@@ -287,12 +292,12 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
   if (isPosition && sectionObj && sectionObj.charPositions) {
     box.className = 'prompt-look inspector-position-block';
 
-    // モード表示（囲い内部のタグチップ）
+    // モード表示（四角い枠線なしのテキスト表示）
     const modeText = sectionObj.positionMode || (sectionObj.useCoords === false ? 'AIにおまかせ' : 'カスタム');
     const modeRow = document.createElement('div');
     modeRow.className = 'inspector-position-mode-row';
     const modeTag = document.createElement('span');
-    modeTag.className = `diff-tag common ${sectionObj.useCoords === false ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
+    modeTag.className = `inspector-position-mode-text ${sectionObj.useCoords === false ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
     modeTag.textContent = modeText;
     modeRow.appendChild(modeTag);
     box.appendChild(modeRow);
@@ -371,10 +376,7 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
     box.textContent = String(value);
   } else if (isParam) {
     box.className = 'prompt-look param-box';
-    const tag = document.createElement('span');
-    tag.className = 'diff-tag common';
-    tag.textContent = String(value);
-    box.appendChild(tag);
+    box.textContent = String(value);
   } else {
     box.className = 'prompt-look';
     const tags = parsePromptTags(String(value));

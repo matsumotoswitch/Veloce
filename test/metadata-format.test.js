@@ -225,9 +225,24 @@ describe('Metadata Format Utils', () => {
 
       expect(sections[1].title).toBe('プロンプト');
       expect(sections[1].value).toBe('1girl');
+      expect(sections[1].copyable).toBe(true);
+
+      expect(sections[2].title).toBe('除外したい要素');
+      expect(sections[2].copyable).toBe(true);
 
       expect(sections[3].title).toBe('キャラクター 1 プロンプト');
       expect(sections[3].value).toBe('red hair');
+      expect(sections[3].copyable).toBe(true);
+
+      expect(sections[4].title).toBe('キャラクター 1 除外したい要素');
+      expect(sections[4].copyable).toBe(true);
+
+      // パラメータセクション（モデル、シード、サイズ等）には copyable が付与されないこと
+      expect(sections[0].copyable).toBeUndefined();
+      expect(sections[5].title).toBe('画像サイズ');
+      expect(sections[5].copyable).toBeUndefined();
+      expect(sections[6].title).toBe('シード値');
+      expect(sections[6].copyable).toBeUndefined();
     });
   });
 });
