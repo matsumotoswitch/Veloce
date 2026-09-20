@@ -143,6 +143,12 @@ export function extractMetadataFields(file, meta = {}) {
   });
   data.charPositions = charPositions;
 
+  const useCoords = (p && typeof p.use_coords === 'boolean') ? p.use_coords :
+                    (meta && typeof meta.use_coords === 'boolean') ? meta.use_coords :
+                    (file && typeof file.use_coords === 'boolean') ? file.use_coords :
+                    (p && p.v4_prompt && typeof p.v4_prompt.use_coords === 'boolean') ? p.v4_prompt.use_coords : null;
+  data.useCoords = useCoords;
+
   const w = p.width || meta.width || file.width;
   const h = p.height || meta.height || file.height;
   data.width = w;
@@ -248,13 +254,18 @@ export function buildInspectorSections(data) {
 
   // キャラクター位置指定データが存在する場合、各種パラメータの下に「位置」セクションを追加
   if (data.charPositions && data.charPositions.length > 0) {
+    const isAuto = data.useCoords === false;
+    const positionModeText = isAuto ? 'AIにおまかせ' : 'カスタム';
+
     sections.push({
       title: '位置',
       value: data.charPositions,
       isPosition: true,
       width: data.width,
       height: data.height,
-      charPositions: data.charPositions
+      charPositions: data.charPositions,
+      useCoords: data.useCoords,
+      positionMode: positionModeText
     });
   }
 

@@ -411,9 +411,19 @@ export async function renderMetadata(file, options = {}) {
       let sectionHasMatch = false;
 
       if (section.isPosition) {
-        secEl.box.className = 'inspector-position-block';
+        secEl.box.className = 'prompt-look inspector-position-block';
         secEl.box.style.cssText = '';
         secEl.box.replaceChildren();
+
+        // モード表示（囲い内部のタグチップ）
+        const modeText = section.positionMode || (section.useCoords === false ? 'AIにおまかせ' : 'カスタム');
+        const modeRow = document.createElement('div');
+        modeRow.className = 'inspector-position-mode-row';
+        const modeTag = document.createElement('span');
+        modeTag.className = `diff-tag common ${section.useCoords === false ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
+        modeTag.textContent = modeText;
+        modeRow.appendChild(modeTag);
+        secEl.box.appendChild(modeRow);
 
         const mapWrapper = document.createElement('div');
         mapWrapper.className = 'inspector-position-map-wrapper';

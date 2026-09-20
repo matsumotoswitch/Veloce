@@ -147,11 +147,55 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(lastSection.width).toBe(1216);
       expect(lastSection.height).toBe(832);
       expect(lastSection.charPositions.length).toBe(1);
+      expect(lastSection.positionMode).toBe('カスタム');
 
       // Verify that parameters precede the position section
       const rawParamIndex = sections.findIndex(s => s.title === '生成パラメータ (Raw)');
       const positionIndex = sections.findIndex(s => s.title === '位置');
       expect(positionIndex).toBeGreaterThan(rawParamIndex);
+    });
+
+    it('should set positionMode to "AIにおまかせ" when useCoords is false', () => {
+      const data = {
+        source: 'NovelAI',
+        prompt: 'test prompt',
+        negativePrompt: 'test neg',
+        chars: [],
+        params: {},
+        useCoords: false,
+        charPositions: [{ index: 1, centers: [{ x: 0.5, y: 0.5 }] }]
+      };
+
+      const sections = buildInspectorSections(data);
+      const posSec = sections.find(s => s.title === '位置');
+      expect(posSec).toBeDefined();
+      expect(posSec.positionMode).toBe('AIにおまかせ');
+      expect(posSec.useCoords).toBe(false);
+    });
+
+    it('should set positionMode to "カスタム" when useCoords is true or undefined', () => {
+      const dataTrue = {
+        source: 'NovelAI',
+        prompt: 'test prompt',
+        negativePrompt: 'test neg',
+        chars: [],
+        params: {},
+        useCoords: true,
+        charPositions: [{ index: 1, centers: [{ x: 0.5, y: 0.5 }] }]
+      };
+      const sectionsTrue = buildInspectorSections(dataTrue);
+      expect(sectionsTrue.find(s => s.title === '位置').positionMode).toBe('カスタム');
+
+      const dataUndefined = {
+        source: 'NovelAI',
+        prompt: 'test prompt',
+        negativePrompt: 'test neg',
+        chars: [],
+        params: {},
+        charPositions: [{ index: 1, centers: [{ x: 0.5, y: 0.5 }] }]
+      };
+      const sectionsUndefined = buildInspectorSections(dataUndefined);
+      expect(sectionsUndefined.find(s => s.title === '位置').positionMode).toBe('カスタム');
     });
 
     it('should not add position section when charPositions is empty', () => {
@@ -315,6 +359,79 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(spacer).not.toBeNull();
       expect(spacer.style.display).toBe('block');
       expect(container.lastElementChild).toBe(spacer);
+    });
+
+    it('should display "AIにおまかせ" mode text between title and map when use_coords is false', async () => {
+      const file = { name: 'auto_pos.png', path: 'auto_pos.png' };
+      const meta = {
+        source: 'NovelAI',
+        prompt: '2girls',
+        negativePrompt: 'low quality',
+        params: {
+          use_coords: false,
+          characterPrompts: [
+            { prompt: 'girl 1', uc: '', centers: [{ x: 0.3, y: 0.5 }] },
+            { prompt: 'girl 2', uc: '', centers: [{ x: 0.7, y: 0.5 }] }
+          ]
+        }
+      };
+
+      window.veloceAPI.parseMetadata = vi.fn().mockResolvedValue(meta);
+      await renderMetadata(file);
+
+      const container = document.getElementById('inspector-content');
+      const positionBlock = container.querySelector('.inspector-position-block');
+      expect(positionBlock).not.toBeNull();
+
+      // Check that positionBlock itself is a single prompt-look container
+      expect(positionBlock.classList.contains('prompt-look')).toBe(true);
+
+      // Check mode element within the single container
+      const modeRow = positionBlock.querySelector('.inspector-position-mode-row');
+      expect(modeRow).not.toBeNull();
+
+      const modeTag = modeRow.querySelector('.diff-tag.common');
+      expect(modeTag).not.toBeNull();
+      expect(modeTag.textContent).toBe('AIにおまかせ');
+      expect(modeTag.classList.contains('inspector-position-mode--auto')).toBe(true);
+
+      // Ensure mode row is the first child, followed by map wrapper and coords
+      expect(positionBlock.firstElementChild).toBe(modeRow);
+      expect(modeRow.nextElementSibling.classList.contains('inspector-position-map-wrapper')).toBe(true);
+      expect(positionBlock.querySelector('.inspector-position-coords')).not.toBeNull();
+    });
+
+    it('should display "カスタム" mode text between title and map when use_coords is true', async () => {
+      const file = { name: 'custom_pos.png', path: 'custom_pos.png' };
+      const meta = {
+        source: 'NovelAI',
+        prompt: '2girls',
+        negativePrompt: 'low quality',
+        params: {
+          use_coords: true,
+          characterPrompts: [
+            { prompt: 'girl 1', uc: '', centers: [{ x: 0.3, y: 0.5 }] },
+            { prompt: 'girl 2', uc: '', centers: [{ x: 0.7, y: 0.5 }] }
+          ]
+        }
+      };
+
+      window.veloceAPI.parseMetadata = vi.fn().mockResolvedValue(meta);
+      await renderMetadata(file);
+
+      const container = document.getElementById('inspector-content');
+      const positionBlock = container.querySelector('.inspector-position-block');
+      expect(positionBlock).not.toBeNull();
+      expect(positionBlock.classList.contains('prompt-look')).toBe(true);
+
+      const modeRow = positionBlock.querySelector('.inspector-position-mode-row');
+      expect(modeRow).not.toBeNull();
+
+      const modeTag = modeRow.querySelector('.diff-tag.common');
+      expect(modeTag).not.toBeNull();
+      expect(modeTag.textContent).toBe('カスタム');
+      expect(modeTag.classList.contains('inspector-position-mode--custom')).toBe(true);
+      expect(positionBlock.firstElementChild).toBe(modeRow);
     });
   });
 });

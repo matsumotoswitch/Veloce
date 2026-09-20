@@ -2371,6 +2371,7 @@ fn get_full_metadata_for_path_with_stat_inner(
 
             // NovelAI V4プロンプト対応
             if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
+                let v4_use_coords = v4_prompt.get("use_coords").and_then(|v| v.as_bool());
                 if let Some(char_captions) = v4_prompt
                     .pointer("/caption/char_captions")
                     .and_then(|v| v.as_array())
@@ -2417,6 +2418,9 @@ fn get_full_metadata_for_path_with_stat_inner(
                             "characterPrompts".to_string(),
                             serde_json::Value::Array(char_prompts_arr),
                         );
+                        if let Some(use_coords) = v4_use_coords {
+                            map.insert("use_coords".to_string(), serde_json::Value::Bool(use_coords));
+                        }
                         map.remove("v4_prompt");
                         map.remove("v4_negative_prompt");
                     }
@@ -7915,6 +7919,58 @@ mod viewer_tests {
         let _ = std::fs::remove_file(&test_file);
 
         assert_eq!(result.as_deref(), Some(sample_prompt), "Stealth PNGInfo からプロンプトが正確に解凍・抽出されること");
+    }
+
+    #[test]
+    fn test_novelai_v4_use_coords_preserved() {
+        let v4_json = serde_json::json!({
+            "prompt": "masterpiece, 2girls",
+            "v4_prompt": {
+                "caption": {
+                    "base_caption": "masterpiece, 2girls",
+                    "char_captions": [
+                        {
+                            "char_caption": "girl 1",
+                            "centers": [{"x": 0.2, "y": 0.5}]
+                        }
+                    ]
+                },
+                "use_coords": false
+            }
+        });
+
+        let mut comment_obj = v4_json;
+        if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
+            let v4_use_coords = v4_prompt.get("use_coords").and_then(|v| v.as_bool());
+            if let Some(char_captions) = v4_prompt
+                .pointer("/caption/char_captions")
+                .and_then(|v| v.as_array())
+            {
+                let mut char_prompts_arr = Vec::new();
+                for p in char_captions.iter() {
+                    let mut char_obj = serde_json::Map::new();
+                    if let Some(cap) = p.get("char_caption").and_then(|v| v.as_str()) {
+                        char_obj.insert("prompt".to_string(), serde_json::Value::String(cap.to_string()));
+                    }
+                    if let Some(centers) = p.get("centers") {
+                        char_obj.insert("centers".to_string(), centers.clone());
+                    }
+                    char_prompts_arr.push(serde_json::Value::Object(char_obj));
+                }
+
+                if let serde_json::Value::Object(ref mut map) = comment_obj {
+                    map.insert("characterPrompts".to_string(), serde_json::Value::Array(char_prompts_arr));
+                    if let Some(use_coords) = v4_use_coords {
+                        map.insert("use_coords".to_string(), serde_json::Value::Bool(use_coords));
+                    }
+                    map.remove("v4_prompt");
+                }
+            }
+        }
+
+        assert_eq!(comment_obj.get("use_coords"), Some(&serde_json::Value::Bool(false)));
+        assert!(comment_obj.get("characterPrompts").is_some());
+        assert!(comment_obj.get("v4_prompt").is_none());
     }
 
     #[test]

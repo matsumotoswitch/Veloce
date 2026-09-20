@@ -124,9 +124,18 @@
 .inspector-position-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   margin-bottom: 0;
+  min-height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.inspector-position-mode-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
 }
 
 .inspector-position-map-wrapper {
@@ -134,10 +143,7 @@
   justify-content: center;
   align-items: center;
   width: 100%;
-  background-color: var(--panel-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 8px;
+  padding: 4px 0;
   box-sizing: border-box;
   overflow: visible;
   min-height: 60px;

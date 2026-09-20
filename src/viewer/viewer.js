@@ -285,7 +285,18 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
   box.tabIndex = -1;
 
   if (isPosition && sectionObj && sectionObj.charPositions) {
-    box.className = 'inspector-position-block';
+    box.className = 'prompt-look inspector-position-block';
+
+    // モード表示（囲い内部のタグチップ）
+    const modeText = sectionObj.positionMode || (sectionObj.useCoords === false ? 'AIにおまかせ' : 'カスタム');
+    const modeRow = document.createElement('div');
+    modeRow.className = 'inspector-position-mode-row';
+    const modeTag = document.createElement('span');
+    modeTag.className = `diff-tag common ${sectionObj.useCoords === false ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
+    modeTag.textContent = modeText;
+    modeRow.appendChild(modeTag);
+    box.appendChild(modeRow);
+
     const mapWrapper = document.createElement('div');
     mapWrapper.className = 'inspector-position-map-wrapper';
 
