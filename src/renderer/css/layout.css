@@ -574,11 +574,16 @@ body.is-resizing .app-content {
   border-bottom: none !important;
 }
 
+#resizer-center {
+  margin-bottom: -4px;
+}
+
 :root[data-center-collapsed="true"] #resizer-center {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
+  margin-bottom: 0;
   z-index: 100;
   /* Instead of display: none, remove it from flow so thumbnail-controls moves up to 0 */
 }
