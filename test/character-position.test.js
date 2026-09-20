@@ -434,4 +434,147 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(positionBlock.firstElementChild).toBe(modeRow);
     });
   });
+
+  describe('showDiffModal with character positions', () => {
+    let uiManager;
+
+    beforeEach(async () => {
+      const { UIManager } = await import('../src/renderer/renderer-ui.js');
+      uiManager = new UIManager(appState);
+      document.body.innerHTML = `
+        <div id="diff-modal" class="modal-backdrop">
+          <div id="diff-container"></div>
+        </div>
+      `;
+    });
+
+    it('should render position diff sections when both files have character positions', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = {
+        params: {
+          characterPrompts: [
+            { prompt: 'girl 1', centers: [{ x: 0.2, y: 0.5 }] }
+          ]
+        }
+      };
+      const meta2 = {
+        params: {
+          characterPrompts: [
+            { prompt: 'girl 1', centers: [{ x: 0.2, y: 0.5 }] }
+          ]
+        }
+      };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const posBlocks = container.querySelectorAll('.inspector-position-block');
+      expect(posBlocks.length).toBe(2);
+
+      const posHeaders = Array.from(container.querySelectorAll('.diff-section h3')).filter(h => h.textContent.includes('位置'));
+      expect(posHeaders.length).toBe(2);
+      expect(posHeaders[0].classList.contains('has-diff')).toBe(false);
+      expect(posHeaders[1].classList.contains('has-diff')).toBe(false);
+
+      expect(posBlocks[0].querySelector('.inspector-position-mode-row')).not.toBeNull();
+      expect(posBlocks[0].querySelector('.inspector-position-map-wrapper')).not.toBeNull();
+      expect(posBlocks[0].querySelector('.inspector-position-coords')).not.toBeNull();
+    });
+
+    it('should mark position header with has-diff when coordinates differ', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = {
+        params: {
+          characterPrompts: [
+            { prompt: 'girl', centers: [{ x: 0.2, y: 0.5 }] }
+          ]
+        }
+      };
+      const meta2 = {
+        params: {
+          characterPrompts: [
+            { prompt: 'girl', centers: [{ x: 0.8, y: 0.5 }] }
+          ]
+        }
+      };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const posHeaders = Array.from(container.querySelectorAll('.diff-section h3')).filter(h => h.textContent.includes('位置'));
+      expect(posHeaders.length).toBe(2);
+      expect(posHeaders[0].classList.contains('has-diff')).toBe(true);
+      expect(posHeaders[1].classList.contains('has-diff')).toBe(true);
+    });
+
+    it('should mark position header with has-diff when mode differs', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = {
+        params: {
+          use_coords: false,
+          characterPrompts: [{ prompt: 'girl', centers: [{ x: 0.5, y: 0.5 }] }]
+        }
+      };
+      const meta2 = {
+        params: {
+          use_coords: true,
+          characterPrompts: [{ prompt: 'girl', centers: [{ x: 0.5, y: 0.5 }] }]
+        }
+      };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const posHeaders = Array.from(container.querySelectorAll('.diff-section h3')).filter(h => h.textContent.includes('位置'));
+      expect(posHeaders.length).toBe(2);
+      expect(posHeaders[0].classList.contains('has-diff')).toBe(true);
+
+      const posBlocks = container.querySelectorAll('.inspector-position-block');
+      expect(posBlocks[0].querySelector('.diff-tag').textContent).toBe('AIにおまかせ');
+      expect(posBlocks[1].querySelector('.diff-tag').textContent).toBe('カスタム');
+    });
+
+    it('should render position block on one side and "なし" on the other when only one file has positions', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = {
+        params: {
+          characterPrompts: [{ prompt: 'girl', centers: [{ x: 0.5, y: 0.5 }] }]
+        }
+      };
+      const meta2 = {
+        params: {}
+      };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const posBlocks = container.querySelectorAll('.inspector-position-block');
+      expect(posBlocks.length).toBe(1);
+
+      const emptyTags = container.querySelectorAll('.diff-tag-empty');
+      const hasEmptyInPosition = Array.from(emptyTags).some(t => t.textContent === 'なし');
+      expect(hasEmptyInPosition).toBe(true);
+
+      const posHeaders = Array.from(container.querySelectorAll('.diff-section h3')).filter(h => h.textContent.includes('位置'));
+      expect(posHeaders.length).toBe(2);
+      expect(posHeaders[0].classList.contains('has-diff')).toBe(true);
+    });
+
+    it('should not render position section when neither file has character positions', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = { params: {} };
+      const meta2 = { params: {} };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const posHeaders = Array.from(container.querySelectorAll('.diff-section h3')).filter(h => h.textContent.includes('位置'));
+      expect(posHeaders.length).toBe(0);
+    });
+  });
 });

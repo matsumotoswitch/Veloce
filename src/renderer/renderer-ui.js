@@ -1258,6 +1258,128 @@ class UIManager {
     const src1 = window.veloceAPI.convertFileSrc(file1.path);
     const src2 = window.veloceAPI.convertFileSrc(file2.path);
 
+    // キャラクター位置指定データが存在する場合、「位置」セクションを末尾に追加
+    const hasPositions1 = !!(d1.charPositions && d1.charPositions.length > 0);
+    const hasPositions2 = !!(d2.charPositions && d2.charPositions.length > 0);
+
+    if (hasPositions1 || hasPositions2) {
+      const renderPositionBlock = (d, src) => {
+        if (!d.charPositions || d.charPositions.length === 0) {
+          return {
+            html: '<div class="prompt-look param-box"><span class="diff-tag-empty">なし</span></div>',
+            copyText: '-'
+          };
+        }
+
+        const isAuto = d.useCoords === false;
+        const modeText = isAuto ? 'AIにおまかせ' : 'カスタム';
+        const modeModifier = isAuto ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom';
+
+        const imgWidth = d.width;
+        const imgHeight = d.height;
+        const aspectAttr = (imgWidth && imgHeight) ? `data-aspect-ratio="${imgWidth} / ${imgHeight}"` : '';
+
+        let markersHtml = '';
+        let coordsHtml = '';
+        const copyLines = [`モード: ${modeText}`];
+
+        d.charPositions.forEach(cp => {
+          const charNum = cp.index;
+          const colorClass = charNum <= 4 ? `char-marker-${charNum}` : 'char-marker-other';
+
+          cp.centers.forEach(center => {
+            const leftPct = (center.x * 100).toFixed(2);
+            const topPct = (center.y * 100).toFixed(2);
+            markersHtml += `<div class="inspector-position-marker ${colorClass}" data-x="${leftPct}" data-y="${topPct}">${charNum}</div>`;
+
+            const xPct = (center.x * 100).toFixed(1);
+            const yPct = (center.y * 100).toFixed(1);
+            coordsHtml += `
+              <div class="inspector-coord-item">
+                <span class="inspector-coord-badge ${colorClass}">${charNum}</span>
+                <span class="inspector-coord-text">X: ${xPct}%, Y: ${yPct}% (${center.x.toFixed(3)}, ${center.y.toFixed(3)})</span>
+              </div>
+            `;
+
+            copyLines.push(`キャラ ${charNum}: X: ${center.x.toFixed(3)}, Y: ${center.y.toFixed(3)} (${xPct}%, ${yPct}%)`);
+          });
+        });
+
+        const blockHtml = `
+          <div class="prompt-look inspector-position-block">
+            <div class="inspector-position-mode-row">
+              <span class="diff-tag common ${modeModifier}">${modeText}</span>
+            </div>
+            <div class="inspector-position-map-wrapper">
+              <div class="inspector-position-map" ${aspectAttr}>
+                <img src="${src}" class="inspector-position-bg-img" decoding="async">
+                ${markersHtml}
+              </div>
+            </div>
+            <div class="inspector-position-coords">
+              ${coordsHtml}
+            </div>
+          </div>
+        `;
+
+        return {
+          html: blockHtml,
+          copyText: copyLines.join('\n')
+        };
+      };
+
+      let hasDiff = false;
+      if (hasPositions1 !== hasPositions2) {
+        hasDiff = true;
+      } else {
+        const mode1 = d1.useCoords === false ? 'AIにおまかせ' : 'カスタム';
+        const mode2 = d2.useCoords === false ? 'AIにおまかせ' : 'カスタム';
+        if (mode1 !== mode2) {
+          hasDiff = true;
+        } else {
+          const normalizePositions = (positions) => {
+            return positions.map(cp => ({
+              index: cp.index,
+              centers: cp.centers.map(c => ({
+                x: Number(c.x.toFixed(4)),
+                y: Number(c.y.toFixed(4))
+              }))
+            }));
+          };
+          if (JSON.stringify(normalizePositions(d1.charPositions)) !== JSON.stringify(normalizePositions(d2.charPositions))) {
+            hasDiff = true;
+          }
+        }
+      }
+
+      const titleClass = hasDiff ? 'has-diff' : '';
+      const block1 = renderPositionBlock(d1, src1);
+      const block2 = renderPositionBlock(d2, src2);
+
+      contentHtml += `
+        <div class="diff-columns">
+          <div class="diff-column">
+            <div class="diff-section">
+              <h3 class="${titleClass}">
+                <span>位置</span>
+                ${UIManager.createCopyButtonHTML(block1.copyText)}
+              </h3>
+              ${block1.html}
+            </div>
+          </div>
+          <div class="diff-column">
+            <div class="diff-section">
+              <h3 class="${titleClass}">
+                <span>位置</span>
+                ${UIManager.createCopyButtonHTML(block2.copyText)}
+              </h3>
+              ${block2.html}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     const getMediaHtml = (path, src) => {
       if (path.toLowerCase().endsWith('.mp4')) {
         return `<video src="${src}" class="diff-thumbnail" autoplay loop muted playsinline></video>`;
@@ -1281,6 +1403,18 @@ class UIManager {
     `;
 
     container.innerHTML = headerHtml + contentHtml;
+
+    // 位置情報マーカーとアスペクト比をDOMプロパティとして設定（HTMLインラインスタイル属性を排除）
+    container.querySelectorAll('.inspector-position-map[data-aspect-ratio]').forEach(map => {
+      const ar = map.getAttribute('data-aspect-ratio');
+      if (ar) map.style.aspectRatio = ar;
+    });
+    container.querySelectorAll('.inspector-position-marker[data-x]').forEach(marker => {
+      const x = marker.getAttribute('data-x');
+      const y = marker.getAttribute('data-y');
+      if (x) marker.style.left = `${x}%`;
+      if (y) marker.style.top = `${y}%`;
+    });
 
     container.querySelectorAll('.diff-copy-btn').forEach(btn => {
       this.bindTooltip(btn, 'コピー');
