@@ -10,6 +10,7 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toContain('--glow-gold:');
     expect(cssContent).toContain('--danger-red:');
     expect(cssContent).toContain('--border-color:');
+    expect(cssContent).toContain('--border-color-light:');
     expect(cssContent).toContain('--text-color:');
     expect(cssContent).toContain('--bg-color:');
   });
@@ -310,7 +311,7 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     // Subtle edge lines for inactive tabs to distinguish tab geometry from titlebar
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-top:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.08\)/);
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-left:\s*1px solid rgba\(255,\s*255,\s*255,\s*0\.05\)/);
-    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color\)/);
+    expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color-light\)/);
 
     // Smooth horizontal gradient masks on #tab-container when overflowing to connect boundaries seamlessly without clipping
     expect(cssContent).toMatch(/#tab-container\.has-overflow-left[^{]*\{[^}]*-webkit-mask-image:\s*linear-gradient\(/);
@@ -356,6 +357,25 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
   it('should unify thumbnail-controls header height and border-bottom with other pane headers', () => {
     expect(cssContent).toMatch(/#thumbnail-controls\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color\);/);
     expect(cssContent).toMatch(/#thumbnail-controls\s*\{[^}]*height:\s*var\(--header-height\);/);
+  });
+
+  it('should define distinct border tokens for default dark surfaces and bright/translucent surfaces', () => {
+    // 1. Default boundary lines are distinctly calm (#3b5057: ~29% lightness)
+    expect(cssContent).toContain('--border-color: #3b5057;');
+
+    // 2. Bright surface border token (#4a656d: ~36% lightness)
+    expect(cssContent).toContain('--border-color-light: #4a656d;');
+    expect(cssContent).toContain('--border-light: var(--border-color-light);');
+
+    // 3. Bright surface elements utilize --border-color-light
+    expect(cssContent).toMatch(/#search-container\s*\{[^}]*border:\s*1px solid var\(--border-color-light\);/);
+    expect(cssContent).toMatch(/#tab-container \.tab-item\.active\s*\{[^}]*border-top:\s*1px solid var\(--border-color-light\)/);
+    expect(cssContent).toMatch(/\.titlebar\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color-light\)/);
+    expect(cssContent).toMatch(/\.toolbar\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color-light\);/);
+    expect(cssContent).toMatch(/#bookmark-bar\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color-light\);/);
+    expect(cssContent).toMatch(/\.control-divider\s*\{[^}]*background-color:\s*var\(--border-color-light\);/);
+    expect(cssContent).toMatch(/\.viewer-metadata-overlay\s*\{[^}]*border-left:\s*1px solid var\(--border-color-light\);/);
+    expect(cssContent).toMatch(/\.viewer-metadata-overlay \.prompt-look\s*\{[^}]*border-color:\s*var\(--border-color-light\);/);
   });
 });
 

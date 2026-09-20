@@ -150,7 +150,7 @@
 .control-divider {
   width: 1px;
   height: 16px;
-  background-color: var(--border-color);
+  background-color: var(--border-color-light);
   margin: 0 4px;
 }
 

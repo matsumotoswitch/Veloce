@@ -485,7 +485,7 @@ html.viewer-html,
   display: flex;
   flex-direction: column;
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
-  border-left: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color-light);
   transform: translateX(100%);
   opacity: 0;
   pointer-events: none;
@@ -525,7 +525,7 @@ html.viewer-html,
   justify-content: flex-start;
   height: 40px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color-light);
   background: rgba(var(--panel-rgb), 0.85);
   flex-shrink: 0;
   box-sizing: border-box;
@@ -540,7 +540,7 @@ html.viewer-html,
   width: 20px;
   height: 40px;
   background: rgba(var(--panel-rgb), 0.85);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color-light);
   box-sizing: border-box;
   pointer-events: none;
 }
@@ -570,6 +570,7 @@ html.viewer-html,
 
 .viewer-metadata-overlay .prompt-look {
   background-color: rgba(0, 0, 0, 0.55);
+  border-color: var(--border-color-light);
 }
 
 .viewer-meta-empty,

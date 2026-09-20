@@ -18,6 +18,8 @@
   --top-bar-bg: #22343a;
   --tab-inactive-bg: #121b1e;
   --border-color: #3b5057;
+  --border-color-light: #4a656d;
+  --border-light: var(--border-color-light);
   --text-color: #cddbe0;
   --text-rgb: 205, 219, 224;
   --accent-color: #257e8c;
