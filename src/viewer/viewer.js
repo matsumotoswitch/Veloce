@@ -332,7 +332,6 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
     const coordsContainer = document.createElement('div');
     coordsContainer.className = 'inspector-position-coords';
 
-    const copyLines = [];
     sectionObj.charPositions.forEach((cp) => {
       const charNum = cp.index;
       const colorClass = charNum <= 4 ? `char-marker-${charNum}` : 'char-marker-other';
@@ -361,16 +360,12 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
         coordItem.appendChild(badge);
         coordItem.appendChild(text);
         coordsContainer.appendChild(coordItem);
-
-        copyLines.push(`キャラ ${charNum}: X: ${center.x.toFixed(3)}, Y: ${center.y.toFixed(3)} (${xPct}%, ${yPct}%)`);
       });
     });
 
     mapWrapper.appendChild(map);
     box.appendChild(mapWrapper);
     box.appendChild(coordsContainer);
-
-    copyBtn.setAttribute('data-copy-text', copyLines.join('\n'));
   } else if (isRaw) {
     box.className = 'prompt-look raw-box';
     box.textContent = String(value);
@@ -521,6 +516,7 @@ export async function updateMetadataOverlay() {
 
     contentEl.replaceChildren(fragment);
   } catch (err) {
+    console.error('Failed to update metadata overlay:', err);
     if (seq !== currentMetadataSeq) return;
     contentEl.innerHTML = '<div class="viewer-meta-empty">メタデータの読み込みに失敗しました</div>';
   }

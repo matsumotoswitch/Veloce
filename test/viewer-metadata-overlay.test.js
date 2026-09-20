@@ -407,4 +407,41 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true }));
     expect(window.veloceAPI.copyImageToClipboard).toHaveBeenCalledWith('C:\\images\\test_character.png');
   });
+
+  it('キャラクター位置情報を持つ画像のメタデータオーバーレイをエラーなく正常に描画できること', async () => {
+    window.veloceAPI.parseMetadata = vi.fn().mockResolvedValue({
+      source: 'NovelAI',
+      prompt: '2girls, high quality',
+      negativePrompt: 'low quality',
+      params: {
+        use_coords: true,
+        characterPrompts: [
+          { prompt: 'girl 1', uc: '', centers: [{ x: 0.3, y: 0.5 }] },
+          { prompt: 'girl 2', uc: '', centers: [{ x: 0.7, y: 0.5 }] }
+        ]
+      }
+    });
+
+    toggleMetadataOverlay(true);
+    await updateMetadataOverlay();
+
+    const content = document.getElementById('viewer-metadata-content');
+    // 「メタデータの読み込みに失敗しました」が表示されていないこと
+    expect(content.textContent).not.toContain('メタデータの読み込みに失敗しました');
+
+    // 「位置」セクションが正常にレンダリングされていること
+    const positionBlock = content.querySelector('.inspector-position-block');
+    expect(positionBlock).not.toBeNull();
+
+    // モードテキストが四角い diff-tag ではなく inspector-position-mode-text で表示されていること
+    const modeTag = positionBlock.querySelector('.inspector-position-mode-text');
+    expect(modeTag).not.toBeNull();
+    expect(modeTag.textContent).toBe('カスタム');
+    expect(positionBlock.querySelector('.inspector-position-mode-row .diff-tag')).toBeNull();
+
+    // 座標リストが正常に存在すること
+    const coords = positionBlock.querySelector('.inspector-position-coords');
+    expect(coords).not.toBeNull();
+    expect(coords.children.length).toBe(2);
+  });
 });
