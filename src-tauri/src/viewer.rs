@@ -75,11 +75,6 @@ pub async fn open_viewer(
         }
     };
 
-    println!("[Veloce DEBUG] open_viewer called with current_index: {} (resolved: {}). current_paths.len(): {}", current_index, resolved_index, current_paths.len());
-    if current_paths.len() > resolved_index {
-        println!("[Veloce DEBUG] target_path at resolved_index {}: {:?}", resolved_index, current_paths[resolved_index]);
-    }
-
     let mut win_width = width;
     let mut win_height = height;
 

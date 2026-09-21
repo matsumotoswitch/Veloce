@@ -220,6 +220,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
                     []
                 );
             }
+            #[cfg(debug_assertions)]
             println!("Migration completed.");
         }
     });
@@ -3032,6 +3033,7 @@ async fn generate_thumbnail(
             format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
         };
         
+        #[cfg(debug_assertions)]
         if t_gen.as_millis() > 5 {
             let fname = std::path::Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy();
             println!("[Rust] {}: db_lookup={}ms", fname, t_gen.as_millis());
@@ -3612,15 +3614,6 @@ async fn precache_directory_recursively(
 
 #[tauri::command]
 fn update_smart_folders(rules: Vec<SmartFolderRule>, state: tauri::State<'_, AppState>) {
-    println!("Received smart folders update: {} rules", rules.len());
-    for rule in &rules {
-        println!(
-            "Rule ID: {}, match_type: {}, conditions: {}",
-            rule.id,
-            rule.match_type,
-            rule.conditions.len()
-        );
-    }
     if let Ok(mut lock) = state.smart_folders.lock() {
         *lock = rules;
     }
