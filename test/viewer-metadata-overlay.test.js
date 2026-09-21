@@ -221,15 +221,11 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     expect(viewerState.isMetadataVisible).toBe(false);
   });
 
-  it('オーバーレイ表示中に Escape キーを押すとオーバーレイのみが閉じ、closeWindow は呼ばれないこと', () => {
+  it('オーバーレイ表示中であっても Escape キーを押すと closeWindow が呼ばれてビューア画面が閉じること', () => {
     toggleMetadataOverlay(true);
     expect(viewerState.isMetadataVisible).toBe(true);
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(viewerState.isMetadataVisible).toBe(false);
-    expect(window.veloceAPI.closeWindow).not.toHaveBeenCalled();
-
-    // 再度 Escape を押すと closeWindow が呼ばれること
+    // Escape キー押下で常に closeWindow が呼ばれること
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(window.veloceAPI.closeWindow).toHaveBeenCalled();
   });

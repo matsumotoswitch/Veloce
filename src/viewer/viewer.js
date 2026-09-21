@@ -1762,9 +1762,7 @@ window.addEventListener('keydown', async (e) => {
       break;
     }
     case 'Escape':
-      if (viewerState.isMetadataVisible) {
-        toggleMetadataOverlay(false);
-      } else if (window.veloceAPI && window.veloceAPI.closeWindow) {
+      if (window.veloceAPI && window.veloceAPI.closeWindow) {
         window.veloceAPI.closeWindow();
       }
       break;
