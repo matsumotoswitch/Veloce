@@ -422,80 +422,84 @@ export async function renderMetadata(file, options = {}) {
         secEl.box.replaceChildren();
 
         // モード表示（四角い枠線なしのテキスト表示）
-        const modeText = section.positionMode || (section.useCoords === false ? 'AIにおまかせ' : 'カスタム');
+        const isAuto = section.positionMode === 'AIにおまかせ' || section.useCoords === false;
+        const modeText = section.positionMode || (isAuto ? 'AIにおまかせ' : 'カスタム');
         const modeRow = document.createElement('div');
         modeRow.className = 'inspector-position-mode-row';
         const modeTag = document.createElement('span');
-        modeTag.className = `inspector-position-mode-text ${section.useCoords === false ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
+        modeTag.className = `inspector-position-mode-text ${isAuto ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom'}`;
         modeTag.textContent = modeText;
         modeRow.appendChild(modeTag);
         secEl.box.appendChild(modeRow);
 
-        const mapWrapper = document.createElement('div');
-        mapWrapper.className = 'inspector-position-map-wrapper';
+        // 「AIにおまかせ」の場合はその旨のみ表示し、画像や座標情報は表示しない
+        if (!isAuto && section.charPositions && section.charPositions.length > 0) {
+          const mapWrapper = document.createElement('div');
+          mapWrapper.className = 'inspector-position-map-wrapper';
 
-        const map = document.createElement('div');
-        map.className = 'inspector-position-map';
+          const map = document.createElement('div');
+          map.className = 'inspector-position-map';
 
-        const imgWidth = section.width;
-        const imgHeight = section.height;
-        if (imgWidth && imgHeight) {
-          map.style.aspectRatio = `${imgWidth} / ${imgHeight}`;
-        }
+          const imgWidth = section.width;
+          const imgHeight = section.height;
+          if (imgWidth && imgHeight) {
+            map.style.aspectRatio = `${imgWidth} / ${imgHeight}`;
+          }
 
-        // 背景画像（サムネイルまたは元画像URL）
-        const thumbUrl = (appState?.thumbnailUrls?.get(file.path)) ||
-                         (window.appState?.thumbnailUrls?.get(file.path)) ||
-                         (typeof window.veloceAPI?.convertFileSrc === 'function' ? window.veloceAPI.convertFileSrc(file.path) : '') || '';
-        if (thumbUrl) {
-          const bgImg = document.createElement('img');
-          bgImg.className = 'inspector-position-bg-img';
-          bgImg.src = thumbUrl;
-          bgImg.onload = () => {
-            if (bgImg.naturalWidth && bgImg.naturalHeight && (!section.width || !section.height)) {
-              map.style.aspectRatio = `${bgImg.naturalWidth} / ${bgImg.naturalHeight}`;
-            }
-          };
-          map.appendChild(bgImg);
-        }
+          // 背景画像（サムネイルまたは元画像URL）
+          const thumbUrl = (appState?.thumbnailUrls?.get(file.path)) ||
+                           (window.appState?.thumbnailUrls?.get(file.path)) ||
+                           (typeof window.veloceAPI?.convertFileSrc === 'function' ? window.veloceAPI.convertFileSrc(file.path) : '') || '';
+          if (thumbUrl) {
+            const bgImg = document.createElement('img');
+            bgImg.className = 'inspector-position-bg-img';
+            bgImg.src = thumbUrl;
+            bgImg.onload = () => {
+              if (bgImg.naturalWidth && bgImg.naturalHeight && (!section.width || !section.height)) {
+                map.style.aspectRatio = `${bgImg.naturalWidth} / ${bgImg.naturalHeight}`;
+              }
+            };
+            map.appendChild(bgImg);
+          }
 
-        const coordsContainer = document.createElement('div');
-        coordsContainer.className = 'inspector-position-coords';
+          const coordsContainer = document.createElement('div');
+          coordsContainer.className = 'inspector-position-coords';
 
-        section.charPositions.forEach((cp) => {
-          const charNum = cp.index;
-          const colorClass = charNum <= 4 ? `char-marker-${charNum}` : 'char-marker-other';
+          section.charPositions.forEach((cp) => {
+            const charNum = cp.index;
+            const colorClass = charNum <= 4 ? `char-marker-${charNum}` : 'char-marker-other';
 
-          cp.centers.forEach((center) => {
-            const marker = document.createElement('div');
-            marker.className = `inspector-position-marker ${colorClass}`;
-            marker.style.left = `${(center.x * 100).toFixed(2)}%`;
-            marker.style.top = `${(center.y * 100).toFixed(2)}%`;
-            marker.textContent = String(charNum);
-            map.appendChild(marker);
+            cp.centers.forEach((center) => {
+              const marker = document.createElement('div');
+              marker.className = `inspector-position-marker ${colorClass}`;
+              marker.style.left = `${(center.x * 100).toFixed(2)}%`;
+              marker.style.top = `${(center.y * 100).toFixed(2)}%`;
+              marker.textContent = String(charNum);
+              map.appendChild(marker);
 
-            const coordItem = document.createElement('div');
-            coordItem.className = 'inspector-coord-item';
+              const coordItem = document.createElement('div');
+              coordItem.className = 'inspector-coord-item';
 
-            const badge = document.createElement('span');
-            badge.className = `inspector-coord-badge ${colorClass}`;
-            badge.textContent = String(charNum);
+              const badge = document.createElement('span');
+              badge.className = `inspector-coord-badge ${colorClass}`;
+              badge.textContent = String(charNum);
 
-            const text = document.createElement('span');
-            text.className = 'inspector-coord-text';
-            const xPct = (center.x * 100).toFixed(1);
-            const yPct = (center.y * 100).toFixed(1);
-            text.textContent = `X: ${xPct}%, Y: ${yPct}% (${center.x.toFixed(3)}, ${center.y.toFixed(3)})`;
+              const text = document.createElement('span');
+              text.className = 'inspector-coord-text';
+              const xPct = (center.x * 100).toFixed(1);
+              const yPct = (center.y * 100).toFixed(1);
+              text.textContent = `X: ${xPct}%, Y: ${yPct}% (${center.x.toFixed(3)}, ${center.y.toFixed(3)})`;
 
-            coordItem.appendChild(badge);
-            coordItem.appendChild(text);
-            coordsContainer.appendChild(coordItem);
+              coordItem.appendChild(badge);
+              coordItem.appendChild(text);
+              coordsContainer.appendChild(coordItem);
+            });
           });
-        });
 
-        mapWrapper.appendChild(map);
-        secEl.box.appendChild(mapWrapper);
-        secEl.box.appendChild(coordsContainer);
+          mapWrapper.appendChild(map);
+          secEl.box.appendChild(mapWrapper);
+          secEl.box.appendChild(coordsContainer);
+        }
       } else if (section.isRaw) {
         secEl.box.className = 'prompt-look raw-box';
         secEl.box.style.cssText = '';

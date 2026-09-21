@@ -396,13 +396,13 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(modeTag.textContent).toBe('AIにおまかせ');
       expect(modeTag.classList.contains('inspector-position-mode--auto')).toBe(true);
 
-      // Ensure mode row is the first child, followed by map wrapper and coords
+      // 「AIにおまかせ」の場合はその旨のみ表示し、画像マップや座標情報は表示しない
       expect(positionBlock.firstElementChild).toBe(modeRow);
-      expect(modeRow.nextElementSibling.classList.contains('inspector-position-map-wrapper')).toBe(true);
-      expect(positionBlock.querySelector('.inspector-position-coords')).not.toBeNull();
+      expect(positionBlock.querySelector('.inspector-position-map-wrapper')).toBeNull();
+      expect(positionBlock.querySelector('.inspector-position-coords')).toBeNull();
     });
 
-    it('should display "カスタム" mode text between title and map when use_coords is true', async () => {
+    it('should display "カスタム" mode text and render map and coords when use_coords is true', async () => {
       const file = { name: 'custom_pos.png', path: 'custom_pos.png' };
       const meta = {
         source: 'NovelAI',
@@ -434,6 +434,9 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(modeTag.textContent).toBe('カスタム');
       expect(modeTag.classList.contains('inspector-position-mode--custom')).toBe(true);
       expect(positionBlock.firstElementChild).toBe(modeRow);
+      // カスタムの場合は画像マップと座標が表示されること
+      expect(positionBlock.querySelector('.inspector-position-map-wrapper')).not.toBeNull();
+      expect(positionBlock.querySelector('.inspector-position-coords')).not.toBeNull();
     });
   });
 
@@ -539,6 +542,41 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(posBlocks[1].querySelector('.inspector-position-mode-text').textContent).toBe('カスタム');
       expect(posBlocks[0].querySelector('.inspector-position-mode-row .diff-tag')).toBeNull();
       expect(posBlocks[1].querySelector('.inspector-position-mode-row .diff-tag')).toBeNull();
+      // 「AIにおまかせ」側は画像と座標を表示しないこと
+      expect(posBlocks[0].querySelector('.inspector-position-map-wrapper')).toBeNull();
+      expect(posBlocks[0].querySelector('.inspector-position-coords')).toBeNull();
+      // 「カスタム」側は画像と座標を表示すること
+      expect(posBlocks[1].querySelector('.inspector-position-map-wrapper')).not.toBeNull();
+      expect(posBlocks[1].querySelector('.inspector-position-coords')).not.toBeNull();
+    });
+
+    it('should not mark position header with has-diff when both files are in "AIにおまかせ" mode', () => {
+      const file1 = { name: 'f1.png', path: 'f1.png' };
+      const file2 = { name: 'f2.png', path: 'f2.png' };
+      const meta1 = {
+        params: {
+          use_coords: false,
+          characterPrompts: [{ prompt: 'girl', centers: [{ x: 0.2, y: 0.3 }] }]
+        }
+      };
+      const meta2 = {
+        params: {
+          use_coords: false,
+          characterPrompts: [{ prompt: 'girl', centers: [{ x: 0.8, y: 0.7 }] }]
+        }
+      };
+
+      uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+      const container = document.getElementById('diff-container');
+      const posHeaders = Array.from(container.querySelectorAll('.diff-section h3')).filter(h => h.textContent.includes('位置'));
+      expect(posHeaders.length).toBe(2);
+      expect(posHeaders[0].classList.contains('has-diff')).toBe(false);
+      expect(posHeaders[1].classList.contains('has-diff')).toBe(false);
+
+      const posBlocks = container.querySelectorAll('.inspector-position-block');
+      expect(posBlocks[0].querySelector('.inspector-position-map-wrapper')).toBeNull();
+      expect(posBlocks[1].querySelector('.inspector-position-map-wrapper')).toBeNull();
     });
 
     it('should render position block on one side and "なし" on the other when only one file has positions', () => {

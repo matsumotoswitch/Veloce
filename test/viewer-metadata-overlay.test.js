@@ -444,4 +444,36 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     expect(coords).not.toBeNull();
     expect(coords.children.length).toBe(2);
   });
+
+  it('should only show mode text and hide map and coordinates when position mode is "AIにおまかせ"', async () => {
+    window.veloceAPI.parseMetadata = vi.fn().mockResolvedValue({
+      source: 'NovelAI',
+      prompt: '2girls, high quality',
+      negativePrompt: 'low quality',
+      params: {
+        use_coords: false,
+        characterPrompts: [
+          { prompt: 'girl 1', uc: '', centers: [{ x: 0.3, y: 0.5 }] },
+          { prompt: 'girl 2', uc: '', centers: [{ x: 0.7, y: 0.5 }] }
+        ]
+      }
+    });
+
+    toggleMetadataOverlay(true);
+    await updateMetadataOverlay();
+
+    const content = document.getElementById('viewer-metadata-content');
+    const positionBlock = content.querySelector('.inspector-position-block');
+    expect(positionBlock).not.toBeNull();
+
+    // モードテキストが「AIにおまかせ」であること
+    const modeTag = positionBlock.querySelector('.inspector-position-mode-text');
+    expect(modeTag).not.toBeNull();
+    expect(modeTag.textContent).toBe('AIにおまかせ');
+    expect(modeTag.classList.contains('inspector-position-mode--auto')).toBe(true);
+
+    // 画像マップや座標リストが存在しないこと
+    expect(positionBlock.querySelector('.inspector-position-map-wrapper')).toBeNull();
+    expect(positionBlock.querySelector('.inspector-position-coords')).toBeNull();
+  });
 });

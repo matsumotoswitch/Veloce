@@ -1299,6 +1299,21 @@ class UIManager {
         const modeText = isAuto ? 'AIにおまかせ' : 'カスタム';
         const modeModifier = isAuto ? 'inspector-position-mode--auto' : 'inspector-position-mode--custom';
 
+        // 「AIにおまかせ」の場合はその旨のみ表示し、画像や座標情報は表示しない
+        if (isAuto) {
+          const blockHtml = `
+            <div class="prompt-look inspector-position-block">
+              <div class="inspector-position-mode-row">
+                <span class="inspector-position-mode-text ${modeModifier}">${modeText}</span>
+              </div>
+            </div>
+          `;
+          return {
+            html: blockHtml,
+            copyText: `モード: ${modeText}`
+          };
+        }
+
         const imgWidth = d.width;
         const imgHeight = d.height;
         const aspectAttr = (imgWidth && imgHeight) ? `data-aspect-ratio="${imgWidth} / ${imgHeight}"` : '';
@@ -1360,7 +1375,8 @@ class UIManager {
         const mode2 = d2.useCoords === false ? 'AIにおまかせ' : 'カスタム';
         if (mode1 !== mode2) {
           hasDiff = true;
-        } else {
+        } else if (d1.useCoords !== false) {
+          // 両方とも「カスタム」の場合のみ座標の差分を比較
           const normalizePositions = (positions) => {
             return positions.map(cp => ({
               index: cp.index,
