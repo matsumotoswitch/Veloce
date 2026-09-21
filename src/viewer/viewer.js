@@ -86,6 +86,10 @@ if (typeof window !== 'undefined') {
 }
 
 window.addEventListener('focus', () => {
+  // <video> 要素の内部操作（再生・一時停止等）がウィンドウ focus を誘発するケースがある。
+  // これを「フォーカス目的クリック」と誤判定して ignoreNextClick を立てないよう、
+  // activeElement が VIDEO の場合は lastFocusTime を更新しない。
+  if (document.activeElement && document.activeElement.tagName === 'VIDEO') return;
   viewerState.lastFocusTime = Date.now();
 });
 
@@ -1106,8 +1110,6 @@ function swapImageElement(newImg, sequenceId) {
     if (img !== currentlyVisibleImg && img !== newImg) {
       if (img.tagName === 'VIDEO') {
         img.pause();
-        img.removeAttribute('src');
-        img.load();
       }
       img.remove();
     }
@@ -1119,9 +1121,11 @@ function swapImageElement(newImg, sequenceId) {
     // Clean up the currently visible image since the new one is ready
     if (currentlyVisibleImg && currentlyVisibleImg !== newImg) {
       if (currentlyVisibleImg.tagName === 'VIDEO') {
+        // 表示から外れた動画は一時停止してバックグラウンド再生・音声出力を停止する。
+        // ※ preloadCache に保持されている動画要素の src を removeAttribute してしまうと、
+        //   再訪時に空の video 要素が再利用されて再生できなくなるため、src の消去は行わない。
+        //   メモリ解放は preloadCache から完全に破棄されるタイミング（diff > 3 または clearPreloadCache）で行う。
         currentlyVisibleImg.pause();
-        currentlyVisibleImg.removeAttribute('src');
-        currentlyVisibleImg.load();
       }
       currentlyVisibleImg.remove();
     }
@@ -1138,12 +1142,23 @@ function swapImageElement(newImg, sequenceId) {
   };
 
   if (newImg.tagName === 'VIDEO') {
+    // 再訪時やループ遷移時、動画を確実に先頭から再生する
+    try {
+      newImg.currentTime = 0;
+    } catch (e) {
+      /* ignore if not yet seekable */
+    }
     if (newImg.readyState >= 1) {
       makeVisible();
       newImg.play().catch(e => console.warn('Video play failed:', e));
     } else {
       newImg.addEventListener('loadedmetadata', () => {
         makeVisible();
+        try {
+          newImg.currentTime = 0;
+        } catch (e) {
+          /* ignore */
+        }
         newImg.play().catch(e => console.warn('Video play failed:', e));
       }, { once: true });
       newImg.addEventListener('error', () => {
@@ -1181,7 +1196,12 @@ async function loadImage() {
     if (viewerState.preloadCache.has(viewerState.currentIndex)) {
       const cachedData = viewerState.preloadCache.get(viewerState.currentIndex);
       if (cachedData.path === viewerState.currentImagePath) {
-        targetImg = cachedData.img;
+        // 動画要素で万が一 src が欠落していた場合はキャッシュ破損とみなして新規生成へフォールバック
+        if (cachedData.img && cachedData.img.tagName === 'VIDEO' && (!cachedData.img.src || cachedData.img.src === '')) {
+          viewerState.preloadCache.delete(viewerState.currentIndex);
+        } else {
+          targetImg = cachedData.img;
+        }
       }
     }
 
@@ -1196,6 +1216,8 @@ async function loadImage() {
         targetImg.autoplay = true;
         targetImg.loop = true;
         targetImg.muted = true;
+        // フォーカスを受け取らないようにし、window.focus 誘発による ignoreNextClick 誤爆を防ぐ
+        targetImg.tabIndex = -1;
       } else {
         targetImg = document.createElement('img');
         targetImg.decoding = 'async';
@@ -1263,6 +1285,8 @@ async function preloadAdjacentImages() {
           img.autoplay = true;
           img.loop = true;
           img.muted = true;
+          // フォーカスを受け取らないようにし、window.focus 誘発による ignoreNextClick 誤爆を防ぐ
+          img.tabIndex = -1;
         } else {
           img = document.createElement('img');
           img.decoding = 'async';

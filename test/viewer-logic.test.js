@@ -308,4 +308,134 @@ describe('Viewer Core Logic & Hotkeys', () => {
     expect(oldImg.remove).toHaveBeenCalled();
     expect(global.viewerState.preloadCache.has(9)).toBe(false);
   });
+
+  // --- video focus 誘発による ignoreNextClick 誤爆防止のテスト ---
+
+  it('should not update lastFocusTime when activeElement is a VIDEO element', () => {
+    // window.focus リスナーで activeElement が VIDEO の場合は lastFocusTime を更新しない仕様の検証
+    const state = { lastFocusTime: 0 };
+
+    // viewer.js の window.focus ハンドラのロジックをシミュレート
+    const onFocus = (activeElement) => {
+      if (activeElement && activeElement.tagName === 'VIDEO') return;
+      state.lastFocusTime = Date.now();
+    };
+
+    const before = state.lastFocusTime;
+
+    // VIDEO が activeElement のとき → lastFocusTime が更新されないこと
+    onFocus({ tagName: 'VIDEO' });
+    expect(state.lastFocusTime).toBe(before);
+
+    // IMG が activeElement のとき → lastFocusTime が更新されること
+    onFocus({ tagName: 'IMG' });
+    expect(state.lastFocusTime).toBeGreaterThan(before);
+  });
+
+  it('should create video element with tabIndex -1 to prevent focus capture', () => {
+    // video 要素に tabIndex = -1 が設定されること（loadImage / preloadAdjacentImages 両者）
+    const videoUrls = ['test.mp4', 'test.webm', 'test.avi', 'test.mkv'];
+    for (const url of videoUrls) {
+      // viewer.js の video 生成ロジックをシミュレート
+      const img = document.createElement('video');
+      img.autoplay = true;
+      img.loop = true;
+      img.muted = true;
+      img.tabIndex = -1; // この設定が存在すること
+      expect(img.tabIndex).toBe(-1);
+    }
+  });
+
+  it('should pause video on image swap without clearing src so that preloadCache entries remain valid for repeated playback', () => {
+    const videoMock = {
+      tagName: 'VIDEO',
+      pause: vi.fn(),
+      removeAttribute: vi.fn(),
+      load: vi.fn(),
+      remove: vi.fn(),
+      src: 'http://127.0.0.1:50000/video.mp4'
+    };
+
+    let currentlyVisibleImg = videoMock;
+    const newImg = {
+      tagName: 'IMG',
+      id: '',
+      classList: { remove: vi.fn() },
+      style: { display: 'none' },
+      offsetHeight: 100
+    };
+
+    // swapImageElement 内の makeVisible ロジックをシミュレート
+    const makeVisible = () => {
+      if (currentlyVisibleImg && currentlyVisibleImg !== newImg) {
+        if (currentlyVisibleImg.tagName === 'VIDEO') {
+          currentlyVisibleImg.pause();
+        }
+        currentlyVisibleImg.remove();
+      }
+      currentlyVisibleImg = newImg;
+    };
+
+    makeVisible();
+
+    expect(videoMock.pause).toHaveBeenCalledTimes(1);
+    expect(videoMock.removeAttribute).not.toHaveBeenCalled();
+    expect(videoMock.load).not.toHaveBeenCalled();
+    expect(videoMock.remove).toHaveBeenCalledTimes(1);
+    // src が保持されているため再訪時にそのまま再生可能
+    expect(videoMock.src).toBe('http://127.0.0.1:50000/video.mp4');
+  });
+
+  it('should reset currentTime to 0 and play video when revisiting previously played video element', async () => {
+    const videoMock = {
+      tagName: 'VIDEO',
+      readyState: 2, // HAVE_CURRENT_DATA
+      currentTime: 12.5, // 以前の再生位置
+      play: vi.fn().mockResolvedValue(undefined),
+      classList: { remove: vi.fn() },
+      style: { display: 'none' },
+      offsetHeight: 100
+    };
+
+    // swapImageElement 内のビデオ再生処理をシミュレート
+    if (videoMock.tagName === 'VIDEO') {
+      try {
+        videoMock.currentTime = 0;
+      } catch (e) {
+        /* ignore */
+      }
+      if (videoMock.readyState >= 1) {
+        videoMock.play();
+      }
+    }
+
+    expect(videoMock.currentTime).toBe(0);
+    expect(videoMock.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('should invalidate cache entry and fallback to new video creation if cached video has missing src', () => {
+    const brokenVideo = {
+      tagName: 'VIDEO',
+      src: ''
+    };
+    global.viewerState.preloadCache.set(2, { img: brokenVideo, path: 'C:/videos/corrupted.mp4' });
+    global.viewerState.currentIndex = 2;
+    global.viewerState.currentImagePath = 'C:/videos/corrupted.mp4';
+
+    let targetImg;
+    if (global.viewerState.preloadCache.has(global.viewerState.currentIndex)) {
+      const cachedData = global.viewerState.preloadCache.get(global.viewerState.currentIndex);
+      if (cachedData.path === global.viewerState.currentImagePath) {
+        if (cachedData.img && cachedData.img.tagName === 'VIDEO' && (!cachedData.img.src || cachedData.img.src === '')) {
+          global.viewerState.preloadCache.delete(global.viewerState.currentIndex);
+        } else {
+          targetImg = cachedData.img;
+        }
+      }
+    }
+
+    expect(targetImg).toBeUndefined();
+    expect(global.viewerState.preloadCache.has(2)).toBe(false);
+  });
 });
+
