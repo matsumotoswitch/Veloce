@@ -86,6 +86,9 @@ export function initTabHandlers(ctx) {
 
     appState.activeTabIndex = index;
     uiManager.renderTabs();
+    if (uiManager && typeof uiManager.scrollTabIntoView === 'function') {
+      uiManager.scrollTabIntoView();
+    }
 
     appState.searchQuery = tab.searchQuery || '';
     if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;
@@ -238,6 +241,9 @@ export function initTabHandlers(ctx) {
           
           window.veloceAPI.loadDirectory(nextTab.path);
           expandTreeToPath(appState.currentDirectory);
+          if (uiManager && typeof uiManager.scrollTabIntoView === 'function') {
+            uiManager.scrollTabIntoView();
+          }
         }, 230);
       }
     }

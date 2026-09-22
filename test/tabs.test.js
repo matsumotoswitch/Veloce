@@ -348,5 +348,78 @@ describe('Tabs Functionality', () => {
       expect(container.classList.contains('has-overflow-right')).toBe(false);
       expect(newTabBtn.classList.contains('is-overflowing')).toBe(false);
     });
+
+    it('should scroll #tab-container to make active tab visible when active tab is on the right side', () => {
+      const container = document.getElementById('tab-container');
+      container.getBoundingClientRect = vi.fn(() => ({
+        left: 0,
+        right: 400,
+        width: 400,
+        top: 0,
+        bottom: 40,
+        height: 40
+      }));
+      container.scrollLeft = 0;
+
+      // 5番目のタブ（index: 4）をアクティブに設定
+      appState.activeTabIndex = 4;
+      uiManager.renderTabs();
+
+      const activeTabEl = container.querySelector('.tab-item.active');
+      expect(activeTabEl).not.toBeNull();
+
+      // アクティブタブが右側（left: 600, right: 750）にあるとモック
+      activeTabEl.getBoundingClientRect = vi.fn(() => ({
+        left: 600,
+        right: 750,
+        width: 150,
+        top: 0,
+        bottom: 40,
+        height: 40
+      }));
+
+      uiManager.scrollTabIntoView();
+
+      // contRect.right (400) - padding (8) = 392
+      // tabRect.right (750) - 392 = 358
+      // container.scrollLeft が 358 にスクロールされること
+      expect(container.scrollLeft).toBe(358);
+    });
+
+    it('should scroll #tab-container to make active tab visible when active tab is on the left side', () => {
+      const container = document.getElementById('tab-container');
+      container.getBoundingClientRect = vi.fn(() => ({
+        left: 100,
+        right: 500,
+        width: 400,
+        top: 0,
+        bottom: 40,
+        height: 40
+      }));
+      container.scrollLeft = 300;
+
+      appState.activeTabIndex = 0;
+      uiManager.renderTabs();
+
+      const activeTabEl = container.querySelector('.tab-item.active');
+      expect(activeTabEl).not.toBeNull();
+
+      // アクティブタブが左側（left: 50, right: 200）に見切れているとモック
+      activeTabEl.getBoundingClientRect = vi.fn(() => ({
+        left: 50,
+        right: 200,
+        width: 150,
+        top: 0,
+        bottom: 40,
+        height: 40
+      }));
+
+      uiManager.scrollTabIntoView();
+
+      // contRect.left (100) + padding (8) = 108
+      // 108 - tabRect.left (50) = 58
+      // container.scrollLeft = 300 - 58 = 242 にスクロールされること
+      expect(container.scrollLeft).toBe(242);
+    });
   });
 });

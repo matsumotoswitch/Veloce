@@ -233,20 +233,11 @@ async function refreshFileList(showToast = false) {
 
 /**
  * タブ要素を安全に横スクロール表示する
- * @param {HTMLElement} tabEl - 表示対象のタブ要素
+ * @param {HTMLElement} [tabEl] - 表示対象のタブ要素（省略時はアクティブタブ）
  */
 function scrollTabIntoView(tabEl) {
-  if (!tabEl) return;
-  const container = document.getElementById('tab-container');
-  if (!container) return;
-
-  const tabRect = tabEl.getBoundingClientRect();
-  const contRect = container.getBoundingClientRect();
-
-  if (tabRect.left < contRect.left) {
-    container.scrollLeft = Math.max(0, container.scrollLeft - (contRect.left - tabRect.left));
-  } else if (tabRect.right > contRect.right) {
-    container.scrollLeft = container.scrollLeft + (tabRect.right - contRect.right);
+  if (uiManager && typeof uiManager.scrollTabIntoView === 'function') {
+    uiManager.scrollTabIntoView(tabEl);
   }
 }
 
@@ -1775,6 +1766,9 @@ window.addEventListener('resize', debounce(() => {
     });
   }
   uiManager.updateTabScrollState();
+  if (uiManager && typeof uiManager.scrollTabIntoView === 'function') {
+    uiManager.scrollTabIntoView();
+  }
 }, 500));
 
 window.addEventListener('beforeunload', () => {
@@ -3053,6 +3047,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   uiManager.renderTabs();
+  scrollTabIntoView();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      scrollTabIntoView();
+    });
+  }
 
   const currentTab = appState.tabs[appState.activeTabIndex];
 
@@ -3260,6 +3260,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     await expandTreeToPath(appState.currentDirectory);
     saveTabsState();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        scrollTabIntoView();
+      });
+    }
   }
 
   if (window.veloceAPI.onRatingChanged) {

@@ -311,6 +311,33 @@ class UIManager {
     }
   }
 
+  /**
+   * 指定したタブ（または現在のアクティブタブ）をタブコンテナの表示範囲内にスクロール表示します。
+   * ネイティブの scrollIntoView() による祖先要素の不要なスクロール暴走を防ぐため、
+   * #tab-container の scrollLeft のみを直接計算して操作します。
+   * @param {HTMLElement} [targetTabEl=null] - スクロール対象のタブ要素（省略時はアクティブタブ）
+   */
+  scrollTabIntoView(targetTabEl = null) {
+    const container = document.getElementById('tab-container');
+    if (!container) return;
+
+    const tabEl = targetTabEl || container.querySelector('.tab-item.active');
+    if (!tabEl) return;
+
+    const tabRect = tabEl.getBoundingClientRect();
+    const contRect = container.getBoundingClientRect();
+    if (contRect.width === 0) return;
+
+    const padding = 8;
+    if (tabRect.left < contRect.left + padding) {
+      container.scrollLeft = Math.max(0, container.scrollLeft - (contRect.left + padding - tabRect.left));
+    } else if (tabRect.right > contRect.right - padding) {
+      container.scrollLeft = container.scrollLeft + (tabRect.right - (contRect.right - padding));
+    }
+
+    this.updateTabScrollState();
+  }
+
   renderTabs() {
     const container = document.getElementById('tab-container');
     if (!container) return;
