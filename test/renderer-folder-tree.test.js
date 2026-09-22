@@ -24,11 +24,12 @@ describe('Renderer Folder Tree Controller (renderer-folder-tree.js)', () => {
       setViewParams: vi.fn().mockResolvedValue(undefined)
     };
 
-    global.CSS = { escape: vi.fn(s => s) };
+    global.CSS = window.CSS || { escape: (s) => s.replace(/([\\:])/g, '\\$1') };
 
     document.body.innerHTML = `
-      <div id="directories-section" style="height: 400px; overflow: auto;">
-        <div id="dir-tree"></div>
+      <div id="directories-section" style="overflow: hidden;">
+        <div class="pane-header">フォルダ</div>
+        <div id="dir-tree" style="height: 400px; overflow: auto;"></div>
       </div>
     `;
     uiManager.elements.dirTree = document.getElementById('dir-tree');
@@ -83,26 +84,106 @@ describe('Renderer Folder Tree Controller (renderer-folder-tree.js)', () => {
   });
 
   describe('scrollTreeItemIntoView', () => {
-    it('should calculate container scrollTop without throwing', () => {
+    it('should scroll #dir-tree container (not #directories-section) to center target item', () => {
+      const dirSection = document.getElementById('directories-section');
+      const dirTree = document.getElementById('dir-tree');
       const node = createTreeNode({ name: 'folder1', path: 'C:\\folder1' });
-      document.getElementById('dir-tree').appendChild(node);
+      dirTree.appendChild(node);
       const itemDiv = node.querySelector('.tree-item');
 
-      expect(() => scrollTreeItemIntoView(itemDiv, 'center')).not.toThrow();
-      expect(() => scrollTreeItemIntoView(itemDiv, 'nearest')).not.toThrow();
+      // dirTree のモック座標（高さ400px）
+      dirTree.getBoundingClientRect = vi.fn(() => ({
+        top: 100,
+        bottom: 500,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 400
+      }));
+      dirTree.scrollTop = 0;
+      dirSection.scrollTop = 0;
+
+      // itemDiv のモック座標（画面下部 Y: 600、高さ30px）
+      itemDiv.getBoundingClientRect = vi.fn(() => ({
+        top: 600,
+        bottom: 630,
+        left: 10,
+        right: 150,
+        width: 140,
+        height: 30
+      }));
+
+      scrollTreeItemIntoView(itemDiv, 'center');
+
+      // #directories-section ではなく #dir-tree の scrollTop が中央位置にスクロールされること
+      expect(dirSection.scrollTop).toBe(0);
+      // targetScrollTop = 0 + (600 - 100) - (400 / 2) + (30 / 2) = 500 - 200 + 15 = 315
+      expect(dirTree.scrollTop).toBe(315);
+    });
+
+    it('should scroll #dir-tree when block is nearest', () => {
+      const dirTree = document.getElementById('dir-tree');
+      const node = createTreeNode({ name: 'folder2', path: 'C:\\folder2' });
+      dirTree.appendChild(node);
+      const itemDiv = node.querySelector('.tree-item');
+
+      dirTree.getBoundingClientRect = vi.fn(() => ({
+        top: 100,
+        bottom: 500,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 400
+      }));
+      dirTree.scrollTop = 0;
+
+      // 下側に見切れている場合 (itemDiv bottom: 550, container bottom: 500)
+      itemDiv.getBoundingClientRect = vi.fn(() => ({
+        top: 520,
+        bottom: 550,
+        left: 10,
+        right: 150,
+        width: 140,
+        height: 30
+      }));
+
+      scrollTreeItemIntoView(itemDiv, 'nearest');
+      // scrollTop = 0 + (550 - 500) = 50
+      expect(dirTree.scrollTop).toBe(50);
     });
   });
 
   describe('expandTreeToPath', () => {
-    it('should expand path hierarchy in tree', async () => {
+    it('should expand path hierarchy in tree and scroll target into view', async () => {
+      window.veloceAPI.getFolders.mockImplementation(async (path) => {
+        if (path === 'C:\\') {
+          return [{ name: 'test', path: 'C:\\test' }];
+        }
+        return [];
+      });
+
       const rootNode = createTreeNode({ name: 'C:\\', path: 'C:\\' }, true);
       const ul = document.createElement('ul');
       ul.className = 'tree-root';
       ul.appendChild(rootNode);
-      document.getElementById('dir-tree').appendChild(ul);
+      const dirTree = document.getElementById('dir-tree');
+      dirTree.appendChild(ul);
 
-      await expandTreeToPath('C:\\test', true);
-      expect(global.CSS.escape).toHaveBeenCalled();
+      dirTree.getBoundingClientRect = vi.fn(() => ({
+        top: 100,
+        bottom: 500,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 400
+      }));
+      dirTree.scrollTop = 0;
+
+      await expandTreeToPath('C:\\test', false);
+
+      const itemDiv = dirTree.querySelector('.tree-item[data-path="C:\\\\test"]');
+      expect(itemDiv).not.toBeNull();
+      expect(itemDiv.classList.contains('selected')).toBe(true);
     });
   });
 

@@ -27,26 +27,39 @@ export function initFolderTree(callbacks = {}) {
 /**
  * フォルダツリー要素を安全にスクロール表示します。
  * ネイティブの scrollIntoView() による祖先要素の不正なスクロール暴走を防ぐため、
- * 親コンテナの scrollTop のみを直接計算して操作します。
+ * スクロール可能な親コンテナ（#dir-tree）の scrollTop/scrollLeft のみを直接計算して操作します。
  * @param {HTMLElement} itemDiv - 表示対象のツリーアイテム要素
  * @param {'center'|'nearest'} [block='center'] - スクロール位置
  */
 export function scrollTreeItemIntoView(itemDiv, block = 'center') {
   if (!itemDiv) return;
-  const container = itemDiv.closest('#directories-section') || itemDiv.closest('#dir-tree');
+  // スクロールバーを持つ要素は #directories-section（overflow: hidden）ではなく #dir-tree（overflow: auto）
+  const container = itemDiv.closest('#dir-tree') || itemDiv.closest('#directories-section');
   if (!container) return;
 
   const itemRect = itemDiv.getBoundingClientRect();
   const containerRect = container.getBoundingClientRect();
+  const containerHeight = containerRect.height || container.clientHeight || 0;
+  if (containerHeight === 0) return;
 
   if (block === 'center') {
-    const targetScrollTop = container.scrollTop + (itemRect.top - containerRect.top) - (containerRect.height / 2) + (itemRect.height / 2);
+    const targetScrollTop = container.scrollTop + (itemRect.top - containerRect.top) - (containerHeight / 2) + (itemRect.height / 2);
     container.scrollTop = Math.max(0, targetScrollTop);
   } else {
     if (itemRect.top < containerRect.top) {
       container.scrollTop = Math.max(0, container.scrollTop - (containerRect.top - itemRect.top));
     } else if (itemRect.bottom > containerRect.bottom) {
       container.scrollTop = container.scrollTop + (itemRect.bottom - containerRect.bottom);
+    }
+  }
+
+  // 水平スクロールの視認性確保（深くネストしたフォルダの可視化）
+  const containerWidth = containerRect.width || container.clientWidth || 0;
+  if (containerWidth > 0) {
+    if (itemRect.left < containerRect.left) {
+      container.scrollLeft = Math.max(0, container.scrollLeft - (containerRect.left - itemRect.left));
+    } else if (itemRect.right > containerRect.right && itemRect.width < containerWidth) {
+      container.scrollLeft = container.scrollLeft + (itemRect.right - containerRect.right);
     }
   }
 }
@@ -201,6 +214,11 @@ export async function expandTreeToPath(targetPath, disableScroll = false, rootEl
         itemDiv.classList.add('selected');
         if (!disableScroll) {
           scrollTreeItemIntoView(itemDiv, 'center');
+          if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => {
+              scrollTreeItemIntoView(itemDiv, 'center');
+            });
+          }
         }
       } else {
         if (itemDiv.expandNode) await itemDiv.expandNode();
