@@ -3014,6 +3014,7 @@ async fn generate_thumbnail(
 
     let video_port = state.video_server_port;
     let url = tokio::task::spawn_blocking(move || {
+        #[cfg(debug_assertions)]
         let t_start = std::time::Instant::now();
         let mtime = mem_mtime.unwrap_or_else(|| {
             std::fs::metadata(&file_path)
@@ -3025,7 +3026,6 @@ async fn generate_thumbnail(
         });
 
         let cache_bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
-        let t_gen = t_start.elapsed();
 
         let url = if cache_bytes.is_empty() {
             String::new()
@@ -3034,9 +3034,12 @@ async fn generate_thumbnail(
         };
         
         #[cfg(debug_assertions)]
-        if t_gen.as_millis() > 5 {
-            let fname = std::path::Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy();
-            println!("[Rust] {}: db_lookup={}ms", fname, t_gen.as_millis());
+        {
+            let t_gen = t_start.elapsed();
+            if t_gen.as_millis() > 5 {
+                let fname = std::path::Path::new(&file_path).file_name().unwrap_or_default().to_string_lossy();
+                println!("[Rust] {}: db_lookup={}ms", fname, t_gen.as_millis());
+            }
         }
         url
     }).await.map_err(|e| e.to_string())?;
