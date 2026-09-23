@@ -267,7 +267,7 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>Delete</kbd></td><td>画像をゴミ箱に移動し、次の画像を表示</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
         <tr><td><kbd>タグをクリック</kbd></td><td>（オーバーレイ時）プロンプトタグをコピー（<kbd>Ctrl</kbd> + クリックで追加コピー）</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる</td></tr>
       </table>
     </div>
   `;

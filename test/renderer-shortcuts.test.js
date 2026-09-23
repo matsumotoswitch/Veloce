@@ -430,8 +430,8 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       expect(helpJs).toContain('<tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>');
       expect(helpJs).toContain('<tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>');
 
-      // ビューアー画面の Esc にオーバーレイを閉じる旨が含まれていること
-      expect(helpJs).toContain('<tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる（オーバーレイ表示時はオーバーレイを閉じる）</td></tr>');
+      // ビューアー画面の Esc がビューワーウィンドウを閉じること
+      expect(helpJs).toContain('<tr><td><kbd>Esc</kbd></td><td>ビューワーウィンドウを閉じる</td></tr>');
     });
   });
 
