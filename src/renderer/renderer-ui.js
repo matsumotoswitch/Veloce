@@ -1351,7 +1351,8 @@ class UIManager {
 
         d.charPositions.forEach(cp => {
           const charNum = cp.index;
-          const colorClass = charNum <= 4 ? `char-marker-${charNum}` : 'char-marker-other';
+          const markerIndex = ((charNum - 1) % 8) + 1;
+          const colorClass = `char-marker-${markerIndex}`;
 
           cp.centers.forEach(center => {
             const leftPct = (center.x * 100).toFixed(2);

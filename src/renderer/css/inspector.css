@@ -206,26 +206,6 @@
   line-height: 1;
 }
 
-.char-marker-1 {
-  background-color: var(--color-tag-char-ref);
-}
-
-.char-marker-2 {
-  background-color: var(--color-tag-inpainting);
-}
-
-.char-marker-3 {
-  background-color: var(--color-tag-vibe);
-}
-
-.char-marker-4 {
-  background-color: var(--color-tag-img2img);
-}
-
-.char-marker-other {
-  background-color: var(--accent-color);
-}
-
 .inspector-position-coords {
   display: flex;
   flex-direction: column;
@@ -255,6 +235,72 @@
   border: 1px solid var(--text-light);
   flex-shrink: 0;
   line-height: 1;
+}
+
+/* --- キャラクター位置プレビュー マーカーカラー（お気に入りパレット8色ループ） ---
+ * マーカー (.inspector-position-marker) と 座標一覧バッジ (.inspector-coord-badge)
+ * の双方に対して、背景色と高コントラストな文字色・枠線色をカスケード適用する
+ */
+.char-marker-1,
+.char-marker--default {
+  background-color: var(--palette-default);
+  color: var(--text-dark);
+  border-color: var(--text-dark);
+}
+
+.char-marker-2,
+.char-marker--red {
+  background-color: var(--palette-red);
+  color: var(--text-light);
+  border-color: var(--text-light);
+}
+
+.char-marker-3,
+.char-marker--blue {
+  background-color: var(--palette-blue);
+  color: var(--text-light);
+  border-color: var(--text-light);
+}
+
+.char-marker-4,
+.char-marker--green {
+  background-color: var(--palette-green);
+  color: var(--text-dark);
+  border-color: var(--text-dark);
+}
+
+.char-marker-5,
+.char-marker--yellow {
+  background-color: var(--palette-yellow);
+  color: var(--text-dark);
+  border-color: var(--text-dark);
+}
+
+.char-marker-6,
+.char-marker--purple {
+  background-color: var(--palette-purple);
+  color: var(--text-light);
+  border-color: var(--text-light);
+}
+
+.char-marker-7,
+.char-marker--pink {
+  background-color: var(--palette-pink);
+  color: var(--text-light);
+  border-color: var(--text-light);
+}
+
+.char-marker-8,
+.char-marker--cyan {
+  background-color: var(--palette-cyan);
+  color: var(--text-dark);
+  border-color: var(--text-dark);
+}
+
+.char-marker-other {
+  background-color: var(--accent-color);
+  color: var(--text-light);
+  border-color: var(--text-light);
 }
 
 .inspector-coord-text {

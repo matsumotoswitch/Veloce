@@ -708,4 +708,81 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       expect(posHeaders.length).toBe(0);
     });
   });
+
+  describe('Palette Color Cycling & Contrast for Multi-Characters (up to 27 characters)', () => {
+    it('should cycle through 8 palette classes for characters 1 to 27', async () => {
+      // 27人分のキャラクター座標メタデータを生成
+      const charPrompts = [];
+      for (let i = 1; i <= 27; i++) {
+        charPrompts.push({
+          prompt: `character ${i}`,
+          centers: [{ x: (i * 0.035).toFixed(3), y: 0.5 }]
+        });
+      }
+
+      const file = { name: 'nai_27chars.png', path: 'nai_27chars.png' };
+      const meta = {
+        source: 'NovelAI Diffusion V5',
+        params: {
+          width: 1216,
+          height: 832,
+          characterPrompts: charPrompts
+        }
+      };
+      window.veloceAPI.parseMetadata = vi.fn().mockResolvedValue(meta);
+
+      await renderMetadata(file);
+
+      const container = document.getElementById('inspector-content');
+      const markers = container.querySelectorAll('.inspector-position-marker');
+      expect(markers.length).toBe(27);
+
+      const coordBadges = container.querySelectorAll('.inspector-coord-badge');
+      expect(coordBadges.length).toBe(27);
+
+      // 各キャラクターのクラス割り当て（1〜8のパレット色ループ）を検証
+      for (let i = 1; i <= 27; i++) {
+        const expectedIndex = ((i - 1) % 8) + 1;
+        const expectedClass = `char-marker-${expectedIndex}`;
+
+        expect(markers[i - 1].classList.contains(expectedClass)).toBe(true);
+        expect(coordBadges[i - 1].classList.contains(expectedClass)).toBe(true);
+      }
+
+      // 9人目が1人目と同じ char-marker-1（default）であること
+      expect(markers[8].classList.contains('char-marker-1')).toBe(true);
+      // 27人目が ((27 - 1) % 8) + 1 = 3 (blue: char-marker-3) であること
+      expect(markers[26].classList.contains('char-marker-3')).toBe(true);
+    });
+
+    it('should define high-contrast text and border colors in inspector.css for bright and dark palette colors', () => {
+      const fs = require('fs');
+      const path = require('path');
+      const inspectorCss = fs.readFileSync(path.resolve(__dirname, '../src/renderer/css/inspector.css'), 'utf-8');
+      const variablesCss = fs.readFileSync(path.resolve(__dirname, '../src/common/css/variables.css'), 'utf-8');
+
+      // variables.css に暗色テキストと境界線トークンが定義されていること
+      expect(variablesCss).toContain('--text-dark: #000000;');
+      expect(variablesCss).toContain('--border-dark: rgba(0, 0, 0, 0.65);');
+
+      // 明るいパレット色（default, green, yellow, cyan）は暗色文字・暗色枠線が指定されていること
+      expect(inspectorCss).toMatch(/\.char-marker-1[^}]*background-color:\s*var\(--palette-default\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-4[^}]*background-color:\s*var\(--palette-green\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-5[^}]*background-color:\s*var\(--palette-yellow\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-8[^}]*background-color:\s*var\(--palette-cyan\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
+
+      // 暗い・濃いパレット色（red, blue, purple, pink）は明色文字・明色枠線が指定されていること
+      expect(inspectorCss).toMatch(/\.char-marker-2[^}]*background-color:\s*var\(--palette-red\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-3[^}]*background-color:\s*var\(--palette-blue\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-6[^}]*background-color:\s*var\(--palette-purple\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-7[^}]*background-color:\s*var\(--palette-pink\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
+
+      // .inspector-coord-badge の定義がカラークラスより前にあり、後勝ちによる上書き破壊が発生しないこと
+      const badgeDefIdx = inspectorCss.indexOf('.inspector-coord-badge {');
+      const colorDefIdx = inspectorCss.indexOf('.char-marker-1,');
+      expect(badgeDefIdx).toBeGreaterThan(-1);
+      expect(colorDefIdx).toBeGreaterThan(-1);
+      expect(badgeDefIdx).toBeLessThan(colorDefIdx);
+    });
+  });
 });

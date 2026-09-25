@@ -62,6 +62,8 @@
   --transition-close: cubic-bezier(0.36, 0, 0.66, -0.56);
   --transition-glow: cubic-bezier(0.16, 1, 0.3, 1);
   --text-light: #ffffff;
+  --text-dark: #000000;
+  --border-dark: rgba(0, 0, 0, 0.65);
   --bg-darker: #1e1e1e;
   --bg-darker-rgb: 30, 30, 30;
 
