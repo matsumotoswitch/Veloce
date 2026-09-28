@@ -108,28 +108,118 @@ export function extractMetadataFields(file, meta = {}) {
       return parseA1111(file, meta, a1111P);
     }
   }
+  const ap = (p && typeof p.actual_prompts === 'object') ? p.actual_prompts :
+             ((p && typeof p.actualPrompts === 'object') ? p.actualPrompts : null);
+
+  const currentPrompt = meta.prompt || file.prompt || '';
+  let adoptedPrompt = null;
+  const rawAdopted = p.adoptedPrompt || p.adopted_prompt ||
+    (ap && typeof ap.prompt === 'string' ? ap.prompt : (ap && ap.prompt && typeof ap.prompt.base_caption === 'string' ? ap.prompt.base_caption : null)) ||
+    (typeof p.prompt === 'string' ? p.prompt : null);
+
+  if (rawAdopted && typeof rawAdopted === 'string') {
+    const trimmedAdopted = rawAdopted.trim();
+    const trimmedCurrent = currentPrompt.trim();
+    if (trimmedAdopted && (trimmedAdopted !== trimmedCurrent || trimmedCurrent.includes('||'))) {
+      adoptedPrompt = trimmedAdopted;
+    }
+  }
+
+  const currentNegativePrompt = meta.negativePrompt || file.negativePrompt || '';
+  let adoptedNegativePrompt = null;
+  const rawAdoptedUc = p.adoptedNegativePrompt || p.adopted_negative_prompt ||
+    (ap && typeof ap.negative_prompt === 'string' ? ap.negative_prompt : (ap && ap.negative_prompt && typeof ap.negative_prompt.base_caption === 'string' ? ap.negative_prompt.base_caption : null)) ||
+    (typeof p.uc === 'string' && p.uc.trim() !== currentNegativePrompt.trim() ? p.uc : null);
+
+  if (rawAdoptedUc && typeof rawAdoptedUc === 'string') {
+    const trimmedAdoptedUc = rawAdoptedUc.trim();
+    const trimmedCurrentUc = currentNegativePrompt.trim();
+    if (trimmedAdoptedUc && (trimmedAdoptedUc !== trimmedCurrentUc || trimmedCurrentUc.includes('||'))) {
+      adoptedNegativePrompt = trimmedAdoptedUc;
+    }
+  }
+
   const data = {
     name: file.name,
     source: meta.source || file.source || null,
     requestType: requestType,
-    prompt: meta.prompt || file.prompt || '',
-    negativePrompt: meta.negativePrompt || file.negativePrompt || '',
+    prompt: currentPrompt,
+    adoptedPrompt: adoptedPrompt,
+    negativePrompt: currentNegativePrompt,
+    adoptedNegativePrompt: adoptedNegativePrompt,
     chars: [],
     params: {}
   };
 
+  const apCharPrompts = (ap && ap.prompt && Array.isArray(ap.prompt.char_captions)) ? ap.prompt.char_captions : null;
+  const apCharUcs = (ap && ap.negative_prompt && Array.isArray(ap.negative_prompt.char_captions)) ? ap.negative_prompt.char_captions : null;
+
   if (Array.isArray(p.characterPrompts)) {
-    data.chars = p.characterPrompts.map(cp => ({
-      prompt: cp.prompt || '',
-      uc: cp.uc || '',
-      centers: parseCharacterCenters(cp)
-    }));
+    data.chars = p.characterPrompts.map((cp, idx) => {
+      const cPrompt = cp.prompt || '';
+      const cUc = cp.uc || '';
+
+      let cAdopted = cp.adoptedPrompt || cp.adopted_prompt || null;
+      if (!cAdopted && apCharPrompts && apCharPrompts[idx] && typeof apCharPrompts[idx].char_caption === 'string') {
+        cAdopted = apCharPrompts[idx].char_caption;
+      }
+      if (cAdopted && (cAdopted.trim() === cPrompt.trim() && !cPrompt.includes('||'))) {
+        cAdopted = null;
+      } else if (cAdopted) {
+        cAdopted = cAdopted.trim();
+      }
+
+      let cAdoptedUc = cp.adoptedUc || cp.adopted_uc || null;
+      if (!cAdoptedUc && apCharUcs && apCharUcs[idx] && typeof apCharUcs[idx].char_caption === 'string') {
+        cAdoptedUc = apCharUcs[idx].char_caption;
+      }
+      if (cAdoptedUc && (cAdoptedUc.trim() === cUc.trim() && !cUc.includes('||'))) {
+        cAdoptedUc = null;
+      } else if (cAdoptedUc) {
+        cAdoptedUc = cAdoptedUc.trim();
+      }
+
+      return {
+        prompt: cPrompt,
+        adoptedPrompt: cAdopted,
+        uc: cUc,
+        adoptedUc: cAdoptedUc,
+        centers: parseCharacterCenters(cp)
+      };
+    });
   } else if (Array.isArray(file.charPrompts)) {
-    data.chars = file.charPrompts.map(cp => ({
-      prompt: (cp && typeof cp === 'object' && cp.prompt) ? cp.prompt : String(cp),
-      uc: (cp && typeof cp === 'object' && cp.uc) ? cp.uc : '',
-      centers: parseCharacterCenters(cp)
-    }));
+    data.chars = file.charPrompts.map((cp, idx) => {
+      const cPrompt = (cp && typeof cp === 'object' && cp.prompt) ? cp.prompt : String(cp || '');
+      const cUc = (cp && typeof cp === 'object' && cp.uc) ? cp.uc : '';
+
+      let cAdopted = (cp && typeof cp === 'object' && (cp.adoptedPrompt || cp.adopted_prompt)) ? (cp.adoptedPrompt || cp.adopted_prompt) : null;
+      if (!cAdopted && apCharPrompts && apCharPrompts[idx] && typeof apCharPrompts[idx].char_caption === 'string') {
+        cAdopted = apCharPrompts[idx].char_caption;
+      }
+      if (cAdopted && (cAdopted.trim() === cPrompt.trim() && !cPrompt.includes('||'))) {
+        cAdopted = null;
+      } else if (cAdopted) {
+        cAdopted = cAdopted.trim();
+      }
+
+      let cAdoptedUc = (cp && typeof cp === 'object' && (cp.adoptedUc || cp.adopted_uc)) ? (cp.adoptedUc || cp.adopted_uc) : null;
+      if (!cAdoptedUc && apCharUcs && apCharUcs[idx] && typeof apCharUcs[idx].char_caption === 'string') {
+        cAdoptedUc = apCharUcs[idx].char_caption;
+      }
+      if (cAdoptedUc && (cAdoptedUc.trim() === cUc.trim() && !cUc.includes('||'))) {
+        cAdoptedUc = null;
+      } else if (cAdoptedUc) {
+        cAdoptedUc = cAdoptedUc.trim();
+      }
+
+      return {
+        prompt: cPrompt,
+        adoptedPrompt: cAdopted,
+        uc: cUc,
+        adoptedUc: cAdoptedUc,
+        centers: parseCharacterCenters(cp)
+      };
+    });
   }
 
   const charPositions = [];
@@ -232,13 +322,34 @@ export function buildInspectorSections(data) {
   ];
 
   sections.push(
-    { title: 'プロンプト', value: data.prompt, copyable: true },
+    { title: 'プロンプト', value: data.prompt, copyable: true }
+  );
+
+  if (data.adoptedPrompt) {
+    sections.push(
+      { title: '採用プロンプト', value: data.adoptedPrompt, copyable: true }
+    );
+  }
+
+  sections.push(
     { title: '除外したい要素', value: data.negativePrompt, copyable: true }
   );
 
+  if (data.adoptedNegativePrompt) {
+    sections.push(
+      { title: '採用除外したい要素', value: data.adoptedNegativePrompt, copyable: true }
+    );
+  }
+
   data.chars.forEach((c, i) => {
     sections.push({ title: `キャラクター ${i + 1} プロンプト`, value: c.prompt, copyable: true });
+    if (c.adoptedPrompt) {
+      sections.push({ title: `キャラクター ${i + 1} 採用プロンプト`, value: c.adoptedPrompt, copyable: true });
+    }
     sections.push({ title: `キャラクター ${i + 1} 除外したい要素`, value: c.uc, copyable: true });
+    if (c.adoptedUc) {
+      sections.push({ title: `キャラクター ${i + 1} 採用除外したい要素`, value: c.adoptedUc, copyable: true });
+    }
   });
 
   sections.push(

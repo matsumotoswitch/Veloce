@@ -2363,17 +2363,65 @@ fn get_full_metadata_for_path_with_stat_inner(
             if let Some(uc) = comment_obj.get("uc").and_then(|v| v.as_str()) {
                 negative_prompt = uc.to_string();
             }
+
+            let actual_prompts_obj = comment_obj.get("actual_prompts").cloned();
+
+            // 1. ベースプロンプト (prompt) の抽出と採用プロンプト (adoptedPrompt) 判定
+            let ap_prompt_base = actual_prompts_obj.as_ref().and_then(|ap| {
+                ap.pointer("/prompt/base_caption").and_then(|v| v.as_str())
+                    .or_else(|| ap.get("prompt").and_then(|v| v.as_str()))
+            });
+            let comment_prompt = comment_obj.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
+
             if prompt.is_empty() {
-                if let Some(p) = comment_obj.get("prompt").and_then(|v| v.as_str()) {
+                if let Some(p) = comment_prompt.as_deref().or(ap_prompt_base) {
                     prompt = p.to_string();
+                }
+            }
+
+            let candidate_adopted_prompt = ap_prompt_base.map(|s| s.to_string())
+                .or_else(|| comment_prompt.clone());
+            if let Some(cp) = candidate_adopted_prompt {
+                let is_different = prompt.trim() != cp.trim() || prompt.contains("||");
+                if is_different {
                     if let serde_json::Value::Object(ref mut map) = comment_obj {
-                        map.remove("prompt");
+                        map.insert("adoptedPrompt".to_string(), serde_json::Value::String(cp.clone()));
+                        map.insert("adopted_prompt".to_string(), serde_json::Value::String(cp));
+                    }
+                } else if let serde_json::Value::Object(ref mut map) = comment_obj {
+                    map.remove("prompt");
+                }
+            }
+
+            // 2. ベース除外要素 (negative_prompt / uc) の抽出と採用除外要素 (adoptedNegativePrompt) 判定
+            let ap_uc_base = actual_prompts_obj.as_ref().and_then(|ap| {
+                ap.pointer("/negative_prompt/base_caption").and_then(|v| v.as_str())
+                    .or_else(|| ap.get("negative_prompt").and_then(|v| v.as_str()))
+            });
+            let candidate_adopted_uc = ap_uc_base.map(|s| s.to_string());
+            if let Some(auc) = candidate_adopted_uc {
+                let is_different = negative_prompt.trim() != auc.trim() || negative_prompt.contains("||");
+                if is_different {
+                    if let serde_json::Value::Object(ref mut map) = comment_obj {
+                        map.insert("adoptedNegativePrompt".to_string(), serde_json::Value::String(auc.clone()));
+                        map.insert("adopted_negative_prompt".to_string(), serde_json::Value::String(auc));
                     }
                 }
             }
 
-            // NovelAI V4プロンプト対応
+            // 3. NovelAI V4プロンプト対応
             if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
+                // base_caption による採用プロンプト補完
+                if let Some(base_cap) = v4_prompt.pointer("/caption/base_caption").and_then(|v| v.as_str()) {
+                    if prompt.is_empty() {
+                        prompt = base_cap.to_string();
+                    } else if (prompt.trim() != base_cap.trim() || prompt.contains("||")) && comment_obj.get("adoptedPrompt").is_none() {
+                        if let serde_json::Value::Object(ref mut map) = comment_obj {
+                            map.insert("adoptedPrompt".to_string(), serde_json::Value::String(base_cap.to_string()));
+                            map.insert("adopted_prompt".to_string(), serde_json::Value::String(base_cap.to_string()));
+                        }
+                    }
+                }
                 let v4_use_coords = v4_prompt.get("use_coords").and_then(|v| v.as_bool());
                 if let Some(char_captions) = v4_prompt
                     .pointer("/caption/char_captions")
@@ -2384,19 +2432,38 @@ fn get_full_metadata_for_path_with_stat_inner(
                         .pointer("/v4_negative_prompt/caption/char_captions")
                         .and_then(|v| v.as_array());
 
+                    let ap_char_prompts = actual_prompts_obj.as_ref()
+                        .and_then(|ap| ap.pointer("/prompt/char_captions"))
+                        .and_then(|v| v.as_array());
+                    let ap_char_ucs = actual_prompts_obj.as_ref()
+                        .and_then(|ap| ap.pointer("/negative_prompt/char_captions"))
+                        .and_then(|v| v.as_array());
+
                     for (i, p) in char_captions.iter().enumerate() {
                         let mut char_obj = serde_json::Map::new();
-                        if let Some(cap) = p.get("char_caption").and_then(|v| v.as_str()) {
-                            char_obj.insert(
-                                "prompt".to_string(),
-                                serde_json::Value::String(cap.to_string()),
-                            );
+                        let cap_str = p.get("char_caption").and_then(|v| v.as_str()).unwrap_or_default();
+                        char_obj.insert(
+                            "prompt".to_string(),
+                            serde_json::Value::String(cap_str.to_string()),
+                        );
+
+                        // キャラクター採用プロンプト判定
+                        if let Some(ap_char_item) = ap_char_prompts.and_then(|arr| arr.get(i)) {
+                            if let Some(ap_cap) = ap_char_item.get("char_caption").and_then(|v| v.as_str()) {
+                                if cap_str.trim() != ap_cap.trim() || cap_str.contains("||") {
+                                    char_obj.insert("adoptedPrompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
+                                    char_obj.insert("adopted_prompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
+                                }
+                            }
                         }
+
+                        let mut uc_str = "";
                         if let Some(uc_arr) = ucs {
                             if let Some(uc_item) = uc_arr.get(i) {
                                 if let Some(uc_cap) =
                                     uc_item.get("char_caption").and_then(|v| v.as_str())
                                 {
+                                    uc_str = uc_cap;
                                     char_obj.insert(
                                         "uc".to_string(),
                                         serde_json::Value::String(uc_cap.to_string()),
@@ -2404,6 +2471,17 @@ fn get_full_metadata_for_path_with_stat_inner(
                                 }
                             }
                         }
+
+                        // キャラクター採用除外要素判定
+                        if let Some(ap_uc_item) = ap_char_ucs.and_then(|arr| arr.get(i)) {
+                            if let Some(ap_uc_cap) = ap_uc_item.get("char_caption").and_then(|v| v.as_str()) {
+                                if uc_str.trim() != ap_uc_cap.trim() || uc_str.contains("||") {
+                                    char_obj.insert("adoptedUc".to_string(), serde_json::Value::String(ap_uc_cap.to_string()));
+                                    char_obj.insert("adopted_uc".to_string(), serde_json::Value::String(ap_uc_cap.to_string()));
+                                }
+                            }
+                        }
+
                         // キャラクター位置座標 (centers / center) の抽出
                         if let Some(centers) = p.get("centers") {
                             char_obj.insert("centers".to_string(), centers.clone());
@@ -8027,6 +8105,156 @@ mod viewer_tests {
         assert_eq!(comment_obj.get("use_coords"), Some(&serde_json::Value::Bool(false)));
         assert!(comment_obj.get("characterPrompts").is_some());
         assert!(comment_obj.get("v4_prompt").is_none());
+    }
+
+    #[test]
+    fn test_novelai_randomizer_adopted_prompt() {
+        let mut prompt = "1girl, ||takino tomo|kasuga ayumu||, cheerful".to_string();
+        let mut comment_obj = serde_json::json!({
+            "prompt": "1girl, takino tomo, cheerful",
+            "steps": 28
+        });
+
+        let comment_prompt = comment_obj.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
+        if prompt.is_empty() {
+            if let Some(p) = comment_prompt {
+                prompt = p;
+                if let serde_json::Value::Object(ref mut map) = comment_obj {
+                    map.remove("prompt");
+                }
+            }
+        } else if let Some(cp) = comment_prompt {
+            let is_different = prompt.trim() != cp.trim() || prompt.contains("||");
+            if let serde_json::Value::Object(ref mut map) = comment_obj {
+                if is_different {
+                    map.insert("adoptedPrompt".to_string(), serde_json::Value::String(cp.clone()));
+                    map.insert("adopted_prompt".to_string(), serde_json::Value::String(cp));
+                } else {
+                    map.remove("prompt");
+                }
+            }
+        }
+
+        assert_eq!(prompt, "1girl, ||takino tomo|kasuga ayumu||, cheerful");
+        assert_eq!(comment_obj.get("adoptedPrompt").and_then(|v| v.as_str()), Some("1girl, takino tomo, cheerful"));
+        assert_eq!(comment_obj.get("adopted_prompt").and_then(|v| v.as_str()), Some("1girl, takino tomo, cheerful"));
+    }
+
+    #[test]
+    fn test_novelai_actual_prompts_character_randomizer() {
+        let v4_json = serde_json::json!({
+            "prompt": "1girl",
+            "v4_prompt": {
+                "caption": {
+                    "base_caption": "1girl",
+                    "char_captions": [
+                        {
+                            "char_caption": "girl, ||takino tomo|kasuga ayumu||",
+                            "centers": [{"x": 0.5, "y": 0.5}]
+                        }
+                    ]
+                }
+            },
+            "actual_prompts": {
+                "prompt": {
+                    "base_caption": "1girl",
+                    "char_captions": [
+                        {
+                            "char_caption": "girl, takino tomo"
+                        }
+                    ]
+                }
+            }
+        });
+
+        let mut comment_obj = v4_json;
+        let actual_prompts_obj = comment_obj.get("actual_prompts").cloned();
+        let ap_char_prompts = actual_prompts_obj.as_ref()
+            .and_then(|ap| ap.pointer("/prompt/char_captions"))
+            .and_then(|v| v.as_array());
+
+        if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
+            if let Some(char_captions) = v4_prompt.pointer("/caption/char_captions").and_then(|v| v.as_array()) {
+                let mut char_prompts_arr = Vec::new();
+                for (i, p) in char_captions.iter().enumerate() {
+                    let mut char_obj = serde_json::Map::new();
+                    let cap_str = p.get("char_caption").and_then(|v| v.as_str()).unwrap_or_default();
+                    char_obj.insert("prompt".to_string(), serde_json::Value::String(cap_str.to_string()));
+
+                    if let Some(ap_char_item) = ap_char_prompts.and_then(|arr| arr.get(i)) {
+                        if let Some(ap_cap) = ap_char_item.get("char_caption").and_then(|v| v.as_str()) {
+                            if cap_str.trim() != ap_cap.trim() || cap_str.contains("||") {
+                                char_obj.insert("adoptedPrompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
+                                char_obj.insert("adopted_prompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
+                            }
+                        }
+                    }
+                    char_prompts_arr.push(serde_json::Value::Object(char_obj));
+                }
+                if let serde_json::Value::Object(ref mut map) = comment_obj {
+                    map.insert("characterPrompts".to_string(), serde_json::Value::Array(char_prompts_arr));
+                }
+            }
+        }
+
+        let chars = comment_obj.get("characterPrompts").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(chars[0].get("prompt").and_then(|v| v.as_str()), Some("girl, ||takino tomo|kasuga ayumu||"));
+        assert_eq!(chars[0].get("adoptedPrompt").and_then(|v| v.as_str()), Some("girl, takino tomo"));
+    }
+
+    #[test]
+    fn test_novelai_no_randomizer_removes_redundant_prompt() {
+        let mut prompt = "1girl, cheerful".to_string();
+        let mut comment_obj = serde_json::json!({
+            "prompt": "1girl, cheerful",
+            "steps": 28
+        });
+
+        let comment_prompt = comment_obj.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
+        if prompt.is_empty() {
+            if let Some(p) = comment_prompt {
+                prompt = p;
+                if let serde_json::Value::Object(ref mut map) = comment_obj {
+                    map.remove("prompt");
+                }
+            }
+        } else if let Some(cp) = comment_prompt {
+            let is_different = prompt.trim() != cp.trim() || prompt.contains("||");
+            if let serde_json::Value::Object(ref mut map) = comment_obj {
+                if is_different {
+                    map.insert("adoptedPrompt".to_string(), serde_json::Value::String(cp.clone()));
+                    map.insert("adopted_prompt".to_string(), serde_json::Value::String(cp));
+                } else {
+                    map.remove("prompt");
+                }
+            }
+        }
+
+        assert_eq!(prompt, "1girl, cheerful");
+        assert!(comment_obj.get("adoptedPrompt").is_none());
+        assert!(comment_obj.get("prompt").is_none());
+        assert_eq!(comment_obj.get("steps").and_then(|v| v.as_i64()), Some(28));
+    }
+
+    #[test]
+    fn test_extract_searchable_strings_includes_adopted_prompt() {
+        let meta = crate::models::FullMetadata {
+            path: "test.png".to_string(),
+            width: 832,
+            height: 1216,
+            prompt: "1girl, ||takino tomo|kasuga ayumu||, cheerful".to_string(),
+            negative_prompt: "bad anatomy".to_string(),
+            params: serde_json::json!({
+                "adoptedPrompt": "1girl, takino tomo, cheerful"
+            }),
+            source: "NovelAI".to_string(),
+        };
+
+        let (p, np, src) = crate::utils::extract_searchable_strings(&meta);
+        assert!(p.contains("takino tomo"));
+        assert!(p.contains("kasuga ayumu"));
+        assert!(np.contains("bad anatomy"));
+        assert_eq!(src, "novelai");
     }
 
     #[test]

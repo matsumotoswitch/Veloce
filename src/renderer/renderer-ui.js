@@ -1292,14 +1292,26 @@ class UIManager {
     );
     
     contentHtml += renderSideBySideSection('プロンプト', d1.prompt, d2.prompt);
+    if (d1.adoptedPrompt || d2.adoptedPrompt) {
+      contentHtml += renderSideBySideSection('採用プロンプト', d1.adoptedPrompt, d2.adoptedPrompt);
+    }
     contentHtml += renderSideBySideSection('除外したい要素', d1.negativePrompt, d2.negativePrompt);
+    if (d1.adoptedNegativePrompt || d2.adoptedNegativePrompt) {
+      contentHtml += renderSideBySideSection('採用除外したい要素', d1.adoptedNegativePrompt, d2.adoptedNegativePrompt);
+    }
 
     const maxChars = Math.max(d1.chars.length, d2.chars.length);
     for (let i = 0; i < maxChars; i++) {
       const c1 = d1.chars[i] || { prompt: '', uc: '' };
       const c2 = d2.chars[i] || { prompt: '', uc: '' };
       contentHtml += renderSideBySideSection(`キャラクター ${i + 1} プロンプト`, c1.prompt, c2.prompt);
+      if (c1.adoptedPrompt || c2.adoptedPrompt) {
+        contentHtml += renderSideBySideSection(`キャラクター ${i + 1} 採用プロンプト`, c1.adoptedPrompt, c2.adoptedPrompt);
+      }
       contentHtml += renderSideBySideSection(`キャラクター ${i + 1} 除外したい要素`, c1.uc, c2.uc);
+      if (c1.adoptedUc || c2.adoptedUc) {
+        contentHtml += renderSideBySideSection(`キャラクター ${i + 1} 採用除外したい要素`, c1.adoptedUc, c2.adoptedUc);
+      }
     }
 
     contentHtml += renderSideBySideSection('画像サイズ', d1.params.resolution, d2.params.resolution, true);

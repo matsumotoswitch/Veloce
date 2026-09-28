@@ -154,10 +154,41 @@ pub fn extract_searchable_strings(meta: &FullMetadata) -> (String, String, Strin
                 p.push_str(" ");
                 p.push_str(cp);
             }
+            if let Some(adopted_cp) = c.get("adoptedPrompt").or_else(|| c.get("adopted_prompt")).and_then(|v| v.as_str()) {
+                p.push_str(" ");
+                p.push_str(adopted_cp);
+            }
             if let Some(ucp) = c.get("uc").and_then(|v| v.as_str()) {
                 np.push_str(" ");
                 np.push_str(ucp);
             }
+            if let Some(adopted_ucp) = c.get("adoptedUc").or_else(|| c.get("adopted_uc")).and_then(|v| v.as_str()) {
+                np.push_str(" ");
+                np.push_str(adopted_ucp);
+            }
+        }
+    }
+
+    if let Some(adopted) = meta.params.get("adoptedPrompt")
+        .or_else(|| meta.params.get("adopted_prompt"))
+        .or_else(|| meta.params.get("prompt"))
+        .and_then(|v| v.as_str())
+    {
+        let trimmed = adopted.trim();
+        if !trimmed.is_empty() && trimmed != meta.prompt.trim() {
+            p.push_str(" ");
+            p.push_str(trimmed);
+        }
+    }
+
+    if let Some(adopted_np) = meta.params.get("adoptedNegativePrompt")
+        .or_else(|| meta.params.get("adopted_negative_prompt"))
+        .and_then(|v| v.as_str())
+    {
+        let trimmed = adopted_np.trim();
+        if !trimmed.is_empty() && trimmed != meta.negative_prompt.trim() {
+            np.push_str(" ");
+            np.push_str(trimmed);
         }
     }
 

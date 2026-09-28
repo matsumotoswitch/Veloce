@@ -195,6 +195,102 @@ describe('Metadata Format Utils', () => {
          expect(extracted.negativePrompt).toBe('negative prompt');
       }
     });
+
+    it('should correctly extract adoptedPrompt when randomizer is used in NovelAI', () => {
+      const file = { name: 'randomizer.png' };
+      const meta = {
+        prompt: '1girl, ||takino tomo|kasuga ayumu||, cheerful',
+        negativePrompt: 'bad anatomy',
+        source: 'NovelAI',
+        params: {
+          adoptedPrompt: '1girl, takino tomo, cheerful',
+          width: 832,
+          height: 1216
+        }
+      };
+
+      const extracted = extractMetadataFields(file, meta);
+      expect(extracted.prompt).toBe('1girl, ||takino tomo|kasuga ayumu||, cheerful');
+      expect(extracted.adoptedPrompt).toBe('1girl, takino tomo, cheerful');
+    });
+
+    it('should fallback to params.prompt for adoptedPrompt when it differs from meta.prompt', () => {
+      const file = { name: 'randomizer_raw.png' };
+      const meta = {
+        prompt: '||takino tomo|kasuga ayumu||',
+        source: 'NovelAI',
+        params: {
+          prompt: 'takino tomo',
+          steps: 28
+        }
+      };
+
+      const extracted = extractMetadataFields(file, meta);
+      expect(extracted.prompt).toBe('||takino tomo|kasuga ayumu||');
+      expect(extracted.adoptedPrompt).toBe('takino tomo');
+    });
+
+    it('should not set adoptedPrompt when prompt matches params.prompt and no randomizer syntax', () => {
+      const file = { name: 'normal.png' };
+      const meta = {
+        prompt: '1girl, cheerful',
+        source: 'NovelAI',
+        params: {
+          prompt: '1girl, cheerful'
+        }
+      };
+
+      const extracted = extractMetadataFields(file, meta);
+      expect(extracted.prompt).toBe('1girl, cheerful');
+      expect(extracted.adoptedPrompt).toBeNull();
+    });
+
+    it('should correctly extract adopted prompts from actual_prompts for base, negative, and character prompts', () => {
+      const file = { name: 'actual_prompts_test.png' };
+      const meta = {
+        prompt: '1girl',
+        negativePrompt: 'lowres, ||extra fingers|bad hands||',
+        source: 'NovelAI',
+        params: {
+          characterPrompts: [
+            {
+              prompt: 'girl, smile, ||takino tomo|kasuga ayumu|| (azumanga daioh)',
+              uc: 'bad anatomy'
+            }
+          ],
+          actual_prompts: {
+            prompt: {
+              base_caption: '1girl',
+              char_captions: [
+                {
+                  char_caption: 'girl, smile, takino tomo (azumanga daioh)'
+                }
+              ]
+            },
+            negative_prompt: {
+              base_caption: 'lowres, bad hands',
+              char_captions: [
+                {
+                  char_caption: 'bad anatomy'
+                }
+              ]
+            }
+          }
+        }
+      };
+
+      const extracted = extractMetadataFields(file, meta);
+      expect(extracted.prompt).toBe('1girl');
+      expect(extracted.adoptedPrompt).toBeNull(); // base prompt matches
+      expect(extracted.negativePrompt).toBe('lowres, ||extra fingers|bad hands||');
+      expect(extracted.adoptedNegativePrompt).toBe('lowres, bad hands');
+
+      expect(extracted.chars.length).toBe(1);
+      expect(extracted.chars[0].prompt).toBe('girl, smile, ||takino tomo|kasuga ayumu|| (azumanga daioh)');
+      expect(extracted.chars[0].adoptedPrompt).toBe('girl, smile, takino tomo (azumanga daioh)');
+      expect(extracted.chars[0].uc).toBe('bad anatomy');
+      expect(extracted.chars[0].adoptedUc).toBeNull(); // matches
+    });
   });
 
   describe('buildInspectorSections', () => {
@@ -243,6 +339,58 @@ describe('Metadata Format Utils', () => {
       expect(sections[5].copyable).toBeUndefined();
       expect(sections[6].title).toBe('シード値');
       expect(sections[6].copyable).toBeUndefined();
+    });
+
+    it('should include 採用プロンプト, 採用除外したい要素, and character 採用プロンプト/採用除外したい要素', () => {
+      const data = {
+        source: 'NovelAI',
+        prompt: '1girl, ||takino tomo|kasuga ayumu||',
+        adoptedPrompt: '1girl, takino tomo',
+        negativePrompt: 'lowres, ||extra fingers|bad hands||',
+        adoptedNegativePrompt: 'lowres, bad hands',
+        chars: [
+          {
+            prompt: '||black hair|brown hair||',
+            adoptedPrompt: 'black hair',
+            uc: '||worst|bad||',
+            adoptedUc: 'worst'
+          }
+        ],
+        params: {
+          resolution: '832x1,216'
+        }
+      };
+
+      const sections = buildInspectorSections(data);
+      expect(sections[0].title).toBe('モデル / バージョン');
+      expect(sections[1].title).toBe('プロンプト');
+      expect(sections[1].value).toBe('1girl, ||takino tomo|kasuga ayumu||');
+      expect(sections[1].copyable).toBe(true);
+
+      expect(sections[2].title).toBe('採用プロンプト');
+      expect(sections[2].value).toBe('1girl, takino tomo');
+      expect(sections[2].copyable).toBe(true);
+
+      expect(sections[3].title).toBe('除外したい要素');
+      expect(sections[3].value).toBe('lowres, ||extra fingers|bad hands||');
+
+      expect(sections[4].title).toBe('採用除外したい要素');
+      expect(sections[4].value).toBe('lowres, bad hands');
+      expect(sections[4].copyable).toBe(true);
+
+      expect(sections[5].title).toBe('キャラクター 1 プロンプト');
+      expect(sections[5].value).toBe('||black hair|brown hair||');
+
+      expect(sections[6].title).toBe('キャラクター 1 採用プロンプト');
+      expect(sections[6].value).toBe('black hair');
+      expect(sections[6].copyable).toBe(true);
+
+      expect(sections[7].title).toBe('キャラクター 1 除外したい要素');
+      expect(sections[7].value).toBe('||worst|bad||');
+
+      expect(sections[8].title).toBe('キャラクター 1 採用除外したい要素');
+      expect(sections[8].value).toBe('worst');
+      expect(sections[8].copyable).toBe(true);
     });
   });
 });
