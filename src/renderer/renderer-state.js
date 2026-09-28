@@ -110,10 +110,10 @@ export const fileOpsState = {
  * ウィンドウペイン分割およびレイアウト設定の局所状態
  */
 export const layoutState = {
-  leftWidth: 200,             // 左ペインの幅(px)
-  rightWidth: 300,            // 右ペインの幅(px)
-  leftVisible: true,          // 左ペインの表示状態
-  rightVisible: true,         // 右ペインの表示状態
+  leftWidth: parseInt(localStorage.getItem('leftWidth') || '200', 10),             // 左ペインの幅(px)
+  rightWidth: parseInt(localStorage.getItem('rightWidth') || '300', 10),            // 右ペインの幅(px)
+  leftVisible: localStorage.getItem('leftVisible') !== 'false',          // 左ペインの表示状態
+  rightVisible: localStorage.getItem('rightVisible') !== 'false',         // 右ペインの表示状態
   leftTopHeight: parseInt(localStorage.getItem('leftTopHeight') || '150', 10),
   leftTopVisible: localStorage.getItem('leftTopVisible') !== 'false',
   rightTopHeight: parseInt(localStorage.getItem('rightTopHeight') || '200', 10),

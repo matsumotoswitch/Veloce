@@ -8,6 +8,7 @@
 
 import { layoutState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
+import { getSetting, setSetting } from '../common/settings-store.js';
 
 export const resizingState = {
   left: false,
@@ -50,61 +51,68 @@ export function createResizerToggle(resizer, type) {
     if (type === 'left') {
       layoutState.leftVisible = !layoutState.leftVisible;
       if (layoutState.leftVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
-      localStorage.setItem('leftVisible', layoutState.leftVisible);
+      setSetting('leftVisible', layoutState.leftVisible);
       uiManager.applyLayout();
     } else if (type === 'right') {
       layoutState.rightVisible = !layoutState.rightVisible;
       if (layoutState.rightVisible) btn.classList.remove('expanded'); else btn.classList.add('expanded');
-      localStorage.setItem('rightVisible', layoutState.rightVisible);
+      setSetting('rightVisible', layoutState.rightVisible);
       uiManager.applyLayout();
     } else if (type === 'center') {
       const root = document.documentElement;
       const isCollapsed = root.style.getPropertyValue('--top-height') === '0px';
       if (isCollapsed) {
-        const restoreHeight = localStorage.getItem('prevTopHeight') || '250px';
+        const restoreHeight = getSetting('prevTopHeight') || '250px';
         root.style.setProperty('--top-height', restoreHeight);
         root.removeAttribute('data-center-collapsed');
-        localStorage.setItem('topHeight', restoreHeight);
+        setSetting('topHeight', restoreHeight);
         btn.classList.remove('expanded');
       } else {
-        localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
+        const currentHeight = root.style.getPropertyValue('--top-height') || '250px';
+        setSetting('prevTopHeight', currentHeight);
         root.style.setProperty('--top-height', '0px');
         root.setAttribute('data-center-collapsed', 'true');
-        localStorage.setItem('topHeight', '0px');
+        setSetting('topHeight', '0px');
         btn.classList.add('expanded');
       }
     } else if (type === 'leftTop') {
       const root = document.documentElement;
       const isCollapsed = root.style.getPropertyValue('--left-top-height') === '0px';
       if (isCollapsed) {
-        const restoreHeight = localStorage.getItem('prevLeftTopHeight') || '150px';
+        const restoreHeight = getSetting('prevLeftTopHeight') || '150px';
         root.style.setProperty('--left-top-height', restoreHeight);
         root.removeAttribute('data-left-top-collapsed');
-        localStorage.setItem('leftTopHeight', restoreHeight);
+        setSetting('leftTopHeight', restoreHeight);
         layoutState.leftTopVisible = true;
+        setSetting('leftTopVisible', 'true');
         btn.classList.remove('expanded');
       } else {
-        localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
+        const currentHeight = root.style.getPropertyValue('--left-top-height') || '150px';
+        setSetting('prevLeftTopHeight', currentHeight);
         root.style.setProperty('--left-top-height', '0px');
         root.setAttribute('data-left-top-collapsed', 'true');
-        localStorage.setItem('leftTopHeight', '0px');
+        setSetting('leftTopHeight', '0px');
         layoutState.leftTopVisible = false;
+        setSetting('leftTopVisible', 'false');
         btn.classList.add('expanded');
       }
     } else if (type === 'rightTop') {
       const root = document.documentElement;
       const isCollapsed = root.style.getPropertyValue('--right-top-height') === '0px';
       if (isCollapsed) {
-        const restoreHeight = localStorage.getItem('prevRightTopHeight') || '200px';
+        const restoreHeight = getSetting('prevRightTopHeight') || '200px';
         root.style.setProperty('--right-top-height', restoreHeight);
-        localStorage.setItem('rightTopHeight', restoreHeight);
+        setSetting('rightTopHeight', restoreHeight);
         layoutState.rightTopVisible = true;
+        setSetting('rightTopVisible', 'true');
         btn.classList.remove('expanded');
       } else {
-        localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
+        const currentHeight = root.style.getPropertyValue('--right-top-height') || '200px';
+        setSetting('prevRightTopHeight', currentHeight);
         root.style.setProperty('--right-top-height', '0px');
-        localStorage.setItem('rightTopHeight', '0px');
+        setSetting('rightTopHeight', '0px');
         layoutState.rightTopVisible = false;
+        setSetting('rightTopVisible', 'false');
         btn.classList.add('expanded');
       }
     }
@@ -146,7 +154,7 @@ export function initResizerGlobalEvents() {
         if (newWidth < 50) {
           if (layoutState.leftVisible) {
             layoutState.leftVisible = false;
-            localStorage.setItem('leftVisible', 'false');
+            setSetting('leftVisible', 'false');
             const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
             if (btn) btn.classList.add('expanded');
             uiManager.applyLayout();
@@ -156,7 +164,7 @@ export function initResizerGlobalEvents() {
           layoutState.leftWidth = newWidth;
           if (!layoutState.leftVisible) {
             layoutState.leftVisible = true;
-            localStorage.setItem('leftVisible', 'true');
+            setSetting('leftVisible', 'true');
             const btn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
             if (btn) btn.classList.remove('expanded');
           }
@@ -167,7 +175,7 @@ export function initResizerGlobalEvents() {
         if (newWidth < 50) {
           if (layoutState.rightVisible) {
             layoutState.rightVisible = false;
-            localStorage.setItem('rightVisible', 'false');
+            setSetting('rightVisible', 'false');
             const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
             if (btn) btn.classList.add('expanded');
             uiManager.applyLayout();
@@ -177,7 +185,7 @@ export function initResizerGlobalEvents() {
           layoutState.rightWidth = newWidth;
           if (!layoutState.rightVisible) {
             layoutState.rightVisible = true;
-            localStorage.setItem('rightVisible', 'true');
+            setSetting('rightVisible', 'true');
             const btn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
             if (btn) btn.classList.remove('expanded');
           }
@@ -191,10 +199,11 @@ export function initResizerGlobalEvents() {
         if (newHeight < 50) {
           const root = document.documentElement;
           if (root.style.getPropertyValue('--top-height') !== '0px') {
-            localStorage.setItem('prevTopHeight', root.style.getPropertyValue('--top-height') || '250px');
+            const currentHeight = root.style.getPropertyValue('--top-height') || '250px';
+            setSetting('prevTopHeight', currentHeight);
             root.style.setProperty('--top-height', '0px');
             root.setAttribute('data-center-collapsed', 'true');
-            localStorage.setItem('topHeight', '0px');
+            setSetting('topHeight', '0px');
             const btn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
             if (btn) btn.classList.add('expanded');
           }
@@ -217,10 +226,13 @@ export function initResizerGlobalEvents() {
         if (newHeight < 30) {
           const root = document.documentElement;
           if (root.style.getPropertyValue('--left-top-height') !== '0px') {
-            localStorage.setItem('prevLeftTopHeight', root.style.getPropertyValue('--left-top-height') || '150px');
+            const currentHeight = root.style.getPropertyValue('--left-top-height') || '150px';
+            setSetting('prevLeftTopHeight', currentHeight);
             root.style.setProperty('--left-top-height', '0px');
             root.setAttribute('data-left-top-collapsed', 'true');
-            localStorage.setItem('leftTopHeight', '0px');
+            setSetting('leftTopHeight', '0px');
+            layoutState.leftTopVisible = false;
+            setSetting('leftTopVisible', 'false');
             const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
             if (btn) btn.classList.add('expanded');
           }
@@ -230,6 +242,8 @@ export function initResizerGlobalEvents() {
           root.style.setProperty('--left-top-height', `${newHeight}px`);
           root.removeAttribute('data-left-top-collapsed');
           layoutState.leftTopHeight = newHeight;
+          layoutState.leftTopVisible = true;
+          setSetting('leftTopVisible', 'true');
 
           const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
           if (btn && btn.classList.contains('expanded')) {
@@ -244,9 +258,12 @@ export function initResizerGlobalEvents() {
         if (newHeight < 30) {
           const root = document.documentElement;
           if (root.style.getPropertyValue('--right-top-height') !== '0px') {
-            localStorage.setItem('prevRightTopHeight', root.style.getPropertyValue('--right-top-height') || '200px');
+            const currentHeight = root.style.getPropertyValue('--right-top-height') || '200px';
+            setSetting('prevRightTopHeight', currentHeight);
             root.style.setProperty('--right-top-height', '0px');
-            localStorage.setItem('rightTopHeight', '0px');
+            setSetting('rightTopHeight', '0px');
+            layoutState.rightTopVisible = false;
+            setSetting('rightTopVisible', 'false');
             const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
             if (btn) btn.classList.add('expanded');
           }
@@ -255,6 +272,8 @@ export function initResizerGlobalEvents() {
           const root = document.documentElement;
           root.style.setProperty('--right-top-height', `${newHeight}px`);
           layoutState.rightTopHeight = newHeight;
+          layoutState.rightTopVisible = true;
+          setSetting('rightTopVisible', 'true');
 
           const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
           if (btn && btn.classList.contains('expanded')) {
@@ -267,28 +286,44 @@ export function initResizerGlobalEvents() {
 
   window.addEventListener('mouseup', () => {
     if (resizingState.left) {
-      localStorage.setItem('leftWidth', layoutState.leftWidth);
+      setSetting('leftWidth', layoutState.leftWidth);
+      setSetting('leftVisible', layoutState.leftVisible);
       resizingState.left = false;
       if (uiManager.elements.resizerLeft) uiManager.elements.resizerLeft.classList.remove('resizing');
     }
     if (resizingState.right) {
-      localStorage.setItem('rightWidth', layoutState.rightWidth);
+      setSetting('rightWidth', layoutState.rightWidth);
+      setSetting('rightVisible', layoutState.rightVisible);
       resizingState.right = false;
       if (uiManager.elements.resizerRight) uiManager.elements.resizerRight.classList.remove('resizing');
     }
     if (resizingState.center) {
-      localStorage.setItem('topHeight', document.documentElement.style.getPropertyValue('--top-height'));
+      const curTopH = document.documentElement.style.getPropertyValue('--top-height');
+      setSetting('topHeight', curTopH);
+      if (curTopH && curTopH !== '0px') {
+        setSetting('prevTopHeight', curTopH);
+      }
       resizingState.center = false;
       if (uiManager.elements.resizerCenter) uiManager.elements.resizerCenter.classList.remove('resizing');
     }
     if (resizingState.leftTop) {
-      localStorage.setItem('leftTopHeight', document.documentElement.style.getPropertyValue('--left-top-height'));
+      const curLeftTopH = document.documentElement.style.getPropertyValue('--left-top-height');
+      setSetting('leftTopHeight', curLeftTopH);
+      if (curLeftTopH && curLeftTopH !== '0px') {
+        setSetting('prevLeftTopHeight', curLeftTopH);
+      }
+      setSetting('leftTopVisible', layoutState.leftTopVisible);
       resizingState.leftTop = false;
       const el = document.getElementById('resizer-left-pane');
       if (el) el.classList.remove('resizing');
     }
     if (resizingState.rightTop) {
-      localStorage.setItem('rightTopHeight', document.documentElement.style.getPropertyValue('--right-top-height'));
+      const curRightTopH = document.documentElement.style.getPropertyValue('--right-top-height');
+      setSetting('rightTopHeight', curRightTopH);
+      if (curRightTopH && curRightTopH !== '0px') {
+        setSetting('prevRightTopHeight', curRightTopH);
+      }
+      setSetting('rightTopVisible', layoutState.rightTopVisible);
       resizingState.rightTop = false;
       const el = document.getElementById('resizer-right-pane');
       if (el) el.classList.remove('resizing');
@@ -308,4 +343,51 @@ export function initResizers() {
   setupResizer(document.getElementById('resizer-left-pane'), 'leftTop', 'row-resize');
   setupResizer(document.getElementById('resizer-right-pane'), 'rightTop', 'row-resize');
   initResizerGlobalEvents();
+}
+
+/**
+ * 現在の layoutState および DOM 状態に合わせてすべてのリサイザートグルボタンの表示状態（矢印）を同期します。
+ */
+export function updateResizerToggleStates() {
+  // 左ペイン
+  const leftBtn = uiManager.elements.resizerLeft?.querySelector('.resizer-toggle');
+  if (leftBtn) {
+    if (!layoutState.leftVisible) leftBtn.classList.add('expanded');
+    else leftBtn.classList.remove('expanded');
+  }
+
+  // 右ペイン
+  const rightBtn = uiManager.elements.resizerRight?.querySelector('.resizer-toggle');
+  if (rightBtn) {
+    if (!layoutState.rightVisible) rightBtn.classList.add('expanded');
+    else rightBtn.classList.remove('expanded');
+  }
+
+  // 中央ペイン
+  const centerBtn = uiManager.elements.resizerCenter?.querySelector('.resizer-toggle');
+  if (centerBtn) {
+    const isCenterCollapsed = document.documentElement.getAttribute('data-center-collapsed') === 'true' ||
+      document.documentElement.style.getPropertyValue('--top-height') === '0px';
+    if (isCenterCollapsed) centerBtn.classList.add('expanded');
+    else centerBtn.classList.remove('expanded');
+  }
+
+  // 左ペイン上部（スマートフォルダ）
+  const leftTopBtn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
+  if (leftTopBtn) {
+    const isLeftTopCollapsed = document.documentElement.getAttribute('data-left-top-collapsed') === 'true' ||
+      !layoutState.leftTopVisible ||
+      document.documentElement.style.getPropertyValue('--left-top-height') === '0px';
+    if (isLeftTopCollapsed) leftTopBtn.classList.add('expanded');
+    else leftTopBtn.classList.remove('expanded');
+  }
+
+  // 右ペイン上部
+  const rightTopBtn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
+  if (rightTopBtn) {
+    const isRightTopCollapsed = !layoutState.rightTopVisible ||
+      document.documentElement.style.getPropertyValue('--right-top-height') === '0px';
+    if (isRightTopCollapsed) rightTopBtn.classList.add('expanded');
+    else rightTopBtn.classList.remove('expanded');
+  }
 }

@@ -63,7 +63,8 @@ import {
   initDirTreeDnd,
   initFavoritesDnd
 } from './renderer-dnd.js';
-import { initResizers } from './renderer-resizer.js';
+import { initResizers, updateResizerToggleStates } from './renderer-resizer.js';
+import { getSetting, setSetting } from '../common/settings-store.js';
 import { renderFavorites, initBookmarkEvents } from './renderer-bookmarks.js';
 import {
   initFileOps,
@@ -598,35 +599,6 @@ function updateCurrentTabState() {
   syncCurrentTabState(appState, uiManager);
 }
 
-/**
- * 設定値を取得する（SettingsStore優先、フォールバックとしてlocalStorage）
- * @param {string} key
- * @param {string|null} [defaultValue=null]
- * @returns {string|null}
- */
-function getSetting(key, defaultValue = null) {
-  if (typeof window !== 'undefined' && window.SettingsStore) {
-    return window.SettingsStore.getItem(key, defaultValue);
-  }
-  if (typeof localStorage !== 'undefined') {
-    const v = localStorage.getItem(key);
-    return v !== null ? v : defaultValue;
-  }
-  return defaultValue;
-}
-
-/**
- * 設定値を保存する（SettingsStore経由でSQLite永続化およびlocalStorage同期）
- * @param {string} key
- * @param {any} value
- */
-function setSetting(key, value) {
-  if (typeof window !== 'undefined' && window.SettingsStore) {
-    window.SettingsStore.setItem(key, value);
-  } else if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(key, String(value));
-  }
-}
 
 /**
  * タブの状態をローカルストレージに保存します。
@@ -2735,50 +2707,49 @@ window.addEventListener('DOMContentLoaded', async () => {
   const savedRightVisible = getSetting('rightVisible');
   if (savedRightVisible !== null) appState.layout.rightVisible = savedRightVisible === 'true';
 
-  uiManager.applyLayout();
+  const savedLeftTopHeight = getSetting('leftTopHeight');
+  if (savedLeftTopHeight) {
+    const parsedH = parseInt(savedLeftTopHeight, 10);
+    if (!isNaN(parsedH) && parsedH > 0) {
+      appState.layout.leftTopHeight = parsedH;
+    }
+  }
 
-  if (!appState.layout.leftVisible && uiManager.elements.resizerLeft) {
-    const btn = uiManager.elements.resizerLeft.querySelector('.resizer-toggle');
-    if (btn) btn.classList.add('expanded');
+  const savedLeftTopVisible = getSetting('leftTopVisible');
+  if (savedLeftTopVisible !== null) {
+    appState.layout.leftTopVisible = savedLeftTopVisible === 'true';
+  } else if (savedLeftTopHeight === '0px') {
+    appState.layout.leftTopVisible = false;
   }
-  if (!appState.layout.rightVisible && uiManager.elements.resizerRight) {
-    const btn = uiManager.elements.resizerRight.querySelector('.resizer-toggle');
-    if (btn) btn.classList.add('expanded');
+
+  const savedRightTopHeight = getSetting('rightTopHeight');
+  if (savedRightTopHeight) {
+    const parsedH = parseInt(savedRightTopHeight, 10);
+    if (!isNaN(parsedH) && parsedH > 0) {
+      appState.layout.rightTopHeight = parsedH;
+    }
   }
+
+  const savedRightTopVisible = getSetting('rightTopVisible');
+  if (savedRightTopVisible !== null) {
+    appState.layout.rightTopVisible = savedRightTopVisible === 'true';
+  } else if (savedRightTopHeight === '0px') {
+    appState.layout.rightTopVisible = false;
+  }
+
+  uiManager.applyLayout();
 
   const savedTopHeight = getSetting('topHeight');
   if (savedTopHeight) {
     document.documentElement.style.setProperty('--top-height', savedTopHeight);
     if (savedTopHeight === '0px') {
       document.documentElement.setAttribute('data-center-collapsed', 'true');
-      if (uiManager.elements.resizerCenter) {
-        const btn = uiManager.elements.resizerCenter.querySelector('.resizer-toggle');
-        if (btn) btn.classList.add('expanded');
-      }
     } else {
       document.documentElement.removeAttribute('data-center-collapsed');
     }
   }
 
-  const savedLeftTopHeight = getSetting('leftTopHeight');
-  if (savedLeftTopHeight) {
-    document.documentElement.style.setProperty('--left-top-height', savedLeftTopHeight);
-    if (savedLeftTopHeight === '0px') {
-      document.documentElement.setAttribute('data-left-top-collapsed', 'true');
-      const btn = document.getElementById('resizer-left-pane')?.querySelector('.resizer-toggle');
-      if (btn) btn.classList.add('expanded');
-    } else {
-      document.documentElement.removeAttribute('data-left-top-collapsed');
-    }
-  }
-
-  const savedRightTopHeight = getSetting('rightTopHeight');
-  if (savedRightTopHeight) {
-    if (savedRightTopHeight === '0px') {
-      const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
-      if (btn) btn.classList.add('expanded');
-    }
-  }
+  updateResizerToggleStates();
 
   const savedThumbScale = getSetting('thumbnailScale');
   if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {

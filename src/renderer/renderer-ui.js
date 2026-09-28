@@ -1154,6 +1154,11 @@ class UIManager {
 
     const lTopHeight = this.state.layout.leftTopVisible ? `${this.state.layout.leftTopHeight}px` : '0px';
     root.style.setProperty('--left-top-height', lTopHeight);
+    if (this.state.layout.leftTopVisible) {
+      root.removeAttribute('data-left-top-collapsed');
+    } else {
+      root.setAttribute('data-left-top-collapsed', 'true');
+    }
 
     const rTopHeight = this.state.layout.rightTopVisible ? `${this.state.layout.rightTopHeight}px` : '0px';
     root.style.setProperty('--right-top-height', rTopHeight);

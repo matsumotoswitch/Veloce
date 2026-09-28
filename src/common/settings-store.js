@@ -242,14 +242,53 @@
 
   const SettingsStore = new SettingsStoreClass();
 
+  /**
+   * 設定値を取得する（SettingsStore優先、フォールバックとしてlocalStorage）
+   * @param {string} key
+   * @param {string|null} [defaultValue=null]
+   * @returns {string|null}
+   */
+  function getSetting(key, defaultValue = null) {
+    if (SettingsStore) {
+      return SettingsStore.getItem(key, defaultValue);
+    }
+    if (typeof localStorage !== 'undefined') {
+      const v = localStorage.getItem(key);
+      return v !== null ? v : defaultValue;
+    }
+    return defaultValue;
+  }
+
+  /**
+   * 設定値を保存する（SettingsStore経由でSQLite永続化およびlocalStorage同期）
+   * @param {string} key
+   * @param {any} value
+   */
+  function setSetting(key, value) {
+    if (SettingsStore) {
+      SettingsStore.setItem(key, value);
+    } else if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, String(value));
+    }
+  }
+
   // グローバルおよびモジュールへの公開
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { SettingsStore, SettingsStoreClass };
+    module.exports = { SettingsStore, SettingsStoreClass, getSetting, setSetting };
   }
   if (typeof window !== 'undefined') {
     window.SettingsStore = SettingsStore;
+    window.getSetting = getSetting;
+    window.setSetting = setSetting;
   }
   if (typeof global !== 'undefined') {
     global.SettingsStore = SettingsStore;
+    global.getSetting = getSetting;
+    global.setSetting = setSetting;
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+export const SettingsStore = typeof window !== 'undefined' && window.SettingsStore ? window.SettingsStore : (typeof global !== 'undefined' && global.SettingsStore ? global.SettingsStore : null);
+export const SettingsStoreClass = typeof window !== 'undefined' && window.SettingsStoreClass ? window.SettingsStoreClass : (typeof global !== 'undefined' && global.SettingsStoreClass ? global.SettingsStoreClass : null);
+export const getSetting = typeof window !== 'undefined' && window.getSetting ? window.getSetting : (typeof global !== 'undefined' && global.getSetting ? global.getSetting : function(k, d = null) { return d; });
+export const setSetting = typeof window !== 'undefined' && window.setSetting ? window.setSetting : (typeof global !== 'undefined' && global.setSetting ? global.setSetting : function() {});
