@@ -27,12 +27,14 @@ use tauri::Manager;
 pub mod models;
 pub mod server;
 pub mod state;
+pub mod settings;
 pub mod utils;
 pub mod viewer;
 
 pub use models::*;
 pub use server::*;
 pub use state::*;
+pub use settings::*;
 pub use utils::*;
 pub use viewer::*;
 
@@ -4555,6 +4557,7 @@ fn main() {
     }
 
     let db_conn = init_db().expect("Failed to initialize SQLite database");
+    let (settings_db_conn, settings_db_existed) = init_settings_db().expect("Failed to initialize settings database");
     let db_conn_worker = db_conn.clone();
     let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(4096);
 
@@ -4763,6 +4766,8 @@ fn main() {
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
             db_conn,
+            settings_db_conn,
+            settings_db_existed: Mutex::new(settings_db_existed),
             smart_folders: Mutex::new(Vec::new()),
             db_tx,
             video_server_port: video_port,
@@ -5288,6 +5293,12 @@ fn main() {
             get_files_by_indices,
             get_all_ratings,
             migrate_ratings,
+            init_settings,
+            get_setting,
+            set_setting,
+            set_settings_batch,
+            delete_setting,
+            get_all_settings,
         ])
         .run(context)
         .expect("error while running tauri application");
@@ -6290,7 +6301,9 @@ mod viewer_tests {
             ratings: Mutex::new(std::collections::HashMap::new()),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn,
+            db_conn: db_conn.clone(),
+            settings_db_conn: db_conn,
+            settings_db_existed: Mutex::new(true),
             smart_folders: Mutex::new(Vec::new()),
             db_tx: tokio::sync::mpsc::channel(1).0,
             video_server_port: 0,
@@ -7335,6 +7348,8 @@ mod viewer_tests {
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
             db_conn: init_db().unwrap(),
+            settings_db_conn: init_db().unwrap(),
+            settings_db_existed: Mutex::new(true),
             smart_folders: Mutex::new(Vec::new()),
             db_tx: tokio::sync::mpsc::channel(1).0,
             video_server_port: 0,
@@ -8143,7 +8158,9 @@ mod viewer_tests {
             ratings: Mutex::new(std::collections::HashMap::new()),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn,
+            db_conn: db_conn.clone(),
+            settings_db_conn: db_conn,
+            settings_db_existed: Mutex::new(true),
             smart_folders: Mutex::new(Vec::new()),
             db_tx: tokio::sync::mpsc::channel(1).0,
             video_server_port: 0,
@@ -8416,7 +8433,9 @@ mod viewer_tests {
             ratings: Mutex::new(ratings_map),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn: pool,
+            db_conn: pool.clone(),
+            settings_db_conn: pool,
+            settings_db_existed: Mutex::new(true),
             smart_folders: Mutex::new(Vec::new()),
             db_tx: tokio::sync::mpsc::channel(1).0,
             video_server_port: 0,

@@ -26,6 +26,8 @@ pub struct AppState {
     pub rating_filter_val: Mutex<u8>,
     pub rating_filter_op: Mutex<String>,
     pub db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    pub settings_db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    pub settings_db_existed: Mutex<bool>,
     pub smart_folders: Mutex<Vec<SmartFolderRule>>,
     pub db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     pub video_server_port: u16,
@@ -34,6 +36,8 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+        settings_db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+        settings_db_existed: bool,
         db_tx: tokio::sync::mpsc::Sender<DbMsg>,
         video_server_port: u16,
     ) -> Self {
@@ -56,6 +60,8 @@ impl AppState {
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
             db_conn,
+            settings_db_conn,
+            settings_db_existed: Mutex::new(settings_db_existed),
             smart_folders: Mutex::new(Vec::new()),
             db_tx,
             video_server_port,

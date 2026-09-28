@@ -36,7 +36,11 @@ export function saveTabsState(appState, uiManager) {
     })),
     activeTabIndex: appState.activeTabIndex
   };
-  localStorage.setItem('tabsState', JSON.stringify(state));
+  if (typeof window !== 'undefined' && window.SettingsStore) {
+    window.SettingsStore.setItem('tabsState', JSON.stringify(state));
+  } else if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('tabsState', JSON.stringify(state));
+  }
 }
 
 /**

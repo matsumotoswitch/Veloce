@@ -163,7 +163,7 @@ async function navigateHistory(offset) {
     tab.name = getTabNameForPath(targetPath);
     tab.scrollTop = 0;
     appState.currentDirectory = targetPath;
-    localStorage.setItem('currentDirectory', appState.currentDirectory);
+    setSetting('currentDirectory', appState.currentDirectory);
     uiManager.renderTabs();
     saveTabsState();
 
@@ -599,6 +599,36 @@ function updateCurrentTabState() {
 }
 
 /**
+ * 設定値を取得する（SettingsStore優先、フォールバックとしてlocalStorage）
+ * @param {string} key
+ * @param {string|null} [defaultValue=null]
+ * @returns {string|null}
+ */
+function getSetting(key, defaultValue = null) {
+  if (typeof window !== 'undefined' && window.SettingsStore) {
+    return window.SettingsStore.getItem(key, defaultValue);
+  }
+  if (typeof localStorage !== 'undefined') {
+    const v = localStorage.getItem(key);
+    return v !== null ? v : defaultValue;
+  }
+  return defaultValue;
+}
+
+/**
+ * 設定値を保存する（SettingsStore経由でSQLite永続化およびlocalStorage同期）
+ * @param {string} key
+ * @param {any} value
+ */
+function setSetting(key, value) {
+  if (typeof window !== 'undefined' && window.SettingsStore) {
+    window.SettingsStore.setItem(key, value);
+  } else if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(key, String(value));
+  }
+}
+
+/**
  * タブの状態をローカルストレージに保存します。
  */
 function saveTabsState() {
@@ -745,7 +775,7 @@ const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager
       showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (appState.currentDirectory.startsWith(oldPath)) {
         appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
+        setSetting('currentDirectory', appState.currentDirectory);
       }
       await refreshTree();
     } else {
@@ -769,7 +799,7 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
         let parentDir = parts.join(sep);
         if (!parentDir.includes(sep)) parentDir += sep;
         appState.currentDirectory = parentDir;
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
+        setSetting('currentDirectory', appState.currentDirectory);
         await refreshFileList();
       }
       await refreshTree();
@@ -949,7 +979,7 @@ const updateSortCheckmarks = () => {
 const handleSortChange = (key, asc) => {
   if (key) appState.sortConfig.key = key;
   if (asc !== undefined) appState.sortConfig.asc = asc;
-  localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+  setSetting('currentSort', JSON.stringify(appState.sortConfig));
   updateSortIndicators();
   scheduleRefresh();
   contextMenu.classList.remove('show');
@@ -997,7 +1027,7 @@ const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICO
     return;
   }
   appState.favorites.push({ id: Date.now().toString(), name, path, icon: 'star', color: 'default' });
-  localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+  setSetting('favorites', JSON.stringify(appState.favorites));
   renderFavorites();
 
   // 現在開いているタブの中で該当パスがあれば、お気に入りの名前に更新する
@@ -1099,7 +1129,7 @@ const menuDeleteFavorite = createMenuItem('お気に入りを削除', UIManager.
     const isConfirmed = await uiManager.showConfirm(`「${fav.name}」をお気に入りから削除しますか？`);
     if (isConfirmed) {
       appState.favorites.splice(favIndex, 1);
-      localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+      setSetting('favorites', JSON.stringify(appState.favorites));
       renderFavorites();
 
       // 現在開いているタブの中から該当パスを探してデフォルトのフォルダ名に戻す
@@ -1313,7 +1343,7 @@ const menuTabAddFavorite = createMenuItem('お気に入りに追加', UIManager.
         return;
       }
       appState.favorites.push({ id: Date.now().toString(), name, path, icon: 'star', color: 'default' });
-      localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+      setSetting('favorites', JSON.stringify(appState.favorites));
       renderFavorites();
 
       // タブの名前をお気に入りの名前に更新
@@ -1661,7 +1691,7 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
       activeTab.name = getTabNameForPath(path);
       activeTab.scrollTop = 0;
       appState.currentDirectory = path;
-      localStorage.setItem('currentDirectory', path);
+      setSetting('currentDirectory', path);
       uiManager.renderTabs();
       saveTabsState();
 
@@ -1734,7 +1764,7 @@ uiManager.elements.thumbnailSizeSlider.addEventListener('input', () => {
 });
 
 uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
-  localStorage.setItem('thumbnailScale', e.target.value);
+  setSetting('thumbnailScale', e.target.value);
 });
 
 // リサイズイベント発生時にディレイなしで枠線の表示・非表示を切り替える
@@ -1756,12 +1786,12 @@ window.addEventListener('resize', () => {
 window.addEventListener('resize', debounce(() => {
   if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
     window.veloceAPI.isViewerMaximized().then(isMax => {
-      localStorage.setItem('mainWinMaximized', isMax);
+      setSetting('mainWinMaximized', isMax);
       if (!isMax) {
-        localStorage.setItem('mainWinWidth', Math.max(800, window.outerWidth));
-        localStorage.setItem('mainWinHeight', Math.max(600, window.outerHeight));
-        localStorage.setItem('mainWinX', window.screenX);
-        localStorage.setItem('mainWinY', window.screenY);
+        setSetting('mainWinWidth', Math.max(800, window.outerWidth));
+        setSetting('mainWinHeight', Math.max(600, window.outerHeight));
+        setSetting('mainWinX', window.screenX);
+        setSetting('mainWinY', window.screenY);
       }
     });
   }
@@ -1772,9 +1802,9 @@ window.addEventListener('resize', debounce(() => {
 }, 500));
 
 window.addEventListener('beforeunload', () => {
-  if (localStorage.getItem('mainWinMaximized') !== 'true') {
-    localStorage.setItem('mainWinX', window.screenX);
-    localStorage.setItem('mainWinY', window.screenY);
+  if (getSetting('mainWinMaximized') !== 'true') {
+    setSetting('mainWinX', window.screenX);
+    setSetting('mainWinY', window.screenY);
   }
   saveTabsState(); // アプリ終了時にも状態を保存する
 });
@@ -1792,7 +1822,7 @@ if (fileTableHead) {
       appState.sortConfig.key = key;
       appState.sortConfig.asc = true;
     }
-    localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+    setSetting('currentSort', JSON.stringify(appState.sortConfig));
     updateSortIndicators();
     scheduleRefresh();
   });
@@ -2214,6 +2244,22 @@ document.addEventListener('contextmenu', (e) => {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
+  // SQLite設定DBを起動時4条件に基づいて初期化・調停
+  if (window.SettingsStore) {
+    try {
+      await window.SettingsStore.init(window.veloceAPI);
+    } catch (e) {
+      console.warn('[SettingsStore] Failed to initialize settings store:', e);
+    }
+  }
+
+  // アプリ終了時に保留中の設定を確実にSQLiteへ書き込み
+  window.addEventListener('beforeunload', () => {
+    if (window.SettingsStore) {
+      window.SettingsStore.flush();
+    }
+  });
+
   // ウィンドウ全体の不正なスクロールを絶対防止するガード
   const resetWindowScroll = () => {
     if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
@@ -2264,7 +2310,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           activeTab.name = name;
           activeTab.scrollTop = 0;
           appState.currentDirectory = path;
-          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          setSetting('currentDirectory', appState.currentDirectory);
           if (window.uiManager) window.uiManager.renderTabs();
 
           if (typeof saveTabsState === 'function') saveTabsState();
@@ -2628,11 +2674,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     closeBtn.addEventListener('click', () => window.veloceAPI.closeWindow());
   }
 
-  const savedWinW = localStorage.getItem('mainWinWidth');
-  const savedWinH = localStorage.getItem('mainWinHeight');
-  const savedWinX = localStorage.getItem('mainWinX');
-  const savedWinY = localStorage.getItem('mainWinY');
-  const savedWinMax = localStorage.getItem('mainWinMaximized');
+  const savedWinW = getSetting('mainWinWidth');
+  const savedWinH = getSetting('mainWinHeight');
+  const savedWinX = getSetting('mainWinX');
+  const savedWinY = getSetting('mainWinY');
+  const savedWinMax = getSetting('mainWinMaximized');
 
   if (savedWinW && savedWinH && window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
     const w = Math.max(800, parseInt(savedWinW, 10));
@@ -2677,16 +2723,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  const savedLeftWidth = localStorage.getItem('leftWidth');
+  const savedLeftWidth = getSetting('leftWidth');
   if (savedLeftWidth) appState.layout.leftWidth = parseInt(savedLeftWidth, 10);
 
-  const savedRightWidth = localStorage.getItem('rightWidth');
+  const savedRightWidth = getSetting('rightWidth');
   if (savedRightWidth) appState.layout.rightWidth = parseInt(savedRightWidth, 10);
 
-  const savedLeftVisible = localStorage.getItem('leftVisible');
+  const savedLeftVisible = getSetting('leftVisible');
   if (savedLeftVisible !== null) appState.layout.leftVisible = savedLeftVisible === 'true';
 
-  const savedRightVisible = localStorage.getItem('rightVisible');
+  const savedRightVisible = getSetting('rightVisible');
   if (savedRightVisible !== null) appState.layout.rightVisible = savedRightVisible === 'true';
 
   uiManager.applyLayout();
@@ -2700,7 +2746,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (btn) btn.classList.add('expanded');
   }
 
-  const savedTopHeight = localStorage.getItem('topHeight');
+  const savedTopHeight = getSetting('topHeight');
   if (savedTopHeight) {
     document.documentElement.style.setProperty('--top-height', savedTopHeight);
     if (savedTopHeight === '0px') {
@@ -2714,7 +2760,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  const savedLeftTopHeight = localStorage.getItem('leftTopHeight');
+  const savedLeftTopHeight = getSetting('leftTopHeight');
   if (savedLeftTopHeight) {
     document.documentElement.style.setProperty('--left-top-height', savedLeftTopHeight);
     if (savedLeftTopHeight === '0px') {
@@ -2726,7 +2772,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  const savedRightTopHeight = localStorage.getItem('rightTopHeight');
+  const savedRightTopHeight = getSetting('rightTopHeight');
   if (savedRightTopHeight) {
     if (savedRightTopHeight === '0px') {
       const btn = document.getElementById('resizer-right-pane')?.querySelector('.resizer-toggle');
@@ -2734,7 +2780,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  const savedThumbScale = localStorage.getItem('thumbnailScale');
+  const savedThumbScale = getSetting('thumbnailScale');
   if (savedThumbScale !== null && parseFloat(savedThumbScale) >= 100) {
     uiManager.elements.thumbnailSizeSlider.value = savedThumbScale;
   } else {
@@ -2920,13 +2966,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   const chkViewerName = document.getElementById('show-viewer-name-chk');
 
   if (chkThumbnailName) {
-    const showThumbnailName = localStorage.getItem('showThumbnailNames') === 'true';
+    const showThumbnailName = getSetting('showThumbnailNames') === 'true';
     chkThumbnailName.checked = showThumbnailName;
     if (showThumbnailName) {
       document.body.classList.add('show-thumbnail-names');
     }
     chkThumbnailName.addEventListener('change', (e) => {
-      localStorage.setItem('showThumbnailNames', e.target.checked);
+      setSetting('showThumbnailNames', e.target.checked);
       if (e.target.checked) {
         document.body.classList.add('show-thumbnail-names');
       } else {
@@ -2936,10 +2982,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (chkViewerName) {
-    const showViewerName = localStorage.getItem('showViewerFilename') !== 'false'; // Default to true
+    const showViewerName = getSetting('showViewerFilename') !== 'false'; // Default to true
     chkViewerName.checked = showViewerName;
     chkViewerName.addEventListener('change', (e) => {
-      localStorage.setItem('showViewerFilename', e.target.checked);
+      setSetting('showViewerFilename', e.target.checked);
     });
   }
 
@@ -2970,7 +3016,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           activeTab.name = getTabNameForPath(path);
           activeTab.scrollTop = 0;
           appState.currentDirectory = path;
-          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          setSetting('currentDirectory', appState.currentDirectory);
           uiManager.renderTabs();
           saveTabsState();
 
@@ -2995,7 +3041,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   initModalHandlers();
 
-  const savedSort = localStorage.getItem('currentSort');
+  const savedSort = getSetting('currentSort');
   if (savedSort) {
     try {
       appState.sortConfig = JSON.parse(savedSort);
@@ -3013,7 +3059,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // --- 初期タブの生成と読み込み ---
-  const savedTabsState = localStorage.getItem('tabsState');
+  const savedTabsState = getSetting('tabsState');
   if (savedTabsState) {
     try {
       const state = JSON.parse(savedTabsState);
@@ -3031,7 +3077,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (appState.tabs.length === 0) {
-    const savedDirectory = localStorage.getItem('currentDirectory') || 'PC';
+    const savedDirectory = getSetting('currentDirectory') || 'PC';
     const initialTab = {
       id: Date.now(),
       path: savedDirectory,
@@ -3164,7 +3210,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const asc = item.dataset.sortAsc === 'true';
         appState.sortConfig.key = key;
         appState.sortConfig.asc = asc;
-        localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
+        setSetting('currentSort', JSON.stringify(appState.sortConfig));
         updateSortIndicators();
         scheduleRefresh();
         container.classList.remove('open');
@@ -3244,7 +3290,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (window.veloceAPI.loadDirectory) {
     appState.currentDirectory = currentTab.path;
-    localStorage.setItem('currentDirectory', appState.currentDirectory);
+    setSetting('currentDirectory', appState.currentDirectory);
     appState.totalCount = 0;
     uiManager.renderAll(true);
     clearMetadataUI();
@@ -3446,7 +3492,7 @@ function initSmartFolders() {
           activeTab.name = getTabNameForPath(path, appState.favorites);
           activeTab.scrollTop = 0;
           appState.currentDirectory = path;
-          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          setSetting('currentDirectory', appState.currentDirectory);
           uiManager.renderTabs();
           saveTabsState(appState, uiManager);
 

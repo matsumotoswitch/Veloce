@@ -107,6 +107,12 @@ window.veloceAPI = {
   migrateRatings: (ratings) => invoke('migrate_ratings', { ratings }),
   getVideoServerPort: () => invoke('get_video_server_port'),
   setRating: (path, rating) => invoke('set_rating', { path, rating }),
+  initSettings: (entriesFromLocalstorage) => invoke('init_settings', { entriesFromLocalstorage }),
+  getSetting: (key) => invoke('get_setting', { key }),
+  setSetting: (key, value) => invoke('set_setting', { key, value }),
+  setSettingsBatch: (settings) => invoke('set_settings_batch', { settings }),
+  deleteSetting: (key) => invoke('delete_setting', { key }),
+  getAllSettings: () => invoke('get_all_settings'),
   /**
    * 仮想スクロール用: 指定範囲のImageFileをRustから取得する
    */

@@ -769,7 +769,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // --- ファイル名の表示設定の初期化と監視 ---
     const updateFilenameVisibility = () => {
-      const show = localStorage.getItem('showViewerFilename') !== 'false';
+      const show = (typeof window !== 'undefined' && window.SettingsStore
+        ? window.SettingsStore.getItem('showViewerFilename')
+        : localStorage.getItem('showViewerFilename')) !== 'false';
       
       const filenameEl = document.getElementById('window-filename-display');
       if (filenameEl) {

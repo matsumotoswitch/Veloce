@@ -33,5 +33,11 @@ window.veloceAPI = {
   trashFolder: vi.fn(),
   renameFile: vi.fn(),
   renameFolder: vi.fn(),
-  moveOrCopyFile: vi.fn()
+  moveOrCopyFile: vi.fn(),
+  initSettings: vi.fn().mockImplementation((entries) => Promise.resolve(entries || {})),
+  getSetting: vi.fn().mockResolvedValue(null),
+  setSetting: vi.fn().mockResolvedValue(),
+  setSettingsBatch: vi.fn().mockResolvedValue(),
+  deleteSetting: vi.fn().mockResolvedValue(),
+  getAllSettings: vi.fn().mockResolvedValue({})
 };
