@@ -388,8 +388,9 @@ input:-webkit-autofill:focus {
   border: 1px solid var(--border-color);
   padding: 8px;
   border-radius: var(--radius-xs);
-  min-height: 120px;
+  min-height: 38px;
   max-height: 252px;
+  box-sizing: border-box;
   overflow-y: auto;
   font-size: var(--font-size-sm);
   /* ここを1.1emから0.9emに修正 */
@@ -445,6 +446,11 @@ input:-webkit-autofill:focus {
 
 .sublabel-tag--img2img {
   color: var(--color-tag-img2img);
+}
+
+/* Diffモーダル内では左右比較のため一定の最小高さを維持 */
+.diff-section .prompt-look:not(.param-box):not(.raw-box) {
+  min-height: 120px;
 }
 
 .diff-section {
