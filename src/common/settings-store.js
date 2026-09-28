@@ -272,19 +272,86 @@
     }
   }
 
+  /**
+   * フォルダパスまたはスマートフォルダURIを正規化します。
+   * @param {string} folderPath
+   * @returns {string}
+   */
+  function normalizeFolderPath(folderPath) {
+    if (!folderPath || typeof folderPath !== 'string') return '';
+    const trimmed = folderPath.trim();
+    if (trimmed.startsWith('smart://')) {
+      return trimmed;
+    }
+    if (/^[a-zA-Z]:[\\/]?$/.test(trimmed)) {
+      return trimmed.replace(/\//g, '\\').toUpperCase().replace(/([a-zA-Z]:)$/, '$1\\');
+    }
+    return trimmed.replace(/[\\/]+$/, '').replace(/\//g, '\\');
+  }
+
+  /**
+   * 指定したフォルダまたはスマートフォルダに保存されたソート設定を取得します。
+   * @param {string} folderPath - フォルダパスまたはスマートフォルダURI
+   * @returns {{ key: string, asc: boolean } | null}
+   */
+  function getFolderSort(folderPath) {
+    const norm = normalizeFolderPath(folderPath);
+    if (!norm) return null;
+    const raw = getSetting(`folder_sort:${norm}`);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.key === 'string' && typeof parsed.asc === 'boolean') {
+        return { key: parsed.key, asc: parsed.asc };
+      }
+    } catch (e) {
+      console.warn('[SettingsStore] Failed to parse folder sort for', folderPath, e);
+    }
+    return null;
+  }
+
+  /**
+   * 指定したフォルダまたはスマートフォルダのソート設定を保存します。
+   * @param {string} folderPath - フォルダパスまたはスマートフォルダURI
+   * @param {{ key: string, asc: boolean }} sortConfig - ソート設定
+   */
+  function setFolderSort(folderPath, sortConfig) {
+    const norm = normalizeFolderPath(folderPath);
+    if (!norm || !sortConfig || typeof sortConfig.key !== 'string') return;
+    const value = JSON.stringify({
+      key: sortConfig.key,
+      asc: Boolean(sortConfig.asc)
+    });
+    setSetting(`folder_sort:${norm}`, value);
+  }
+
   // グローバルおよびモジュールへの公開
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { SettingsStore, SettingsStoreClass, getSetting, setSetting };
+    module.exports = {
+      SettingsStore,
+      SettingsStoreClass,
+      getSetting,
+      setSetting,
+      normalizeFolderPath,
+      getFolderSort,
+      setFolderSort
+    };
   }
   if (typeof window !== 'undefined') {
     window.SettingsStore = SettingsStore;
     window.getSetting = getSetting;
     window.setSetting = setSetting;
+    window.normalizeFolderPath = normalizeFolderPath;
+    window.getFolderSort = getFolderSort;
+    window.setFolderSort = setFolderSort;
   }
   if (typeof global !== 'undefined') {
     global.SettingsStore = SettingsStore;
     global.getSetting = getSetting;
     global.setSetting = setSetting;
+    global.normalizeFolderPath = normalizeFolderPath;
+    global.getFolderSort = getFolderSort;
+    global.setFolderSort = setFolderSort;
   }
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -292,3 +359,6 @@ export const SettingsStore = typeof window !== 'undefined' && window.SettingsSto
 export const SettingsStoreClass = typeof window !== 'undefined' && window.SettingsStoreClass ? window.SettingsStoreClass : (typeof global !== 'undefined' && global.SettingsStoreClass ? global.SettingsStoreClass : null);
 export const getSetting = typeof window !== 'undefined' && window.getSetting ? window.getSetting : (typeof global !== 'undefined' && global.getSetting ? global.getSetting : function(k, d = null) { return d; });
 export const setSetting = typeof window !== 'undefined' && window.setSetting ? window.setSetting : (typeof global !== 'undefined' && global.setSetting ? global.setSetting : function() {});
+export const normalizeFolderPath = typeof window !== 'undefined' && window.normalizeFolderPath ? window.normalizeFolderPath : (typeof global !== 'undefined' && global.normalizeFolderPath ? global.normalizeFolderPath : function(p) { return p || ''; });
+export const getFolderSort = typeof window !== 'undefined' && window.getFolderSort ? window.getFolderSort : (typeof global !== 'undefined' && global.getFolderSort ? global.getFolderSort : function() { return null; });
+export const setFolderSort = typeof window !== 'undefined' && window.setFolderSort ? window.setFolderSort : (typeof global !== 'undefined' && global.setFolderSort ? global.setFolderSort : function() {});

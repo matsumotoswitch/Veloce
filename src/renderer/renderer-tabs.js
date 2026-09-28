@@ -1,4 +1,5 @@
 import { checkPathExists } from '../common/path-utils.js';
+import { getFolderSort, setSetting } from '../common/settings-store.js';
 
 /**
  * 現在のタブの状態を同期します。
@@ -96,18 +97,22 @@ export function initTabHandlers(ctx) {
 
     appState.searchQuery = tab.searchQuery || '';
     if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;
-    if (tab.sortConfig) {
+    const folderSort = getFolderSort(tab.path);
+    if (folderSort) {
+      appState.sortConfig = { ...folderSort };
+      tab.sortConfig = { ...folderSort };
+    } else if (tab.sortConfig) {
       appState.sortConfig = { ...tab.sortConfig };
-      localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
-      updateSortIndicators();
     }
+    setSetting('currentSort', JSON.stringify(appState.sortConfig));
+    updateSortIndicators();
 
     if (window.veloceAPI.loadDirectory) {
       if (window.veloceAPI.setViewParams) {
         await appState.setViewParams();
       }
       appState.currentDirectory = tab.path;
-      localStorage.setItem('currentDirectory', appState.currentDirectory);
+      setSetting('currentDirectory', appState.currentDirectory);
       appState.totalCount = 0;
       appState.selection.clear();
       appState.selectedIndex = -1;
@@ -220,15 +225,19 @@ export function initTabHandlers(ctx) {
           if (appState.activeTabIndex !== nextIndex) return;
 
           appState.currentDirectory = nextTab.path;
-          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          setSetting('currentDirectory', appState.currentDirectory);
           
           appState.searchQuery = nextTab.searchQuery || '';
           if (uiManager.elements.searchBar) uiManager.elements.searchBar.value = appState.searchQuery;
-          if (nextTab.sortConfig) {
+          const folderSort = getFolderSort(nextTab.path);
+          if (folderSort) {
+            appState.sortConfig = { ...folderSort };
+            nextTab.sortConfig = { ...folderSort };
+          } else if (nextTab.sortConfig) {
             appState.sortConfig = JSON.parse(JSON.stringify(nextTab.sortConfig));
-            localStorage.setItem('currentSort', JSON.stringify(appState.sortConfig));
-            updateSortIndicators();
           }
+          setSetting('currentSort', JSON.stringify(appState.sortConfig));
+          updateSortIndicators();
 
           appState.totalCount = 0;
           appState.selection.clear();

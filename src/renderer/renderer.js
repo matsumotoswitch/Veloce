@@ -64,7 +64,7 @@ import {
   initFavoritesDnd
 } from './renderer-dnd.js';
 import { initResizers, updateResizerToggleStates } from './renderer-resizer.js';
-import { getSetting, setSetting } from '../common/settings-store.js';
+import { getSetting, setSetting, getFolderSort, setFolderSort } from '../common/settings-store.js';
 import { renderFavorites, initBookmarkEvents } from './renderer-bookmarks.js';
 import {
   initFileOps,
@@ -186,6 +186,18 @@ async function refreshFileList(showToast = false) {
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
   }
 
+  // フォルダ（またはスマートフォルダ）固有のソート設定があれば復元
+  const savedFolderSort = getFolderSort(appState.currentDirectory);
+  if (savedFolderSort) {
+    appState.sortConfig.key = savedFolderSort.key;
+    appState.sortConfig.asc = savedFolderSort.asc;
+    const activeTab = appState.tabs && appState.tabs[appState.activeTabIndex];
+    if (activeTab) {
+      activeTab.sortConfig = { ...savedFolderSort };
+    }
+    updateSortIndicators();
+  }
+
   // スクロール位置のキャッシュ: 現在と同じフォルダの再読み込み（F5など）時のみスクロール位置を維持し、
   // 別フォルダやスマートフォルダへの遷移時は 0（先頭）から即時描画する
   const activeTab = appState.tabs && appState.tabs[appState.activeTabIndex];
@@ -222,8 +234,10 @@ async function refreshFileList(showToast = false) {
   try {
     appState.pushHistory(appState.currentDirectory);
     updateNavButtons();
-    // Rust側のバックグラウンド処理をキックする
-    // ※結果は await せず、onDirectoryLoaded リスナー側で随時受け取る
+    // Rust側のバックグラウンド処理をキックする（直前の最新ソート設定を反映）
+    if (window.veloceAPI && window.veloceAPI.setViewParams) {
+      await appState.setViewParams();
+    }
     await window.veloceAPI.loadDirectory(appState.currentDirectory);
   } catch (error) {
     console.error('Failed to start loading directory:', error);
@@ -948,12 +962,32 @@ const updateSortCheckmarks = () => {
   });
 };
 
-const handleSortChange = (key, asc) => {
+/**
+ * ソート条件を変更し、UIインジケーター・現在のフォルダ・アクティブタブ・グローバル設定へ同期して再描画をスケジュールします。
+ * @param {string} [key] - ソート対象キー（省略時は現在のキー）
+ * @param {boolean} [asc] - 昇順フラグ（省略時は現在の値）
+ */
+function applySortChange(key, asc) {
   if (key) appState.sortConfig.key = key;
   if (asc !== undefined) appState.sortConfig.asc = asc;
+
   setSetting('currentSort', JSON.stringify(appState.sortConfig));
+  if (appState.currentDirectory) {
+    setFolderSort(appState.currentDirectory, appState.sortConfig);
+  }
+
+  const activeTab = appState.tabs && appState.tabs[appState.activeTabIndex];
+  if (activeTab) {
+    activeTab.sortConfig = { ...appState.sortConfig };
+    saveTabsState();
+  }
+
   updateSortIndicators();
   scheduleRefresh();
+}
+
+const handleSortChange = (key, asc) => {
+  applySortChange(key, asc);
   contextMenu.classList.remove('show');
 };
 
@@ -1788,15 +1822,8 @@ if (fileTableHead) {
     if (!th) return;
     const key = th.dataset.sort;
     if (!key) return;
-    if (appState.sortConfig.key === key) {
-      appState.sortConfig.asc = !appState.sortConfig.asc;
-    } else {
-      appState.sortConfig.key = key;
-      appState.sortConfig.asc = true;
-    }
-    setSetting('currentSort', JSON.stringify(appState.sortConfig));
-    updateSortIndicators();
-    scheduleRefresh();
+    const asc = appState.sortConfig.key === key ? !appState.sortConfig.asc : true;
+    applySortChange(key, asc);
   });
 }
 
@@ -3179,11 +3206,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         e.stopPropagation();
         const key = item.dataset.sortKey;
         const asc = item.dataset.sortAsc === 'true';
-        appState.sortConfig.key = key;
-        appState.sortConfig.asc = asc;
-        setSetting('currentSort', JSON.stringify(appState.sortConfig));
-        updateSortIndicators();
-        scheduleRefresh();
+        applySortChange(key, asc);
         container.classList.remove('open');
       });
     });
@@ -3254,10 +3277,14 @@ window.addEventListener('DOMContentLoaded', async () => {
       openSelect.classList.remove('open', 'open-up');
     }
   });
-  if (currentTab.sortConfig) {
+  const initialFolderSort = getFolderSort(currentTab.path);
+  if (initialFolderSort) {
+    appState.sortConfig = { ...initialFolderSort };
+    currentTab.sortConfig = { ...initialFolderSort };
+  } else if (currentTab.sortConfig) {
     appState.sortConfig = JSON.parse(JSON.stringify(currentTab.sortConfig));
-    updateSortIndicators();
   }
+  updateSortIndicators();
 
   if (window.veloceAPI.loadDirectory) {
     appState.currentDirectory = currentTab.path;

@@ -216,4 +216,49 @@ describe('SettingsStore & Migration Specifications', () => {
       expect(mockApi.deleteSetting).toHaveBeenCalledWith('tempKey');
     });
   });
+
+  describe('Per-Folder and Per-Smart-Folder Sort Persistence', () => {
+    it('normalizes folder paths and smart folder URIs consistently', async () => {
+      const { normalizeFolderPath } = await import('../src/common/settings-store.js');
+
+      expect(normalizeFolderPath('C:/Photos/Trip/')).toBe('C:\\Photos\\Trip');
+      expect(normalizeFolderPath('C:\\Photos\\Trip')).toBe('C:\\Photos\\Trip');
+      expect(normalizeFolderPath('c:\\')).toBe('C:\\');
+      expect(normalizeFolderPath('D:/')).toBe('D:\\');
+      expect(normalizeFolderPath('smart://fav_5')).toBe('smart://fav_5');
+      expect(normalizeFolderPath('smart://portrait_high')).toBe('smart://portrait_high');
+      expect(normalizeFolderPath('')).toBe('');
+      expect(normalizeFolderPath(null)).toBe('');
+    });
+
+    it('saves and retrieves sort config per normal folder and per smart folder', async () => {
+      const { getFolderSort, setFolderSort } = await import('../src/common/settings-store.js');
+
+      mockApi.initSettings.mockResolvedValue({});
+      await SettingsStore.init(mockApi);
+
+      // Initially no sort saved
+      expect(getFolderSort('C:/Photos/Trip')).toBeNull();
+      expect(getFolderSort('smart://fav_5')).toBeNull();
+
+      // Save folder 1
+      setFolderSort('C:/Photos/Trip', { key: 'mtime', asc: false });
+      expect(getFolderSort('C:\\Photos\\Trip')).toEqual({ key: 'mtime', asc: false });
+      expect(getFolderSort('C:/Photos/Trip/')).toEqual({ key: 'mtime', asc: false });
+
+      // Save smart folder
+      setFolderSort('smart://fav_5', { key: 'width', asc: true });
+      expect(getFolderSort('smart://fav_5')).toEqual({ key: 'width', asc: true });
+
+      // Folder 1 sort should remain untouched
+      expect(getFolderSort('C:\\Photos\\Trip')).toEqual({ key: 'mtime', asc: false });
+
+      // Save folder 2 with different sort
+      setFolderSort('D:\\Illustrations', { key: 'rating', asc: false });
+      expect(getFolderSort('D:\\Illustrations')).toEqual({ key: 'rating', asc: false });
+      expect(getFolderSort('C:\\Photos\\Trip')).toEqual({ key: 'mtime', asc: false });
+      expect(getFolderSort('smart://fav_5')).toEqual({ key: 'width', asc: true });
+    });
+  });
 });
+
