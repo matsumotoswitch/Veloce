@@ -27,6 +27,7 @@
       * `path-utils.js`: パス正規化、親ディレクトリ取得、ファイル名/フォルダ名バリデーションの一元管理（`validateFilename`）
       * `metadata-format.js`: AIメタデータ解析（PNG/WebP）、プロンプトハイライト
       * `dialog-base.js`: 共通ダイアログ基盤、キーボード/オーバーレイハンドラー
+      * `settings-store.js`: SQLite (`veloce_settings.db`) を Single Source of Truth とするアプリケーション設定ストア。起動時に4条件調停（localStorage/DBの有無の組み合わせ）で設定を最新化し、メモリ内キャッシュによるO(1)同期取得・100msデバウンスでのSQLiteバッチ書き込み。タブ状態、ペインレイアウト、フォルダ別ソート設定等の永続化を一元管理
     * **メインウィンドウ (`src/renderer/`):**
       * `renderer.js`: アプリ全体のライフサイクル管理、グローバルショートカット、初期化統括
       * `renderer-ui.js`: DOM構造管理、仮想スクロール制御、ツールチップ/トースト通知基盤、カスタムプロンプト
@@ -73,7 +74,8 @@
 
 ### 2.3 タブシステム（マルチタスク）
 * **複数タブ管理:** 複数タブの並列起動、個別閉じ（中クリック対応）、コンテキストメニューからの「タブ複製」「他のタブをすべて閉じる」「右側のタブをすべて閉じる」を完全にサポート。
-* **状態の永続化:** タブごとの閲覧パス、スクロール位置、適用されているソート/検索クエリ設定を `tabsState` として LocalStorage に常時保存し、アプリ再起動時に寸分狂わずに前回の状態を復元。
+* **状態の永続化:** タブごとの閲覧パス、スクロール位置、適用されているソート/検索クエリ設定を `tabsState` として設定ストアに常時保存し、アプリ再起動時に寸分狂わずに前回の状態を復元。さらに、フォルダおよびスマートフォルダごとのソート設定（基準・昇降順）もパスをキーとして `settings-store.js` 経由でSQLiteに永続化され、同じフォルダを再訪時に前回のソート順が自動復元される。
+* **ペインレイアウトの永続化:** 左右ペインの開閉状態、幅、および上下サブペインの開閉状態・高さを `layoutState` として `settings-store.js` 経由でSQLiteに保存。アプリ再起動時にフォルダツリーペインやインスペクターペインのレイアウトを正確に復元。
 * **スクロール位置の保存と復元:** タブを切り替える直前に `updateCurrentTabState()` を呼び出し、各タブオブジェクトのプロパティにスクロール位置（`scrollTop`）を保存。復元時は、`appState.savedScrollTopGrid` / `appState.savedScrollTopList` に目標値をセットし、**仮想スクロールのレンダリングサイクル内（`renderGrid` / `updateVirtualList`）にて、コンテナ全体の高さが算出された直後に同期的に復元**する。これにより不要な二重レンダリング（キューイングの暴走）や遅延を防ぎ、遅延のない位置復元を実現している。
 
 ### 2.4 ナビゲーション・履歴
@@ -90,7 +92,8 @@
 2. **WebP / JPEG形式:** バイナリをメモリマップ（`memmap2`）で展開し、TIFF IFD構造をパースして `ImageDescription` や `UserComment`（UNICODE/ASCIIヘッダースキップ処理付き）、`Software` を高速抽出。
 3. **Stealth形式 (隠しメタデータ):** EXIF等に痕跡がない場合、画像のアルファチャンネル（最下位ビット）から Column-Major Order (x -> y) でビットを抽出し、MSB first でバイト配列に変換。`stealth_pngcomp` (Gzip圧縮) および `stealth_pnginfo` (非圧縮) をデコードしてプロンプトを復元。
 4. **NovelAI V4 / V4.5 特殊対応:** JSON内のマルチキャラクタープロンプト（`v4_prompt/caption/char_captions`）およびネガティブ側を自動パースし、フロントエンド側で `characterPrompts` 配列（`prompt`, `uc`）に再構造化して保持。
-5. **A1111 / WebUI形式フォールバック:** parameters 内の `Steps: ` 等の文字列パターンを検出し、自動的に `rawParameters` フィールドに格納してパース。
+5. **ランダマイザ（採用プロンプト）対応:** NovelAIの `||A|B||` 書式によるランダム抽選を検出。`Comment` 内の `actual_prompts` JSON構造から、ベースプロンプトおよび各キャラクタープロンプト・除外要素の「実際に採用された値」を抽出し `adoptedPrompt` として格納。抽選前プロンプト（ランダマイザ書式を含む）と採用後プロンプトの両方をインスペクター・ビューアーオーバーレイ・パラメータDiffモーダルに表示し、FTS5検索インデックスにも含める。
+6. **A1111 / WebUI形式フォールバック:** parameters 内の `Steps: ` 等の文字列パターンを検出し、自動的に `rawParameters` フィールドに格納してパース。
 
 ### 3.2 フロントエンド・インスペクター & DOM Pool
 * **DOM Pool（要素の再利用）:** インスペクターに大量のプロンプトタグやパラメータを描画する際、メモリ解放（GC）によるガタつきを排除するため、`inspectorSectionPool` および `inspectorTagPool` を実装。画面更新時はDOM要素を一度も破棄せず、`display = 'none'` による非表示化と中身の `replaceChildren()` による書き換えだけで要素を高速に再利用。
@@ -183,6 +186,7 @@
 
 ### 6.4 ソートドロップダウン
 * **サムネイルコントロールバー内のクイックソート:** `#thumbnail-controls` バー内に常時表示されるカスタムドロップダウン（`#sort-select-container`）から、ソート基準と順序を1アクションで切り替え可能。選択肢は右クリックメニューのソートサブメニューと完全に同じ並び順（名前→拡張子→幅→高さ→比率→サイズ→更新日時→レーティングの各昇順/降順、全16項目）。
+* **ソート設定のフォルダ別永続化:** ソート基準と昇降順の設定は、フォルダパスまたはスマートフォルダURIをキーとして `settings-store.js` 経由でSQLiteに永続化される（`getFolderSort` / `setFolderSort`）。同じフォルダを再訪した際に前回のソート順が自動的に復元される。
 * **同期:** テーブルヘッダーのクリックでソートが変わった場合にもドロップダウンのラベルが `updateSortSelectDropdown()` により自動同期される。
 * **展開方向の動的判定:** クリック時にウィンドウ下端までの残り高さを計測し、メニューが収まらない場合のみ上方向展開（`open-up`クラス）に切り替える。
 
@@ -217,7 +221,7 @@
 巨大な単一グローバル状態（`appState`）の肥大化・強結合を解消するため、責任範囲ごとに4つのサブドメイン状態オブジェクトへ分割・局所化を実施。既存呼び出し元および全ユニットテストとの互換性を完全に保つため、`AppState` クラス上に ES6 ゲッター/セッターによる透過的プロキシ（Facade）を設置している。
 * **`dndState` (`renderer-dnd.js` 担当):** ドラッグ中パスリスト、選択インデックス、起点ディレクトリ、アプリ内ドラッグフラグ（`isAppDragging`）、完了時リフレッシュ保留フラグ（`pendingRefresh`）をカプセル化。`isAppDragging()` ヘルパーおよび `reset()` によるライフサイクル管理を提供。
 * **`fileOpsState` (`renderer-file-ops.js` 担当):** ファイルリネーム・移動・コピー・削除等の Undo スタック（`undoStack`）および操作メソッド（`push`, `pop`, `clear`）を局所化。
-* **`layoutState` (`renderer-resizer.js`, `renderer-ui.js` 担当):** ペイン寸法（左右幅、左右上部高さ）および表示状態トグルを局所化。LocalStorage との同期および `uiManager.applyLayout()` との直接連携。
+* **`layoutState` (`renderer-resizer.js`, `renderer-ui.js` 担当):** ペイン寸法（左右幅、左右上部高さ）および表示状態トグルを局所化。`settings-store.js` 経由でSQLiteに永続化され、アプリ再起動時に `uiManager.applyLayout()` で復元。
 * **`thumbnailState` (`renderer-thumbnails.js` 担当):** サムネイルBlob/Asset URLキャッシュ（`urls`）、可視パス集合（`visiblePathSet`）、プリロードカーソルおよびキュー状態、進捗カウンタ（要求総数、完了数、重複排除Set、トースト消去タイマー）、メタデータバッチIDを局所化。`resetProgress()` によりフォルダ移動時の一括初期化を実現。
 * **後方互換性ファサード:** `appState.dragState`, `appState.undoStack`, `appState.layout`, `appState.thumbnailUrls`, `appState.thumbnailTotalRequested` 等へのアクセスは透過的にサブドメイン状態へとルーティングされ、既存コンポーネントの破壊を防止。
 
