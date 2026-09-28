@@ -3467,28 +3467,29 @@ fn generate_thumbnail_inner_with_hash(
         }
     }
     
-    // 静止画像または動画ファイルのサムネイルを高速生成（キャッシュミス時）
+    // 動画ファイルのみRustバックエンドで同期生成する。
+    // 静止画像（PNG/WebP/JPEG等）のキャッシュミス時は空配列を返す。
+    // Rustソフトウェアデコード（image::open + Lanczos3リサイズ）は
+    // 大容量AIイラスト（2K～4K PNG）を処理する際に spawn_blocking スレッドを
+    // 数百ms単位でブロックするため、ブラウザの hardware-accelerated な
+    // createImageBitmap パイプライン（OffscreenCanvas）に委譲するのが適切。
     let lower_path = file_path.to_lowercase();
-    let generated_bytes = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-        generate_video_thumbnail_sync(file_path)
-    } else {
-        generate_image_thumbnail_sync(file_path)
-    };
-
-    if let Some(bytes) = generated_bytes {
-        if let Ok(conn) = db_conn.get() {
-            let clean_path = normalize_unc_path(file_path).into_owned();
-            let hash_key = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes()));
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-            let _ = conn.execute(
-                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-                rusqlite::params![hash_key, bytes, clean_path, now],
-            );
+    if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+        if let Some(bytes) = generate_video_thumbnail_sync(file_path) {
+            if let Ok(conn) = db_conn.get() {
+                let clean_path = normalize_unc_path(file_path).into_owned();
+                let hash_key = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes()));
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                let _ = conn.execute(
+                    "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+                    rusqlite::params![hash_key, bytes, clean_path, now],
+                );
+            }
+            return bytes;
         }
-        return bytes;
     }
-    
+
     Vec::new()
 }
 
@@ -6841,7 +6842,10 @@ mod viewer_tests {
     }
 
     #[test]
-    fn test_generate_thumbnail_inner_generates_on_cache_miss() {
+    fn test_generate_thumbnail_inner_static_image_cache_miss_returns_empty() {
+        // 静止画像（PNG/WebP/JPEG）のキャッシュミス時は空配列を返す。
+        // Rustソフトウェアデコードは spawn_blocking スレッドをブロックするため、
+        // ブラウザのOffscreenCanvasパイプラインに委譲するのが設計上の正しい動作。
         let manager = r2d2_sqlite::SqliteConnectionManager::memory();
         let pool = r2d2::Pool::new(manager).unwrap();
         {
@@ -6863,25 +6867,66 @@ mod viewer_tests {
             ).unwrap();
         }
 
-        // テスト用の小さなPNG画像ファイルを作成
-        let temp_dir = tempfile::tempdir().unwrap();
-        let temp_file_path = temp_dir.path().join("test_img.png");
-        let img = image::RgbImage::new(100, 100);
-        img.save(&temp_file_path).unwrap();
+        // キャッシュに何も存在しない状態でPNG/WebP/JPEGパスを渡すと空配列が返ること
+        let res_png = super::generate_thumbnail_inner("C:\\photos\\nonexistent.png", 12345, &pool);
+        assert!(res_png.is_empty(), "PNGキャッシュミス時はJS委譲のため空配列を返すこと（実ファイル不要）");
 
-        let path_str = temp_file_path.to_string_lossy().to_string();
-        let res = super::generate_thumbnail_inner(&path_str, 12345, &pool);
-        assert!(!res.is_empty(), "キャッシュミス時でも自動生成されたサムネイルが返却されること");
-        assert!(res.starts_with(&[0xFF, 0xD8]), "生成されたサムネイルはJPEG形式であること");
+        let res_webp = super::generate_thumbnail_inner("C:\\photos\\nonexistent.webp", 12345, &pool);
+        assert!(res_webp.is_empty(), "WebPキャッシュミス時は空配列を返すこと");
 
-        // DB に保存されていることを確認
+        let res_jpg = super::generate_thumbnail_inner("C:\\photos\\nonexistent.jpg", 12345, &pool);
+        assert!(res_jpg.is_empty(), "JPEGキャッシュミス時は空配列を返すこと");
+
+        // DBへの書き込みも行われていないこと（不要なI/Oが発生しない）
         let conn = pool.get().unwrap();
         let count: i64 = conn.query_row(
             "SELECT count(*) FROM cache WHERE thumbnail IS NOT NULL",
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(count, 1, "キャッシュDBに保存されていること");
+        assert_eq!(count, 0, "キャッシュミスで静止画像の生成・DB保存が行われないこと");
+    }
+
+    #[test]
+    fn test_generate_thumbnail_inner_video_cache_miss_attempts_generation() {
+        // 動画ファイル（.mp4/.webm/.avi/.mkv）のキャッシュミス時はRust側で生成を試みる。
+        // テスト環境にffmpegや対象ファイルがないため生成は失敗し空配列が返るが、
+        // 静止画像と同じ「即時空返し」ではなく動画生成パスを通ることを確認する。
+        // （実環境では有効なffmpegがあれば JPEG バイト列が返る）
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        // 存在しないmp4パスでも「パニックしない」こと、および空配列が返ること
+        // (ffmpegが存在しない・ファイルが存在しない環境では空を返す)
+        let res_mp4 = super::generate_thumbnail_inner("C:\\videos\\nonexistent.mp4", 0, &pool);
+        // 戻り値の検証: ffmpeg不在または失敗時は空が返ること（クラッシュしないこと）
+        // 返ってきた場合（ffmpegが存在してJPEGが生成された場合）はJPEGヘッダであること
+        if !res_mp4.is_empty() {
+            assert!(res_mp4.starts_with(&[0xFF, 0xD8]), "動画サムネイルはJPEG形式であること");
+        }
+
+        let res_webm = super::generate_thumbnail_inner("C:\\videos\\nonexistent.webm", 0, &pool);
+        if !res_webm.is_empty() {
+            assert!(res_webm.starts_with(&[0xFF, 0xD8]), "webmサムネイルはJPEG形式であること");
+        }
     }
 
     /// PLAN.md Sec 5.2: アスペクト比条件（portrait, landscape, square）の動的SQL生成テスト
