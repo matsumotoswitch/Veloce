@@ -14,7 +14,7 @@
 //!   4. `localStorage` に設定あり ＆ DBファイルあり: DBファイルの設定に従って起動（DB優先）。
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tauri::State;
 use crate::state::AppState;
 use crate::utils::get_veloce_data_dir;
@@ -206,6 +206,7 @@ pub fn get_all_settings(state: State<'_, AppState>) -> Result<HashMap<String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn setup_test_db(path: &Path) -> r2d2::Pool<r2d2_sqlite::SqliteConnectionManager> {
         let manager = r2d2_sqlite::SqliteConnectionManager::file(path);
