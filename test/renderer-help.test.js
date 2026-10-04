@@ -164,8 +164,6 @@ describe('renderer-help.js', () => {
       expect(viewerContent.textContent).toContain('メタデータオーバーレイの表示 / 非表示');
       expect(viewerContent.innerHTML).toContain('<kbd>I</kbd>');
       expect(viewerContent.innerHTML).not.toContain('<kbd>P</kbd>');
-      expect(viewerContent.textContent).toContain('アルファチャンネルオーバーレイ（メタデータ可視化）表示切替');
-      expect(viewerContent.innerHTML).toContain('<kbd>Shift</kbd> + <kbd>A</kbd>');
     });
   });
 });

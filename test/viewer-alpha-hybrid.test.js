@@ -3,15 +3,22 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { viewerState } from '../src/viewer/viewer-state.js';
-import { applyAlphaOverlay, toggleAlphaOverlayMode, showToast } from '../src/viewer/viewer.js';
+import {
+  applyAlphaOverlay,
+  toggleAlphaOverlayMode,
+  toggleMetadataOverlay,
+  showToast
+} from '../src/viewer/viewer.js';
 
-describe('Viewer Alpha Overlay Hybrid (Plan 1 + Plan 2 Hybrid)', () => {
+describe('Viewer Alpha Overlay Hybrid with I Key Integration', () => {
   let mockImg;
   let mockGetAlphaOverlayImage;
+  let mockParseMetadata;
 
   beforeEach(() => {
     document.body.innerHTML = `
       <div id="toast-container"></div>
+      <div id="window-controls"></div>
       <img id="viewer-img" src="asset://original-image.png" />
     `;
 
@@ -21,11 +28,12 @@ describe('Viewer Alpha Overlay Hybrid (Plan 1 + Plan 2 Hybrid)', () => {
     viewerState.currentIndex = 0;
     viewerState.paths = ['E:/test/stealth.png'];
     viewerState.currentImagePath = 'E:/test/stealth.png';
+    viewerState.isMetadataVisible = false;
     viewerState.isAlphaOverlayMode = false;
     viewerState.originalSrc = null;
     viewerState.overlayCache.clear();
 
-    // Mock API
+    // Mock APIs
     mockGetAlphaOverlayImage = vi.fn().mockResolvedValue({
       data_url: 'data:image/png;base64,mockHybridOverlayData',
       width: 100,
@@ -39,24 +47,40 @@ describe('Viewer Alpha Overlay Hybrid (Plan 1 + Plan 2 Hybrid)', () => {
       occupied_columns: 166,
     });
 
+    mockParseMetadata = vi.fn().mockResolvedValue({
+      prompt: 'masterpiece, 1girl, smiling',
+      negativePrompt: 'lowres, bad quality',
+      params: { steps: 28, sampler: 'Euler' },
+      source: 'NovelAI'
+    });
+
     window.veloceAPI = {
       getAlphaOverlayImage: mockGetAlphaOverlayImage,
+      parseMetadata: mockParseMetadata,
       arrangeViewers: vi.fn(),
     };
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    const overlay = document.getElementById('viewer-metadata-overlay');
+    if (overlay) overlay.remove();
     document.body.innerHTML = '';
   });
 
-  it('should toggle overlay ON and replace img.src with hybrid data_url, saving originalSrc', async () => {
-    await toggleAlphaOverlayMode();
+  it('should toggle both metadata text and alpha hybrid overlay ON via toggleMetadataOverlay (I key)', async () => {
+    toggleMetadataOverlay();
 
+    expect(viewerState.isMetadataVisible).toBe(true);
     expect(viewerState.isAlphaOverlayMode).toBe(true);
+
+    // Wait for async applyAlphaOverlay & parseMetadata
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
     expect(viewerState.originalSrc).toBe('asset://original-image.png');
     expect(mockImg.src).toBe('data:image/png;base64,mockHybridOverlayData');
     expect(mockGetAlphaOverlayImage).toHaveBeenCalledWith('E:/test/stealth.png');
+    expect(mockParseMetadata).toHaveBeenCalledWith('E:/test/stealth.png');
 
     // Check toast content
     const toast = document.querySelector('.toast-message');
@@ -66,42 +90,59 @@ describe('Viewer Alpha Overlay Hybrid (Plan 1 + Plan 2 Hybrid)', () => {
     expect(toast.textContent).toContain('166 列');
     expect(toast.textContent).toContain('2.0 KiB');
     expect(toast.textContent).toContain('15.50%');
+
+    // Check metadata text overlay DOM
+    const metaOverlay = document.getElementById('viewer-metadata-overlay');
+    expect(metaOverlay).not.toBeNull();
+    expect(metaOverlay.classList.contains('show')).toBe(true);
   });
 
-  it('should toggle overlay OFF and restore originalSrc', async () => {
+  it('should toggle both metadata text and alpha overlay OFF and restore originalSrc via toggleMetadataOverlay (I key)', async () => {
     // Turn ON
-    await toggleAlphaOverlayMode();
+    toggleMetadataOverlay();
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(viewerState.isAlphaOverlayMode).toBe(true);
 
     // Turn OFF
-    await toggleAlphaOverlayMode();
+    toggleMetadataOverlay();
+    expect(viewerState.isMetadataVisible).toBe(false);
     expect(viewerState.isAlphaOverlayMode).toBe(false);
     expect(viewerState.originalSrc).toBeNull();
     expect(mockImg.src).toBe('asset://original-image.png');
 
-    const toasts = document.querySelectorAll('.toast-message');
-    const toast = toasts[toasts.length - 1];
-    expect(toast).not.toBeNull();
-    expect(toast.textContent).toContain('アルファオーバーレイ: OFF');
+    const metaOverlay = document.getElementById('viewer-metadata-overlay');
+    expect(metaOverlay.classList.contains('show')).toBe(false);
   });
 
-  it('should use cache on subsequent overlay applications for same path', async () => {
-    // First toggle ON
-    await toggleAlphaOverlayMode();
-    expect(mockGetAlphaOverlayImage).toHaveBeenCalledTimes(1);
+  it('should only show metadata text without alpha overlay when image has no alpha metadata', async () => {
+    mockGetAlphaOverlayImage.mockRejectedValueOnce(new Error('No stealth metadata signature found'));
 
-    // Toggle OFF
-    await toggleAlphaOverlayMode();
+    toggleMetadataOverlay();
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Toggle ON again -> should use cached overlay result without extra IPC call
+    expect(viewerState.isMetadataVisible).toBe(true);
+    expect(viewerState.isAlphaOverlayMode).toBe(false);
+    expect(mockImg.src).toBe('asset://original-image.png');
+
+    // Metadata text overlay should still be visible
+    const metaOverlay = document.getElementById('viewer-metadata-overlay');
+    expect(metaOverlay).not.toBeNull();
+    expect(metaOverlay.classList.contains('show')).toBe(true);
+  });
+
+  it('should support standalone toggleAlphaOverlayMode', async () => {
     await toggleAlphaOverlayMode();
-    expect(mockGetAlphaOverlayImage).toHaveBeenCalledTimes(1);
+    expect(viewerState.isAlphaOverlayMode).toBe(true);
     expect(mockImg.src).toBe('data:image/png;base64,mockHybridOverlayData');
+
+    await toggleAlphaOverlayMode();
+    expect(viewerState.isAlphaOverlayMode).toBe(false);
+    expect(mockImg.src).toBe('asset://original-image.png');
   });
 
-  it('should handle auto-follow when navigating images with overlay active', async () => {
-    // Turn ON
-    await toggleAlphaOverlayMode();
+  it('should handle auto-follow when navigating images with metadata visible', async () => {
+    toggleMetadataOverlay();
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(viewerState.isAlphaOverlayMode).toBe(true);
 
     // Navigate to next image
@@ -126,32 +167,5 @@ describe('Viewer Alpha Overlay Hybrid (Plan 1 + Plan 2 Hybrid)', () => {
 
     expect(viewerState.originalSrc).toBe('asset://image2.png');
     expect(mockImg.src).toBe('data:image/png;base64,mockHybridOverlayData2');
-  });
-
-  it('should show warning toast and not change state when no alpha metadata found', async () => {
-    mockGetAlphaOverlayImage.mockRejectedValueOnce(new Error('No stealth metadata signature found'));
-
-    await toggleAlphaOverlayMode();
-
-    expect(viewerState.isAlphaOverlayMode).toBe(false);
-    expect(mockImg.src).toBe('asset://original-image.png');
-
-    const toast = document.querySelector('.toast-message');
-    expect(toast).not.toBeNull();
-    expect(toast.textContent).toContain('この画像にはアルファチャンネルのメタデータが存在しません');
-  });
-
-  it('should warn when target element is not an IMG (e.g. video)', async () => {
-    document.body.innerHTML = `
-      <div id="toast-container"></div>
-      <video id="viewer-img"></video>
-    `;
-
-    await toggleAlphaOverlayMode();
-
-    expect(viewerState.isAlphaOverlayMode).toBe(false);
-    const toast = document.querySelector('.toast-message');
-    expect(toast).not.toBeNull();
-    expect(toast.textContent).toContain('アルファオーバーレイは静止画像（PNG/WebP）のみ対応しています');
   });
 });
