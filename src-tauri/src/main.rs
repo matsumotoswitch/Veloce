@@ -78,7 +78,8 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
             size INTEGER DEFAULT 0,
             mtime INTEGER DEFAULT 0,
             ctime INTEGER DEFAULT 0,
-            last_accessed INTEGER
+            last_accessed INTEGER,
+            metadata_source TEXT DEFAULT ''
         )",
         [],
     ).map_err(|e| e.to_string())?;
@@ -110,6 +111,11 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_prompt TEXT DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_negative_prompt TEXT DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE cache ADD COLUMN metadata_source TEXT DEFAULT ''", []);
+    let _ = conn.execute(
+        "UPDATE cache SET metadata_source = '' WHERE metadata_source != '' AND metadata_source NOT IN ('PNG Chunks', 'Alpha Channel', 'WebP EXIF', 'JPEG EXIF', 'None')",
+        [],
+    );
 
     // --- FTS5 Setup ---
     let mut needs_fts_rebuild = false;
@@ -1316,8 +1322,8 @@ fn load_directory(
                             if let Ok(tx) = conn.transaction() {
                                 {
                                     if let Ok(mut stmt) = tx.prepare_cached(
-                                        "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                         ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source"
+                                        "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                         ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source"
                                     ) {
                                         for (_, _, _, _, _, ref opt_row) in &results {
                                             if let Some(row) = opt_row {
@@ -1334,6 +1340,7 @@ fn load_directory(
                                                     &row.sp,
                                                     &row.snp,
                                                     &row.ss,
+                                                    &row.metadata_source,
                                                 ]);
                                             }
                                         }
@@ -2150,7 +2157,16 @@ fn get_full_metadata_for_path_with_stat_inner(
                                 cached_meta.prompt = raw.to_string();
                             }
                         }
-                        return (cached_meta, mtime_millis, file_size, None);
+                        // DBに情報ソースが保存されている場合はキャッシュから即座に返却
+                        // 新しい統一形式（PNG Chunks, Alpha Channel, WebP EXIF, JPEG EXIF, None）以外（過去データ等）の場合は
+                        // 早期リターンせず、最新の仕様で再解析を行ってDBを更新・保存する
+                        let is_valid_source = matches!(
+                            cached_meta.metadata_source.as_str(),
+                            "PNG Chunks" | "Alpha Channel" | "WebP EXIF" | "JPEG EXIF" | "None"
+                        );
+                        if is_valid_source {
+                            return (cached_meta, mtime_millis, file_size, None);
+                        }
                     }
                 }
             }
@@ -2160,8 +2176,9 @@ fn get_full_metadata_for_path_with_stat_inner(
     let lower_path = file_path.to_lowercase();
     let is_png = lower_path.ends_with(".png");
     let mut png_color_type = 0u8;
+    let mut detected_source = String::new();
     let (raw_description, mut raw_comment, raw_parameters, mut source, width, height): (String, String, String, String, u32, u32) = if is_png {
-        let (chunks, w, h, ct) = parse_png_chunks_with_dimensions(file_path);
+        let (chunks, _chunk_types, w, h, ct) = parse_png_chunks_with_dimensions_and_types(file_path);
         png_color_type = ct;
         let desc = chunks
             .get("Description")
@@ -2180,20 +2197,37 @@ fn get_full_metadata_for_path_with_stat_inner(
             .cloned()
             .unwrap_or_default();
 
+        let mut has_chunk_metadata = false;
+
+        if !comment.trim().is_empty() || !params.trim().is_empty() {
+            has_chunk_metadata = true;
+        }
+
         // ComfyUI metadata fallback
         if let Some(workflow) = chunks.get("workflow") {
             if comment.is_empty() {
                 comment = workflow.clone();
+                has_chunk_metadata = true;
             } else if params.is_empty() {
                 params = workflow.clone();
             }
         } else if let Some(prompt_json) = chunks.get("prompt") {
             if comment.is_empty() {
                 comment = prompt_json.clone();
+                has_chunk_metadata = true;
             } else if params.is_empty() {
                 params = prompt_json.clone();
             }
         }
+
+        if !desc.trim().is_empty() {
+            has_chunk_metadata = true;
+        }
+
+        if has_chunk_metadata {
+            detected_source = "PNG Chunks".to_string();
+        }
+
         (desc, comment, params, src, w, h)
     } else {
         let (mut w, mut h) = image::image_dimensions(file_path).unwrap_or((0, 0));
@@ -2204,7 +2238,8 @@ fn get_full_metadata_for_path_with_stat_inner(
             }
         }
 
-        let exif_data = if lower_path.ends_with(".webp") {
+        let is_webp = lower_path.ends_with(".webp");
+        let exif_data = if is_webp {
             parse_webp_exif(file_path)
         } else {
             parse_jpeg_exif(file_path)
@@ -2246,6 +2281,12 @@ fn get_full_metadata_for_path_with_stat_inner(
                 comment.push_str(&make_str);
             }
         }
+
+        let prefix = if is_webp { "WebP" } else { "JPEG" };
+        if !comment.trim().is_empty() || !desc.trim().is_empty() {
+            detected_source = format!("{} EXIF", prefix);
+        }
+
         (desc, comment, String::new(), src, w, h)
     };
 
@@ -2260,11 +2301,18 @@ fn get_full_metadata_for_path_with_stat_inner(
         };
 
         if can_have_stealth {
-            if let Some(stealth) = extract_stealth_pnginfo(file_path) {
+            if let Some((stealth, _)) = extract_stealth_pnginfo_with_type(file_path) {
                 raw_comment = stealth;
+                detected_source = "Alpha Channel".to_string();
             }
         }
     }
+
+    let metadata_source = if !detected_source.is_empty() {
+        detected_source
+    } else {
+        "None".to_string()
+    };
 
     let mut prompt = raw_description.clone();
     let mut negative_prompt = String::new();
@@ -2548,6 +2596,7 @@ fn get_full_metadata_for_path_with_stat_inner(
         height,
         params,
         source: source.clone(),
+        metadata_source: metadata_source.clone(),
     };
 
     let row = build_metadata_cache_row(
@@ -2562,9 +2611,9 @@ fn get_full_metadata_for_path_with_stat_inner(
         if let Some(ref r) = row {
             if let Ok(conn) = db_conn.get() {
                 let _ = conn.execute(
-                    "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source",
-                    rusqlite::params![&r.hash_key, &r.json_str, r.width, r.height, &r.path, r.file_size, r.mtime, r.ctime, r.now, &r.sp, &r.snp, &r.ss]
+                    "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source",
+                    rusqlite::params![&r.hash_key, &r.json_str, r.width, r.height, &r.path, r.file_size, r.mtime, r.ctime, r.now, &r.sp, &r.snp, &r.ss, &r.metadata_source]
                 );
             }
         }
@@ -2586,6 +2635,7 @@ struct MetadataCacheRow {
     sp: String,
     snp: String,
     ss: String,
+    metadata_source: String,
 }
 
 fn build_metadata_cache_row(
@@ -2617,14 +2667,24 @@ fn build_metadata_cache_row(
             sp,
             snp,
             ss,
+            metadata_source: meta.metadata_source.clone(),
         })
     } else {
         None
     }
 }
 
-fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<String, String>, u32, u32, u8) {
+fn parse_png_chunks_with_dimensions_and_types(
+    path: &str,
+) -> (
+    std::collections::HashMap<String, String>,
+    std::collections::HashMap<String, &'static str>,
+    u32,
+    u32,
+    u8,
+) {
     let mut chunks = std::collections::HashMap::new();
+    let mut chunk_types = std::collections::HashMap::new();
     let mut width = 0;
     let mut height = 0;
     let mut color_type = 0u8;
@@ -2656,6 +2716,7 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
                         if let Some(null_idx) = data.iter().position(|&b| b == 0) {
                             let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
                             let text = String::from_utf8_lossy(&data[null_idx + 1..]).to_string();
+                            chunk_types.insert(keyword.clone(), "tEXt");
                             chunks.insert(keyword, text);
                         }
                     } else if chunk_type == b"iTXt" {
@@ -2678,6 +2739,7 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
                                         } else {
                                             String::from_utf8_lossy(text_data).to_string()
                                         };
+                                        chunk_types.insert(keyword.clone(), "iTXt");
                                         chunks.insert(keyword, text);
                                     }
                                 }
@@ -2692,6 +2754,11 @@ fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<St
             }
         }
     }
+    (chunks, chunk_types, width, height, color_type)
+}
+
+fn parse_png_chunks_with_dimensions(path: &str) -> (std::collections::HashMap<String, String>, u32, u32, u8) {
+    let (chunks, _, width, height, color_type) = parse_png_chunks_with_dimensions_and_types(path);
     (chunks, width, height, color_type)
 }
 
@@ -2820,7 +2887,7 @@ fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<String, Vec<u8>
     results
 }
 
-fn extract_stealth_pnginfo(path: &str) -> Option<String> {
+fn extract_stealth_pnginfo_with_type(path: &str) -> Option<(String, &'static str)> {
     let lower_path = path.to_lowercase();
     let is_png = lower_path.ends_with(".png");
     let is_webp = lower_path.ends_with(".webp");
@@ -2958,15 +3025,20 @@ fn extract_stealth_pnginfo(path: &str) -> Option<String> {
         let mut decoder = GzDecoder::new(payload);
         let mut decompressed = String::new();
         if decoder.read_to_string(&mut decompressed).is_ok() {
-            return Some(decompressed);
+            return Some((decompressed, "Stealth PNGInfo (Compressed)"));
         }
     } else if is_raw {
         if let Ok(text) = String::from_utf8(payload.to_vec()) {
-            return Some(text);
+            return Some((text, "Stealth PNGInfo (Raw)"));
         }
     }
 
     None
+}
+
+#[allow(dead_code)]
+fn extract_stealth_pnginfo(path: &str) -> Option<String> {
+    extract_stealth_pnginfo_with_type(path).map(|(s, _)| s)
 }
 
 fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
@@ -3069,6 +3141,7 @@ async fn parse_metadata(
             height: full_meta.height,
             params: full_meta.params,
             source: full_meta.source,
+            metadata_source: full_meta.metadata_source,
         }
     })
     .await
@@ -3079,6 +3152,7 @@ async fn parse_metadata(
         height: 0,
         params: serde_json::Value::Object(serde_json::Map::new()),
         source: String::new(),
+        metadata_source: String::new(),
     }))
 }
 
@@ -5722,6 +5796,7 @@ mod tests {
                 height: 0,
                 params: serde_json::Value::Null,
                 source: "".to_string(),
+                metadata_source: String::new(),
             };
             let meta2 = super::FullMetadata {
                 path: "C:\\fake\\path2.png".to_string(),
@@ -5731,6 +5806,7 @@ mod tests {
                 height: 0,
                 params: serde_json::Value::Null,
                 source: "".to_string(),
+                metadata_source: String::new(),
             };
             let meta3 = super::FullMetadata {
                 path: "C:\\fake\\path3.png".to_string(),
@@ -5740,6 +5816,7 @@ mod tests {
                 height: 0,
                 params: serde_json::Value::Null,
                 source: "".to_string(),
+                metadata_source: String::new(),
             };
             conn.execute("INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
                 rusqlite::params!["hash1", vec![0u8], serde_json::to_string(&meta1).unwrap(), 0, 0, meta1.path, 0]).unwrap();
@@ -5877,7 +5954,8 @@ mod tests {
                     last_accessed INTEGER,
                     searchable_prompt TEXT DEFAULT '',
                     searchable_negative_prompt TEXT DEFAULT '',
-                    searchable_source TEXT DEFAULT ''
+                    searchable_source TEXT DEFAULT '',
+                    metadata_source TEXT DEFAULT ''
                 )",
                 [],
             ).unwrap();
@@ -6834,6 +6912,7 @@ mod viewer_tests {
                 height: 1024,
                 params: serde_json::Value::String("Steps: 28".to_string()),
                 source: "NovelAI".to_string(),
+                metadata_source: String::new(),
             }
         ];
 
@@ -8248,6 +8327,7 @@ mod viewer_tests {
                 "adoptedPrompt": "1girl, takino tomo, cheerful"
             }),
             source: "NovelAI".to_string(),
+            metadata_source: String::new(),
         };
 
         let (p, np, src) = crate::utils::extract_searchable_strings(&meta);
@@ -8753,6 +8833,116 @@ mod viewer_tests {
         let lock = app_state.ratings.lock().unwrap();
         assert!(!lock.contains_key(old_path), "メモリ上から旧パスが削除されていること");
         assert_eq!(lock.get(new_path).copied(), Some(4), "メモリ上で新パスにレーティングが反映されていること");
+    }
+
+    #[test]
+    fn test_parse_png_metadata_source_text_comment() {
+        let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&10u32.to_be_bytes());
+        ihdr_data.extend_from_slice(&10u32.to_be_bytes());
+        ihdr_data.push(8);
+        ihdr_data.push(6);
+        ihdr_data.extend_from_slice(&[0, 0, 0]);
+        png_bytes.extend_from_slice(&(ihdr_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"IHDR");
+        png_bytes.extend_from_slice(&ihdr_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        let mut text_data = Vec::new();
+        text_data.extend_from_slice(b"Comment\0{\"prompt\": \"1girl, solo\", \"uc\": \"lowres\"}");
+        png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"tEXt");
+        png_bytes.extend_from_slice(&text_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IEND");
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_veloce_source_text.png");
+        std::fs::write(&test_file, &png_bytes).unwrap();
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, metadata TEXT, width INTEGER, height INTEGER, path TEXT, size INTEGER, mtime INTEGER, ctime INTEGER, last_accessed INTEGER, searchable_prompt TEXT, searchable_negative_prompt TEXT, searchable_source TEXT, metadata_source TEXT)", []).unwrap();
+        }
+
+        let (meta, _, _) = get_full_metadata_for_path(&test_file.to_string_lossy(), &pool);
+        let _ = std::fs::remove_file(&test_file);
+
+        assert_eq!(meta.metadata_source, "PNG Chunks");
+        assert_eq!(meta.prompt, "1girl, solo");
+        assert_eq!(meta.negative_prompt, "lowres");
+    }
+
+    #[test]
+    fn test_cache_reparse_when_metadata_source_empty() {
+        let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&10u32.to_be_bytes());
+        ihdr_data.extend_from_slice(&10u32.to_be_bytes());
+        ihdr_data.push(8);
+        ihdr_data.push(6);
+        ihdr_data.extend_from_slice(&[0, 0, 0]);
+        png_bytes.extend_from_slice(&(ihdr_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"IHDR");
+        png_bytes.extend_from_slice(&ihdr_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        let mut text_data = Vec::new();
+        text_data.extend_from_slice(b"parameters\0Steps: 20, Sampler: Euler");
+        png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"tEXt");
+        png_bytes.extend_from_slice(&text_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IEND");
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_veloce_source_reparse.png");
+        std::fs::write(&test_file, &png_bytes).unwrap();
+
+        let file_path = test_file.to_string_lossy().to_string();
+        let mtime = 12345678u64;
+        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
+        let hash_key = format!("{:016x}", digest);
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, metadata TEXT, width INTEGER, height INTEGER, path TEXT, size INTEGER, mtime INTEGER, ctime INTEGER, last_accessed INTEGER, searchable_prompt TEXT, searchable_negative_prompt TEXT, searchable_source TEXT, metadata_source TEXT)", []).unwrap();
+            
+            // 過去の古い形式のメタデータ（例: "PNG (tEXt: parameters)"）が保存されている状態
+            let old_meta = FullMetadata {
+                path: file_path.clone(),
+                width: 10,
+                height: 10,
+                prompt: "old prompt".to_string(),
+                negative_prompt: String::new(),
+                params: serde_json::json!({}),
+                source: String::new(),
+                metadata_source: "PNG (tEXt: parameters)".to_string(),
+            };
+            let old_json = serde_json::to_string(&old_meta).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, metadata, path, metadata_source) VALUES (?1, ?2, ?3, 'PNG (tEXt: parameters)')", rusqlite::params![hash_key, old_json, file_path]).unwrap();
+        }
+
+        // 実行: 古い形式の metadata_source なので再解析が走り、最新の "PNG Chunks" でDBが更新される
+        let (meta, _, _, _) = get_full_metadata_for_path_with_stat_inner(&file_path, mtime, 0, png_bytes.len() as u64, &pool, true);
+        let _ = std::fs::remove_file(&test_file);
+
+        assert_eq!(meta.metadata_source, "PNG Chunks", "再解析により最新の PNG Chunks が特定されること");
+
+        let conn = pool.get().unwrap();
+        let saved_source: String = conn.query_row("SELECT metadata_source FROM cache WHERE hash_key = ?1", rusqlite::params![hash_key], |r| r.get(0)).unwrap();
+        assert_eq!(saved_source, "PNG Chunks", "DBのmetadata_sourceカラムが更新されていること");
     }
 }
 

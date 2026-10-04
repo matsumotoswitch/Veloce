@@ -392,5 +392,72 @@ describe('Metadata Format Utils', () => {
       expect(sections[8].value).toBe('worst');
       expect(sections[8].copyable).toBe(true);
     });
+
+    it('should set subLabel on "プロンプト" section when metadataSource is present', () => {
+      const data = {
+        name: 'test.png',
+        source: 'NovelAI Diffusion V4.5',
+        metadataSource: 'PNG Chunks',
+        prompt: '1girl, smile',
+        negativePrompt: 'lowres',
+        chars: [],
+        params: {}
+      };
+
+      const sections = buildInspectorSections(data);
+      expect(sections[0].title).toBe('モデル / バージョン');
+      expect(sections[1].title).toBe('プロンプト');
+      expect(sections[1].subLabel).toBe('PNG Chunks');
+      expect(sections.some(s => s.title === '情報ソース')).toBe(false);
+    });
+
+    it('should not set subLabel on "プロンプト" section when metadataSource is "None" or not provided', () => {
+      const data1 = {
+        name: 'test.png',
+        source: 'NovelAI Diffusion V4.5',
+        metadataSource: 'None',
+        prompt: '1girl',
+        negativePrompt: '',
+        chars: [],
+        params: {}
+      };
+      const sections1 = buildInspectorSections(data1);
+      expect(sections1[1].subLabel).toBeNull();
+
+      const data2 = {
+        name: 'test.png',
+        source: 'NovelAI Diffusion V4.5',
+        prompt: '1girl',
+        negativePrompt: '',
+        chars: [],
+        params: {}
+      };
+      const sections2 = buildInspectorSections(data2);
+      expect(sections2[1].subLabel).toBeNull();
+    });
+  });
+
+  describe('extractMetadataFields with metadataSource', () => {
+    it('should preserve metadataSource from meta object', () => {
+      const file = { name: 'sample.png' };
+      const meta = {
+        prompt: 'test prompt',
+        metadataSource: 'Alpha Channel',
+        source: 'NovelAI'
+      };
+      const result = extractMetadataFields(file, meta);
+      expect(result.metadataSource).toBe('Alpha Channel');
+    });
+
+    it('should fallback to metadata_source snake_case from meta object', () => {
+      const file = { name: 'sample.png' };
+      const meta = {
+        prompt: 'test prompt',
+        metadata_source: 'WebP EXIF',
+        source: 'NovelAI'
+      };
+      const result = extractMetadataFields(file, meta);
+      expect(result.metadataSource).toBe('WebP EXIF');
+    });
   });
 });

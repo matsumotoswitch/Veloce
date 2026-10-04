@@ -223,6 +223,58 @@ describe('renderer-inspector.js', () => {
 
       delete window.veloceAPI;
     });
+
+    it('should render metadataSource sublabel beside prompt with special class for Alpha Channel', async () => {
+      window.veloceAPI = {
+        parseMetadata: vi.fn().mockResolvedValue({
+          prompt: '1girl, smile',
+          metadata_source: 'Alpha Channel'
+        })
+      };
+
+      const file = { path: 'D:\\stealth.png', width: 512, height: 512 };
+      await renderMetadata(file);
+
+      const container = document.getElementById('inspector-content');
+      const sections = Array.from(container.querySelectorAll('.inspector-section-block'));
+      const promptSec = sections.find(
+        sec => sec.querySelector('.inspector-title-wrapper > span')?.textContent === 'プロンプト'
+      );
+      expect(promptSec).toBeDefined();
+
+      const alphaTag = promptSec.querySelector('.sublabel-tag.sublabel-tag--alpha-channel');
+      expect(alphaTag).not.toBeNull();
+      expect(alphaTag.textContent).toBe('[Alpha Channel]');
+
+      delete window.veloceAPI;
+    });
+
+    it('should render metadataSource sublabel beside prompt for PNG Chunks without alpha-channel class', async () => {
+      window.veloceAPI = {
+        parseMetadata: vi.fn().mockResolvedValue({
+          prompt: '1girl, smile',
+          metadata_source: 'PNG Chunks'
+        })
+      };
+
+      const file = { path: 'D:\\normal.png', width: 512, height: 512 };
+      await renderMetadata(file);
+
+      const container = document.getElementById('inspector-content');
+      const sections = Array.from(container.querySelectorAll('.inspector-section-block'));
+      const promptSec = sections.find(
+        sec => sec.querySelector('.inspector-title-wrapper > span')?.textContent === 'プロンプト'
+      );
+      expect(promptSec).toBeDefined();
+
+      const chunkTag = promptSec.querySelector('.sublabel-tag');
+      expect(chunkTag).not.toBeNull();
+      expect(chunkTag.classList.contains('sublabel-tag--alpha-channel')).toBe(false);
+      expect(chunkTag.classList.contains('sublabel-tag--muted')).toBe(true);
+      expect(chunkTag.textContent).toBe('[PNG Chunks]');
+
+      delete window.veloceAPI;
+    });
   });
 
   describe('initInspectorDelegation & Header Path Context Menu', () => {

@@ -576,6 +576,10 @@ export async function renderMetadata(file, options = {}) {
             modifier = ' sublabel-tag--char-ref';
           } else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) {
             modifier = ' sublabel-tag--img2img';
+          } else if (lbl === 'Alpha Channel') {
+            modifier = ' sublabel-tag--alpha-channel';
+          } else {
+            modifier = ' sublabel-tag--muted';
           }
           const span = document.createElement('span');
           span.className = `sublabel-tag${modifier}`;

@@ -142,6 +142,7 @@ export function extractMetadataFields(file, meta = {}) {
   const data = {
     name: file.name,
     source: meta.source || file.source || null,
+    metadataSource: meta.metadataSource || meta.metadata_source || file.metadataSource || null,
     requestType: requestType,
     prompt: currentPrompt,
     adoptedPrompt: adoptedPrompt,
@@ -321,8 +322,10 @@ export function buildInspectorSections(data) {
     { title: 'モデル / バージョン', value: data.source, isParam: true, subLabel: data.requestType ? formatRequestType(data.requestType) : null }
   ];
 
+  const promptSubLabel = (data.metadataSource && data.metadataSource !== 'None') ? data.metadataSource : null;
+
   sections.push(
-    { title: 'プロンプト', value: data.prompt, copyable: true }
+    { title: 'プロンプト', value: data.prompt, copyable: true, subLabel: promptSubLabel }
   );
 
   if (data.adoptedPrompt) {
@@ -511,6 +514,7 @@ function parseComfyUI(file, meta, p) {
   return {
     name: file.name,
     source: "ComfyUI",
+    metadataSource: meta.metadataSource || meta.metadata_source || file.metadataSource || null,
     requestType: null,
     prompt: positivePrompt || '',
     negativePrompt: negativePrompt || '',
@@ -601,6 +605,7 @@ function parseA1111(file, meta, p) {
   return {
     name: file.name,
     source: source,
+    metadataSource: meta.metadataSource || meta.metadata_source || file.metadataSource || null,
     requestType: null,
     prompt: positivePrompt || '',
     negativePrompt: negativePrompt || '',
@@ -677,6 +682,7 @@ function parseComfyUIPromptFormat(file, meta, p) {
   return {
     name: file.name,
     source: "ComfyUI",
+    metadataSource: meta.metadataSource || meta.metadata_source || file.metadataSource || null,
     requestType: null,
     prompt: positivePrompt || '',
     negativePrompt: negativePrompt || '',

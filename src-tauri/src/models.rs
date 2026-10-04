@@ -92,6 +92,8 @@ pub struct FullMetadata {
     pub negative_prompt: String,
     pub params: serde_json::Value,
     pub source: String,
+    #[serde(default)]
+    pub metadata_source: String,
 }
 
 /// 単一画像のメタデータ解析結果
@@ -104,6 +106,8 @@ pub struct ParseMetadataResult {
     pub height: u32,
     pub params: serde_json::Value,
     pub source: String,
+    #[serde(default)]
+    pub metadata_source: String,
 }
 
 /// フォルダ操作結果

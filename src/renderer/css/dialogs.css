@@ -448,6 +448,14 @@ input:-webkit-autofill:focus {
   color: var(--color-tag-img2img);
 }
 
+.sublabel-tag--alpha-channel {
+  color: var(--color-tag-alpha-channel);
+}
+
+.sublabel-tag--muted {
+  opacity: 0.6;
+}
+
 /* Diffモーダル内では左右比較のため一定の最小高さを維持 */
 .diff-section .prompt-look:not(.param-box):not(.raw-box) {
   min-height: 120px;

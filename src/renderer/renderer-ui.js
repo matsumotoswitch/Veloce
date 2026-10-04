@@ -1242,6 +1242,10 @@ class UIManager {
             modifier = ' sublabel-tag--char-ref';
           } else if (lbl.includes('Image to Image') || lbl.includes('Img2Img')) {
             modifier = ' sublabel-tag--img2img';
+          } else if (lbl === 'Alpha Channel') {
+            modifier = ' sublabel-tag--alpha-channel';
+          } else {
+            modifier = ' sublabel-tag--muted';
           }
           return `<span class="sublabel-tag${modifier}">[${lbl}]</span>`;
         });
