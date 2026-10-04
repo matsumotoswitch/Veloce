@@ -94,6 +94,7 @@
 4. **NovelAI V4 / V4.5 特殊対応:** JSON内のマルチキャラクタープロンプト（`v4_prompt/caption/char_captions`）およびネガティブ側を自動パースし、フロントエンド側で `characterPrompts` 配列（`prompt`, `uc`）に再構造化して保持。
 5. **ランダマイザ（採用プロンプト）対応:** NovelAIの `||A|B||` 書式によるランダム抽選を検出。`Comment` 内の `actual_prompts` JSON構造から、ベースプロンプトおよび各キャラクタープロンプト・除外要素の「実際に採用された値」を抽出し `adoptedPrompt` として格納。抽選前プロンプト（ランダマイザ書式を含む）と採用後プロンプトの両方をインスペクター・ビューアーオーバーレイ・パラメータDiffモーダルに表示し、FTS5検索インデックスにも含める。
 6. **A1111 / WebUI形式フォールバック:** parameters 内の `Steps: ` 等の文字列パターンを検出し、自動的に `rawParameters` フィールドに格納してパース。
+7. **情報ソース判定と表示:** 画像バイナリの解析経路に応じた出処（`PNG Chunks`, `Alpha Channel`, `WebP EXIF`, `JPEG EXIF`）を判定し、SQLite `cache` テーブルの `metadata_source` カラムに永続化。インスペクター・独立ビューアー・差分表示の「プロンプト」見出し横にサブラベルタグとして表示。アルファチャンネル（Stealth PNGInfo）検出時のみゴールド色（`--glow-gold`）で強調し、通常ソースは控えめな文字色（`opacity: 0.6`）で統一。
 
 ### 3.2 フロントエンド・インスペクター & DOM Pool
 * **DOM Pool（要素の再利用）:** インスペクターに大量のプロンプトタグやパラメータを描画する際、メモリ解放（GC）によるガタつきを排除するため、`inspectorSectionPool` および `inspectorTagPool` を実装。画面更新時はDOM要素を一度も破棄せず、`display = 'none'` による非表示化と中身の `replaceChildren()` による書き換えだけで要素を高速に再利用。
