@@ -534,9 +534,90 @@ export async function updateMetadataOverlay() {
 }
 
 /**
+ * 指定した画像要素にアルファチャンネルオーバーレイ（メタデータ領域ハイブリッド）を適用
+ * @param {HTMLImageElement} imgEl - 対象の画像要素
+ * @param {string} filePath - 画像ファイルパス
+ * @param {boolean} [isAutoFollow=false] - 画像切り替え時の自動追従呼び出しフラグ
+ */
+export async function applyAlphaOverlay(imgEl, filePath, isAutoFollow = false) {
+  if (!filePath || !window.veloceAPI || !window.veloceAPI.getAlphaOverlayImage) return;
+
+  try {
+    let result = viewerState.overlayCache.get(filePath);
+    if (!result) {
+      result = await window.veloceAPI.getAlphaOverlayImage(filePath);
+      if (result) {
+        viewerState.overlayCache.set(filePath, result);
+      }
+    }
+
+    // 非同期通信完了時に表示中パスが変わっている、またはオーバーレイモードが解除されていたら適用を破棄
+    if (viewerState.currentImagePath !== filePath || !viewerState.isAlphaOverlayMode) {
+      return;
+    }
+
+    if (!result || !result.data_url) {
+      if (!isAutoFollow) {
+        viewerState.isAlphaOverlayMode = false;
+        showToast('この画像にはアルファチャンネルのメタデータが存在しません', 2500, 'warning');
+      }
+      return;
+    }
+
+    // 元画像のsrcを退避（まだ未退避の場合のみ）
+    if (!viewerState.originalSrc) {
+      viewerState.originalSrc = imgEl.src;
+    }
+
+    imgEl.src = result.data_url;
+    const kib = (result.payload_bytes / 1024).toFixed(1);
+    const pct = result.coverage_percent.toFixed(2);
+    showToast(`アルファオーバーレイ: ON (${result.total_pixels.toLocaleString()} px / ${result.occupied_columns} 列 / ${kib} KiB / 占有率 ${pct}%)`, 3500, 'info');
+  } catch (err) {
+    console.error('Failed to apply alpha overlay:', err);
+    if (!isAutoFollow) {
+      viewerState.isAlphaOverlayMode = false;
+      showToast('この画像にはアルファチャンネルのメタデータが存在しません', 2500, 'warning');
+    }
+  }
+}
+
+/**
+ * アルファチャンネルオーバーレイ（メタデータ領域ハイブリッド）のトグル切り替え
+ * @param {HTMLImageElement} [customImgEl=null] - 任意の対象画像要素（未指定時は表示中要素を自動解決）
+ */
+export async function toggleAlphaOverlayMode(customImgEl = null) {
+  const imgEl = customImgEl || currentViewerImg || (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+  if (!imgEl || imgEl.tagName !== 'IMG') {
+    showToast('アルファオーバーレイは静止画像（PNG/WebP）のみ対応しています', 2000, 'warning');
+    return;
+  }
+
+  const currentPath = viewerState.currentImagePath;
+  if (!currentPath) return;
+
+  viewerState.isAlphaOverlayMode = !viewerState.isAlphaOverlayMode;
+
+  if (!viewerState.isAlphaOverlayMode) {
+    if (viewerState.originalSrc) {
+      imgEl.src = viewerState.originalSrc;
+      viewerState.originalSrc = null;
+    }
+    showToast('アルファオーバーレイ: OFF', 1500, 'info');
+    return;
+  }
+
+  await applyAlphaOverlay(imgEl, currentPath, false);
+}
+
+/**
  * 現在表示中の画像・動画要素のリソースを即座に解放
  */
 function cleanupCurrentImage() {
+  if (viewerState.isAlphaOverlayMode && viewerState.originalSrc && currentlyVisibleImg) {
+    currentlyVisibleImg.src = viewerState.originalSrc;
+  }
+  viewerState.originalSrc = null;
   if (currentlyVisibleImg) {
     if (currentlyVisibleImg.tagName === 'VIDEO') {
       currentlyVisibleImg.pause();
@@ -636,6 +717,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
         cleanupCurrentImage();
         clearPreloadCache();
+        viewerState.isAlphaOverlayMode = false;
+        viewerState.originalSrc = null;
+        viewerState.overlayCache.clear();
         viewerState.lastDirection = 1;
         viewerState.paths = total > 0 ? new Array(total).fill(null) : null;
         viewerState.currentImagePath = targetPath;
@@ -1239,6 +1323,10 @@ async function loadImage() {
     preloadAdjacentImages();
     if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
 
+    if (viewerState.isAlphaOverlayMode && targetImg.tagName === 'IMG') {
+      applyAlphaOverlay(targetImg, path, true);
+    }
+
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
     const filenameEl = document.getElementById('window-filename-display');
     if (filenameEl && path) {
@@ -1777,8 +1865,13 @@ window.addEventListener('keydown', async (e) => {
       break;
     case 'a':
     case 'A':
-      if (window.veloceAPI.arrangeViewers) {
-        window.veloceAPI.arrangeViewers();
+      if (e.shiftKey) {
+        e.preventDefault();
+        toggleAlphaOverlayMode();
+      } else {
+        if (window.veloceAPI.arrangeViewers) {
+          window.veloceAPI.arrangeViewers();
+        }
       }
       break;
     case 's':

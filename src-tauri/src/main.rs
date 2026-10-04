@@ -3041,6 +3041,200 @@ fn extract_stealth_pnginfo(path: &str) -> Option<String> {
     extract_stealth_pnginfo_with_type(path).map(|(s, _)| s)
 }
 
+/// アルファチャンネルのメタデータ領域オーバーレイ生成結果
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct AlphaOverlayResult {
+    pub data_url: String,
+    pub width: u32,
+    pub height: u32,
+    pub header_bytes: usize,
+    pub payload_bytes: usize,
+    pub total_bytes: usize,
+    pub total_pixels: usize,
+    pub image_total_pixels: usize,
+    pub coverage_percent: f64,
+    pub occupied_columns: usize,
+}
+
+/// 画像から Stealth PNGInfo のメタデータ領域（列優先走査）を検出し、
+/// アルファチャンネルのLSBビット（砂嵐パターン）と元画像を半透明ブレンドした
+/// ハイブリッドオーバーレイ画像を生成して返却します。
+fn generate_alpha_overlay_image(path: &str) -> Result<AlphaOverlayResult, String> {
+    let lower_path = path.to_lowercase();
+    let is_png = lower_path.ends_with(".png");
+    let is_webp = lower_path.ends_with(".webp");
+    if !is_png && !is_webp {
+        return Err("Unsupported file format for alpha metadata overlay".into());
+    }
+
+    // 1. PNGヘッダーの事前検査
+    if is_png {
+        if let Ok(mut file) = std::fs::File::open(path) {
+            use std::io::Read;
+            let mut header = [0u8; 30];
+            if let Ok(n) = file.read(&mut header) {
+                if n >= 26 && &header[0..8] == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+                    if &header[12..16] == b"IHDR" {
+                        let color_type = header[25];
+                        if color_type != 6 && color_type != 4 {
+                            return Err("Image does not have an alpha channel".into());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. WebPヘッダーの事前検査
+    if is_webp {
+        if let Ok(mut file) = std::fs::File::open(path) {
+            use std::io::Read;
+            let mut header = [0u8; 25];
+            if let Ok(n) = file.read(&mut header) {
+                if n >= 16 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP" {
+                    let chunk_type = &header[12..16];
+                    if chunk_type == b"VP8 " {
+                        return Err("Image does not have an alpha channel".into());
+                    } else if chunk_type == b"VP8X" && n >= 21 {
+                        let flags = header[20];
+                        if (flags & 0x10) == 0 {
+                            return Err("Image does not have an alpha channel".into());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut img = image::open(path)
+        .map_err(|e| format!("Failed to open image: {}", e))?
+        .into_rgba8();
+
+    let width = img.width() as usize;
+    let height = img.height() as usize;
+    let image_total_pixels = width * height;
+
+    // 署名（15バイト）+ 長さ（4バイト）= 19バイト = 152ビット
+    if image_total_pixels < 152 {
+        return Err("Image too small for alpha metadata".into());
+    }
+
+    let raw: &mut [u8] = img.as_mut();
+
+    // 先頭19バイト（152ピクセル）のシグネチャと長さを早期判定（列優先走査）
+    let mut header_bytes = [0u8; 19];
+    let mut bit_idx = 0;
+    'header_loop: for x in 0..width {
+        for y in 0..height {
+            let idx = (y * width + x) * 4 + 3;
+            let bit = raw[idx] & 1;
+            let byte_pos = bit_idx / 8;
+            let bit_pos = 7 - (bit_idx % 8);
+            header_bytes[byte_pos] |= bit << bit_pos;
+            bit_idx += 1;
+            if bit_idx >= 152 {
+                break 'header_loop;
+            }
+        }
+    }
+
+    let is_comp = &header_bytes[0..15] == b"stealth_pngcomp";
+    let is_raw = &header_bytes[0..15] == b"stealth_pnginfo";
+    if !is_comp && !is_raw {
+        return Err("No stealth metadata signature found in alpha channel".into());
+    }
+
+    let len_bytes: [u8; 4] = header_bytes[15..19]
+        .try_into()
+        .map_err(|_| "Failed to parse payload length".to_string())?;
+    let raw_length = u32::from_be_bytes(len_bytes) as usize;
+
+    // Stealth PNGInfo 仕様: ヘッダーの長さフィールドはペイロードの「ビット数（bits）」
+    // （※フォーク版等でバイト数で格納されている場合を考慮し、もしビット数が全画素数を大幅に超えるような異常値の場合はバイト数とみなすセーフガードを適用）
+    let payload_bits = if raw_length <= image_total_pixels.saturating_sub(152) {
+        raw_length
+    } else {
+        raw_length.checked_mul(8).unwrap_or(raw_length)
+    };
+
+    let total_pixels = (152 + payload_bits).min(image_total_pixels);
+    let payload_bytes = (payload_bits + 7) / 8;
+    let total_bytes = 19 + payload_bytes;
+
+    // 案1（LSB白黒砂嵐）と案2（半透明オーバーレイ）のハイブリッドブレンド:
+    // ヘッダー領域（152px）: 赤系半透明（ビット値に応じて明暗差）
+    // ペイロード領域（total_pixelsまで）: アルファLSBのビット値に応じた白黒砂嵐を元画像に半透明ブレンド
+    let mut current_pixel_idx = 0;
+    'overlay_loop: for x in 0..width {
+        for y in 0..height {
+            if current_pixel_idx >= total_pixels {
+                break 'overlay_loop;
+            }
+
+            let idx = (y * width + x) * 4;
+            let bit = raw[idx + 3] & 1;
+
+            let (target_r, target_g, target_b, blend_alpha) = if current_pixel_idx < 152 {
+                if bit == 1 {
+                    (255u32, 110u32, 110u32, 130u32) // 明るい赤
+                } else {
+                    (70u32, 0u32, 0u32, 130u32)       // 暗い赤
+                }
+            } else {
+                if bit == 1 {
+                    (255u32, 255u32, 255u32, 115u32) // 白（ビット1）
+                } else {
+                    (0u32, 0u32, 0u32, 115u32)       // 黒（ビット0）
+                }
+            };
+
+            let inv_alpha = 255 - blend_alpha;
+            let orig_r = raw[idx] as u32;
+            let orig_g = raw[idx + 1] as u32;
+            let orig_b = raw[idx + 2] as u32;
+
+            raw[idx] = ((orig_r * inv_alpha + target_r * blend_alpha) / 255) as u8;
+            raw[idx + 1] = ((orig_g * inv_alpha + target_g * blend_alpha) / 255) as u8;
+            raw[idx + 2] = ((orig_b * inv_alpha + target_b * blend_alpha) / 255) as u8;
+            raw[idx + 3] = raw[idx + 3].max(blend_alpha as u8).max(220);
+
+            current_pixel_idx += 1;
+        }
+    }
+
+    let mut png_bytes = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut png_bytes);
+    img.write_to(&mut cursor, image::ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode overlay PNG: {}", e))?;
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    let data_url = format!("data:image/png;base64,{}", b64);
+
+    let occupied_columns = (total_pixels + height - 1) / height;
+    let coverage_percent = (total_pixels as f64 / image_total_pixels as f64) * 100.0;
+
+    Ok(AlphaOverlayResult {
+        data_url,
+        width: width as u32,
+        height: height as u32,
+        header_bytes: 19,
+        payload_bytes,
+        total_bytes,
+        total_pixels,
+        image_total_pixels,
+        coverage_percent,
+        occupied_columns,
+    })
+}
+
+/// アルファチャンネルに埋め込まれたメタデータ領域を検出し、
+/// LSBビット情報と半透明レイヤーを元画像に重ね合わせたハイブリッド画像を返却するコマンド
+#[tauri::command]
+fn get_alpha_overlay_image(file_path: String) -> Result<AlphaOverlayResult, String> {
+    generate_alpha_overlay_image(&file_path)
+}
+
 fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
     let mut results = std::collections::HashMap::new();
     if let Ok(file) = std::fs::File::open(path) {
@@ -5452,6 +5646,7 @@ fn main() {
             set_settings_batch,
             delete_setting,
             get_all_settings,
+            get_alpha_overlay_image,
         ])
         .run(context)
         .expect("error while running tauri application");
@@ -8944,5 +9139,72 @@ mod viewer_tests {
         let saved_source: String = conn.query_row("SELECT metadata_source FROM cache WHERE hash_key = ?1", rusqlite::params![hash_key], |r| r.get(0)).unwrap();
         assert_eq!(saved_source, "PNG Chunks", "DBのmetadata_sourceカラムが更新されていること");
     }
+
+    #[test]
+    fn test_generate_alpha_overlay_image_with_stealth() {
+        let sample_payload = b"test payload metadata for hybrid alpha overlay";
+        let payload_bits = (sample_payload.len() * 8) as u32;
+        let mut payload_bytes = Vec::new();
+        payload_bytes.extend_from_slice(b"stealth_pnginfo");
+        payload_bytes.extend_from_slice(&payload_bits.to_be_bytes());
+        payload_bytes.extend_from_slice(sample_payload);
+
+        let mut bits = Vec::new();
+        for b in &payload_bytes {
+            for i in 0..8 {
+                bits.push((b >> (7 - i)) & 1);
+            }
+        }
+
+        let width = 60u32;
+        let height = 40u32;
+        let mut img = image::RgbaImage::new(width, height);
+
+        let mut bit_idx = 0;
+        for x in 0..width {
+            for y in 0..height {
+                let bit = if bit_idx < bits.len() { bits[bit_idx] } else { 0 };
+                bit_idx += 1;
+                img.put_pixel(x, y, image::Rgba([120, 160, 200, 254 | bit]));
+            }
+        }
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_hybrid_overlay_stealth.png");
+        img.save(&test_file).unwrap();
+
+        let result = generate_alpha_overlay_image(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert!(result.is_ok(), "Stealthメタデータがある画像からハイブリッドオーバーレイ画像が生成できること");
+        let res = result.unwrap();
+        assert!(res.data_url.starts_with("data:image/png;base64,"));
+        assert_eq!(res.width, 60);
+        assert_eq!(res.height, 40);
+        assert_eq!(res.header_bytes, 19);
+        assert_eq!(res.payload_bytes, sample_payload.len());
+        assert_eq!(res.total_bytes, 19 + sample_payload.len());
+        assert_eq!(res.total_pixels, 152 + sample_payload.len() * 8);
+        assert_eq!(res.image_total_pixels, (width * height) as usize);
+        assert!(res.coverage_percent > 0.0 && res.coverage_percent <= 100.0);
+        assert_eq!(res.occupied_columns, (res.total_pixels + (height as usize) - 1) / (height as usize));
+    }
+
+    #[test]
+    fn test_generate_alpha_overlay_image_without_stealth() {
+        let width = 20u32;
+        let height = 20u32;
+        let img = image::RgbaImage::new(width, height);
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_overlay_no_stealth.png");
+        img.save(&test_file).unwrap();
+
+        let result = generate_alpha_overlay_image(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert!(result.is_err(), "Stealth署名がない場合はエラーを返却すること");
+    }
 }
+
 

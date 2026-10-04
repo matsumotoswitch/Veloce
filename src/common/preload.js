@@ -61,8 +61,9 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<void>} openCacheFolder
  * @property {() => Promise<void>} clearCache
  * @property {() => Promise<{path: string, fileCount: number, totalSizeBytes: number}>} getCacheInfo
- * @property {(path: string) => Promise<void>} openInExplorer
+ * @property {() => Promise<void>} openInExplorer
  * @property {() => Promise<number>} getVideoServerPort
+ * @property {(filePath: string) => Promise<{data_url: string, width: number, height: number, header_bytes: number, payload_bytes: number, total_bytes: number, total_pixels: number, image_total_pixels: number, coverage_percent: number, occupied_columns: number}|null>} getAlphaOverlayImage
  */
 /**
  * @description
@@ -70,6 +71,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @type {VeloceAPI}
  */
 window.veloceAPI = {
+  getAlphaOverlayImage: (filePath) => invoke('get_alpha_overlay_image', { filePath }),
   updateSmartFolders: (rules) => invoke('update_smart_folders', { rules }),
   /**
    * 利用可能なドライブ文字（またはルートディレクトリ）のリストを取得します。

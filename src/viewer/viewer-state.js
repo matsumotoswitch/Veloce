@@ -27,6 +27,9 @@ class ViewerState {
     this.ignoreNextClick = false;   // フォーカス目的のクリックを無視するためのフラグ
     this.preloadCache = new Map();  // 前後の画像のプリロードキャッシュ
     this.lastDirection = 1;         // 直近のナビゲーション進行方向 (1: 次へ/前進, -1: 前へ/後退)
+    this.isAlphaOverlayMode = false; // アルファチャンネルオーバーレイ（メタデータ領域ハイブリッド）表示中か
+    this.originalSrc = null;        // オーバーレイ適用前の元画像URL
+    this.overlayCache = new Map();  // アルファオーバーレイ結果キャッシュ (path -> overlayResult)
   }
 }
 
