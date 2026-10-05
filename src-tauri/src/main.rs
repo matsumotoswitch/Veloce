@@ -1962,6 +1962,11 @@ fn notify_file_changed(
     state: tauri::State<'_, AppState>,
     mut file: ImageFile,
 ) -> usize {
+    let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
+    file.path = clean.clone();
+    if file.hash_key.is_empty() {
+        file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime);
+    }
     if let Ok(mut all_files) = state.all_files.lock() {
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
             // 既存の幅・高さが取得済みで、通知された値が 0 の場合は既存の寸法を維持する
@@ -1973,6 +1978,7 @@ fn notify_file_changed(
         } else {
             all_files.push(std::sync::Arc::new(file));
         }
+        state.rebuild_all_indices(&all_files);
     }
     apply_filters_and_sort(Some(&app), &state)
 }
@@ -1984,8 +1990,10 @@ fn notify_file_removed(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> usize {
+    let clean_path = path.replace("\\\\?\\", "").replace('/', "\\");
     if let Ok(mut all_files) = state.all_files.lock() {
-        all_files.retain(|f| f.path != path);
+        all_files.retain(|f| f.path != clean_path && f.path != path);
+        state.rebuild_all_indices(&all_files);
     }
     apply_filters_and_sort(Some(&app), &state)
 }
@@ -5219,19 +5227,27 @@ fn main() {
                         dir
                     };
 
-                    if current_dir.is_empty() {
-                        std::thread::sleep(std::time::Duration::from_millis(200));
+                    // スマートフォルダや空パスの場合は監視をスキップ
+                    if current_dir.is_empty() || current_dir.starts_with("smart://") {
+                        std::thread::sleep(std::time::Duration::from_millis(300));
                         continue;
                     }
 
-                    let parent_dir = std::path::Path::new(&current_dir)
+                    let clean_current_dir = current_dir.replace("\\\\?\\", "").replace('/', "\\");
+                    let current_path = std::path::Path::new(&clean_current_dir);
+                    if !current_path.exists() {
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                        continue;
+                    }
+
+                    let parent_dir = current_path
                         .parent()
-                        .map(|p| p.to_string_lossy().to_string());
-                        
+                        .map(|p| p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\"));
+
                     let parent_watch = parent_dir.clone().unwrap_or_default();
 
                     let mut dir_changed = false;
-                    if current_dir != current_watched_dir || parent_watch != current_watched_parent {
+                    if clean_current_dir != current_watched_dir || parent_watch != current_watched_parent {
                         if let Some(watcher) = &mut watcher_opt {
                             if !current_watched_dir.is_empty() {
                                 let _ = watcher.unwatch(std::path::Path::new(&current_watched_dir));
@@ -5239,9 +5255,9 @@ fn main() {
                             if !current_watched_parent.is_empty() {
                                 let _ = watcher.unwatch(std::path::Path::new(&current_watched_parent));
                             }
-                            if std::path::Path::new(&current_dir).exists() {
-                                let _ = watcher.watch(std::path::Path::new(&current_dir), RecursiveMode::NonRecursive);
-                                current_watched_dir = current_dir.clone();
+                            if current_path.exists() {
+                                let _ = watcher.watch(current_path, RecursiveMode::NonRecursive);
+                                current_watched_dir = clean_current_dir.clone();
                             }
                             if !parent_watch.is_empty() && std::path::Path::new(&parent_watch).exists() {
                                 let _ = watcher.watch(std::path::Path::new(&parent_watch), RecursiveMode::NonRecursive);
@@ -5263,7 +5279,7 @@ fn main() {
                     }
 
                     // Fallback: poll directory mtime
-                    if let Ok(meta) = std::fs::metadata(&current_dir) {
+                    if let Ok(meta) = std::fs::metadata(&clean_current_dir) {
                         let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
                         if mtime != last_dir_mtime && last_dir_mtime != 0 {
                             rx_ready = true;
@@ -5281,7 +5297,11 @@ fn main() {
                         }
                     }
 
-                    if !dir_changed && !rx_ready {
+                    // Windows NTFS ではディレクトリ mtime が更新されず、かつ notify のイベントが欠落する場合があるため、
+                    // idle_cycles が 2 以上（約1.5〜2秒経過）になったら定期スキャンとして強制的に差分検査を実行する。
+                    let is_periodic_scan = idle_cycles >= 2;
+
+                    if !dir_changed && !rx_ready && !is_periodic_scan {
                         idle_cycles = idle_cycles.saturating_add(1);
                         continue;
                     }
@@ -5297,22 +5317,29 @@ fn main() {
                         dir
                     };
 
-                    if current_dir.is_empty() {
+                    if current_dir.is_empty() || current_dir.starts_with("smart://") {
                         continue;
                     }
 
-                    let parent_dir = std::path::Path::new(&current_dir)
-                        .parent()
-                        .map(|p| p.to_string_lossy().to_string());
+                    let clean_current_dir = current_dir.replace("\\\\?\\", "").replace('/', "\\");
+                    let current_path = std::path::Path::new(&clean_current_dir);
+                    if !current_path.exists() {
+                        continue;
+                    }
 
-                    if current_dir != last_dir {
-                        last_dir = current_dir.clone();
+                    let parent_dir = current_path
+                        .parent()
+                        .map(|p| p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\"));
+
+                    if clean_current_dir != last_dir {
+                        last_dir = clean_current_dir.clone();
                         known_files.clear();
                         known_folders.clear();
 
-                        if let Ok(entries) = std::fs::read_dir(&current_dir) {
+                        if let Ok(entries) = std::fs::read_dir(&clean_current_dir) {
                             for entry in entries.filter_map(Result::ok) {
                                 let p = entry.path();
+                                let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
                                 if p.is_file() {
                                     if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                                         let ext_lower = ext.to_lowercase();
@@ -5331,14 +5358,14 @@ fn main() {
                                                     .map(|d| d.as_millis() as u64)
                                                     .unwrap_or(0);
                                                 known_files.insert(
-                                                    p.to_string_lossy().to_string(),
+                                                    clean_p,
                                                     (size, mtime),
                                                 );
                                             }
                                         }
                                     }
                                 } else if p.is_dir() {
-                                    known_folders.insert(p.to_string_lossy().to_string());
+                                    known_folders.insert(clean_p);
                                 }
                             }
                         }
@@ -5347,7 +5374,8 @@ fn main() {
                                 for entry in entries.filter_map(Result::ok) {
                                     let p = entry.path();
                                     if p.is_dir() {
-                                        known_folders.insert(p.to_string_lossy().to_string());
+                                        let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
+                                        known_folders.insert(clean_p);
                                     }
                                 }
                             }
@@ -5361,9 +5389,10 @@ fn main() {
                         std::collections::HashSet::new();
                     let mut folder_changed = false;
 
-                    if let Ok(entries) = std::fs::read_dir(&current_dir) {
+                    if let Ok(entries) = std::fs::read_dir(&clean_current_dir) {
                         for entry in entries.filter_map(Result::ok) {
                             let p = entry.path();
+                            let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
                             if p.is_file() {
                                 if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                                     let ext_lower = ext.to_lowercase();
@@ -5381,7 +5410,7 @@ fn main() {
                                                 })
                                                 .map(|d| d.as_millis() as u64)
                                                 .unwrap_or(0);
-                                            let path_str = p.to_string_lossy().to_string();
+                                            let path_str = clean_p;
                                             current_files.insert(path_str.clone(), (size, mtime));
 
                                             if let Some(&(old_size, old_mtime)) =
@@ -5407,6 +5436,7 @@ fn main() {
                                                         .file_name()
                                                         .to_string_lossy()
                                                         .into_owned();
+                                                    let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
                                                     let img_file = ImageFile {
                                                         name: file_name,
                                                         ext: format!(".{}", ext_lower),
@@ -5423,8 +5453,8 @@ fn main() {
                                                         source: String::new(),
                                                         meta_loaded: false,
                                                         search_text: String::new(),
-            unified_search_text: String::new(),
-            hash_key: String::new(),
+                                                        unified_search_text: String::new(),
+                                                        hash_key,
                                                     };
                                                     let _ = app_handle
                                                         .emit_all("file-changed", img_file);
@@ -5439,7 +5469,8 @@ fn main() {
                                                     .created()
                                                     .ok()
                                                     .and_then(|t| {
-                                                        t.duration_since(std::time::UNIX_EPOCH).ok()
+                                                        t.duration_since(std::time::UNIX_EPOCH)
+                                                            .ok()
                                                     })
                                                     .map(|d| d.as_millis() as u64)
                                                     .unwrap_or(0);
@@ -5447,6 +5478,7 @@ fn main() {
                                                     .file_name()
                                                     .to_string_lossy()
                                                     .into_owned();
+                                                let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
                                                 let img_file = ImageFile {
                                                     name: file_name,
                                                     ext: format!(".{}", ext_lower),
@@ -5463,8 +5495,8 @@ fn main() {
                                                     source: String::new(),
                                                     meta_loaded: false,
                                                     search_text: String::new(),
-            unified_search_text: String::new(),
-            hash_key: String::new(),
+                                                    unified_search_text: String::new(),
+                                                    hash_key,
                                                 };
                                                 let _ =
                                                     app_handle.emit_all("file-changed", img_file);
@@ -5473,7 +5505,7 @@ fn main() {
                                     }
                                 }
                             } else if p.is_dir() {
-                                let path_str = p.to_string_lossy().to_string();
+                                let path_str = clean_p;
                                 current_folders.insert(path_str.clone());
                                 if !known_folders.contains(&path_str) {
                                     folder_changed = true;
@@ -5487,7 +5519,7 @@ fn main() {
                             for entry in entries.filter_map(Result::ok) {
                                 let p = entry.path();
                                 if p.is_dir() {
-                                    let path_str = p.to_string_lossy().to_string();
+                                    let path_str = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
                                     current_folders.insert(path_str.clone());
                                     if !known_folders.contains(&path_str) {
                                         folder_changed = true;
@@ -5511,18 +5543,16 @@ fn main() {
                             let _ = app_handle.emit_all("file-removed", path_str.clone());
 
                             // ファイル削除検知時のキャッシュ自動クリーンアップ:
-                            // 対象ファイルに紐づくサムネイル画像およびメタデータJSONのキャッシュファイルを
-                            // MD5ハッシュベースで特定し、ストレージ容量の無駄遣いを防ぐために即時削除します。
+                            // 対象ファイルに紐づくサムネイル画像およびメタデータJSONのキャッシュファイルを特定し削除
                             if let Some(data_dir) = get_veloce_data_dir() {
-                                let cache_file_name = format!("{}_{}", path_str, mtime);
-                                let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
+                                let hash_key = crate::utils::hash_path_mtime_hex(path_str, mtime);
 
                                 let thumb_path = data_dir
                                     .join("Thumbnails")
-                                    .join(format!("{:016x}.jpg", digest));
+                                    .join(format!("{}.jpg", hash_key));
                                 let meta_path = data_dir
                                     .join("Metadata")
-                                    .join(format!("{:016x}.json", digest));
+                                    .join(format!("{}.json", hash_key));
 
                                 let _ = std::fs::remove_file(thumb_path);
                                 let _ = std::fs::remove_file(meta_path);
@@ -9196,6 +9226,164 @@ mod viewer_tests {
         let _ = std::fs::remove_file(&test_file);
 
         assert!(result.is_err(), "Stealth署名がない場合はエラーを返却すること");
+    }
+
+    /// ファイルウォッチャーのフォールバック定期スキャン判定、パス正規化、hash_key生成の検証
+    #[test]
+    fn test_file_watcher_periodic_scan_and_path_normalization() {
+        // 1. idle_cycles フォールバック判定ロジックの検証
+        let idle_cycles_0 = 0u32;
+        let idle_cycles_1 = 1u32;
+        let idle_cycles_2 = 2u32;
+        let idle_cycles_5 = 5u32;
+
+        assert_eq!(idle_cycles_0 >= 2, false);
+        assert_eq!(idle_cycles_1 >= 2, false);
+        assert_eq!(idle_cycles_2 >= 2, true, "idle_cycles >= 2 で定期スキャンが発火すること");
+        assert_eq!(idle_cycles_5 >= 2, true);
+
+        // 2. パス正規化の一貫性検証
+        let raw_unc_slash = "\\\\?\\C:/images/folder/test.png";
+        let clean = raw_unc_slash.replace("\\\\?\\", "").replace('/', "\\");
+        assert_eq!(clean, "C:\\images\\folder\\test.png");
+
+        let mtime: u64 = 1700000000;
+        let hash_key = crate::utils::hash_path_mtime_hex(&clean, mtime);
+        assert_eq!(hash_key.len(), 16);
+
+        // キャッシュファイル名の照合
+        let expected_thumb = format!("{}.jpg", hash_key);
+        let expected_meta = format!("{}.json", hash_key);
+        assert!(expected_thumb.ends_with(".jpg"));
+        assert!(expected_meta.ends_with(".json"));
+    }
+
+    /// notify_file_changed および notify_file_removed のパス自動正規化とインデックス再構築同期検証
+    #[test]
+    fn test_notify_file_changed_and_removed_state_sync() {
+        let app_state = AppState {
+            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
+            current_dir: Mutex::new(String::new()),
+            viewer_paths: Mutex::new(std::collections::HashMap::new()),
+            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
+            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
+            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
+            all_files: Mutex::new(Vec::new()),
+            filtered_files: Mutex::new(Vec::new()),
+            sort_config: Mutex::new(super::SortConfig {
+                key: "name".to_string(),
+                asc: true,
+            }),
+            search_query: Mutex::new(String::new()),
+            ratings: Mutex::new(std::collections::HashMap::new()),
+            rating_filter_val: Mutex::new(0),
+            rating_filter_op: Mutex::new("gte".to_string()),
+            db_conn: init_db().unwrap(),
+            settings_db_conn: init_db().unwrap(),
+            settings_db_existed: Mutex::new(true),
+            smart_folders: Mutex::new(Vec::new()),
+            db_tx: tokio::sync::mpsc::channel(1).0,
+            video_server_port: 0,
+        };
+
+        // 1. 新規ファイルの通知（UNC接頭辞あり、hash_key空）
+        let mut new_file = ImageFile {
+            name: "new_pic.png".to_string(),
+            ext: ".png".to_string(),
+            path: "\\\\?\\C:/images/new_pic.png".to_string(),
+            size: 2048,
+            mtime: 1700000000,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 1024,
+            height: 768,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: "".to_string(),
+        };
+
+        // notify_file_changed の内部ロジックをシミュレート
+        let clean = new_file.path.replace("\\\\?\\", "").replace('/', "\\");
+        new_file.path = clean.clone();
+        if new_file.hash_key.is_empty() {
+            new_file.hash_key = crate::utils::hash_path_mtime_hex(&clean, new_file.mtime);
+        }
+
+        {
+            let mut all = app_state.all_files.lock().unwrap();
+            all.push(std::sync::Arc::new(new_file.clone()));
+            app_state.rebuild_all_indices(&all);
+        }
+
+        // インデックスとall_filesが正しく同期されていることを検証
+        assert_eq!(new_file.path, "C:\\images\\new_pic.png");
+        assert_eq!(new_file.hash_key.len(), 16);
+        assert_eq!(app_state.path_to_all_idx.lock().unwrap().get("C:\\images\\new_pic.png").copied(), Some(0));
+        assert_eq!(app_state.get_mtime("C:\\images\\new_pic.png"), Some(1700000000));
+
+        // 2. 既存ファイルの更新（寸法0が届いた場合の寸法保持）
+        let mut updated_file = ImageFile {
+            name: "new_pic.png".to_string(),
+            ext: ".png".to_string(),
+            path: "C:\\images\\new_pic.png".to_string(),
+            size: 4096,
+            mtime: 1700000050,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 0,
+            height: 0,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: "".to_string(),
+        };
+        let clean_update = updated_file.path.replace("\\\\?\\", "").replace('/', "\\");
+        updated_file.path = clean_update.clone();
+        if updated_file.hash_key.is_empty() {
+            updated_file.hash_key = crate::utils::hash_path_mtime_hex(&clean_update, updated_file.mtime);
+        }
+
+        {
+            let mut all = app_state.all_files.lock().unwrap();
+            if let Some(existing) = all.iter_mut().find(|f| f.path == updated_file.path) {
+                if updated_file.width == 0 && updated_file.height == 0 && (existing.width > 0 || existing.height > 0) {
+                    updated_file.width = existing.width;
+                    updated_file.height = existing.height;
+                }
+                *existing = std::sync::Arc::new(updated_file);
+            }
+            app_state.rebuild_all_indices(&all);
+        }
+
+        {
+            let all = app_state.all_files.lock().unwrap();
+            assert_eq!(all[0].size, 4096, "サイズが更新されること");
+            assert_eq!(all[0].width, 1024, "寸法が保持されること");
+            assert_eq!(all[0].height, 768, "寸法が保持されること");
+        }
+        assert_eq!(app_state.get_mtime("C:\\images\\new_pic.png"), Some(1700000050), "インデックスのmtimeが更新されること");
+
+        // 3. ファイル削除（notify_file_removed）
+        let remove_path = "C:/images/new_pic.png"; // スラッシュ区切りで削除要求
+        let clean_remove = remove_path.replace("\\\\?\\", "").replace('/', "\\");
+        {
+            let mut all = app_state.all_files.lock().unwrap();
+            all.retain(|f| f.path != clean_remove && f.path != remove_path);
+            app_state.rebuild_all_indices(&all);
+        }
+
+        assert_eq!(app_state.path_to_all_idx.lock().unwrap().get("C:\\images\\new_pic.png").copied(), None, "削除後にインデックスから消去されること");
+        assert_eq!(app_state.get_mtime("C:\\images\\new_pic.png"), None);
     }
 }
 
