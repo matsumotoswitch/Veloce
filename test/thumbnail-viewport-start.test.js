@@ -357,4 +357,90 @@ describe('Thumbnail Viewport Start Priority (User Experience Optimization)', () 
     expect(indexOfImg40).toBeGreaterThan(-1);
     expect(indexOfImg19).toBeLessThan(indexOfImg40);
   });
+
+  it('ThumbnailQueueManager.purgeOutOfView should remove tasks no longer in visibleSet (Phase 3)', () => {
+    const queueManager = new ThumbnailQueueManager(4);
+    // processNext の自動取り出しを停止して priorityQueue にタスクを留める
+    queueManager.processNext = vi.fn();
+
+    const fileVisible1 = 'C:/images/visible_1.png';
+    const fileVisible2 = 'C:/images/visible_2.png';
+    const fileOutOfView1 = 'C:/images/out_1.png';
+    const fileOutOfView2 = 'C:/images/out_2.png';
+
+    // 優先キューに4アイテムを追加
+    queueManager.enqueuePriorityBatch([fileVisible1, fileOutOfView1, fileVisible2, fileOutOfView2], true);
+
+    expect(queueManager.priorityQueue.length).toBe(4);
+    expect(queueManager.totalEnqueued).toBe(4);
+    expect(queueManager.priorityQueueSet.has(fileOutOfView1)).toBe(true);
+
+    // 有効な可視セットは visible_1 と visible_2 のみ
+    const validSet = new Set([fileVisible1, fileVisible2]);
+
+    queueManager.purgeOutOfView(validSet);
+
+    // 範囲外のアイテムが優先キューおよび追跡セットから除去されていること
+    expect(queueManager.priorityQueue.length).toBe(2);
+    expect(queueManager.priorityQueue.map(r => r.filePath)).toEqual([fileVisible1, fileVisible2]);
+    expect(queueManager.priorityQueueSet.has(fileOutOfView1)).toBe(false);
+    expect(queueManager.priorityQueueSet.has(fileOutOfView2)).toBe(false);
+    expect(queueManager.priorityQueueSet.has(fileVisible1)).toBe(true);
+    expect(queueManager.priorityQueueSet.has(fileVisible2)).toBe(true);
+
+    // totalEnqueued がパージされた分だけ減少し、プログレスバー計算が整合していること
+    expect(queueManager.totalEnqueued).toBe(2);
+  });
+
+  it('updateVirtualGrid should automatically trigger purgeOutOfView on scroll transition (Phase 3)', async () => {
+    const totalFiles = 100;
+    const testFiles = Array.from({ length: totalFiles }, (_, i) => ({
+      path: `C:/images/img_${String(i).padStart(3, '0')}.png`,
+      name: `img_${String(i).padStart(3, '0')}.png`,
+      mtime: 1000 + i,
+      hasThumbnailCache: false
+    }));
+
+    sharedAppState.totalCount = totalFiles;
+    window.veloceAPI = {
+      getItems: vi.fn((offset, limit) => {
+        return Promise.resolve(testFiles.slice(offset, offset + limit));
+      })
+    };
+
+    const purgeOutOfViewMock = vi.fn();
+    window.thumbnailManager = {
+      _preloadAnchor: 0,
+      _preloadWrapped: false,
+      resetPreload: vi.fn(),
+      enqueuePriorityBatch: vi.fn(),
+      enqueuePriority: vi.fn(),
+      purgeOutOfView: purgeOutOfViewMock,
+      processNext: vi.fn()
+    };
+
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    Object.defineProperty(container, 'clientWidth', { value: 648, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 384, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    const content = document.createElement('div');
+    content.className = 'virtual-content';
+    const spacer = document.createElement('div');
+    spacer.className = 'virtual-spacer';
+    container.appendChild(content);
+    container.appendChild(spacer);
+
+    const ui = new UIManager(sharedAppState);
+    ui.elements.thumbnailGrid = container;
+    ui.elements.thumbnailSizeSlider = { value: '120' };
+
+    await ui.updateVirtualGrid(true);
+
+    expect(purgeOutOfViewMock).toHaveBeenCalled();
+    const calledSet = purgeOutOfViewMock.mock.calls[0][0];
+    expect(calledSet instanceof Set).toBe(true);
+    expect(calledSet.size).toBeGreaterThan(0);
+  });
 });

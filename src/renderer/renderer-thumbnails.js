@@ -699,6 +699,37 @@ export class ThumbnailQueueManager {
     }
   }
 
+  /**
+   * 現在の表示範囲外（ビューポート＋前後バッファ外）となった未着手タスクを優先キューからパージする
+   * 高速スクロール時に通過した不要なタスクを破棄し、CPU/Workerリソースを現在画面に集中させる
+   * @param {Set<string>} validPathSet - 現在有効なパスの集合（appState.visiblePathSet 等）
+   */
+  purgeOutOfView(validPathSet) {
+    if (!validPathSet || validPathSet.size === 0) return;
+    if (this.priorityQueue.length === 0) return;
+
+    let purgedCount = 0;
+    const newQueue = [];
+    for (let i = 0; i < this.priorityQueue.length; i++) {
+      const req = this.priorityQueue[i];
+      if (validPathSet.has(req.filePath)) {
+        newQueue.push(req);
+      } else {
+        this.priorityQueueSet.delete(req.filePath);
+        if (this._trackedPaths && this._trackedPaths.has(req.filePath)) {
+          this._trackedPaths.delete(req.filePath);
+          purgedCount++;
+        }
+      }
+    }
+
+    if (purgedCount > 0) {
+      this.priorityQueue = newQueue;
+      this.totalEnqueued = Math.max(this.completedCount, this.totalEnqueued - purgedCount);
+      this.updateProgressBar();
+    }
+  }
+
   resetPreload() {
     this.preloadQueue = [];
     this._preloadFetchId = (this._preloadFetchId || 0) + 1;

@@ -2289,6 +2289,13 @@ class UIManager {
       appState.visiblePathSet = visibleSet;
     }
 
+    // --- 通り過ぎた不要タスクのパージ (Phase 3: UX-3) ---
+    // 高速スクロール時にビューポート＋前後バッファ（visibleSet）から完全に外れた未着手優先タスクを削除し、
+    // CPU/Workerリソースを現在画面に集中させる
+    if (window.thumbnailManager && typeof window.thumbnailManager.purgeOutOfView === 'function') {
+      window.thumbnailManager.purgeOutOfView(visibleSet);
+    }
+
     // --- バックグラウンド・プレロード位置の現在地追従 (Phase 1: UX-1) ---
     // ユーザーが見ている画面の直後から先回りフェッチを行うため、preloadCursor を visibleEndIndex + 1 に同期
     if (visibleEndIndex >= 0 && typeof appState !== 'undefined' && appState.totalCount > 0) {
