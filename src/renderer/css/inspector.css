@@ -197,9 +197,11 @@
   justify-content: center;
   font-size: var(--font-size-xs);
   font-weight: bold;
-  color: var(--text-light);
+  background-color: rgba(19, 27, 30, 0.85);
   border: 2px solid var(--text-light);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(2px);
   z-index: 2;
   pointer-events: none;
   user-select: none;
@@ -223,84 +225,69 @@
 }
 
 .inspector-coord-badge {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: bold;
-  color: var(--text-light);
-  border: 1px solid var(--text-light);
+  background-color: rgba(19, 27, 30, 0.85);
+  border: 2px solid var(--text-light);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
   flex-shrink: 0;
   line-height: 1;
 }
 
-/* --- キャラクター位置プレビュー マーカーカラー（お気に入りパレット8色ループ） ---
+/* --- キャラクター位置プレビュー マーカーカラー（HUD・サイバー調 8色ローテーション） ---
  * マーカー (.inspector-position-marker) と 座標一覧バッジ (.inspector-coord-badge)
- * の双方に対して、背景色と高コントラストな文字色・枠線色をカスケード適用する
+ * に対し、ダーク半透明背景の上で枠線と数字に各カラーを適用する（32人以上でも8色でローテーション）
  */
-.char-marker-1,
-.char-marker--default {
-  background-color: var(--palette-default);
-  color: var(--text-dark);
-  border-color: var(--text-dark);
+.char-marker-1 {
+  border-color: var(--color-tag-char-ref);
+  color: var(--color-tag-char-ref);
 }
 
-.char-marker-2,
-.char-marker--red {
-  background-color: var(--palette-red);
-  color: var(--text-light);
-  border-color: var(--text-light);
+.char-marker-2 {
+  border-color: var(--color-tag-inpainting);
+  color: var(--color-tag-inpainting);
 }
 
-.char-marker-3,
-.char-marker--blue {
-  background-color: var(--palette-blue);
-  color: var(--text-light);
-  border-color: var(--text-light);
+.char-marker-3 {
+  border-color: var(--color-tag-vibe);
+  color: var(--color-tag-vibe);
 }
 
-.char-marker-4,
-.char-marker--green {
-  background-color: var(--palette-green);
-  color: var(--text-dark);
-  border-color: var(--text-dark);
+.char-marker-4 {
+  border-color: var(--color-tag-img2img);
+  color: var(--color-tag-img2img);
 }
 
-.char-marker-5,
-.char-marker--yellow {
-  background-color: var(--palette-yellow);
-  color: var(--text-dark);
-  border-color: var(--text-dark);
+.char-marker-5 {
+  border-color: var(--color-tag-alpha-channel);
+  color: var(--color-tag-alpha-channel);
 }
 
-.char-marker-6,
-.char-marker--purple {
-  background-color: var(--palette-purple);
-  color: var(--text-light);
-  border-color: var(--text-light);
+.char-marker-6 {
+  border-color: var(--danger-red);
+  color: var(--danger-red);
 }
 
-.char-marker-7,
-.char-marker--pink {
-  background-color: var(--palette-pink);
-  color: var(--text-light);
-  border-color: var(--text-light);
+.char-marker-7 {
+  border-color: var(--palette-cyan);
+  color: var(--palette-cyan);
 }
 
-.char-marker-8,
-.char-marker--cyan {
-  background-color: var(--palette-cyan);
-  color: var(--text-dark);
-  border-color: var(--text-dark);
+.char-marker-8 {
+  border-color: var(--palette-pink);
+  color: var(--palette-pink);
 }
 
 .char-marker-other {
-  background-color: var(--accent-color);
-  color: var(--text-light);
-  border-color: var(--text-light);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
 }
 
 .inspector-coord-text {

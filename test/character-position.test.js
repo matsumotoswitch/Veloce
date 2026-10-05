@@ -709,18 +709,18 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
     });
   });
 
-  describe('Palette Color Cycling & Contrast for Multi-Characters (up to 27 characters)', () => {
-    it('should cycle through 8 palette classes for characters 1 to 27', async () => {
-      // 27人分のキャラクター座標メタデータを生成
+  describe('Color Tag Palette Cycling for Multi-Characters (up to 32 characters)', () => {
+    it('should cycle through 8 tag color classes for characters 1 to 32', async () => {
+      // 32人分のキャラクター座標メタデータを生成
       const charPrompts = [];
-      for (let i = 1; i <= 27; i++) {
+      for (let i = 1; i <= 32; i++) {
         charPrompts.push({
           prompt: `character ${i}`,
-          centers: [{ x: (i * 0.035).toFixed(3), y: 0.5 }]
+          centers: [{ x: (i * 0.03).toFixed(3), y: 0.5 }]
         });
       }
 
-      const file = { name: 'nai_27chars.png', path: 'nai_27chars.png' };
+      const file = { name: 'nai_32chars.png', path: 'nai_32chars.png' };
       const meta = {
         source: 'NovelAI Diffusion V5',
         params: {
@@ -735,13 +735,13 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
 
       const container = document.getElementById('inspector-content');
       const markers = container.querySelectorAll('.inspector-position-marker');
-      expect(markers.length).toBe(27);
+      expect(markers.length).toBe(32);
 
       const coordBadges = container.querySelectorAll('.inspector-coord-badge');
-      expect(coordBadges.length).toBe(27);
+      expect(coordBadges.length).toBe(32);
 
-      // 各キャラクターのクラス割り当て（1〜8のパレット色ループ）を検証
-      for (let i = 1; i <= 27; i++) {
+      // 各キャラクターのクラス割り当て（1〜8のタグカラー色ループ）を検証
+      for (let i = 1; i <= 32; i++) {
         const expectedIndex = ((i - 1) % 8) + 1;
         const expectedClass = `char-marker-${expectedIndex}`;
 
@@ -749,40 +749,42 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
         expect(coordBadges[i - 1].classList.contains(expectedClass)).toBe(true);
       }
 
-      // 9人目が1人目と同じ char-marker-1（default）であること
+      // 1人目, 9人目, 17人目, 25人目が同じ char-marker-1 であること
+      expect(markers[0].classList.contains('char-marker-1')).toBe(true);
       expect(markers[8].classList.contains('char-marker-1')).toBe(true);
-      // 27人目が ((27 - 1) % 8) + 1 = 3 (blue: char-marker-3) であること
-      expect(markers[26].classList.contains('char-marker-3')).toBe(true);
+      expect(markers[16].classList.contains('char-marker-1')).toBe(true);
+      expect(markers[24].classList.contains('char-marker-1')).toBe(true);
+
+      // 32人目が ((32 - 1) % 8) + 1 = 8 (char-marker-8) であること
+      expect(markers[31].classList.contains('char-marker-8')).toBe(true);
     });
 
-    it('should define high-contrast text and border colors in inspector.css for bright and dark palette colors', () => {
+    it('should define HUD cyber-style colors and translucent background in inspector.css for characters 1 to 8', () => {
       const fs = require('fs');
       const path = require('path');
       const inspectorCss = fs.readFileSync(path.resolve(__dirname, '../src/renderer/css/inspector.css'), 'utf-8');
-      const variablesCss = fs.readFileSync(path.resolve(__dirname, '../src/common/css/variables.css'), 'utf-8');
 
-      // variables.css に暗色テキストと境界線トークンが定義されていること
-      expect(variablesCss).toContain('--text-dark: #000000;');
-      expect(variablesCss).toContain('--border-dark: rgba(0, 0, 0, 0.65);');
+      // ダーク半透明背景が指定されていること
+      expect(inspectorCss).toMatch(/\.inspector-position-marker\s*\{[^}]*background-color:\s*rgba\(19,\s*27,\s*30,\s*0\.85\);/);
+      expect(inspectorCss).toMatch(/\.inspector-coord-badge\s*\{[^}]*background-color:\s*rgba\(19,\s*27,\s*30,\s*0\.85\);/);
 
-      // 明るいパレット色（default, green, yellow, cyan）は暗色文字・暗色枠線が指定されていること
-      expect(inspectorCss).toMatch(/\.char-marker-1[^}]*background-color:\s*var\(--palette-default\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
-      expect(inspectorCss).toMatch(/\.char-marker-4[^}]*background-color:\s*var\(--palette-green\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
-      expect(inspectorCss).toMatch(/\.char-marker-5[^}]*background-color:\s*var\(--palette-yellow\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
-      expect(inspectorCss).toMatch(/\.char-marker-8[^}]*background-color:\s*var\(--palette-cyan\);[^}]*color:\s*var\(--text-dark\);[^}]*border-color:\s*var\(--text-dark\);/s);
+      // 座標情報を表示する箇所のバッジサイズが、画像上のマーカーと同じ 22px × 22px に統一されていること
+      expect(inspectorCss).toMatch(/\.inspector-coord-badge\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;[^}]*border:\s*2px solid/s);
 
-      // 暗い・濃いパレット色（red, blue, purple, pink）は明色文字・明色枠線が指定されていること
-      expect(inspectorCss).toMatch(/\.char-marker-2[^}]*background-color:\s*var\(--palette-red\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
-      expect(inspectorCss).toMatch(/\.char-marker-3[^}]*background-color:\s*var\(--palette-blue\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
-      expect(inspectorCss).toMatch(/\.char-marker-6[^}]*background-color:\s*var\(--palette-purple\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
-      expect(inspectorCss).toMatch(/\.char-marker-7[^}]*background-color:\s*var\(--palette-pink\);[^}]*color:\s*var\(--text-light\);[^}]*border-color:\s*var\(--text-light\);/s);
+      // 1〜4 は以前のメタデータタグカラーが枠線と文字色に適用されていること
+      expect(inspectorCss).toMatch(/\.char-marker-1\s*\{[^}]*border-color:\s*var\(--color-tag-char-ref\);[^}]*color:\s*var\(--color-tag-char-ref\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-2\s*\{[^}]*border-color:\s*var\(--color-tag-inpainting\);[^}]*color:\s*var\(--color-tag-inpainting\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-3\s*\{[^}]*border-color:\s*var\(--color-tag-vibe\);[^}]*color:\s*var\(--color-tag-vibe\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-4\s*\{[^}]*border-color:\s*var\(--color-tag-img2img\);[^}]*color:\s*var\(--color-tag-img2img\);/s);
 
-      // .inspector-coord-badge の定義がカラークラスより前にあり、後勝ちによる上書き破壊が発生しないこと
-      const badgeDefIdx = inspectorCss.indexOf('.inspector-coord-badge {');
-      const colorDefIdx = inspectorCss.indexOf('.char-marker-1,');
-      expect(badgeDefIdx).toBeGreaterThan(-1);
-      expect(colorDefIdx).toBeGreaterThan(-1);
-      expect(badgeDefIdx).toBeLessThan(colorDefIdx);
+      // 5〜8 は拡張された8色相（alpha-channel, danger-red, cyan, pink）が枠線と文字色に適用されていること
+      expect(inspectorCss).toMatch(/\.char-marker-5\s*\{[^}]*border-color:\s*var\(--color-tag-alpha-channel\);[^}]*color:\s*var\(--color-tag-alpha-channel\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-6\s*\{[^}]*border-color:\s*var\(--danger-red\);[^}]*color:\s*var\(--danger-red\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-7\s*\{[^}]*border-color:\s*var\(--palette-cyan\);[^}]*color:\s*var\(--palette-cyan\);/s);
+      expect(inspectorCss).toMatch(/\.char-marker-8\s*\{[^}]*border-color:\s*var\(--palette-pink\);[^}]*color:\s*var\(--palette-pink\);/s);
+
+      // char-marker-other が定義されていること
+      expect(inspectorCss).toMatch(/\.char-marker-other\s*\{[^}]*border-color:\s*var\(--accent-color\);[^}]*color:\s*var\(--accent-color\);/s);
     });
   });
 });
