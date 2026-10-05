@@ -817,7 +817,8 @@ export class ThumbnailQueueManager {
     this.isProcessing = true;
 
     try {
-      // updateVirtualGrid() で同期した appState.visiblePathSet を参照する（querySelectorAll O(N) を排除）
+      // updateVirtualGrid() で同期した appState.viewportPathSet (現在画面内の要素) と appState.visiblePathSet (バッファ含む要素)
+      const viewportPaths = appState.viewportPathSet || new Set();
       const visiblePaths = appState.visiblePathSet || new Set();
 
       while (this.activeTasks.size < this.concurrency) {
@@ -827,9 +828,15 @@ export class ThumbnailQueueManager {
         // 1. Priority Queue
         if (this.priorityQueue.length > 0) {
           appState.isPreloadRunning = false;
-          let targetIndex = this.priorityQueue.findIndex(req => visiblePaths.has(req.filePath));
+          // 最優先: 現在画面内に表示されているアイテム（始点: 画面先頭ファイル）
+          let targetIndex = this.priorityQueue.findIndex(req => viewportPaths.has(req.filePath));
           let isVisible = true;
           
+          // 画面内に無ければ、バッファ領域（visiblePaths）にあるものを探す
+          if (targetIndex === -1) {
+            targetIndex = this.priorityQueue.findIndex(req => visiblePaths.has(req.filePath));
+          }
+
           if (targetIndex === -1) {
             targetIndex = 0;
             isVisible = false;

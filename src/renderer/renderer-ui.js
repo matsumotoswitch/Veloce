@@ -1929,10 +1929,14 @@ class UIManager {
     // 表示すべき行の計算 (上下に8行ずつのバッファ)
     const startRow = Math.floor(Math.max(0, scrollTop - padding) / rowHeight);
     const safeStartRow = Math.max(0, startRow - 8);
-    const endRow = Math.min(rows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 8);
+    const visibleRowCount = Math.ceil(containerHeight / rowHeight);
+    const visibleEndRow = Math.min(rows - 1, startRow + visibleRowCount);
+    const endRow = Math.min(rows - 1, startRow + visibleRowCount + 8);
 
     const startIndex = safeStartRow * cols;
     const endIndex = Math.min(appState.totalCount - 1, ((endRow + 1) * cols) - 1);
+    const visibleStartIndex = Math.min(appState.totalCount - 1, startRow * cols);
+    const visibleEndIndex = Math.min(appState.totalCount - 1, ((visibleEndRow + 1) * cols) - 1);
 
     // スクロール位置が変わっていなければスキップ
     if (!force && this.lastGridStartIndex === startIndex && this.lastGridEndIndex === endIndex) {
@@ -2002,11 +2006,7 @@ class UIManager {
       content.appendChild(wrapper);
     }
 
-    // 余分な要素はループ終了後に display:none で隠して再利用（DOMプール）します。
-
-    // (getCachedThumbnailBatch has been removed in favor of native custom protocol streaming)
-    const filesToEnqueue = [];
-
+    // 1. 基本DOM構造・プロパティの同期（全要素の配置・サイズ・選択・レーティング）
     for (let i = startIndex; i <= endIndex; i++) {
       const file = items[i - startIndex];
       if (!file) continue;
@@ -2042,7 +2042,6 @@ class UIManager {
 
         wrapper.dataset.filepath = file.path;
         wrapper.dataset.index = i;
-        img.dataset.currentSrc = file.path;
 
         // 再利用直後は古い画像の残像を即座に隠蔽し、スケルトンローディング状態にする
         wrapper.classList.add('loading');
@@ -2058,126 +2057,6 @@ class UIManager {
           delete wrapper.dataset.filename;
           label.removeAttribute('title');
           wrapper.removeAttribute('title');
-        }
-
-        if (appState.thumbnailUrls.has(file.path)) {
-            const targetUrl = appState.thumbnailUrls.get(file.path);
-            img.src = targetUrl;
-            if (img.complete && img.naturalWidth > 0) {
-                img.classList.remove('loading');
-                wrapper.classList.remove('loading');
-                if (img.naturalWidth === 0 && !img.src.startsWith('data:image/svg+xml')) {
-                    // Force onerror logic if broken
-                    img.dispatchEvent(new Event('error'));
-                }
-            } else {
-                img.onload = function() {
-                  if (wrapper.dataset.filepath === file.path) {
-                    this.classList.remove('loading');
-                    wrapper.classList.remove('loading');
-                  }
-                };
-                img.onerror = function() {
-                  if (wrapper.dataset.filepath !== file.path) return;
-                  this.classList.remove('loading');
-                  wrapper.classList.remove('loading');
-                  let fallback;
-                  if (file.path.toLowerCase().endsWith('.mp4')) {
-                    fallback = BROKEN_MP4_FALLBACK_URL;
-                  } else {
-                    fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
-                  }
-                  if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
-                    if (window.appState && window.appState.thumbnailUrls) {
-                      window.appState.thumbnailUrls.set(file.path, fallback);
-                      if (window.evictThumbnailCache) window.evictThumbnailCache();
-                    }
-                    this.src = fallback;
-                  }
-                };
-                if (img.complete && img.naturalWidth > 0) {
-                  if (wrapper.dataset.filepath === file.path) {
-                    img.classList.remove('loading');
-                    wrapper.classList.remove('loading');
-                  }
-                }
-            }
-            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else if (file.hasThumbnailCache && !(appState.rebuiltPaths && appState.rebuiltPaths.has(file.path))) {
-            const hashParam = file.hashKey ? `&hash=${encodeURIComponent(file.hashKey)}` : '';
-            const url = window.videoServerPort
-              ? `http://127.0.0.1:${window.videoServerPort}/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}&thumb=1${hashParam}`
-              : `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}${hashParam}`;
-            appState.thumbnailUrls.set(file.path, url);
-            if (window.evictThumbnailCache) window.evictThumbnailCache();
-            img.src = url;
-            if (img.complete && img.naturalWidth > 0) {
-              if (wrapper.dataset.filepath === file.path) {
-                img.classList.remove('loading');
-                wrapper.classList.remove('loading');
-              }
-            } else {
-              img.onload = function() {
-                if (wrapper.dataset.filepath === file.path) {
-                  this.classList.remove('loading');
-                  wrapper.classList.remove('loading');
-                }
-              };
-              img.onerror = function() {
-                if (wrapper.dataset.filepath !== file.path) return;
-                this.classList.remove('loading');
-                wrapper.classList.remove('loading');
-                // URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
-                if (window.appState && window.appState.thumbnailUrls) {
-                  window.appState.thumbnailUrls.delete(file.path);
-                }
-                if (window.thumbnailManager) {
-                  window.thumbnailManager.enqueuePriority(file.path);
-                }
-              };
-              if (img.complete && img.naturalWidth > 0) {
-                if (wrapper.dataset.filepath === file.path) {
-                  img.classList.remove('loading');
-                  wrapper.classList.remove('loading');
-                }
-              }
-            }
-            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else {
-            img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-            img.onload = null;
-            img.onerror = null;
-            if (window.thumbnailManager) {
-              filesToEnqueue.push(file.path);
-            }
-        }
-      } else {
-        // パスもインデックスも変わっていないが、サムネイルURLが新たに利用可能になった場合に反映する
-        if (img.classList.contains('loading') && appState.thumbnailUrls.has(file.path)) {
-          const cachedUrl = appState.thumbnailUrls.get(file.path);
-          if (img.src !== cachedUrl) {
-            img.src = cachedUrl;
-            if (img.complete && img.naturalWidth > 0) {
-              if (wrapper.dataset.filepath === file.path) {
-                img.classList.remove('loading');
-                wrapper.classList.remove('loading');
-              }
-            } else {
-              img.onload = function() {
-                if (wrapper.dataset.filepath === file.path) {
-                  this.classList.remove('loading');
-                  wrapper.classList.remove('loading');
-                }
-              };
-              if (img.complete && img.naturalWidth > 0) {
-                if (wrapper.dataset.filepath === file.path) {
-                  img.classList.remove('loading');
-                  wrapper.classList.remove('loading');
-                }
-              }
-            }
-            if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-          }
         }
       }
 
@@ -2202,6 +2081,137 @@ class UIManager {
       }
     }
 
+    // --- サムネイル画像描写の優先順序構築 ---
+    // ユーザーにスピード感を体験させるため、サムネイル描写の始点を「現在画面に表示されているファイルの先頭 (visibleStartIndex)」とし、
+    // 画面内アイテム (visibleStartIndex 〜 visibleEndIndex) -> 画面下側バッファ -> 画面上側バッファ の順に処理する。
+    const loadOrder = [];
+    // 1. 現在画面に表示されている領域（始点: visibleStartIndex）
+    for (let i = visibleStartIndex; i <= visibleEndIndex; i++) {
+      if (i >= startIndex && i <= endIndex) {
+        loadOrder.push(i);
+      }
+    }
+    // 2. 画面下側バッファ (下スクロール方向)
+    for (let i = visibleEndIndex + 1; i <= endIndex; i++) {
+      loadOrder.push(i);
+    }
+    // 3. 画面上側バッファ (上側隠蔽領域)
+    for (let i = visibleStartIndex - 1; i >= startIndex; i--) {
+      loadOrder.push(i);
+    }
+
+    const filesToEnqueue = [];
+
+    for (const i of loadOrder) {
+      const file = items[i - startIndex];
+      if (!file) continue;
+
+      const wrapper = content.children[i - startIndex];
+      if (!wrapper) continue;
+      const img = wrapper.children[0];
+      if (!img) continue;
+
+      if (img.dataset.currentSrc !== file.path || img.classList.contains('loading')) {
+        img.dataset.currentSrc = file.path;
+
+        if (appState.thumbnailUrls.has(file.path)) {
+          const targetUrl = appState.thumbnailUrls.get(file.path);
+          if (img.src !== targetUrl) {
+            img.src = targetUrl;
+          }
+          if (img.complete && img.naturalWidth > 0) {
+            if (wrapper.dataset.filepath === file.path) {
+              img.classList.remove('loading');
+              wrapper.classList.remove('loading');
+              if (img.naturalWidth === 0 && !img.src.startsWith('data:image/svg+xml')) {
+                // Force onerror logic if broken
+                img.dispatchEvent(new Event('error'));
+              }
+            }
+          } else {
+            img.onload = function() {
+              if (wrapper.dataset.filepath === file.path) {
+                this.classList.remove('loading');
+                wrapper.classList.remove('loading');
+              }
+            };
+            img.onerror = function() {
+              if (wrapper.dataset.filepath !== file.path) return;
+              this.classList.remove('loading');
+              wrapper.classList.remove('loading');
+              let fallback;
+              if (file.path.toLowerCase().endsWith('.mp4')) {
+                fallback = BROKEN_MP4_FALLBACK_URL;
+              } else {
+                fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
+              }
+              if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
+                if (window.appState && window.appState.thumbnailUrls) {
+                  window.appState.thumbnailUrls.set(file.path, fallback);
+                  if (window.evictThumbnailCache) window.evictThumbnailCache();
+                }
+                this.src = fallback;
+              }
+            };
+            if (img.complete && img.naturalWidth > 0) {
+              if (wrapper.dataset.filepath === file.path) {
+                img.classList.remove('loading');
+                wrapper.classList.remove('loading');
+              }
+            }
+          }
+          if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+        } else if (file.hasThumbnailCache && !(appState.rebuiltPaths && appState.rebuiltPaths.has(file.path))) {
+          const hashParam = file.hashKey ? `&hash=${encodeURIComponent(file.hashKey)}` : '';
+          const url = window.videoServerPort
+            ? `http://127.0.0.1:${window.videoServerPort}/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}&thumb=1${hashParam}`
+            : `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}${hashParam}`;
+          appState.thumbnailUrls.set(file.path, url);
+          if (window.evictThumbnailCache) window.evictThumbnailCache();
+          img.src = url;
+          if (img.complete && img.naturalWidth > 0) {
+            if (wrapper.dataset.filepath === file.path) {
+              img.classList.remove('loading');
+              wrapper.classList.remove('loading');
+            }
+          } else {
+            img.onload = function() {
+              if (wrapper.dataset.filepath === file.path) {
+                this.classList.remove('loading');
+                wrapper.classList.remove('loading');
+              }
+            };
+            img.onerror = function() {
+              if (wrapper.dataset.filepath !== file.path) return;
+              this.classList.remove('loading');
+              wrapper.classList.remove('loading');
+              // URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
+              if (window.appState && window.appState.thumbnailUrls) {
+                window.appState.thumbnailUrls.delete(file.path);
+              }
+              if (window.thumbnailManager) {
+                window.thumbnailManager.enqueuePriority(file.path);
+              }
+            };
+            if (img.complete && img.naturalWidth > 0) {
+              if (wrapper.dataset.filepath === file.path) {
+                img.classList.remove('loading');
+                wrapper.classList.remove('loading');
+              }
+            }
+          }
+          if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
+        } else {
+          img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+          img.onload = null;
+          img.onerror = null;
+          if (window.thumbnailManager) {
+            filesToEnqueue.push(file.path);
+          }
+        }
+      }
+    }
+
     // DOMプールの余分な要素を非表示にして使い回す（GCとReflowの発生を抑える）
     const currentChildrenCount = content.children.length;
     for (let i = targetCount; i < currentChildrenCount; i++) {
@@ -2221,6 +2231,21 @@ class UIManager {
     // DOM構造の変化（要素新規生成・表示非表示切替）または強制更新時のみ同期レイアウトを確定し、通常スクロール時の不要Reflowを根絶
     if (domStructureChanged || force) {
       void content.offsetHeight;
+    }
+
+    // viewportPathSet: 現在画面（ビューポート）内に実際に表示されているアイテムのパス集合（描写優先度の最上位）
+    let viewportSet = (typeof appState !== 'undefined' && appState.viewportPathSet instanceof Set)
+      ? appState.viewportPathSet
+      : new Set();
+    viewportSet.clear();
+    for (let i = visibleStartIndex; i <= visibleEndIndex; i++) {
+      if (i >= startIndex && i <= endIndex) {
+        const f = items[i - startIndex];
+        if (f && f.path) viewportSet.add(f.path);
+      }
+    }
+    if (typeof appState !== 'undefined') {
+      appState.viewportPathSet = viewportSet;
     }
 
     // visiblePathSet を _domByPath から構築（既存Setを再利用してスクロール毎フレームのGC圧を根絶）

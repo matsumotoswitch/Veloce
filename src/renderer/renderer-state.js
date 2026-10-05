@@ -126,6 +126,7 @@ export const layoutState = {
 export const thumbnailState = {
   urls: new Map(),
   visiblePathSet: new Set(),
+  viewportPathSet: new Set(),
   preloadCursor: 0,
   isPreloadRunning: false,
   isFetchingPreload: false,
@@ -229,6 +230,9 @@ class AppState {
 
   get visiblePathSet() { return thumbnailState.visiblePathSet; }
   set visiblePathSet(val) { thumbnailState.visiblePathSet = val; }
+
+  get viewportPathSet() { return thumbnailState.viewportPathSet; }
+  set viewportPathSet(val) { thumbnailState.viewportPathSet = val; }
 
   get preloadCursor() { return thumbnailState.preloadCursor; }
   set preloadCursor(val) { thumbnailState.preloadCursor = val; }
