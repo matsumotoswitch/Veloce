@@ -643,6 +643,9 @@ export class ThumbnailQueueManager {
     this.totalEnqueued = 0;
     this._progressFadeTimeout = null;
     this._trackedPaths = new Set();
+    this._preloadAnchor = 0;
+    this._preloadWrapped = false;
+    this._preloadFetchId = 0;
   }
 
   enqueuePriority(filePath, skipDbCheck = false) {
@@ -698,6 +701,8 @@ export class ThumbnailQueueManager {
 
   resetPreload() {
     this.preloadQueue = [];
+    this._preloadFetchId = (this._preloadFetchId || 0) + 1;
+    appState.isFetchingPreload = false;
   }
 
   clear() {
@@ -706,6 +711,9 @@ export class ThumbnailQueueManager {
     this.preloadQueue = [];
     this.totalEnqueued = 0;
     this.completedCount = 0;
+    this._preloadAnchor = 0;
+    this._preloadWrapped = false;
+    this._preloadFetchId = 0;
     if (this._trackedPaths) this._trackedPaths.clear();
     if (this._progressFadeTimeout) {
       clearTimeout(this._progressFadeTimeout);
@@ -864,27 +872,36 @@ export class ThumbnailQueueManager {
           targetFile = req.filePath;
           targetSkipDbCheck = !!req.skipDbCheck;
         }
-        // 2. Preload Fetching
-        else if (this.preloadQueue.length === 0 && appState.preloadCursor < appState.totalCount) {
+        // 2. Preload Fetching (現在位置から前方への先回り取得)
+        else if (this.preloadQueue.length === 0 && (!this._preloadWrapped ? appState.preloadCursor < appState.totalCount : appState.preloadCursor < (this._preloadAnchor || 0))) {
           appState.isPreloadRunning = true;
           if (!appState.isFetchingPreload) {
             appState.isFetchingPreload = true;
             if (typeof window.veloceAPI?.getItems === 'function') {
-              const fetchPromise = window.veloceAPI.getItems(appState.preloadCursor, 50);
+              const fetchLimit = this._preloadWrapped
+                ? Math.min(50, Math.max(0, (this._preloadAnchor || 0) - appState.preloadCursor))
+                : 50;
+              const fetchOffset = appState.preloadCursor;
+              const currentFetchId = ++this._preloadFetchId;
+              const fetchPromise = window.veloceAPI.getItems(fetchOffset, fetchLimit);
               if (fetchPromise && typeof fetchPromise.then === 'function') {
                 fetchPromise.then(items => {
+                  if (this._preloadFetchId !== currentFetchId) return;
                   if (items && items.length > 0) {
-                    appState.preloadCursor += items.length;
+                    appState.preloadCursor = fetchOffset + items.length;
                     this.preloadQueue.push(...items.map(f => f.path));
                   } else {
-                    appState.preloadCursor += 50;
+                    appState.preloadCursor = fetchOffset + fetchLimit;
                   }
                 }).catch(err => {
+                  if (this._preloadFetchId !== currentFetchId) return;
                   console.warn("Preload getItems failed:", err);
-                  appState.preloadCursor += 50;
+                  appState.preloadCursor = fetchOffset + fetchLimit;
                 }).finally(() => {
-                  appState.isFetchingPreload = false;
-                  this.processNext();
+                  if (this._preloadFetchId === currentFetchId) {
+                    appState.isFetchingPreload = false;
+                    this.processNext();
+                  }
                 });
               } else {
                 appState.isFetchingPreload = false;
@@ -894,6 +911,12 @@ export class ThumbnailQueueManager {
             }
           }
           break; // wait for fetch
+        }
+        // 2b. 末尾到達時、未処理の先頭領域（0 〜 _preloadAnchor）へのラップアラウンド
+        else if (this.preloadQueue.length === 0 && !this._preloadWrapped && appState.preloadCursor >= appState.totalCount && (this._preloadAnchor || 0) > 0) {
+          this._preloadWrapped = true;
+          appState.preloadCursor = 0;
+          continue; // 同一ループ内で即座に 0 からのフェッチ (2. Preload Fetching) に進む
         }
         // 3. Preload Queue
         else if (this.preloadQueue.length > 0) {
@@ -919,7 +942,10 @@ export class ThumbnailQueueManager {
             }
           }
           if (!found) {
-            if (appState.preloadCursor >= appState.totalCount) {
+            const isFinished = (this._preloadWrapped || (this._preloadAnchor || 0) === 0)
+              ? appState.preloadCursor >= (this._preloadWrapped ? (this._preloadAnchor || 0) : appState.totalCount)
+              : false;
+            if (isFinished) {
               appState.isPreloadRunning = false;
             }
             continue;
@@ -934,10 +960,14 @@ export class ThumbnailQueueManager {
       }
       
       // キューが完全に空になり、かつ全件のフェッチも終了していれば「完了」とみなして件数を同期
+      const isPreloadAllFinished = (this._preloadWrapped || (this._preloadAnchor || 0) === 0)
+        ? appState.preloadCursor >= (this._preloadWrapped ? (this._preloadAnchor || 0) : appState.totalCount)
+        : false;
+
       if (this.priorityQueue.length === 0 && 
           this.preloadQueue.length === 0 && 
           this.activeTasks.size === 0 && 
-          appState.preloadCursor >= appState.totalCount) {
+          isPreloadAllFinished) {
         if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
           window.debouncedUpdateSmartFolderCounts();
         }

@@ -2262,6 +2262,26 @@ class UIManager {
       appState.visiblePathSet = visibleSet;
     }
 
+    // --- バックグラウンド・プレロード位置の現在地追従 (Phase 1: UX-1) ---
+    // ユーザーが見ている画面の直後から先回りフェッチを行うため、preloadCursor を visibleEndIndex + 1 に同期
+    if (visibleEndIndex >= 0 && typeof appState !== 'undefined' && appState.totalCount > 0) {
+      const nextPreloadTarget = Math.min(appState.totalCount, visibleEndIndex + 1);
+      const tm = window.thumbnailManager;
+      const isOutOfRange = appState.preloadCursor < visibleStartIndex || appState.preloadCursor > visibleEndIndex + 150;
+      if (appState.preloadCursor === 0 || isOutOfRange) {
+        appState.preloadCursor = nextPreloadTarget;
+        if (tm) {
+          tm._preloadAnchor = nextPreloadTarget;
+          tm._preloadWrapped = false;
+          if (typeof tm.resetPreload === 'function') {
+            tm.resetPreload();
+          }
+        }
+      } else if (!tm?._preloadWrapped && appState.preloadCursor < nextPreloadTarget) {
+        appState.preloadCursor = nextPreloadTarget;
+      }
+    }
+
     // --- ここでようやく enqueuePriority を呼ぶ ---
     if (filesToEnqueue.length > 0 && window.thumbnailManager) {
       if (typeof window.thumbnailManager.enqueuePriorityBatch === 'function') {

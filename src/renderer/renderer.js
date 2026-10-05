@@ -372,6 +372,10 @@ export function applyRatingUI(path, rating, isOptimistic = false) {
 
 const scheduleRefresh = debounce(async () => {
   appState.preloadCursor = 0;
+  if (window.thumbnailManager) {
+    window.thumbnailManager._preloadAnchor = 0;
+    window.thumbnailManager._preloadWrapped = false;
+  }
   await appState.setViewParams();
   uiManager.renderAll();
   uiManager.updateSelectionUI();

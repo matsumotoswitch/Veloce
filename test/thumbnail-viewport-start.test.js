@@ -148,4 +148,142 @@ describe('Thumbnail Viewport Start Priority (User Experience Optimization)', () 
     expect(executedTasks[1]).toBe(viewportSecondFile);
     expect(executedTasks[2]).toBe(offscreenBufferFile);
   });
+
+  it('updateVirtualGrid should synchronize preloadCursor to visibleEndIndex + 1 when user scrolls', async () => {
+    const totalFiles = 200;
+    const testFiles = Array.from({ length: totalFiles }, (_, i) => ({
+      path: `C:/images/img_${String(i).padStart(3, '0')}.png`,
+      name: `img_${String(i).padStart(3, '0')}.png`,
+      mtime: 1000 + i,
+      hasThumbnailCache: false
+    }));
+
+    sharedAppState.totalCount = totalFiles;
+    sharedAppState.preloadCursor = 0;
+
+    window.veloceAPI = {
+      getItems: vi.fn().mockImplementation((offset, limit) => {
+        return Promise.resolve(testFiles.slice(offset, offset + limit));
+      })
+    };
+
+    const resetPreloadMock = vi.fn();
+    window.thumbnailManager = {
+      _preloadAnchor: 0,
+      _preloadWrapped: false,
+      resetPreload: resetPreloadMock,
+      enqueuePriorityBatch: vi.fn(),
+      enqueuePriority: vi.fn(),
+      processNext: vi.fn()
+    };
+
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    Object.defineProperty(container, 'clientWidth', { value: 648, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 384, configurable: true });
+    // scrollTop = 1288 -> startRow = 10, cols = 5 -> visibleStartIndex = 50
+    Object.defineProperty(container, 'scrollTop', { value: 1288, writable: true, configurable: true });
+
+    const content = document.createElement('div');
+    content.className = 'virtual-content';
+    const spacer = document.createElement('div');
+    spacer.className = 'virtual-spacer';
+    container.appendChild(content);
+    container.appendChild(spacer);
+
+    const ui = new UIManager(sharedAppState);
+    ui.elements.thumbnailGrid = container;
+    ui.elements.thumbnailSizeSlider = { value: '120' };
+
+    await ui.updateVirtualGrid(true);
+
+    // visibleEndIndex は画面末尾。preloadCursor は visibleEndIndex + 1 に同期されていること
+    expect(sharedAppState.preloadCursor).toBeGreaterThan(50);
+    expect(window.thumbnailManager._preloadAnchor).toBe(sharedAppState.preloadCursor);
+    expect(window.thumbnailManager._preloadWrapped).toBe(false);
+    expect(resetPreloadMock).toHaveBeenCalled();
+  });
+
+  it('ThumbnailQueueManager.processNext should fetch preload from preloadCursor and wrap around at totalCount', async () => {
+    const queueManager = new ThumbnailQueueManager(4);
+    // バックグラウンド実行リミットに達するようにアクティブタスクを保持し、自動消化を一時抑止
+    queueManager.runTask = vi.fn((filePath) => {
+      queueManager.activeTasks.add(filePath);
+    });
+
+    const totalCount = 120;
+    sharedAppState.totalCount = totalCount;
+    sharedAppState.preloadCursor = 100;
+    queueManager._preloadAnchor = 100;
+    queueManager._preloadWrapped = false;
+
+    const fetchedRanges = [];
+    window.veloceAPI = {
+      getItems: vi.fn((offset, limit) => {
+        fetchedRanges.push({ offset, limit });
+        const items = [];
+        for (let i = 0; i < limit && offset + i < totalCount; i++) {
+          items.push({ path: `C:/images/img_${offset + i}.png` });
+        }
+        return Promise.resolve(items);
+      })
+    };
+
+    // 1回目: 100からフェッチ（100〜120までの20件が返り、preloadCursorは120へ進む）
+    queueManager.processNext();
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(fetchedRanges[0]).toEqual({ offset: 100, limit: 50 });
+    expect(sharedAppState.preloadCursor).toBe(120);
+    expect(queueManager.preloadQueue.length).toBeGreaterThan(0);
+    expect(queueManager._preloadWrapped).toBe(false);
+
+    // キューを消化し、アクティブタスクをクリアして次のイテレーションを実行
+    queueManager.preloadQueue = [];
+    queueManager.activeTasks.clear();
+    queueManager.processNext();
+    await new Promise(r => setTimeout(r, 10));
+
+    // 2回目: preloadCursor(120) >= totalCount(120) のため、ラップアラウンドが発生して 0 になり、先頭領域フェッチが実行される
+    expect(queueManager._preloadWrapped).toBe(true);
+    expect(fetchedRanges[1]).toEqual({ offset: 0, limit: 50 });
+    expect(sharedAppState.preloadCursor).toBe(50);
+  });
+
+  it('ThumbnailQueueManager fast scroll should cancel outdated preload fetch via _preloadFetchId', async () => {
+    const queueManager = new ThumbnailQueueManager(4);
+    sharedAppState.totalCount = 500;
+    sharedAppState.preloadCursor = 0;
+    queueManager._preloadAnchor = 0;
+
+    let resolveFirstFetch;
+    window.veloceAPI = {
+      getItems: vi.fn(() => {
+        return new Promise((resolve) => {
+          resolveFirstFetch = resolve;
+        });
+      })
+    };
+
+    // 1. 最初のプレロードフェッチ開始 (offset: 0)
+    queueManager.processNext();
+    expect(sharedAppState.isFetchingPreload).toBe(true);
+
+    // 2. ユーザーが急激にスクロールし、resetPreload() が呼ばれカーソルが 300 にジャンプ
+    sharedAppState.preloadCursor = 300;
+    queueManager._preloadAnchor = 300;
+    queueManager.resetPreload();
+
+    // 3. 遅延していた最初のフェッチ (offset: 0 のアイテム) が解決
+    resolveFirstFetch([
+      { path: 'C:/images/old_0.png' },
+      { path: 'C:/images/old_1.png' }
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // 世代番号 _preloadFetchId により、古いフェッチ結果は破棄され、preloadCursor も 300 のまま維持されること
+    expect(queueManager.preloadQueue.length).toBe(0);
+    expect(sharedAppState.preloadCursor).toBe(300);
+  });
 });
