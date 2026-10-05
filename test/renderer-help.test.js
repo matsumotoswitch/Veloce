@@ -147,7 +147,7 @@ describe('renderer-help.js', () => {
       expect(document.getElementById('license-overlay')).toBeNull();
     });
 
-    it('should include rating, tag copy, and I key in help shortcut tables', () => {
+    it('should include rating, tag copy, and I, A, L keys in help shortcut tables', () => {
       toggleHelpOverlay(true);
       const overlay = document.getElementById('help-overlay');
       const mainContent = overlay.querySelector('#help-main');
@@ -157,12 +157,18 @@ describe('renderer-help.js', () => {
       expect(mainContent.textContent).toContain('タグをクリック');
       expect(mainContent.textContent).toContain('プロンプトタグをコピー');
       expect(mainContent.textContent).toContain('Ctrl + Tab / Ctrl + PageDown');
+      expect(mainContent.innerHTML).toContain('<kbd>L</kbd>');
+      expect(mainContent.textContent).toContain('開いているビューアーウィンドウを横一列に整列');
 
       // ビューワー画面のテーブル確認
       expect(viewerContent.textContent).toContain('0 〜 5');
       expect(viewerContent.textContent).toContain('表示中の画像にレーティングを設定');
       expect(viewerContent.textContent).toContain('メタデータオーバーレイの表示 / 非表示');
+      expect(viewerContent.textContent).toContain('アルファチャンネル可視化（メタデータ領域）の表示 / 非表示');
+      expect(viewerContent.textContent).toContain('すべてのビューアーを横一列に整列');
       expect(viewerContent.innerHTML).toContain('<kbd>I</kbd>');
+      expect(viewerContent.innerHTML).toContain('<kbd>A</kbd>');
+      expect(viewerContent.innerHTML).toContain('<kbd>L</kbd>');
       expect(viewerContent.innerHTML).not.toContain('<kbd>P</kbd>');
     });
   });

@@ -224,7 +224,7 @@ export function toggleHelpOverlay(forceShow) {
       <table class="help-table">
         <tr><td><kbd>F5</kbd></td><td>最新の情報に更新（再読み込み）</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>検索キーワード入力欄にフォーカス</td></tr>
-        <tr><td><kbd>A</kbd></td><td>開いているビューアーウィンドウを横一列に整列</td></tr>
+        <tr><td><kbd>L</kbd></td><td>開いているビューアーウィンドウを横一列に整列</td></tr>
         <tr><td><kbd>D</kbd></td><td>選択した2枚の画像の情報を比較 (Diffモーダル)</td></tr>
         <tr><td><kbd>F1</kbd> / <kbd>H</kbd></td><td>ヘルプの表示 / 非表示</td></tr>
         <tr><td><kbd>Esc</kbd></td><td>各種モーダル・ヘルプ・メニューを閉じる（検索時はキーワードをクリア）</td></tr>
@@ -260,7 +260,8 @@ export function toggleHelpOverlay(forceShow) {
       <table class="help-table">
         <tr><td><kbd>0</kbd> 〜 <kbd>5</kbd></td><td>表示中の画像にレーティングを設定 / 解除</td></tr>
         <tr><td><kbd>F11</kbd></td><td>フルスクリーン表示切り替え</td></tr>
-        <tr><td><kbd>A</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
+        <tr><td><kbd>A</kbd></td><td>アルファチャンネル可視化（メタデータ領域）の表示 / 非表示</td></tr>
+        <tr><td><kbd>L</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
         <tr><td><kbd>B</kbd></td><td>ウィンドウ枠（ボーダー）・UIの表示切替</td></tr>
         <tr><td><kbd>I</kbd></td><td>メタデータオーバーレイの表示 / 非表示</td></tr>
         <tr><td><kbd>S</kbd></td><td>動画のシークバーの表示 / 非表示</td></tr>

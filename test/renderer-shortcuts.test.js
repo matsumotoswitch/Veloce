@@ -270,8 +270,8 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       expect(uiManager.updateSelectionUI).toHaveBeenCalled();
     });
 
-    it('should call arrangeViewers on A', async () => {
-      const event = new window.KeyboardEvent('keydown', { key: 'a', cancelable: true });
+    it('should call arrangeViewers on L', async () => {
+      const event = new window.KeyboardEvent('keydown', { key: 'l', cancelable: true });
       await globalKeydownHandler(event);
       expect(window.veloceAPI.arrangeViewers).toHaveBeenCalled();
     });
@@ -502,7 +502,7 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       expect(window.renameSelectedFile).not.toHaveBeenCalled();
     });
 
-    it('guards against viewer launch (Enter) and arrange (A) when help-overlay is open', async () => {
+    it('guards against viewer launch (Enter) and arrange (L) when help-overlay is open', async () => {
       dummyDialog = document.createElement('div');
       dummyDialog.id = 'help-overlay';
       document.body.appendChild(dummyDialog);
@@ -512,8 +512,8 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       const enterEvent = new window.KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
       await globalKeydownHandler(enterEvent);
 
-      const aEvent = new window.KeyboardEvent('keydown', { key: 'a', cancelable: true });
-      await globalKeydownHandler(aEvent);
+      const lEvent = new window.KeyboardEvent('keydown', { key: 'l', cancelable: true });
+      await globalKeydownHandler(lEvent);
 
       expect(window.veloceAPI.arrangeViewers).not.toHaveBeenCalled();
     });

@@ -9,8 +9,7 @@ import {
   toggleMetadataOverlay,
   showToast
 } from '../src/viewer/viewer.js';
-
-describe('Viewer Alpha Overlay Hybrid with I Key Integration', () => {
+describe('Viewer Alpha Overlay (A key) & Arrange Viewers (L key)', () => {
   let mockImg;
   let mockGetAlphaOverlayImage;
   let mockParseMetadata;
@@ -68,21 +67,16 @@ describe('Viewer Alpha Overlay Hybrid with I Key Integration', () => {
     document.body.innerHTML = '';
   });
 
-  it('should toggle both metadata text and alpha hybrid overlay ON via toggleMetadataOverlay (I key)', async () => {
-    toggleMetadataOverlay();
+  it('should toggle alpha overlay ON and OFF via toggleAlphaOverlayMode (A key)', async () => {
+    // 1. AキーでアルファオーバーレイをON
+    await toggleAlphaOverlayMode();
 
-    expect(viewerState.isMetadataVisible).toBe(true);
     expect(viewerState.isAlphaOverlayMode).toBe(true);
-
-    // Wait for async applyAlphaOverlay & parseMetadata
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
     expect(viewerState.originalSrc).toBe('asset://original-image.png');
     expect(mockImg.src).toBe('data:image/png;base64,mockHybridOverlayData');
     expect(mockGetAlphaOverlayImage).toHaveBeenCalledWith('E:/test/stealth.png');
-    expect(mockParseMetadata).toHaveBeenCalledWith('E:/test/stealth.png');
 
-    // Check toast content
+    // トースト表示の検証
     const toast = document.querySelector('.toast-message');
     expect(toast).not.toBeNull();
     expect(toast.textContent).toContain('アルファオーバーレイ: ON');
@@ -91,61 +85,74 @@ describe('Viewer Alpha Overlay Hybrid with I Key Integration', () => {
     expect(toast.textContent).toContain('2.0 KiB');
     expect(toast.textContent).toContain('15.50%');
 
-    // Check metadata text overlay DOM
+    // メタデータテキストオーバーレイは独立しているため表示されないこと
     const metaOverlay = document.getElementById('viewer-metadata-overlay');
-    expect(metaOverlay).not.toBeNull();
-    expect(metaOverlay.classList.contains('show')).toBe(true);
-  });
+    expect(metaOverlay).toBeNull();
 
-  it('should toggle both metadata text and alpha overlay OFF and restore originalSrc via toggleMetadataOverlay (I key)', async () => {
-    // Turn ON
-    toggleMetadataOverlay();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(viewerState.isAlphaOverlayMode).toBe(true);
+    // 2. もう一度呼んでOFFにし、元画像のsrcが復元されること
+    await toggleAlphaOverlayMode();
 
-    // Turn OFF
-    toggleMetadataOverlay();
-    expect(viewerState.isMetadataVisible).toBe(false);
     expect(viewerState.isAlphaOverlayMode).toBe(false);
     expect(viewerState.originalSrc).toBeNull();
     expect(mockImg.src).toBe('asset://original-image.png');
-
-    const metaOverlay = document.getElementById('viewer-metadata-overlay');
-    expect(metaOverlay.classList.contains('show')).toBe(false);
   });
 
-  it('should only show metadata text without alpha overlay when image has no alpha metadata', async () => {
-    mockGetAlphaOverlayImage.mockRejectedValueOnce(new Error('No stealth metadata signature found'));
+  it('should trigger toggleAlphaOverlayMode on A key press', async () => {
+    const event = new window.KeyboardEvent('keydown', { key: 'a', cancelable: true });
+    window.dispatchEvent(event);
 
-    toggleMetadataOverlay();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
+    expect(viewerState.isAlphaOverlayMode).toBe(true);
+    expect(mockImg.src).toBe('data:image/png;base64,mockHybridOverlayData');
+  });
+
+  it('should trigger arrangeViewers on L key press', async () => {
+    const event = new window.KeyboardEvent('keydown', { key: 'l', cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(window.veloceAPI.arrangeViewers).toHaveBeenCalled();
+  });
+
+  it('should keep metadata text overlay independent from alpha overlay via I key', async () => {
+    toggleMetadataOverlay();
+
     expect(viewerState.isMetadataVisible).toBe(true);
+    // Iキーはテキストオーバーレイのみで、アルファオーバーレイはONにならないこと
     expect(viewerState.isAlphaOverlayMode).toBe(false);
     expect(mockImg.src).toBe('asset://original-image.png');
 
-    // Metadata text overlay should still be visible
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(mockParseMetadata).toHaveBeenCalledWith('E:/test/stealth.png');
     const metaOverlay = document.getElementById('viewer-metadata-overlay');
     expect(metaOverlay).not.toBeNull();
     expect(metaOverlay.classList.contains('show')).toBe(true);
+
+    // 再度Iキーを押してテキストオーバーレイを非表示に
+    toggleMetadataOverlay();
+    expect(viewerState.isMetadataVisible).toBe(false);
+    expect(metaOverlay.classList.contains('show')).toBe(false);
   });
 
-  it('should support standalone toggleAlphaOverlayMode', async () => {
-    await toggleAlphaOverlayMode();
-    expect(viewerState.isAlphaOverlayMode).toBe(true);
-    expect(mockImg.src).toBe('data:image/png;base64,mockHybridOverlayData');
+  it('should show toast and revert mode when image has no alpha metadata', async () => {
+    mockGetAlphaOverlayImage.mockRejectedValueOnce(new Error('No stealth metadata signature found'));
 
     await toggleAlphaOverlayMode();
+
     expect(viewerState.isAlphaOverlayMode).toBe(false);
     expect(mockImg.src).toBe('asset://original-image.png');
+
+    const toast = document.querySelector('.toast-message');
+    expect(toast).not.toBeNull();
+    expect(toast.textContent).toContain('この画像にはアルファチャンネルのメタデータが存在しません');
   });
 
-  it('should handle auto-follow when navigating images with metadata visible', async () => {
-    toggleMetadataOverlay();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  it('should handle auto-follow when navigating images with alpha overlay ON', async () => {
+    await toggleAlphaOverlayMode();
     expect(viewerState.isAlphaOverlayMode).toBe(true);
 
-    // Navigate to next image
+    // 次の画像へ切り替え
     viewerState.currentImagePath = 'E:/test/stealth2.png';
     mockImg.src = 'asset://image2.png';
     viewerState.originalSrc = null;

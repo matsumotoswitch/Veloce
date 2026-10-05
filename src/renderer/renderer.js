@@ -1998,7 +1998,7 @@ export const globalKeydownHandler = async (e) => {
     }
   }
 
-  if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey) {
+  if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey) {
     e.preventDefault();
     if (window.veloceAPI.arrangeViewers) {
       window.veloceAPI.arrangeViewers();
