@@ -190,11 +190,13 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(rendererJsContent).toContain('td._cachedRating = rating;');
     });
 
-    it('should suppress Watchdog DOM traversal during idle state in renderer-thumbnails.js', () => {
+    it('should suppress Watchdog DOM traversal during idle state in renderer-thumbnails.js and avoid setInterval polling', () => {
       expect(thumbnailsJsContent).toContain("activeCenterPane !== 'grid'");
       expect(thumbnailsJsContent).toContain('allHealthy = false');
       expect(thumbnailsJsContent).toContain('export function checkThumbnailSelfHealing');
       expect(thumbnailsJsContent).toContain('window.checkThumbnailSelfHealing = checkThumbnailSelfHealing;');
+      expect(thumbnailsJsContent).toContain('export function scheduleThumbnailSelfHealing');
+      expect(thumbnailsJsContent).not.toMatch(/setInterval\s*\(\s*checkThumbnailSelfHealing/);
     });
 
     it('should use replaceChildren() instead of innerHTML = "" for DOM clearing to reduce GC and avoid HTML parser overhead', () => {

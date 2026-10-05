@@ -307,4 +307,64 @@ describe('renderer-inspector.js', () => {
       delete window.veloceAPI;
     });
   });
+
+  describe('Async Race Condition Sequence Guard (Phase 3)', () => {
+    it('should discard stale async metadata responses when rapid file selection occurs', async () => {
+      let resolveFirstCall;
+      const firstCallPromise = new Promise((resolve) => {
+        resolveFirstCall = resolve;
+      });
+
+      window.veloceAPI = {
+        parseMetadata: vi.fn((path) => {
+          if (path.includes('fileA')) {
+            // fileA は非同期で遅延解決する
+            return firstCallPromise;
+          }
+          // fileB は即時解決する
+          return Promise.resolve({
+            prompt: 'Prompt for file B',
+            source: 'NovelAI'
+          });
+        })
+      };
+
+      const fileA = { path: 'C:\\images\\fileA.png', width: 512, height: 512 };
+      const fileB = { path: 'C:\\images\\fileB.png', width: 512, height: 512 };
+
+      // 1. fileA をリクエスト（非同期待機中）
+      const p1 = renderMetadata(fileA);
+
+      // 2. 直後に fileB をリクエスト（即時完了）
+      const p2 = renderMetadata(fileB);
+      await p2;
+
+      const headerPath = document.getElementById('inspector-header-path');
+      expect(headerPath.getAttribute('data-path')).toBe('C:\\images\\fileB.png');
+
+      const container = document.getElementById('inspector-content');
+      const getPromptText = () => {
+        const sections = Array.from(container.querySelectorAll('.inspector-section-block'));
+        const promptSec = sections.find(
+          sec => sec.querySelector('.inspector-title-wrapper > span')?.textContent === 'プロンプト'
+        );
+        return promptSec ? promptSec.querySelector('.prompt-look')?.textContent : null;
+      };
+
+      expect(getPromptText()).toBe('Prompt for file B');
+
+      // 3. 遅れて fileA のレスポンスを解決
+      resolveFirstCall({
+        prompt: 'Old Prompt for file A',
+        source: 'NovelAI'
+      });
+      await p1;
+
+      // 4. fileA の遅延結果によって fileB の表示が上書きされていないこと
+      expect(headerPath.getAttribute('data-path')).toBe('C:\\images\\fileB.png');
+      expect(getPromptText()).toBe('Prompt for file B');
+
+      delete window.veloceAPI;
+    });
+  });
 });

@@ -28,10 +28,16 @@ let inspectorSectionIndex = 0;
 let inspectorTagIndex = 0;
 let _inspectorDelegationInit = false;
 let _inspectorDelegationOptions = {};
+let _currentInspectorRenderSeq = 0;
 
 export function resetInspectorDelegationForTest() {
   _inspectorDelegationInit = false;
   _inspectorDelegationOptions = {};
+  _currentInspectorRenderSeq = 0;
+}
+
+export function getCurrentInspectorRenderSeqForTest() {
+  return _currentInspectorRenderSeq;
 }
 
 /**
@@ -335,6 +341,8 @@ export async function renderMetadata(file, options = {}) {
   const container = document.getElementById('inspector-content');
   if (!file || !container) return;
 
+  const renderSeq = ++_currentInspectorRenderSeq;
+
   const emptyInspectorMsg = document.getElementById('inspector-empty');
   if (emptyInspectorMsg) emptyInspectorMsg.classList.remove('show');
 
@@ -342,6 +350,12 @@ export async function renderMetadata(file, options = {}) {
     const rawMeta = window.veloceAPI?.parseMetadata
       ? await window.veloceAPI.parseMetadata(file.path)
       : null;
+
+    // 非同期呼び出し完了時に最新のリクエストシーケンスと一致しない場合は破棄（キー連打・非同期解決遅延による表示上書き防止）
+    if (renderSeq !== _currentInspectorRenderSeq) {
+      return;
+    }
+
     const meta = rawMeta || {};
 
     if (meta.width > 0 && meta.height > 0 && (!file.width || !file.height)) {

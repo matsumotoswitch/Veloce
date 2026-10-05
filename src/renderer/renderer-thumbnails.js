@@ -934,6 +934,9 @@ export class ThumbnailQueueManager {
         if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
           window.debouncedUpdateSmartFolderCounts();
         }
+        if (typeof scheduleThumbnailSelfHealing === 'function') {
+          scheduleThumbnailSelfHealing(1500);
+        }
       }
     } finally {
       this.isProcessing = false;
@@ -1151,6 +1154,9 @@ export class ThumbnailQueueManager {
               }
               this.src = fallback;
             }
+            if (typeof scheduleThumbnailSelfHealing === 'function') {
+              scheduleThumbnailSelfHealing(2000);
+            }
           };
           if (img.complete && img.naturalWidth > 0 && isMatch()) {
             img.classList.remove('loading');
@@ -1226,4 +1232,35 @@ export function checkThumbnailSelfHealing() {
 }
 
 window.checkThumbnailSelfHealing = checkThumbnailSelfHealing;
-setInterval(checkThumbnailSelfHealing, 5000);
+
+let _selfHealingTimer = null;
+
+/**
+ * 自己修復プロセスをオンデマンドでスケジュール実行する（不要な定常ポーリングを排除しCPU負荷を低減）
+ * @param {number} [delay=2500] - 実行までの遅延時間 (ms)
+ */
+export function scheduleThumbnailSelfHealing(delay = 2500) {
+  if (_selfHealingTimer) {
+    clearTimeout(_selfHealingTimer);
+  }
+  _selfHealingTimer = setTimeout(() => {
+    _selfHealingTimer = null;
+    checkThumbnailSelfHealing();
+  }, delay);
+}
+
+export function cancelThumbnailSelfHealing() {
+  if (_selfHealingTimer) {
+    clearTimeout(_selfHealingTimer);
+    _selfHealingTimer = null;
+  }
+}
+
+window.scheduleThumbnailSelfHealing = scheduleThumbnailSelfHealing;
+
+// ブラウザ/ウィンドウのフォーカス復帰時に自己修復を遅延トリガー（AGENTS.md Sec 3 準拠のイベント駆動設計）
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('focus', () => {
+    scheduleThumbnailSelfHealing(500);
+  });
+}

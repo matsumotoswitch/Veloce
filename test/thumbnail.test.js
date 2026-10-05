@@ -679,6 +679,31 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(retriesStuck).toBe(1);
       expect(window.thumbnailManager.enqueuePriority).toHaveBeenCalledWith('C:/images/stuck.png');
     });
+
+    it('scheduleThumbnailSelfHealing should debounce and trigger self-healing on-demand', async () => {
+      vi.useFakeTimers();
+      const { scheduleThumbnailSelfHealing, cancelThumbnailSelfHealing, checkThumbnailSelfHealing } = await import('../src/renderer/renderer-thumbnails.js');
+
+      window.appState = { activeCenterPane: 'grid', dragState: { isAppDragging: false } };
+      window.uiManager = { _domByPath: new Map() };
+
+      scheduleThumbnailSelfHealing(1000);
+      scheduleThumbnailSelfHealing(500); // 連続スケジュール時のデバウンス
+
+      expect(vi.getTimerCount()).toBe(1);
+
+      // 500ms 経過後に自己修復が発火すること
+      vi.advanceTimersByTime(500);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // キャンセルの検証
+      scheduleThumbnailSelfHealing(1000);
+      expect(vi.getTimerCount()).toBe(1);
+      cancelThumbnailSelfHealing();
+      expect(vi.getTimerCount()).toBe(0);
+
+      vi.useRealTimers();
+    });
   });
 
   describe('Thumbnail Cache Rebuild Workflow & Persistence', () => {
