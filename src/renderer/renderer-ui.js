@@ -187,6 +187,10 @@ class UIManager {
 
     // マウスホイールのスクロール量を制御
     this.initWheelControl();
+
+    // スクロール方向の追跡（Phase 2: UX-2）
+    this._lastScrollTop = 0;
+    this.scrollDirection = 'down';
   }
 
   initWheelControl() {
@@ -1576,6 +1580,8 @@ class UIManager {
     }
 
     if (resetScroll) {
+      this._lastScrollTop = 0;
+      this.scrollDirection = 'down';
       if (this.elements.fileListBody) this.elements.fileListBody.replaceChildren();
       
       // フォルダ選択時と同様に、タブ切り替え時等も以前のサムネイル表示を確実にクリアする
@@ -1924,6 +1930,14 @@ class UIManager {
     }
 
     const scrollTop = container.scrollTop;
+    if (typeof this._lastScrollTop === 'number') {
+      if (scrollTop < this._lastScrollTop) {
+        this.scrollDirection = 'up';
+      } else if (scrollTop > this._lastScrollTop) {
+        this.scrollDirection = 'down';
+      }
+    }
+    this._lastScrollTop = scrollTop;
     const containerHeight = container.clientHeight || window.innerHeight;
 
     // 表示すべき行の計算 (上下に8行ずつのバッファ)
@@ -2081,23 +2095,36 @@ class UIManager {
       }
     }
 
-    // --- サムネイル画像描写の優先順序構築 ---
-    // ユーザーにスピード感を体験させるため、サムネイル描写の始点を「現在画面に表示されているファイルの先頭 (visibleStartIndex)」とし、
-    // 画面内アイテム (visibleStartIndex 〜 visibleEndIndex) -> 画面下側バッファ -> 画面上側バッファ の順に処理する。
+    // --- サムネイル画像描写の優先順序構築 (Phase 2: スクロール方向への動的適応) ---
+    // サムネイル描写の始点は常に「現在画面に表示されている領域 (visibleStartIndex 〜 visibleEndIndex)」を最優先とする。
+    // その後のバッファ領域は、スクロール方向（進行方向）に合わせて動的に優先度を切り替える：
+    // - 上スクロール時: 画面内 -> 画面上側バッファ -> 画面下側バッファ
+    // - 下スクロール/静止時: 画面内 -> 画面下側バッファ -> 画面上側バッファ
     const loadOrder = [];
-    // 1. 現在画面に表示されている領域（始点: visibleStartIndex）
+    // 1. 現在画面に表示されている領域（最優先・始点は visibleStartIndex）
     for (let i = visibleStartIndex; i <= visibleEndIndex; i++) {
       if (i >= startIndex && i <= endIndex) {
         loadOrder.push(i);
       }
     }
-    // 2. 画面下側バッファ (下スクロール方向)
-    for (let i = visibleEndIndex + 1; i <= endIndex; i++) {
-      loadOrder.push(i);
-    }
-    // 3. 画面上側バッファ (上側隠蔽領域)
-    for (let i = visibleStartIndex - 1; i >= startIndex; i--) {
-      loadOrder.push(i);
+    if (this.scrollDirection === 'up') {
+      // 2. 画面上側バッファ (上スクロール進行方向: 画面に近い側から上方へ)
+      for (let i = visibleStartIndex - 1; i >= startIndex; i--) {
+        loadOrder.push(i);
+      }
+      // 3. 画面下側バッファ (通過した領域)
+      for (let i = visibleEndIndex + 1; i <= endIndex; i++) {
+        loadOrder.push(i);
+      }
+    } else {
+      // 2. 画面下側バッファ (下スクロール進行方向: 画面直下から下方へ)
+      for (let i = visibleEndIndex + 1; i <= endIndex; i++) {
+        loadOrder.push(i);
+      }
+      // 3. 画面上側バッファ (通過した領域)
+      for (let i = visibleStartIndex - 1; i >= startIndex; i--) {
+        loadOrder.push(i);
+      }
     }
 
     const filesToEnqueue = [];

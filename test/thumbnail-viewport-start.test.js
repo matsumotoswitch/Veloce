@@ -286,4 +286,75 @@ describe('Thumbnail Viewport Start Priority (User Experience Optimization)', () 
     expect(queueManager.preloadQueue.length).toBe(0);
     expect(sharedAppState.preloadCursor).toBe(300);
   });
+
+  it('updateVirtualGrid should dynamically prioritize top buffer over bottom buffer when scrolling up (Phase 2)', async () => {
+    const totalFiles = 200;
+    const testFiles = Array.from({ length: totalFiles }, (_, i) => ({
+      path: `C:/images/img_${String(i).padStart(3, '0')}.png`,
+      name: `img_${String(i).padStart(3, '0')}.png`,
+      mtime: 1000 + i,
+      hasThumbnailCache: false
+    }));
+
+    sharedAppState.totalCount = totalFiles;
+    window.veloceAPI = {
+      getItems: vi.fn((offset, limit) => {
+        return Promise.resolve(testFiles.slice(offset, offset + limit));
+      })
+    };
+
+    let enqueuedBatches = [];
+    window.thumbnailManager = {
+      _preloadAnchor: 0,
+      _preloadWrapped: false,
+      resetPreload: vi.fn(),
+      enqueuePriorityBatch: vi.fn((paths) => {
+        enqueuedBatches.push(...paths);
+      }),
+      enqueuePriority: vi.fn((path) => {
+        enqueuedBatches.push(path);
+      }),
+      processNext: vi.fn()
+    };
+
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    Object.defineProperty(container, 'clientWidth', { value: 648, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 384, configurable: true });
+    // 最初は 1288px (約10行目)
+    Object.defineProperty(container, 'scrollTop', { value: 1288, writable: true, configurable: true });
+
+    const content = document.createElement('div');
+    content.className = 'virtual-content';
+    const spacer = document.createElement('div');
+    spacer.className = 'virtual-spacer';
+    container.appendChild(content);
+    container.appendChild(spacer);
+
+    const ui = new UIManager(sharedAppState);
+    ui.elements.thumbnailGrid = container;
+    ui.elements.thumbnailSizeSlider = { value: '120' };
+
+    // 1回目描画 (1288px, 初期状態・下スクロール方向)
+    await ui.updateVirtualGrid(true);
+    expect(ui.scrollDirection).toBe('down');
+
+    // 2回目描画: 上方向にスクロール (1288px -> 640px)
+    enqueuedBatches = [];
+    container.scrollTop = 640;
+    await ui.updateVirtualGrid(true);
+
+    expect(ui.scrollDirection).toBe('up');
+
+    // 画面内アイテム（img_020.png）が先頭にあること
+    expect(enqueuedBatches[0]).toBe('C:/images/img_020.png');
+
+    // 上スクロール時のバッファ優先度: 上側バッファ（img_019.png 等）が下側バッファ（img_040.png 等）より前にあること！
+    const indexOfImg19 = enqueuedBatches.indexOf('C:/images/img_019.png'); // 上側バッファ直近
+    const indexOfImg40 = enqueuedBatches.indexOf('C:/images/img_040.png'); // 下側バッファ直近
+
+    expect(indexOfImg19).toBeGreaterThan(-1);
+    expect(indexOfImg40).toBeGreaterThan(-1);
+    expect(indexOfImg19).toBeLessThan(indexOfImg40);
+  });
 });
