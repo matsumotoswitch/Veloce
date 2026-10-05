@@ -377,5 +377,13 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/\.viewer-metadata-overlay\s*\{[^}]*border-left:\s*1px solid var\(--border-color-light\);/);
     expect(cssContent).toMatch(/\.viewer-metadata-overlay \.prompt-look\s*\{[^}]*border-color:\s*var\(--border-color-light\);/);
   });
+
+  it('should define --viewer-bg-rgb and --marker-hud-bg tokens and use them for position markers', () => {
+    expect(cssContent).toContain('--viewer-bg-rgb: 19, 27, 30;');
+    expect(cssContent).toContain('--marker-hud-bg: rgba(var(--viewer-bg-rgb), 0.85);');
+    expect(cssContent).toMatch(/\.inspector-position-marker\s*\{[^}]*background-color:\s*var\(--marker-hud-bg\);/);
+    expect(cssContent).toMatch(/\.inspector-coord-badge\s*\{[^}]*background-color:\s*var\(--marker-hud-bg\);/);
+    expect(cssContent).not.toMatch(/\.inspector-position-marker\s*\{[^}]*background-color:\s*rgba\(19,\s*27,\s*30/);
+  });
 });
 

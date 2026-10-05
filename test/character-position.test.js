@@ -764,9 +764,13 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       const path = require('path');
       const inspectorCss = fs.readFileSync(path.resolve(__dirname, '../src/renderer/css/inspector.css'), 'utf-8');
 
-      // ダーク半透明背景が指定されていること
-      expect(inspectorCss).toMatch(/\.inspector-position-marker\s*\{[^}]*background-color:\s*rgba\(19,\s*27,\s*30,\s*0\.85\);/);
-      expect(inspectorCss).toMatch(/\.inspector-coord-badge\s*\{[^}]*background-color:\s*rgba\(19,\s*27,\s*30,\s*0\.85\);/);
+      // ダーク半透明背景が CSS トークン var(--marker-hud-bg) で指定されていること (AGENTS.md Sec 2 準拠)
+      expect(inspectorCss).toMatch(/\.inspector-position-marker\s*\{[^}]*background-color:\s*var\(--marker-hud-bg\);/);
+      expect(inspectorCss).toMatch(/\.inspector-coord-badge\s*\{[^}]*background-color:\s*var\(--marker-hud-bg\);/);
+
+      const variablesCss = fs.readFileSync(path.resolve(__dirname, '../src/common/css/variables.css'), 'utf-8');
+      expect(variablesCss).toContain('--viewer-bg-rgb: 19, 27, 30;');
+      expect(variablesCss).toContain('--marker-hud-bg: rgba(var(--viewer-bg-rgb), 0.85);');
 
       // 座標情報を表示する箇所のバッジサイズが、画像上のマーカーと同じ 22px × 22px に統一されていること
       expect(inspectorCss).toMatch(/\.inspector-coord-badge\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;[^}]*border:\s*2px solid/s);

@@ -1726,7 +1726,7 @@ class UIManager {
       items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
     }
 
-    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策）
+    // 非同期呼び出し完了時に最新スクロール位置との不整合を検知した場合は描画を破棄し、表示の同期整合性を維持する
     if (this.lastListStartIndex !== safeStartRow) {
       return;
     }
@@ -1940,7 +1940,7 @@ class UIManager {
       items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
     }
 
-    // 非同期呼び出し中にスクロールがさらに進んだ場合は古い結果を破棄（レースコンディション対策・ちらつき防止）
+    // 非同期呼び出し中にスクロールが遷移した場合は古い結果を破棄し、同期外れによるちらつきと表示崩れを防止する
     const currentScrollTop = container.scrollTop;
     const currentStartRow = Math.floor(Math.max(0, currentScrollTop - padding) / rowHeight);
     const currentSafeStartRow = Math.max(0, currentStartRow - 8);

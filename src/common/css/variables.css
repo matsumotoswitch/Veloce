@@ -55,6 +55,8 @@
   --input-bg: #000000;
   --dialog-bg: #1a2327;
   --viewer-bg: #131b1e;
+  --viewer-bg-rgb: 19, 27, 30;
+  --marker-hud-bg: rgba(var(--viewer-bg-rgb), 0.85);
 
   /* v1.11.0 Unifications */
   --transition-smooth: cubic-bezier(0.2, 0.8, 0.2, 1);

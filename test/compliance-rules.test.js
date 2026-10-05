@@ -25,6 +25,7 @@ describe('AGENTS.md & PLAN.md Compliance and Regression Guard', () => {
 
   const jsFiles = getAllFiles(srcDir, '.js');
   const htmlFiles = getAllFiles(srcDir, '.html');
+  const cssFiles = getAllFiles(srcDir, '.css');
 
   const cssContent = getFullCssContent();
 
@@ -95,6 +96,28 @@ describe('AGENTS.md & PLAN.md Compliance and Regression Guard', () => {
         const regex = new RegExp(term, 'g');
         const matches = cargoContent.match(regex);
         expect(matches, `Exaggerated term "${term}" found in Cargo.toml`).toBeNull();
+      }
+    });
+
+    it('should not contain exaggerated marketing buzzwords like "一瞬" in CSS sources (including comments)', () => {
+      const cssExaggeratedTerms = ['神速', '爆速', '一瞬'];
+      for (const file of cssFiles) {
+        for (const term of cssExaggeratedTerms) {
+          const regex = new RegExp(term, 'g');
+          const matches = file.content.match(regex);
+          expect(matches, `Exaggerated term "${term}" found in src/${file.name}`).toBeNull();
+        }
+      }
+    });
+
+    it('should not contain casual bug-fix comments like "レースコンディション対策" in JS and CSS sources', () => {
+      const casualTerms = ['レースコンディション対策', 'バグ回避', '回避策'];
+      for (const file of [...jsFiles, ...cssFiles]) {
+        for (const term of casualTerms) {
+          const regex = new RegExp(term, 'g');
+          const matches = file.content.match(regex);
+          expect(matches, `Casual comment "${term}" found in src/${file.name} (must be elevated to objective technical explanation)`).toBeNull();
+        }
       }
     });
   });

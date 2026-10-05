@@ -1038,7 +1038,7 @@ export class ThumbnailQueueManager {
       } else {
         console.warn(`[Thumbnail] ${filePath.split('\\').pop()} error:`, err);
 
-        // 書き込み中のファイルに対するレースコンディション対策:
+        // OSによるファイル書き込み完了前の不完全データ読み込みを防止するため遅延再試行を行う:
         // リトライカウントを管理し、最大3回まで遅延リトライする (1s, 2s, 3s)
         const retryCount = (this._retryMap ? this._retryMap.get(filePath) : 0) || 0;
         if (retryCount < 3) {

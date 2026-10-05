@@ -456,7 +456,7 @@ html.viewer-html,
   }
 }
 
-/* プロンプト・メタデータ消去: マイルドな視覚的逆再生 (一瞬-3pxだけわずかにクッションして右へスライド退場) */
+/* プロンプト・メタデータ消去: マイルドな視覚的逆再生 (-3pxクッションしてから右へスライド退場) */
 @keyframes viewerPromptHide {
   0% {
     transform: translateX(0);
