@@ -235,15 +235,84 @@ describe('Virtual Scroll Reflow Optimization', () => {
     };
 
     try {
+      const initialSetInstance = appState.visiblePathSet;
       await ui.updateVirtualList(true);
 
       expect(appState.visiblePathSet).toBeInstanceOf(Set);
       expect(appState.visiblePathSet.size).toBeGreaterThan(0);
       expect(appState.visiblePathSet.has('C:/files/list_file_0.png')).toBe(true);
 
-      // totalCount が 0 になったとき、visiblePathSet がクリアされること
+      // 既存の Set インスタンスが再利用され、オブジェクト再生成（GC圧）が発生しないこと
+      expect(appState.visiblePathSet).toBe(initialSetInstance);
+
+      // スクロール位置が更新されて再描画された際も同一インスタンス参照が維持されること
+      container.scrollTop = 56;
+      await ui.updateVirtualList();
+      expect(appState.visiblePathSet).toBe(initialSetInstance);
+
+      // totalCount が 0 になったとき、同一インスタンスがクリアされること
       appState.totalCount = 0;
       await ui.updateVirtualList(true);
+      expect(appState.visiblePathSet).toBe(initialSetInstance);
+      expect(appState.visiblePathSet.size).toBe(0);
+    } finally {
+      document.getElementById = originalGetElementById;
+    }
+  });
+
+  it('updateVirtualGrid should reuse the same appState.visiblePathSet instance across scroll cycles', async () => {
+    appState.totalCount = 30;
+    appState.selection = new Set();
+    appState.ratings = {};
+    appState.dragState = { isAppDragging: false };
+    appState.initialChunk = null;
+    const initialSetInstance = new Set();
+    appState.visiblePathSet = initialSetInstance;
+
+    const files = Array.from({ length: 30 }, (_, i) => ({
+      path: `C:/files/grid_file_${i}.png`,
+      name: `grid_file_${i}.png`,
+      ext: '.png',
+      size: 2048,
+      mtime: 2000
+    }));
+
+    window.veloceAPI = {
+      getItems: vi.fn().mockImplementation((offset, limit) => Promise.resolve(files.slice(offset, offset + limit)))
+    };
+
+    const ui = new UIManager(appState);
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    Object.defineProperty(container, 'clientWidth', { value: 600, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    const content = document.createElement('div');
+    content.className = 'virtual-content';
+    const spacer = document.createElement('div');
+    spacer.className = 'virtual-spacer';
+    container.appendChild(content);
+    container.appendChild(spacer);
+
+    ui.elements.thumbnailGrid = container;
+
+    const originalGetElementById = document.getElementById;
+    document.getElementById = (id) => {
+      if (id === 'center-bottom') return container;
+      return originalGetElementById.call(document, id);
+    };
+
+    try {
+      ui.updateVirtualGrid(true);
+
+      // 初期同期後、同一インスタンスが維持されていること
+      expect(appState.visiblePathSet).toBe(initialSetInstance);
+
+      // totalCount が 0 の場合も同一インスタンスが clear されること
+      appState.totalCount = 0;
+      ui.updateVirtualGrid(true);
+      expect(appState.visiblePathSet).toBe(initialSetInstance);
       expect(appState.visiblePathSet.size).toBe(0);
     } finally {
       document.getElementById = originalGetElementById;

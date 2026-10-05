@@ -1125,8 +1125,6 @@ class UIManager {
         }
       }
     }
-
-    this._lastRenderedSelection = new Set(currentSelection);
   }
 
   /**
@@ -1642,7 +1640,13 @@ class UIManager {
     if (appState.totalCount === 0) {
       tbody.replaceChildren();
       if (this._listDomByPath) this._listDomByPath.clear();
-      appState.visiblePathSet = new Set();
+      if (typeof appState !== 'undefined') {
+        if (appState.visiblePathSet instanceof Set) {
+          appState.visiblePathSet.clear();
+        } else {
+          appState.visiblePathSet = new Set();
+        }
+      }
       this.lastListStartIndex = -1;
       this.lastListEndIndex = -1;
       return;
@@ -1804,14 +1808,19 @@ class UIManager {
       }
     }
 
-    // visiblePathSet を _listDomByPath から構築（リスト表示モード時の可視パス集合同期）
-    const newVisibleSet = new Set();
+    // visiblePathSet を _listDomByPath から構築（既存Setを再利用してスクロール毎フレームのGC圧を根絶）
+    let visibleSet = (typeof appState !== 'undefined' && appState.visiblePathSet instanceof Set)
+      ? appState.visiblePathSet
+      : new Set();
+    visibleSet.clear();
     if (this._listDomByPath) {
       for (const fp of this._listDomByPath.keys()) {
-        newVisibleSet.add(fp);
+        visibleSet.add(fp);
       }
     }
-    appState.visiblePathSet = newVisibleSet;
+    if (typeof appState !== 'undefined') {
+      appState.visiblePathSet = visibleSet;
+    }
 
     // スクロール位置を同期復元する場合のみレイアウトを確定させ、ジャンプ時の描画遅延を防止（通常スクロール時の不要Reflowを排除）
     if (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) {
@@ -1862,7 +1871,13 @@ class UIManager {
     if (appState.totalCount === 0) {
       content.replaceChildren();
       if (this._domByPath) this._domByPath.clear();
-      appState.visiblePathSet = new Set();
+      if (typeof appState !== 'undefined') {
+        if (appState.visiblePathSet instanceof Set) {
+          appState.visiblePathSet.clear();
+        } else {
+          appState.visiblePathSet = new Set();
+        }
+      }
       spacer.style.height = '0px';
       const emptyContainer = container.querySelector('.empty-state-container');
       if (emptyContainer) {
@@ -2208,14 +2223,19 @@ class UIManager {
       void content.offsetHeight;
     }
 
-    // visiblePathSet を _domByPath から構築（_domByPath はループ内 L1671 で既に最新化済み）
-    const newVisibleSet = new Set();
+    // visiblePathSet を _domByPath から構築（既存Setを再利用してスクロール毎フレームのGC圧を根絶）
+    let visibleSet = (typeof appState !== 'undefined' && appState.visiblePathSet instanceof Set)
+      ? appState.visiblePathSet
+      : new Set();
+    visibleSet.clear();
     if (this._domByPath) {
       for (const fp of this._domByPath.keys()) {
-        newVisibleSet.add(fp);
+        visibleSet.add(fp);
       }
     }
-    appState.visiblePathSet = newVisibleSet;
+    if (typeof appState !== 'undefined') {
+      appState.visiblePathSet = visibleSet;
+    }
 
     // --- ここでようやく enqueuePriority を呼ぶ ---
     if (filesToEnqueue.length > 0 && window.thumbnailManager) {

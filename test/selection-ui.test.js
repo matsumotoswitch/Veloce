@@ -116,6 +116,15 @@ describe('UIManager.updateSelectionUI', () => {
     expect(elapsed).toBeLessThan(50);
   });
 
+  it('should not allocate unused _lastRenderedSelection Set instance to prevent GC pressure', () => {
+    uiManager.state.selection.add(1);
+    uiManager.state.selection.add(2);
+    uiManager.updateSelectionUI();
+
+    // 未参照の _lastRenderedSelection が不要に生成・保持されていないこと
+    expect(uiManager._lastRenderedSelection).toBeUndefined();
+  });
+
   it('should format bytes into human-readable strings correctly', async () => {
     const { formatBytesHuman } = await import('../src/renderer/renderer-ui.js');
     expect(formatBytesHuman(0)).toBe('0 B');
