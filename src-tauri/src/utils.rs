@@ -214,3 +214,72 @@ pub fn debug_log(msg: String) {
 pub fn get_license_text() -> String {
     include_str!("../../LICENSE.md").to_string()
 }
+
+/// パス文字列と mtime (更新日時) から xxHash (xxh3_64) を中間ヒープアロケーションなしで高速計算する
+///
+/// 入力バイト列: `"{path}_{mtime}"` の UTF-8 バイト列（旧実装と 100% 互換）
+/// スタック上の固定バッファに mtime をフォーマットし、ストリーミングハッシャーに逐次投入することで
+/// `format!("{}_{}", path, mtime)` によるヒープアロケーション（String割り当て）を排除する。
+pub fn hash_path_mtime<T: std::fmt::Display>(path: &str, mtime: T) -> u64 {
+    use std::io::Write;
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+    hasher.update(path.as_bytes());
+    hasher.update(b"_");
+    let mut num_buf = [0u8; 32];
+    let mut cursor = std::io::Cursor::new(&mut num_buf[..]);
+    let _ = write!(cursor, "{}", mtime);
+    let written = cursor.position() as usize;
+    hasher.update(&num_buf[..written]);
+    hasher.digest()
+}
+
+/// パスと mtime から 16文字の16進数キャッシュキー (`{:016x}`) を生成する
+pub fn hash_path_mtime_hex<T: std::fmt::Display>(path: &str, mtime: T) -> String {
+    format!("{:016x}", hash_path_mtime(path, mtime))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_path_mtime_matches_legacy_format() {
+        let u64_cases = [
+            ("C:\\images\\photo.png", 1700000000u64),
+            ("D:/novelai/generation_001.webp", 1712345678901u64),
+            ("\\\\?\\UNC\\server\\share\\art.png", 0u64),
+            ("日本語パス/テスト_画像.png", 999999999999u64),
+        ];
+
+        for (path, mtime) in u64_cases {
+            let legacy_digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", path, mtime).as_bytes());
+            let optimized_digest = hash_path_mtime(path, mtime);
+            assert_eq!(
+                legacy_digest, optimized_digest,
+                "Hash mismatch for path '{}' and mtime '{}'",
+                path, mtime
+            );
+
+            let legacy_hex = format!("{:016x}", legacy_digest);
+            let optimized_hex = hash_path_mtime_hex(path, mtime);
+            assert_eq!(legacy_hex, optimized_hex);
+        }
+
+        let i64_cases = [
+            ("C:\\images\\photo.png", 1700000000i64),
+            ("D:/novelai/generation_001.webp", 1712345678901i64),
+            ("\\\\?\\UNC\\server\\share\\art.png", 0i64),
+            ("日本語パス/テスト_画像.png", 999999999999i64),
+        ];
+
+        for (path, mtime) in i64_cases {
+            let legacy_digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", path, mtime).as_bytes());
+            let optimized_digest = hash_path_mtime(path, mtime);
+            assert_eq!(legacy_digest, optimized_digest);
+
+            let legacy_hex = format!("{:016x}", legacy_digest);
+            let optimized_hex = hash_path_mtime_hex(path, mtime);
+            assert_eq!(legacy_hex, optimized_hex);
+        }
+    }
+}

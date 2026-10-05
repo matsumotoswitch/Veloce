@@ -120,8 +120,7 @@ pub fn start_local_video_server(
                         }
 
                         let clean_path = path_str.replace("\\\\?\\", "");
-                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-                        let hash_key = format!("{:016x}", digest);
+                        let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
 
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
                         let _ = db_tx.blocking_send(DbMsg::SaveThumbnail {
@@ -192,9 +191,9 @@ pub fn start_local_video_server(
                             if cache_bytes.is_empty() && !path_str.is_empty() {
                                 let norm_unc = normalize_unc_path(&path_str).into_owned();
                                 let stripped = if path_str.starts_with(r"\\?\") { &path_str[4..] } else { path_str.as_str() };
-                                let hash_norm = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", norm_unc, mtime).as_bytes()));
-                                let hash_strip = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", stripped, mtime).as_bytes()));
-                                let hash_raw = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", path_str, mtime).as_bytes()));
+                                let hash_norm = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
+                                let hash_strip = crate::utils::hash_path_mtime_hex(stripped, mtime);
+                                let hash_raw = crate::utils::hash_path_mtime_hex(&path_str, mtime);
 
                                 if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
                                     if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {

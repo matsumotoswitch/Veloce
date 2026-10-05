@@ -1159,10 +1159,8 @@ fn load_directory(
                     .enumerate()
                     .map(|(i, f)| {
                         let clean = f.path.replace("\\\\?\\", "");
-                        let digest = xxhash_rust::xxh3::xxh3_64(
-                            format!("{}_{}", clean, f.mtime).as_bytes()
-                        );
-                        (format!("{:016x}", digest), i)
+                        let hash_key = crate::utils::hash_path_mtime_hex(&clean, f.mtime);
+                        (hash_key, i)
                     })
                     .collect();
 
@@ -2139,8 +2137,7 @@ fn get_full_metadata_for_path_with_stat_inner(
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     auto_save: bool,
 ) -> (FullMetadata, u64, u64, Option<MetadataCacheRow>) {
-    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime_millis).as_bytes());
-    let hash_key = format!("{:016x}", digest);
+    let hash_key = crate::utils::hash_path_mtime_hex(file_path, mtime_millis);
 
     if let Ok(conn) = db_conn.get() {
         if let Ok(mut stmt) = conn.prepare_cached("SELECT metadata FROM cache WHERE hash_key = ?") {
@@ -2651,8 +2648,7 @@ fn build_metadata_cache_row(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes());
-        let hash_key = format!("{:016x}", digest);
+        let hash_key = crate::utils::hash_path_mtime_hex(file_path, mtime);
 
         Some(MetadataCacheRow {
             hash_key,
@@ -3469,10 +3465,7 @@ async fn get_cached_thumbnail_batch(
         use rayon::prelude::*;
         files_with_mtime.into_par_iter().filter_map(|(file_path, mtime)| {
             let clean_path = file_path.replace("\\\\?\\", "");
-            let digest = xxhash_rust::xxh3::xxh3_64(
-                format!("{}_{}", clean_path, mtime).as_bytes()
-            );
-            let hash_key = format!("{:016x}", digest);
+            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
 
             // DB のみを参照（生成しない）
             if let Ok(conn) = db_conn.get() {
@@ -3790,9 +3783,9 @@ fn generate_thumbnail_inner_with_hash(
         if !file_path.is_empty() {
             let norm_unc = normalize_unc_path(file_path).into_owned();
             let stripped = if file_path.starts_with(r"\\?\") { &file_path[4..] } else { file_path };
-            let hash_norm = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", norm_unc, mtime).as_bytes()));
-            let hash_strip = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", stripped, mtime).as_bytes()));
-            let hash_raw = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", file_path, mtime).as_bytes()));
+            let hash_norm = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
+            let hash_strip = crate::utils::hash_path_mtime_hex(stripped, mtime);
+            let hash_raw = crate::utils::hash_path_mtime_hex(file_path, mtime);
 
             if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
                 if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {
@@ -3824,7 +3817,7 @@ fn generate_thumbnail_inner_with_hash(
         if let Some(bytes) = generate_video_thumbnail_sync(file_path) {
             if let Ok(conn) = db_conn.get() {
                 let clean_path = normalize_unc_path(file_path).into_owned();
-                let hash_key = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes()));
+                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
                 let _ = conn.execute(
                     "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
@@ -3863,8 +3856,7 @@ async fn save_thumbnail(
     };
 
     let clean_path = file_path.replace("\\\\?\\", "");
-    let digest_clean = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-    let hash_key = format!("{:016x}", digest_clean);
+    let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
 
     // b64_data is expected to be "data:image/jpeg;base64,..."
     let b64 = if let Some(idx) = b64_data.find(',') {
@@ -3926,8 +3918,7 @@ async fn precache_directory_recursively(
                 .unwrap_or(0);
 
             let clean_path = path.replace("\\\\?\\", "");
-            let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-            let hash_key = format!("{:016x}", digest);
+            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
 
             let mut has_both = false;
             if let Ok(conn) = db_conn.get() {
@@ -4110,8 +4101,7 @@ async fn clear_metadata_cache(
                 if let Ok(meta) = std::fs::metadata(&clean_path) {
                     if let Ok(modified) = meta.modified() {
                         let mtime = modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                        let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
-                        let hash_key = format!("{:016x}", digest);
+                        let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
                         let _ = stmt_hash.execute([&hash_key]);
                     }
                 }
@@ -4263,8 +4253,7 @@ pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) 
                     let mtime: u64 = row.get(0).unwrap_or(0);
                     let old_hash_key: String = row.get(1).unwrap_or_default();
 
-                    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", new_clean, mtime).as_bytes());
-                    let new_hash_key = format!("{:016x}", digest);
+                    let new_hash_key = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
 
                     let _ = conn.execute(
                         "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
@@ -4426,8 +4415,7 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
                         continue;
                     };
                     
-                    let digest = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", new_path, mtime).as_bytes());
-                    let new_hash_key = format!("{:016x}", digest);
+                    let new_hash_key = crate::utils::hash_path_mtime_hex(&new_path, mtime);
                     
                     updates.push((new_path, new_hash_key, old_hash_key));
                 }
@@ -7470,6 +7458,10 @@ mod viewer_tests {
         let clean_path = raw_path.replace("\\\\?\\", "");
         let digest1 = xxhash_rust::xxh3::xxh3_64(format!("{}_{}", clean_path, mtime).as_bytes());
         let hash_key1 = format!("{:016x}", digest1);
+
+        // 新設したゼロアロケーション関数が旧来の format!("{}_{}") と完全一致すること
+        let zero_alloc_hash = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+        assert_eq!(hash_key1, zero_alloc_hash, "ゼロアロケーションハッシュ計算結果は旧来の文字列ハッシュと完全一致すべき");
 
         // 既に正規化済みのパスでも同一のハッシュキーが生成されること
         let normalized_path = "C:\\images\\sample.png";
