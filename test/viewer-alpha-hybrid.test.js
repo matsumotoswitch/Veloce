@@ -67,7 +67,7 @@ describe('Viewer Alpha Overlay (A key) & Arrange Viewers (L key)', () => {
     document.body.innerHTML = '';
   });
 
-  it('should toggle alpha overlay ON and OFF via toggleAlphaOverlayMode (A key)', async () => {
+  it('should toggle alpha overlay ON and OFF via toggleAlphaOverlayMode (A key) without showing toast', async () => {
     // 1. AキーでアルファオーバーレイをON
     await toggleAlphaOverlayMode();
 
@@ -76,14 +76,9 @@ describe('Viewer Alpha Overlay (A key) & Arrange Viewers (L key)', () => {
     expect(mockImg.src).toBe('data:image/png;base64,mockHybridOverlayData');
     expect(mockGetAlphaOverlayImage).toHaveBeenCalledWith('E:/test/stealth.png');
 
-    // トースト表示の検証
+    // トースト通知が表示されないこと（Aキー押下時の通知は不要）
     const toast = document.querySelector('.toast-message');
-    expect(toast).not.toBeNull();
-    expect(toast.textContent).toContain('アルファオーバーレイ: ON');
-    expect(toast.textContent).toContain('16,536 px');
-    expect(toast.textContent).toContain('166 列');
-    expect(toast.textContent).toContain('2.0 KiB');
-    expect(toast.textContent).toContain('15.50%');
+    expect(toast).toBeNull();
 
     // メタデータテキストオーバーレイは独立しているため表示されないこと
     const metaOverlay = document.getElementById('viewer-metadata-overlay');
@@ -95,6 +90,10 @@ describe('Viewer Alpha Overlay (A key) & Arrange Viewers (L key)', () => {
     expect(viewerState.isAlphaOverlayMode).toBe(false);
     expect(viewerState.originalSrc).toBeNull();
     expect(mockImg.src).toBe('asset://original-image.png');
+
+    // OFF時もトースト通知が表示されないこと
+    const toastOff = document.querySelector('.toast-message');
+    expect(toastOff).toBeNull();
   });
 
   it('should trigger toggleAlphaOverlayMode on A key press', async () => {
@@ -135,7 +134,7 @@ describe('Viewer Alpha Overlay (A key) & Arrange Viewers (L key)', () => {
     expect(metaOverlay.classList.contains('show')).toBe(false);
   });
 
-  it('should show toast and revert mode when image has no alpha metadata', async () => {
+  it('should revert mode without showing toast when image has no alpha metadata', async () => {
     mockGetAlphaOverlayImage.mockRejectedValueOnce(new Error('No stealth metadata signature found'));
 
     await toggleAlphaOverlayMode();
@@ -143,9 +142,9 @@ describe('Viewer Alpha Overlay (A key) & Arrange Viewers (L key)', () => {
     expect(viewerState.isAlphaOverlayMode).toBe(false);
     expect(mockImg.src).toBe('asset://original-image.png');
 
+    // エラー時もトースト通知が表示されないこと
     const toast = document.querySelector('.toast-message');
-    expect(toast).not.toBeNull();
-    expect(toast.textContent).toContain('この画像にはアルファチャンネルのメタデータが存在しません');
+    expect(toast).toBeNull();
   });
 
   it('should handle auto-follow when navigating images with alpha overlay ON', async () => {

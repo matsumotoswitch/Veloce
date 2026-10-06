@@ -563,7 +563,6 @@ export async function applyAlphaOverlay(imgEl, filePath, isAutoFollow = false) {
           viewerState.originalSrc = null;
         }
         viewerState.isAlphaOverlayMode = false;
-        showToast('この画像にはアルファチャンネルのメタデータが存在しません', 2500, 'warning');
       }
       return;
     }
@@ -575,10 +574,6 @@ export async function applyAlphaOverlay(imgEl, filePath, isAutoFollow = false) {
 
     imgEl.src = result.data_url;
     viewerState.isAlphaOverlayMode = true;
-
-    const kib = (result.payload_bytes / 1024).toFixed(1);
-    const pct = result.coverage_percent.toFixed(2);
-    showToast(`アルファオーバーレイ: ON (${result.total_pixels.toLocaleString()} px / ${result.occupied_columns} 列 / ${kib} KiB / 占有率 ${pct}%)`, 3500, 'info');
   } catch (err) {
     console.error('Failed to apply alpha overlay:', err);
     if (!isAutoFollow) {
@@ -587,7 +582,6 @@ export async function applyAlphaOverlay(imgEl, filePath, isAutoFollow = false) {
         viewerState.originalSrc = null;
       }
       viewerState.isAlphaOverlayMode = false;
-      showToast('この画像にはアルファチャンネルのメタデータが存在しません', 2500, 'warning');
     }
   }
 }
@@ -599,7 +593,6 @@ export async function applyAlphaOverlay(imgEl, filePath, isAutoFollow = false) {
 export async function toggleAlphaOverlayMode(customImgEl = null) {
   const imgEl = customImgEl || currentViewerImg || (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
   if (!imgEl || imgEl.tagName !== 'IMG') {
-    showToast('アルファオーバーレイは静止画像（PNG/WebP）のみ対応しています', 2000, 'warning');
     return;
   }
 
@@ -613,7 +606,6 @@ export async function toggleAlphaOverlayMode(customImgEl = null) {
       imgEl.src = viewerState.originalSrc;
       viewerState.originalSrc = null;
     }
-    showToast('アルファオーバーレイ: OFF', 1500, 'info');
     return;
   }
 
