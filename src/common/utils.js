@@ -84,3 +84,14 @@ export function getStreamUrl(filePath, baseSrc) {
   }
   return baseSrc;
 }
+
+/**
+ * 対象ファイルが動画形式（MP4/WebM/AVI/MKV）であるかを判定する
+ * @param {string} filePath - ファイルパス
+ * @returns {boolean} 動画形式であれば true
+ */
+export function isVideoFile(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  const lower = filePath.toLowerCase();
+  return lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.avi') || lower.endsWith('.mkv');
+}

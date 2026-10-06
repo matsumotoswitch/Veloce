@@ -443,4 +443,61 @@ describe('Thumbnail Viewport Start Priority (User Experience Optimization)', () 
     expect(calledSet instanceof Set).toBe(true);
     expect(calledSet.size).toBeGreaterThan(0);
   });
+
+  it('ThumbnailQueueManager should limit concurrent video tasks and prioritize static images when video slots are full (Phase 4)', () => {
+    // concurrency = 4 の場合、maxVideoConcurrency = 1 となる
+    const queueManager = new ThumbnailQueueManager(4);
+    expect(queueManager.maxVideoConcurrency).toBe(1);
+
+    const startedTasks = [];
+    queueManager.runTask = vi.fn((filePath) => {
+      startedTasks.push(filePath);
+      // 自動完了させずに保持
+    });
+
+    const video1 = 'C:/media/video1.mp4';
+    const video2 = 'C:/media/video2.mp4';
+    const image1 = 'C:/media/image1.png';
+    const image2 = 'C:/media/image2.png';
+
+    // 画面内アイテムとして設定（isVisible = true）
+    sharedAppState.viewportPathSet = new Set([video1, video2, image1, image2]);
+
+    // 優先キューに [video1, video2, image1, image2] を投入
+    // processNext を一時停止して投入
+    queueManager.processNext = vi.fn();
+    queueManager.enqueuePriorityBatch([video1, video2, image1, image2], true);
+
+    expect(queueManager.priorityQueue.length).toBe(4);
+
+    // 本来の processNext 実装を復元してタスク抽出を実行
+    delete queueManager.processNext;
+    queueManager.processNext();
+
+    // 検証:
+    // 1. video1.mp4 は開始され、動画枠（1枠）が埋まる
+    // 2. video2.mp4 は動画枠が満杯のためスキップされる
+    // 3. 後続の image1.png と image2.png がブロックされずに並行起動される！
+    expect(startedTasks).toContain(video1);
+    expect(startedTasks).toContain(image1);
+    expect(startedTasks).toContain(image2);
+    expect(startedTasks).not.toContain(video2);
+
+    expect(queueManager.activeVideoTasks.has(video1)).toBe(true);
+    expect(queueManager.activeVideoTasks.size).toBe(1);
+    expect(queueManager.activeTasks.size).toBe(3);
+
+    // video2.mp4 はキュー内に待機していること
+    expect(queueManager.priorityQueue.length).toBe(1);
+    expect(queueManager.priorityQueue[0].filePath).toBe(video2);
+
+    // video1.mp4 が完了して枠が空いた状態をシミュレート
+    queueManager.activeTasks.delete(video1);
+    queueManager.activeVideoTasks.delete(video1);
+
+    // 次の processNext で video2.mp4 が開始されること
+    queueManager.processNext();
+    expect(startedTasks).toContain(video2);
+    expect(queueManager.activeVideoTasks.has(video2)).toBe(true);
+  });
 });

@@ -22,7 +22,8 @@
 
 import { appState, thumbnailState } from './renderer-state.js';
 import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL } from './renderer-ui.js';
-import { getStreamUrl, debounce } from '../common/utils.js';
+import { getStreamUrl, debounce, isVideoFile } from '../common/utils.js';
+export { isVideoFile };
 
 /**
  * サムネイルCanvas塗りつぶし背景色 (var(--bg-darker) から動的解決)
@@ -646,6 +647,8 @@ export class ThumbnailQueueManager {
     this._preloadAnchor = 0;
     this._preloadWrapped = false;
     this._preloadFetchId = 0;
+    this.activeVideoTasks = new Set();
+    this.maxVideoConcurrency = Math.max(1, Math.min(2, Math.floor((concurrency || 4) / 3)));
   }
 
   enqueuePriority(filePath, skipDbCheck = false) {
@@ -761,6 +764,7 @@ export class ThumbnailQueueManager {
     this.abortController = new AbortController();
     
     this.activeTasks.clear();
+    if (this.activeVideoTasks) this.activeVideoTasks.clear();
     if (this._dirtyTasks) this._dirtyTasks.clear();
     if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
       window.debouncedUpdateSmartFolderCounts();
@@ -863,22 +867,35 @@ export class ThumbnailQueueManager {
       while (this.activeTasks.size < this.concurrency) {
         let targetFile = null;
         let targetSkipDbCheck = false;
+        const isVideoSlotAvailable = (this.activeVideoTasks ? this.activeVideoTasks.size : 0) < this.maxVideoConcurrency;
 
         // 1. Priority Queue
         if (this.priorityQueue.length > 0) {
           appState.isPreloadRunning = false;
-          // 最優先: 現在画面内に表示されているアイテム（始点: 画面先頭ファイル）
-          let targetIndex = this.priorityQueue.findIndex(req => viewportPaths.has(req.filePath));
+          // 最優先: 現在画面内に表示されているアイテム（始点: 画面先頭ファイル）かつ動画枠上限に達していないもの
+          let targetIndex = this.priorityQueue.findIndex(req => 
+            viewportPaths.has(req.filePath) && (!isVideoFile(req.filePath) || isVideoSlotAvailable)
+          );
           let isVisible = true;
           
-          // 画面内に無ければ、バッファ領域（visiblePaths）にあるものを探す
+          // 画面内に無ければ、バッファ領域（visiblePaths）かつ動画枠上限に達していないものを探す
           if (targetIndex === -1) {
-            targetIndex = this.priorityQueue.findIndex(req => visiblePaths.has(req.filePath));
+            targetIndex = this.priorityQueue.findIndex(req => 
+              visiblePaths.has(req.filePath) && (!isVideoFile(req.filePath) || isVideoSlotAvailable)
+            );
           }
 
+          // バッファ領域にも無ければ、キュー内のスロット利用可能な先頭タスク
           if (targetIndex === -1) {
-            targetIndex = 0;
+            targetIndex = this.priorityQueue.findIndex(req => 
+              !isVideoFile(req.filePath) || isVideoSlotAvailable
+            );
             isVisible = false;
+          }
+
+          // 優先キュー内の残タスクがすべて動画であり、動画並行枠の上限に達している場合は待機
+          if (targetIndex === -1) {
+            break;
           }
 
           // 表示中ではないアイテム（スクロールで通り過ぎたアイテム等）の処理時は、
@@ -957,9 +974,11 @@ export class ThumbnailQueueManager {
           }
           appState.isPreloadRunning = true;
           let found = false;
-          while (this.preloadQueue.length > 0) {
-            const p = this.preloadQueue.shift();
+          for (let i = 0; i < this.preloadQueue.length; i++) {
+            const p = this.preloadQueue[i];
             if (appState.thumbnailUrls.has(p)) {
+              this.preloadQueue.splice(i, 1);
+              i--;
               if (this._trackedPaths && this._trackedPaths.has(p)) {
                 this._trackedPaths.delete(p);
                 this.completedCount++;
@@ -967,9 +986,11 @@ export class ThumbnailQueueManager {
               }
               if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
             } else if (!this.activeTasks.has(p)) {
-              targetFile = p;
-              found = true;
-              break;
+              if (!isVideoFile(p) || isVideoSlotAvailable) {
+                targetFile = this.preloadQueue.splice(i, 1)[0];
+                found = true;
+                break;
+              }
             }
           }
           if (!found) {
@@ -979,13 +1000,17 @@ export class ThumbnailQueueManager {
             if (isFinished) {
               appState.isPreloadRunning = false;
             }
-            continue;
+            break;
           }
         }
 
         if (!targetFile) break;
 
         this.activeTasks.add(targetFile);
+        if (isVideoFile(targetFile)) {
+          if (!this.activeVideoTasks) this.activeVideoTasks = new Set();
+          this.activeVideoTasks.add(targetFile);
+        }
         // 個別タスクを非同期で起動（完了次第 updateDOM → processNext を呼ぶ）
         this.runTask(targetFile, targetSkipDbCheck);
       }
@@ -1127,6 +1152,9 @@ export class ThumbnailQueueManager {
         }
       }
     } finally {
+      if (this.activeVideoTasks) {
+        this.activeVideoTasks.delete(filePath);
+      }
       if (!signal.aborted) {
         this.activeTasks.delete(filePath);
         const isTracked = this._trackedPaths && this._trackedPaths.has(filePath);
