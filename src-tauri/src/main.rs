@@ -4876,6 +4876,15 @@ pub fn safe_checkpoint_wal(db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionMan
     let _ = rx.recv_timeout(timeout);
 }
 
+/// アプリ終了時のデータベースWALチェックポイント処理を実行する。
+/// 
+/// キャッシュDB (`veloce_cache.db`) および設定DB (`veloce_settings.db`) の両方に対して
+/// タイムアウト付きで安全に `wal_checkpoint(TRUNCATE)` を発行し、WALファイルを 0 バイトへ切り詰める。
+pub fn perform_shutdown_checkpoints(state: &AppState) {
+    safe_checkpoint_wal(&state.db_conn, std::time::Duration::from_millis(500));
+    safe_checkpoint_wal(&state.settings_db_conn, std::time::Duration::from_millis(300));
+}
+
 /// アプリケーションを安全かつ確実に終了する。
 /// 
 /// `CloseRequested` や `Destroyed` などの複数イベントによる二重実行を防止し、
@@ -4886,7 +4895,7 @@ pub fn shutdown_app(app_state: Option<&AppState>) {
     }
 
     if let Some(state) = app_state {
-        safe_checkpoint_wal(&state.db_conn, std::time::Duration::from_millis(500));
+        perform_shutdown_checkpoints(state);
     }
 
     std::process::exit(0);
@@ -8934,6 +8943,64 @@ mod viewer_tests {
             "コネクション枯渇・ロック競合時でも、指定タイムアウト内に安全に復帰すること。所要時間: {:?}",
             elapsed
         );
+    }
+
+    #[test]
+    fn test_perform_shutdown_checkpoints_truncates_both_wals() {
+        use super::perform_shutdown_checkpoints;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_db_path = temp_dir.path().join("veloce_cache.db");
+        let settings_db_path = temp_dir.path().join("veloce_settings.db");
+
+        let cache_manager = r2d2_sqlite::SqliteConnectionManager::file(&cache_db_path).with_init(|conn| {
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;",
+            )
+        });
+        let cache_pool = r2d2::Pool::builder().max_size(2).build(cache_manager).unwrap();
+
+        let settings_manager = r2d2_sqlite::SqliteConnectionManager::file(&settings_db_path).with_init(|conn| {
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;",
+            )
+        });
+        let settings_pool = r2d2::Pool::builder().max_size(2).build(settings_manager).unwrap();
+
+        // 両方のDBにデータを書き込み、WALファイルを作成・増大させる
+        {
+            let conn1 = cache_pool.get().unwrap();
+            conn1.execute("CREATE TABLE test_cache (k TEXT PRIMARY KEY, v TEXT);", []).unwrap();
+            conn1.execute("INSERT INTO test_cache VALUES ('foo', 'bar');", []).unwrap();
+
+            let conn2 = settings_pool.get().unwrap();
+            conn2.execute("CREATE TABLE test_settings (k TEXT PRIMARY KEY, v TEXT);", []).unwrap();
+            conn2.execute("INSERT INTO test_settings VALUES ('theme', 'dark');", []).unwrap();
+        }
+
+        let cache_wal_path = temp_dir.path().join("veloce_cache.db-wal");
+        let settings_wal_path = temp_dir.path().join("veloce_settings.db-wal");
+
+        // チェックポイント前は WAL ファイルが存在し、サイズが 0 より大きいこと
+        assert!(cache_wal_path.exists(), "cache WAL should exist before checkpoint");
+        assert!(settings_wal_path.exists(), "settings WAL should exist before checkpoint");
+        assert!(std::fs::metadata(&cache_wal_path).unwrap().len() > 0, "cache WAL should have non-zero size before checkpoint");
+        assert!(std::fs::metadata(&settings_wal_path).unwrap().len() > 0, "settings WAL should have non-zero size before checkpoint");
+
+        let (db_tx, _) = tokio::sync::mpsc::channel(1);
+        let app_state = AppState::new(cache_pool, settings_pool, true, db_tx, 0);
+
+        // シャットダウン時のチェックポイントを実行
+        perform_shutdown_checkpoints(&app_state);
+
+        // チェックポイント後、両方の WAL ファイルが 0 バイトに切り詰められていること
+        let cache_wal_len = std::fs::metadata(&cache_wal_path).unwrap().len();
+        let settings_wal_len = std::fs::metadata(&settings_wal_path).unwrap().len();
+
+        assert_eq!(cache_wal_len, 0, "cache WAL should be truncated to 0 bytes on shutdown");
+        assert_eq!(settings_wal_len, 0, "settings WAL should be truncated to 0 bytes on shutdown");
     }
 
     #[test]
