@@ -790,5 +790,15 @@ describe('Character Positioning (NovelAI v4 / v5)', () => {
       // char-marker-other が定義されていること
       expect(inspectorCss).toMatch(/\.char-marker-other\s*\{[^}]*border-color:\s*var\(--accent-color\);[^}]*color:\s*var\(--accent-color\);/s);
     });
+
+    it('should set font-size of inspector-coord-text and inspector-coord-item to var(--font-size-sm) (13px)', () => {
+      const fs = require('fs');
+      const path = require('path');
+      const inspectorCss = fs.readFileSync(path.resolve(__dirname, '../src/renderer/css/inspector.css'), 'utf-8');
+
+      // プロンプトやパラメータ表示と同じ 13px (var(--font-size-sm)) に統一されていること
+      expect(inspectorCss).toMatch(/\.inspector-coord-text\s*\{[^}]*font-size:\s*var\(--font-size-sm\);/);
+      expect(inspectorCss).toMatch(/\.inspector-coord-item\s*\{[^}]*font-size:\s*var\(--font-size-sm\);/);
+    });
   });
 });

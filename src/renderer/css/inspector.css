@@ -220,7 +220,7 @@
   align-items: center;
   gap: 8px;
   padding: 2px 0;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-color);
 }
 
@@ -292,7 +292,7 @@
 
 .inspector-coord-text {
   font-family: var(--font-family-mono);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-color);
   flex: 1;
 }
