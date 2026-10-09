@@ -1385,9 +1385,13 @@ impl PartialOrd for KeyPart {
     }
 }
 
+/// 自然順ソート用キー。4要素以内の通常ファイル名ではスタック（インライン）に直接配置されヒープ確保を回避する
+pub type NaturalKey = smallvec::SmallVec<[KeyPart; 4]>;
+
 /// 文字列から自然順ソート用キーを O(N) で1回のみ事前抽出（シュワルツ変換用）
-pub fn extract_natural_key(s: &str) -> Vec<KeyPart> {
-    let mut parts = Vec::new();
+/// 4要素以内（一般的な画像ファイル名）はヒープ割り当てを行わずスタック上にインライン確保する
+pub fn extract_natural_key(s: &str) -> NaturalKey {
+    let mut parts = NaturalKey::new();
     let mut chars = s.chars().peekable();
     let mut cur_str = String::new();
 
@@ -1419,10 +1423,10 @@ pub fn extract_natural_key(s: &str) -> Vec<KeyPart> {
 }
 
 /// シュワルツ変換を用いた高速並列自然順ソート（Rayon 並列）
-/// 比較ごとの文字列パースを完全に排除し、大量アイテム（34,000件規模）でも 30ms 前後でソートを完了する
+/// 比較ごとの文字列パースを完全に排除し、SmallVec によるインラインスタック確保で大量ファイル時もヒープ割り当てを大幅削減
 pub fn sort_files_by_natural_name(files: &mut [std::sync::Arc<ImageFile>], asc: bool) {
     use rayon::prelude::*;
-    let mut with_keys: Vec<(Vec<KeyPart>, std::sync::Arc<ImageFile>)> = files
+    let mut with_keys: Vec<(NaturalKey, std::sync::Arc<ImageFile>)> = files
         .par_iter()
         .map(|f| (extract_natural_key(&f.name), f.clone()))
         .collect();
@@ -8036,6 +8040,15 @@ mod viewer_tests {
         assert_eq!(extract_natural_key("001.png"), extract_natural_key("01.png"));
         assert!(extract_natural_key("001.png") < extract_natural_key("02.png"));
 
+        // SmallVec のスタック割り当て最適化（インライン性）検証
+        // 1. 4要素以内の通常ファイル名はヒープに昇格（spill）せずスタック上に収まること
+        let normal_key = extract_natural_key("sample_01.png");
+        assert!(!normal_key.spilled(), "4要素以内の通常ファイル名はスタック上にインライン確保されること");
+
+        // 2. 5要素以上の長大なファイル名では自動的にヒープへ安全に昇格すること
+        let long_key = extract_natural_key("part1_part2_part3_part4_part5.png");
+        assert!(long_key.spilled(), "5要素以上のファイル名はヒープへ拡張されること");
+
         // sort_files_by_natural_name のテスト
         let make_file = |name: &str| std::sync::Arc::new(ImageFile {
             name: name.to_string(),
@@ -8071,6 +8084,20 @@ mod viewer_tests {
         sort_files_by_natural_name(&mut files, false);
         let names_desc: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
         assert_eq!(names_desc, vec!["img20.png", "img10.png", "img2.png", "img1.png"]);
+
+        // 5要素以上の長大ファイル名混在時のソート整合性検証
+        let mut complex_files = vec![
+            make_file("v1_sub2_part10_extra1.png"),
+            make_file("v1_sub2_part2_extra1.png"),
+            make_file("v1_sub1_part1_extra1.png"),
+        ];
+        sort_files_by_natural_name(&mut complex_files, true);
+        let complex_names: Vec<String> = complex_files.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(complex_names, vec![
+            "v1_sub1_part1_extra1.png",
+            "v1_sub2_part2_extra1.png",
+            "v1_sub2_part10_extra1.png",
+        ]);
     }
 
     #[test]
