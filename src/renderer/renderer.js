@@ -2570,7 +2570,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
       } else {
         iconHtml = UIManager.ICONS.FOLDER;
-        iconClass = 'icon-color-cyan';
+        iconClass = 'icon-color-folder';
       }
 
       const iconSpan = document.createElement('span');
@@ -2675,6 +2675,26 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (closeBtn) {
     closeBtn.innerHTML = UIManager.ICONS.WINDOW_CLOSE;
     closeBtn.addEventListener('click', () => window.veloceAPI.closeWindow());
+  }
+
+  // テーマ切り替えボタンの初期化とイベント設定
+  const themeToggleBtn = document.getElementById('titlebar-theme-toggle');
+  const initialTheme = getSetting('theme') || 'dark';
+  uiManager.applyTheme(initialTheme);
+
+  if (themeToggleBtn) {
+    uiManager.bindTooltip(themeToggleBtn, () => {
+      return uiManager.state && uiManager.state.theme === 'light' ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
+    });
+
+    themeToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      uiManager.hideCustomTooltip();
+      const currentTheme = (uiManager.state && uiManager.state.theme) || 'dark';
+      const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
+      uiManager.applyTheme(nextTheme);
+      setSetting('theme', nextTheme);
+    });
   }
 
   const savedWinW = getSetting('mainWinWidth');

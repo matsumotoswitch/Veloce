@@ -82,11 +82,89 @@
   --palette-purple: #a855f7;
   --palette-pink: #ec4899;
   --palette-cyan: #06b6d4;
+  /* Titlebar Divider */
+  --titlebar-divider-color: rgba(255, 255, 255, 0.4);
+  /* Folder & Drive Icon Colors */
+  --folder-icon-color: #f59e0b;
+  --drive-icon-color: #94a3b8;
+  --tab-active-bg: var(--top-bar-bg);
+  --tab-active-color: var(--text-light);
+}
+
+/* ============================================================================
+ * Light Theme (data-theme="light")
+ * ============================================================================ */
+:root[data-theme="light"] {
+  /* 背景システム: クリーン＆ブライト（Slateパレット基調） */
+  --bg-color: #ffffff;
+  --bg-rgb: 255, 255, 255;
+  --panel-bg: #f0f7fa;
+  --panel-rgb: 240, 247, 250;
+  --top-bar-bg: #dfedf3;
+  --tab-inactive-bg: #f0f7fa;
+  --border-color: #8ba8b7;
+  --border-color-light: #7292a2;
+  --border-light: var(--border-color-light);
+
+  /* タイポグラフィ・テキストカラー（深みのあるスレートグレーで可読性を最大化） */
+  --text-color: #153340;
+  --text-rgb: 21, 51, 64;
+  --text-light: #ffffff;
+
+  /* アクセントカラー（澄み切ったセルリアン/オーシャンブルー） */
+  --accent-color: #0284c7;
+  --accent-rgb: 2, 132, 199;
+  --accent-hover: #0369a1;
+  --accent-hover-rgb: 3, 105, 161;
+  --accent-hover-translucent: rgba(var(--accent-rgb), 0.12);
+
+  /* フォルダ・ドライブ専用カラー */
+  --folder-icon-color: #f59e0b;
+  --drive-icon-color: #64748b;
+
+  /* モーダル・ダイアログ・インプット（白基調で清潔感のあるコントラスト） */
+  --modal-bg: #ffffff;
+  --modal-border: rgba(0, 0, 0, 0.18);
+  --dialog-bg: #ffffff;
+  --input-bg: #ffffff;
+  --bg-darker: #dfedf3;
+  --titlebar-bg: #f0f7fa;
+
+  /* デンジャー・ゴールド */
+  --danger-red: #ef4444;
+  --danger-rgb: 239, 68, 68;
+  --danger-red-translucent: rgba(var(--danger-rgb), 0.15);
+  --glow-gold: #d97706;
+  --glow-gold-rgb: 217, 119, 6;
+
+  /* 透明背景用チェッカーボード（ライト調） */
+  --checkerboard-dark: #dfedf3;
+  --checkerboard-light: #ffffff;
+
+  /* ポップアップ・モーダルシャドウ（ライト調） */
+  --popup-shadow:
+    0 10px 25px -5px rgba(0, 0, 0, 0.1),
+    0 8px 10px -6px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+  --modal-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.12),
+    0 8px 10px -6px rgba(0, 0, 0, 0.08);
+
+  /* タイトルバー仕切り線（ライト調：明確なコントラスト） */
+  --titlebar-divider-color: rgba(0, 0, 0, 0.25);
+
+  /* タブ固有スタイル（アクティブタブの背景色をツールバー・お気に入りバーと同期） */
+  --tab-active-bg: var(--top-bar-bg);
+  --tab-active-color: #153340;
 }
 
 
 /* --- Veloce Palette Colors --- */
 /* --- Veloce 厳選カラークラス --- */
+.icon-color-folder {
+  color: var(--folder-icon-color);
+}
+
 .icon-color-default {
   color: var(--palette-default);
 }

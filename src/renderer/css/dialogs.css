@@ -725,6 +725,7 @@ input:-webkit-autofill:focus {
 #license-overlay {
   z-index: 10000;
   background: rgba(0, 0, 0, 0.7) !important;
+  color: var(--text-color);
 }
 
 .help-modal-content,
@@ -733,6 +734,7 @@ input:-webkit-autofill:focus {
   display: flex;
   flex-direction: column;
   cursor: default;
+  color: var(--text-color);
 }
 
 .help-modal-content {
@@ -825,7 +827,7 @@ input:-webkit-autofill:focus {
 
 .help-tab:hover {
   opacity: 1;
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(var(--accent-rgb), 0.08);
 }
 
 .help-tab.active {
@@ -886,6 +888,7 @@ kbd {
   padding: 4px 0;
   border-bottom: none;
   line-height: 1.6;
+  color: var(--text-color);
 }
 
 .help-table tr:last-child td {
@@ -1153,4 +1156,69 @@ input[type="range"]:active~.slider-tooltip {
   align-items: center;
   justify-content: center;
 }
-
+
+/* ============================================================================
+ * Light Theme Dialog & Modal Overrides
+ * ============================================================================ */
+:root[data-theme="light"] #help-overlay,
+:root[data-theme="light"] #license-overlay,
+:root[data-theme="light"] .help-modal-content,
+:root[data-theme="light"] .license-modal-content {
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] .help-table td {
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] kbd {
+  background-color: var(--panel-bg);
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] .license-link-btn {
+  background-color: var(--panel-bg);
+  border-color: var(--border-color);
+}
+
+:root[data-theme="light"] .license-link-btn:hover {
+  background-color: rgba(var(--accent-rgb), 0.12);
+  border-color: var(--accent-color);
+  color: var(--accent-hover);
+}
+
+:root[data-theme="light"] #license-text {
+  background-color: var(--panel-bg);
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] #license-text strong {
+  color: var(--text-color) !important;
+}
+
+:root[data-theme="light"] .md-blockquote {
+  background: transparent !important;
+}
+
+:root[data-theme="light"] .dialog-btn {
+  color: var(--text-color);
+  background-color: var(--panel-bg);
+  border: 1px solid var(--border-color);
+}
+
+:root[data-theme="light"] .dialog-btn.cancel {
+  background-color: var(--panel-bg);
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] .dialog-btn.primary,
+:root[data-theme="light"] .dialog-btn.danger {
+  color: #ffffff;
+  border: none;
+}
+
+:root[data-theme="light"] .diff-thumbnail-container {
+  background: var(--panel-bg);
+}

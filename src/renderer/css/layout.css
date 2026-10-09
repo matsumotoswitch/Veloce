@@ -41,7 +41,7 @@
   width: 1px;
   min-width: 1px;
   height: 16px;
-  background-color: rgba(255, 255, 255, 0.4);
+  background-color: var(--titlebar-divider-color, rgba(255, 255, 255, 0.4));
   margin: 0 4px;
   flex-shrink: 0;
   z-index: 10;
@@ -50,6 +50,11 @@
 .titlebar-button svg {
   width: 12px;
   height: 12px;
+}
+
+#titlebar-theme-toggle svg {
+  width: 14px;
+  height: 14px;
 }
 
 .titlebar-button:hover {
@@ -72,6 +77,160 @@
   background-color: var(--danger-red-translucent);
   filter: brightness(0.85);
   color: var(--text-light);
+}
+
+/* ============================================================================
+ * Light Theme Overrides & Selection Styles (Chromium 109 Compatible)
+ * ============================================================================ */
+
+/* Titlebar Controls */
+:root[data-theme="light"] .titlebar-button:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] .titlebar-button:active {
+  background-color: rgba(0, 0, 0, 0.12);
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] .titlebar-button.titlebar-close:hover {
+  background-color: var(--danger-red);
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .titlebar-button.titlebar-close:active {
+  background-color: var(--danger-red);
+  filter: brightness(0.85);
+  color: #ffffff;
+}
+
+/* Tabs: Clear Separation & Pure White Active Tab */
+:root[data-theme="light"] #tab-container .tab-item {
+  background-color: var(--tab-inactive-bg) !important;
+  color: #5e7a8a !important;
+  border-left: 1px solid transparent !important;
+  border-right: 1px solid transparent !important;
+  border-top: 1px solid transparent !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] #tab-container .tab-item:not(.active):hover {
+  background-color: #dfedf3 !important;
+  color: var(--text-color) !important;
+}
+
+:root[data-theme="light"] #tab-container .tab-item.active {
+  background-color: var(--tab-active-bg, var(--top-bar-bg)) !important;
+  color: var(--tab-active-color, #153340) !important;
+  border-left: 1px solid var(--border-color) !important;
+  border-right: 1px solid var(--border-color) !important;
+  border-top: 1px solid var(--border-color) !important;
+  border-bottom: 1px solid transparent !important;
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.04) !important;
+}
+
+:root[data-theme="light"] #tab-container .tab-item.active::after {
+  background-color: var(--tab-active-bg, var(--top-bar-bg)) !important;
+}
+
+:root[data-theme="light"] .tab-close-btn {
+  color: #5e7a8a;
+}
+
+:root[data-theme="light"] .tab-close-btn:hover {
+  color: var(--danger-red);
+}
+
+/* Search Bar Container: Clean White Field */
+:root[data-theme="light"] #search-container {
+  background: var(--input-bg);
+  border-color: var(--border-color);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme="light"] #search-container:focus-within {
+  background: #ffffff;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
+}
+
+/* Directory Tree Folder & Drive Icons */
+:root[data-theme="light"] #dir-tree .tree-icon {
+  color: var(--folder-icon-color);
+}
+
+:root[data-theme="light"] #dir-tree .tree-item[data-is-root="true"] .tree-icon {
+  color: var(--drive-icon-color);
+}
+
+/* Left Pane Smart Folder & Directory Tree Content Backgrounds */
+:root[data-theme="light"] #smart-folders-section,
+:root[data-theme="light"] #directories-section,
+:root[data-theme="light"] #smart-folders-list,
+:root[data-theme="light"] #dir-tree {
+  background-color: #ffffff;
+}
+
+/* Directory Tree Selection & Hover */
+:root[data-theme="light"] #dir-tree .tree-item.selected {
+  background-color: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+:root[data-theme="light"] #dir-tree .tree-item:hover:not(.selected) {
+  background-color: rgba(var(--accent-rgb), 0.07);
+  color: var(--text-color);
+}
+
+:root[data-theme="light"] #dir-tree .tree-item.selected .toggle-icon,
+:root[data-theme="light"] #dir-tree .tree-item:hover .toggle-icon {
+  color: var(--text-color);
+  opacity: 0.8;
+}
+
+/* Smart Folder Selection & Hover */
+:root[data-theme="light"] .smart-folder-item.selected {
+  background-color: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .smart-folder-item.selected .smart-folder-count {
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .smart-folder-item:hover:not(.selected) {
+  background-color: rgba(var(--accent-rgb), 0.07);
+  color: var(--text-color);
+}
+
+/* Bookmark Selection & Hover */
+:root[data-theme="light"] .bookmark-item.selected {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent-hover);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+}
+
+:root[data-theme="light"] .bookmark-item:hover:not(.selected) {
+  background-color: rgba(var(--accent-rgb), 0.07);
+  color: var(--text-color);
+}
+
+/* File Table Selection */
+:root[data-theme="light"] #file-table tr.selected {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text-color);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent-color);
+}
+
+:root[data-theme="light"] #file-table tr:hover:not(.selected) {
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 html, body {
@@ -107,7 +266,7 @@ body.is-resizing .app-content {
 
 /* Panes */
 #left-pane {
-  background: var(--bg-color);
+  background: var(--panel-bg);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -119,7 +278,7 @@ body.is-resizing .app-content {
 }
 
 #right-pane {
-  background: var(--bg-color);
+  background: var(--panel-bg);
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -813,11 +972,9 @@ table#file-table {
   opacity: 1;
 }
 
-/* アイコンのホバー・選択時の色反転処理 */
-.tree-item:hover .tree-icon,
-.tree-item.selected .tree-icon,
-.favorite-item:hover .tree-icon,
-.favorite-item.selected .tree-icon {
+/* アイコンのホバー・選択時の色反転処理（未指定アイコンのみ反転し、フォルダ・パレットアイコンの色は保持） */
+.favorite-item:hover .tree-icon:not([class*="icon-color-"]),
+.favorite-item.selected .tree-icon:not([class*="icon-color-"]) {
   color: var(--text-light) !important;
 }
 
@@ -828,7 +985,7 @@ table#file-table {
   top: 0;
   bottom: 0;
   left: 20px;
-  right: 204px;
+  right: 262px;
   display: flex;
   align-items: center;
   overflow: hidden;

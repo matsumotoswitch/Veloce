@@ -127,7 +127,9 @@ class UIManager {
     WINDOW_CLOSE: `<svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" stroke-width="1"/></svg>`,
     RELOAD: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-refresh-cw"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>`,
     REFRESH: `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-refresh-ccw"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21v-5h5"/></svg>`,
-    DIFF: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-columns-2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>`
+    DIFF: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-columns-2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>`,
+    THEME_LIGHT: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`,
+    THEME_DARK: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`
   };
 
   /**
@@ -590,7 +592,7 @@ class UIManager {
           iconSpan.className = `tab-icon icon-color-${itemData.color || 'default'}`;
         } else {
           iconSpan.innerHTML = UIManager.ICONS.FOLDER;
-          iconSpan.className = 'tab-icon icon-color-cyan';
+          iconSpan.className = 'tab-icon icon-color-folder';
         }
 
         if (isSmartFolder) {
@@ -2369,6 +2371,28 @@ class UIManager {
         const ratioStr = (rw > 100 || rh > 100) ? `${(width / height).toFixed(2)}:1` : `${rw}:${rh}`;
         if (tds[4].textContent !== ratioStr) tds[4].textContent = ratioStr;
       }
+    }
+  }
+
+  /**
+   * アプリケーション全体のテーマ（dark / light）を適用します。
+   * @param {'dark' | 'light'} theme
+   */
+  applyTheme(theme) {
+    const isLight = theme === 'light';
+    if (isLight) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    if (this.state) {
+      this.state.theme = isLight ? 'light' : 'dark';
+    }
+
+    const btn = document.getElementById('titlebar-theme-toggle');
+    if (btn) {
+      btn.innerHTML = isLight ? UIManager.ICONS.THEME_DARK : UIManager.ICONS.THEME_LIGHT;
+      btn.removeAttribute('title');
     }
   }
 }

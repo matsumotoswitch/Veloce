@@ -402,6 +402,22 @@ body.show-thumbnail-names .thumbnail-label {
   z-index: 3;
 }
 
+/* Light Theme Thumbnail Hover & Selection */
+:root[data-theme="light"] .thumbnail-item.selected {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-color), 0 4px 14px rgba(var(--accent-rgb), 0.25);
+}
+
+:root[data-theme="light"] .thumbnail-item.selected:hover {
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 0 2px var(--accent-hover), 0 6px 18px rgba(0, 0, 0, 0.12), 0 0 8px rgba(var(--accent-rgb), 0.25);
+}
+
+:root[data-theme="light"] .thumbnail-item:hover {
+  border-color: var(--accent-hover);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1), 0 0 6px rgba(var(--accent-rgb), 0.2);
+}
+
 
 /* --- トースト通知 --- */
 #toast-container {
@@ -971,4 +987,16 @@ th[data-sort] .sort-arrow.desc {
 
 .tree-toggle-hidden {
   visibility: hidden;
+}
+
+/* ============================================================================
+ * Light Theme Custom Select Overrides
+ * ============================================================================ */
+:root[data-theme="light"] .custom-select {
+  background-color: transparent;
+  border-color: var(--border-color);
+}
+
+:root[data-theme="light"] .custom-select:hover {
+  border-color: var(--border-color-light);
 }

@@ -52,6 +52,16 @@
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+:root[data-theme="light"] .inspector-location-badge {
+  background-color: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--border-color);
+}
+
+:root[data-theme="light"] .inspector-location-badge:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+  border-color: var(--border-color-light);
+}
+
 .inspector-location-badge svg {
   color: var(--accent-color);
   width: 16px;
