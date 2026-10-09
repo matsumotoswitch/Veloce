@@ -3441,6 +3441,12 @@ fn sharpen_rgb_buffer(buffer: &mut [u8], width: u32, height: u32, amount: f32) {
     }
 }
 
+thread_local! {
+    /// サムネイル生成用の fast_image_resize::Resizer インスタンス（内部作業バッファをスレッドローカルで再利用）
+    static THUMB_RESIZER: std::cell::RefCell<fast_image_resize::Resizer> =
+        std::cell::RefCell::new(fast_image_resize::Resizer::new());
+}
+
 fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
     if let Ok(img) = image::open(path_str) {
         let has_alpha = img.color().has_alpha();
@@ -3459,12 +3465,13 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
         use fast_image_resize as fr;
 
         if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
-            let (pixel_type, raw_pixels, color_type, format) = if has_alpha {
-                let rgba = img.to_rgba8();
-                (fr::PixelType::U8x4, rgba.into_raw(), image::ColorType::Rgba8, image::ImageFormat::Png)
+            // into_rgba8 / into_rgb8 を使用して DynamicImage 内部バッファの不要な原寸複製を完全に排除
+            let (pixel_type, raw_pixels) = if has_alpha {
+                let rgba = img.into_rgba8();
+                (fr::PixelType::U8x4, rgba.into_raw())
             } else {
-                let rgb = img.to_rgb8();
-                (fr::PixelType::U8x3, rgb.into_raw(), image::ColorType::Rgb8, image::ImageFormat::Jpeg)
+                let rgb = img.into_rgb8();
+                (fr::PixelType::U8x3, rgb.into_raw())
             };
 
             if let Ok(src_image) = fr::images::Image::from_vec_u8(
@@ -3479,24 +3486,36 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
                         dst_h_nz.get(),
                         pixel_type,
                     );
-                    let mut resizer = fr::Resizer::new();
                     // Lanczos3 高品質補間により縮小時のディテール損失を最小化
                     let options = fr::ResizeOptions::new().resize_alg(
                         fr::ResizeAlg::Interpolation(fr::FilterType::Lanczos3)
                     );
-                    if resizer.resize(&src_image, &mut dst_image, Some(&options)).is_ok() {
+                    let resize_ok = THUMB_RESIZER.with(|resizer| {
+                        resizer.borrow_mut().resize(&src_image, &mut dst_image, Some(&options)).is_ok()
+                    });
+
+                    if resize_ok {
                         let buffer = dst_image.into_vec();
 
                         let mut bytes: Vec<u8> = Vec::new();
                         let mut cursor = std::io::Cursor::new(&mut bytes);
-                        if image::write_buffer_with_format(
-                            &mut cursor,
-                            &buffer,
-                            dst_width,
-                            dst_height,
-                            color_type,
-                            format,
-                        ).is_ok() {
+                        
+                        use image::ImageEncoder;
+                        let encode_ok = if has_alpha {
+                            use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+                            let encoder = PngEncoder::new_with_quality(
+                                &mut cursor,
+                                CompressionType::Fast,
+                                FilterType::Adaptive,
+                            );
+                            encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgba8).is_ok()
+                        } else {
+                            use image::codecs::jpeg::JpegEncoder;
+                            let encoder = JpegEncoder::new_with_quality(&mut cursor, 80);
+                            encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgb8).is_ok()
+                        };
+
+                        if encode_ok {
                             return Some(bytes);
                         }
                     }
@@ -9274,6 +9293,127 @@ mod viewer_tests {
         assert_eq!(app_state.path_to_all_idx.read().get("C:\\images\\new_pic.png").copied(), None, "削除後にインデックスから消去されること");
         assert_eq!(app_state.get_mtime("C:\\images\\new_pic.png"), None);
     }
+
+    #[test]
+    fn test_generate_image_thumbnail_rgba_png_output() {
+        use image::{RgbaImage, Rgba};
+
+        // 800x600 のアルファ付き画像を作成（長辺800px -> 384px にリサイズされる）
+        let mut img = RgbaImage::new(800, 600);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgba([255, 0, 0, 128]); // 半透明赤
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("test_rgba.png");
+        let path_str = path.to_str().unwrap();
+        img.save_with_format(&path, image::ImageFormat::Png).unwrap();
+
+        let thumb_opt = generate_image_thumbnail_sync(path_str);
+        assert!(thumb_opt.is_some(), "サムネイルが生成されること");
+
+        let thumb_bytes = thumb_opt.unwrap();
+        // PNG シグネチャ検証 (\x89PNG\r\n\x1a\n)
+        assert_eq!(&thumb_bytes[0..8], b"\x89PNG\r\n\x1a\n", "出力がPNG形式であること");
+
+        // デコードしてサイズとアルファを検証
+        let decoded = image::load_from_memory(&thumb_bytes).unwrap();
+        assert_eq!(decoded.width(), 384, "長辺が384pxにリサイズされること");
+        assert_eq!(decoded.height(), 288, "アスペクト比(4:3)が維持されること");
+        assert!(decoded.color().has_alpha(), "アルファチャンネルが維持されること");
+    }
+
+    #[test]
+    fn test_generate_image_thumbnail_rgb_jpeg_output() {
+        use image::{RgbImage, Rgb};
+
+        // 600x800 のアルファなし画像を作成（長辺800px -> 384px にリサイズされる）
+        let mut img = RgbImage::new(600, 800);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([0, 255, 0]);
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("test_rgb.jpg");
+        let path_str = path.to_str().unwrap();
+        img.save_with_format(&path, image::ImageFormat::Jpeg).unwrap();
+
+        let thumb_opt = generate_image_thumbnail_sync(path_str);
+        assert!(thumb_opt.is_some(), "サムネイルが生成されること");
+
+        let thumb_bytes = thumb_opt.unwrap();
+        // JPEG シグネチャ検証 (\xFF\xD8)
+        assert_eq!(&thumb_bytes[0..2], b"\xFF\xD8", "出力がJPEG形式であること");
+
+        let decoded = image::load_from_memory(&thumb_bytes).unwrap();
+        assert_eq!(decoded.width(), 288, "アスペクト比(3:4)が維持されること");
+        assert_eq!(decoded.height(), 384, "長辺が384pxにリサイズされること");
+        assert!(!decoded.color().has_alpha(), "アルファチャンネルがないこと");
+    }
+
+    #[test]
+    fn test_generate_image_thumbnail_small_image_no_upscale() {
+        use image::{RgbImage, Rgb};
+
+        // 100x80 の小さい画像を作成
+        let mut img = RgbImage::new(100, 80);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([0, 0, 255]);
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("test_small.jpg");
+        let path_str = path.to_str().unwrap();
+        img.save_with_format(&path, image::ImageFormat::Jpeg).unwrap();
+
+        let thumb_opt = generate_image_thumbnail_sync(path_str);
+        assert!(thumb_opt.is_some(), "サムネイルが生成されること");
+
+        let decoded = image::load_from_memory(&thumb_opt.unwrap()).unwrap();
+        assert_eq!(decoded.width(), 100, "384px未満の画像は拡大されないこと");
+        assert_eq!(decoded.height(), 80, "384px未満の画像は拡大されないこと");
+    }
+
+    #[test]
+    fn test_generate_image_thumbnail_resizer_reuse_and_invalid_file() {
+        use image::{RgbImage, Rgb};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1回目: 500x500
+        let mut img1 = RgbImage::new(500, 500);
+        for p in img1.pixels_mut() { *p = Rgb([10, 20, 30]); }
+        let path1 = temp_dir.path().join("test_reuse1.jpg");
+        let path1_str = path1.to_str().unwrap();
+        img1.save_with_format(&path1, image::ImageFormat::Jpeg).unwrap();
+
+        // 2回目: 400x300
+        let mut img2 = RgbImage::new(400, 300);
+        for p in img2.pixels_mut() { *p = Rgb([40, 50, 60]); }
+        let path2 = temp_dir.path().join("test_reuse2.jpg");
+        let path2_str = path2.to_str().unwrap();
+        img2.save_with_format(&path2, image::ImageFormat::Jpeg).unwrap();
+
+        // 同じスレッドで連続して生成（THUMB_RESIZER の再利用確認）
+        let thumb1 = generate_image_thumbnail_sync(path1_str).unwrap();
+        let thumb2 = generate_image_thumbnail_sync(path2_str).unwrap();
+
+        let dec1 = image::load_from_memory(&thumb1).unwrap();
+        assert_eq!(dec1.width(), 384);
+        assert_eq!(dec1.height(), 384);
+
+        let dec2 = image::load_from_memory(&thumb2).unwrap();
+        assert_eq!(dec2.width(), 384);
+        assert_eq!(dec2.height(), 288);
+
+        // 不正なパスや壊れたファイルの安全性確認
+        assert!(generate_image_thumbnail_sync("C:\\non_existent_image_12345.png").is_none());
+
+        let bad_path = temp_dir.path().join("test_bad.bin");
+        std::fs::write(&bad_path, b"not an image data").unwrap();
+        assert!(generate_image_thumbnail_sync(bad_path.to_str().unwrap()).is_none());
+    }
 }
+
 
 
