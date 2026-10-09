@@ -9,6 +9,9 @@ use parking_lot::{Mutex, RwLock};
 use crate::models::{DbMsg, ImageFile, SmartFolderRule, SortConfig};
 use crate::utils::{normalize_unc_path, strip_unc_prefix};
 
+/// 高速な非暗号学的ハッシュ（xxh3_64）を用いた内部マップ用型エイリアス
+pub type FastHashMap<K, V> = HashMap<K, V, xxhash_rust::xxh3::Xxh3Builder>;
+
 pub struct AppState {
     pub image_paths: RwLock<Arc<Vec<String>>>,
     pub current_dir: RwLock<String>,
@@ -17,10 +20,10 @@ pub struct AppState {
     // Source of Truth: 全ファイルとフィルタリング済みファイルをRust側で保持
     pub all_files: RwLock<Vec<Arc<ImageFile>>>,
     pub filtered_files: RwLock<Vec<Arc<ImageFile>>>,
-    // O(1) 高速逆引きインデックス
-    pub path_to_all_idx: RwLock<HashMap<String, usize>>,
-    pub path_to_filtered_idx: RwLock<HashMap<String, usize>>,
-    pub path_to_mtime: RwLock<HashMap<String, u64>>,
+    // O(1) 高速逆引きインデックス（xxh3ハッシャーによる高速キー探索）
+    pub path_to_all_idx: RwLock<FastHashMap<String, usize>>,
+    pub path_to_filtered_idx: RwLock<FastHashMap<String, usize>>,
+    pub path_to_mtime: RwLock<FastHashMap<String, u64>>,
     pub sort_config: RwLock<SortConfig>,
     pub search_query: RwLock<String>,
     pub ratings: RwLock<HashMap<String, u8>>,
@@ -49,9 +52,9 @@ impl AppState {
             viewer_hashes: RwLock::new(HashMap::new()),
             all_files: RwLock::new(Vec::new()),
             filtered_files: RwLock::new(Vec::new()),
-            path_to_all_idx: RwLock::new(HashMap::new()),
-            path_to_filtered_idx: RwLock::new(HashMap::new()),
-            path_to_mtime: RwLock::new(HashMap::new()),
+            path_to_all_idx: RwLock::new(FastHashMap::default()),
+            path_to_filtered_idx: RwLock::new(FastHashMap::default()),
+            path_to_mtime: RwLock::new(FastHashMap::default()),
             sort_config: RwLock::new(SortConfig {
                 key: "name".to_string(),
                 asc: true,
@@ -73,8 +76,8 @@ impl AppState {
     pub fn rebuild_all_and_filtered_indices(&self, files: &[Arc<ImageFile>]) {
         let has_unc = files.iter().take(20).any(|f| f.path.starts_with(r"\\?\"));
         let cap = if has_unc { files.len() * 2 } else { files.len() + 16 };
-        let mut all_map = HashMap::with_capacity(cap);
-        let mut mtime_map = HashMap::with_capacity(cap);
+        let mut all_map = FastHashMap::with_capacity_and_hasher(cap, xxhash_rust::xxh3::Xxh3Builder::new());
+        let mut mtime_map = FastHashMap::with_capacity_and_hasher(cap, xxhash_rust::xxh3::Xxh3Builder::new());
 
         for (i, f) in files.iter().enumerate() {
             all_map.insert(f.path.clone(), i);
@@ -96,8 +99,8 @@ impl AppState {
     pub fn rebuild_all_indices(&self, files: &[Arc<ImageFile>]) {
         let has_unc = files.iter().take(20).any(|f| f.path.starts_with(r"\\?\"));
         let cap = if has_unc { files.len() * 2 } else { files.len() + 16 };
-        let mut all_map = HashMap::with_capacity(cap);
-        let mut mtime_map = HashMap::with_capacity(cap);
+        let mut all_map = FastHashMap::with_capacity_and_hasher(cap, xxhash_rust::xxh3::Xxh3Builder::new());
+        let mut mtime_map = FastHashMap::with_capacity_and_hasher(cap, xxhash_rust::xxh3::Xxh3Builder::new());
         for (i, f) in files.iter().enumerate() {
             all_map.insert(f.path.clone(), i);
             let norm = normalize_unc_path(&f.path);
@@ -116,7 +119,7 @@ impl AppState {
     pub fn rebuild_filtered_indices(&self, files: &[Arc<ImageFile>]) {
         let has_unc = files.iter().take(20).any(|f| f.path.starts_with(r"\\?\"));
         let cap = if has_unc { files.len() * 2 } else { files.len() + 16 };
-        let mut filtered_map = HashMap::with_capacity(cap);
+        let mut filtered_map = FastHashMap::with_capacity_and_hasher(cap, xxhash_rust::xxh3::Xxh3Builder::new());
         for (i, f) in files.iter().enumerate() {
             filtered_map.insert(f.path.clone(), i);
             let norm = normalize_unc_path(&f.path);
@@ -344,5 +347,50 @@ mod tests {
         for f in all_files.iter() {
             assert!(f.has_thumbnail_cache, "サムネイルキャッシュフラグが true に更新されていること: {}", f.path);
         }
+    }
+
+    #[test]
+    fn test_xxh3_path_lookup() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        let state = AppState::new(pool.clone(), pool, false, tx, 0);
+
+        let files = vec![
+            create_test_file(r"C:\images\standard.png", 1001),
+            create_test_file(r"\\?\C:\images\unc_path.png", 2002),
+            create_test_file("C:/images/forward_slash.png", 3003),
+            create_test_file(r"\\?\C:/images/unc_forward.png", 4004),
+        ];
+
+        *state.all_files.write() = files.clone();
+        *state.filtered_files.write() = files.clone();
+        state.rebuild_all_and_filtered_indices(&files);
+
+        // 1. 通常パスの探索検証
+        assert_eq!(state.path_to_all_idx.read().get(r"C:\images\standard.png").copied(), Some(0));
+        assert_eq!(state.path_to_filtered_idx.read().get(r"C:\images\standard.png").copied(), Some(0));
+        assert_eq!(state.get_mtime(r"C:\images\standard.png"), Some(1001));
+
+        // 2. UNCプレフィックス付きパスの探索（UNC除去後パスでも探索可能であること）
+        assert_eq!(state.path_to_all_idx.read().get(r"\\?\C:\images\unc_path.png").copied(), Some(1));
+        assert_eq!(state.path_to_all_idx.read().get(r"C:\images\unc_path.png").copied(), Some(1));
+        assert_eq!(state.get_mtime(r"\\?\C:\images\unc_path.png"), Some(2002));
+        assert_eq!(state.get_mtime(r"C:\images\unc_path.png"), Some(2002));
+
+        // 3. スラッシュ・バックスラッシュ正規化フォールバックの探索
+        assert_eq!(state.get_mtime("C:/images/forward_slash.png"), Some(3003));
+        assert_eq!(state.get_mtime(r"C:\images\forward_slash.png"), Some(3003));
+
+        // 4. UNCかつスラッシュ混在パスの探索
+        assert_eq!(state.get_mtime(r"\\?\C:/images/unc_forward.png"), Some(4004));
+        assert_eq!(state.get_mtime("C:/images/unc_forward.png"), Some(4004));
+        assert_eq!(state.get_mtime(r"C:\images\unc_forward.png"), Some(4004));
+
+        // 5. 存在しないパスは None を返すこと
+        assert_eq!(state.path_to_all_idx.read().get(r"C:\images\non_existent.png"), None);
+        assert_eq!(state.get_mtime(r"C:\images\non_existent.png"), None);
     }
 }

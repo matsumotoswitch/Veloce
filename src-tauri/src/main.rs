@@ -164,7 +164,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
 
     let _ = conn.execute("DROP TRIGGER IF EXISTS cache_au", []);
     conn.execute(
-        "CREATE TRIGGER cache_au AFTER UPDATE OF hash_key, searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN
+        "CREATE TRIGGER IF NOT EXISTS cache_au AFTER UPDATE OF hash_key, searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN
             UPDATE cache_fts SET
                 hash_key = new.hash_key,
                 searchable_prompt = new.searchable_prompt,
@@ -5015,9 +5015,9 @@ fn main() {
             viewer_hashes: parking_lot::RwLock::new(std::collections::HashMap::new()),
             all_files: parking_lot::RwLock::new(Vec::new()),
             filtered_files: parking_lot::RwLock::new(Vec::new()),
-            path_to_all_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
-            path_to_filtered_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
-            path_to_mtime: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            path_to_all_idx: parking_lot::RwLock::new(state::FastHashMap::default()),
+            path_to_filtered_idx: parking_lot::RwLock::new(state::FastHashMap::default()),
+            path_to_mtime: parking_lot::RwLock::new(state::FastHashMap::default()),
             sort_config: parking_lot::RwLock::new(SortConfig {
                 key: "name".to_string(),
                 asc: true,
@@ -5579,9 +5579,9 @@ pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState
         current_dir: parking_lot::RwLock::new(current_dir.to_string()),
         viewer_paths: parking_lot::RwLock::new(std::collections::HashMap::new()),
         viewer_hashes: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        path_to_all_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        path_to_filtered_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        path_to_mtime: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        path_to_all_idx: parking_lot::RwLock::new(crate::state::FastHashMap::default()),
+        path_to_filtered_idx: parking_lot::RwLock::new(crate::state::FastHashMap::default()),
+        path_to_mtime: parking_lot::RwLock::new(crate::state::FastHashMap::default()),
         all_files: parking_lot::RwLock::new(Vec::new()),
         filtered_files: parking_lot::RwLock::new(Vec::new()),
         sort_config: parking_lot::RwLock::new(SortConfig {
