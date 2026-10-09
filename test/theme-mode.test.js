@@ -103,18 +103,45 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       expect(cssContent).toContain(':root[data-theme="light"] {');
       expect(cssContent).toContain('--bg-color: #ffffff;');
-      expect(cssContent).toContain('--panel-bg: #f0f7fa;');
-      expect(cssContent).toContain('--top-bar-bg: #dfedf3;');
-      expect(cssContent).toContain('--text-color: #153340;');
-      expect(cssContent).toContain('--titlebar-bg: #f0f7fa;');
-      expect(cssContent).toContain('--tab-inactive-bg: #f0f7fa;');
+      expect(cssContent).toContain('--panel-bg: #f8fafc;');
+      expect(cssContent).toContain('--top-bar-bg: #cbd5e1;');
+      expect(cssContent).toContain('--text-color: #0f172a;');
+      expect(cssContent).toContain('--titlebar-bg: #e2e8f0;');
+      expect(cssContent).toContain('--tab-inactive-bg: #e2e8f0;');
       expect(cssContent).toContain('--accent-color: #0284c7;');
-      expect(cssContent).toContain('--folder-icon-color: #f59e0b;');
-      expect(cssContent).toContain('--border-color: #8ba8b7;');
-      expect(cssContent).toContain('--border-color-light: #7292a2;');
+      expect(cssContent).toContain('--folder-icon-color: #d97706;');
+      expect(cssContent).toContain('--border-color: #94a3b8;');
+      expect(cssContent).toContain('--border-color-light: #cbd5e1;');
       expect(cssContent).toContain('--tab-active-bg: var(--top-bar-bg);');
-      expect(cssContent).toContain('--tab-active-color: #153340;');
+      expect(cssContent).toContain('--tab-active-color: #0f172a;');
       expect(cssContent).toContain('--titlebar-divider-color: rgba(0, 0, 0, 0.25);');
+    });
+
+    it('should ensure smart-folder-count in light mode has high-contrast white pill badge (#1e293b)', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      expect(cssContent).toContain(':root[data-theme="light"] .smart-folder-count');
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*color:\s*#1e293b/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*background-color:\s*#ffffff/);
+    });
+
+    it('should ensure active tab synchronizes background and bottom border with top-bar-bg in light mode', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*background-color:\s*var\(--tab-active-bg,\s*var\(--top-bar-bg\)\)\s*!important;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*border-bottom:\s*1px\s+solid\s+var\(--top-bar-bg\)\s*!important;/);
+    });
+
+    it('should ensure light theme component contrast (resizers matching pane header #e2e8f0, custom-select, icon-btn:hover)', () => {
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const cssContent = fs.readFileSync(componentsCssPath, 'utf-8');
+
+      expect(cssContent).toContain(':root[data-theme="light"] .custom-select');
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#ffffff;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*#0f172a;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h\s*\{[^}]*background-color:\s*#e2e8f0;/);
     });
 
     it('should define folder icon tokens and class in variables.css', () => {
@@ -169,13 +196,13 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toContain(':root[data-theme="light"] #search-container');
     });
 
-    it('should set #ffffff background for smart folders and directory tree interiors in light mode', () => {
+    it('should set var(--panel-bg) background for smart folders and directory tree interiors in light mode', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
       expect(cssContent).toContain(':root[data-theme="light"] #smart-folders-list');
       expect(cssContent).toContain(':root[data-theme="light"] #dir-tree');
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#smart-folders-list[\s\S]*?background-color:\s*#ffffff;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#smart-folders-list[\s\S]*?background-color:\s*var\(--panel-bg\);/);
     });
 
     it('should ensure pane headers and resizer dividers reference --panel-bg (#f1f5f9)', () => {
@@ -211,18 +238,38 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.md-blockquote\s*\{[^}]*background:\s*transparent\s*!important;/);
     });
 
-    it('should ensure dropdown boxes (.custom-select) have transparent background in light theme matching sort select', () => {
+    it('should ensure dropdown boxes (.custom-select) have clear #ffffff background in light theme for visibility', () => {
       const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
       const thumbnailCssPath = path.resolve(__dirname, '../src/renderer/css/thumbnail.css');
 
       const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
       const thumbnailContent = fs.readFileSync(thumbnailCssPath, 'utf-8');
 
-      // ソート順のドロップダウンが transparent であること
-      expect(thumbnailContent).toMatch(/#thumbnail-controls\s+\.custom-select\s*\{[^}]*background-color:\s*transparent;/);
-      // ライトモードで .custom-select 全般が transparent に統一されていること
+      // ソート順の基底ドロップダウン定義が存在すること
+      expect(thumbnailContent).toContain('#thumbnail-controls .custom-select');
+      // ライトモードで .custom-select 全般が #ffffff で浮き彫りになること
       expect(componentsContent).toContain(':root[data-theme="light"] .custom-select');
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*transparent;/);
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#ffffff;/);
+    });
+
+    it('should ensure all pane headers, file-table th, and thumbnail-controls unify to #e2e8f0 in light mode', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      expect(layoutContent).toContain(':root[data-theme="light"] .pane-header');
+      expect(layoutContent).toContain(':root[data-theme="light"] #file-table th');
+      expect(layoutContent).toContain(':root[data-theme="light"] #thumbnail-controls');
+      expect(layoutContent).toContain(':root[data-theme="light"] #inspector-header');
+      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+\.pane-header[\s\S]*?background-color:\s*#e2e8f0\s*!important;/);
+    });
+
+    it('should ensure #center-pane::before and #center-pane::after match #e2e8f0 in light mode to eliminate bright scrollbar gutter spot', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      expect(layoutContent).toContain(':root[data-theme="light"] #center-pane::before');
+      expect(layoutContent).toContain(':root[data-theme="light"] #center-pane::after');
+      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+#center-pane::before,\s*:root\[data-theme="light"\]\s+#center-pane::after\s*\{[^}]*background:\s*#e2e8f0\s*!important;/);
     });
   });
 });

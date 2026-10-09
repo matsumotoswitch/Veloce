@@ -1222,3 +1222,22 @@ input[type="range"]:active~.slider-tooltip {
 :root[data-theme="light"] .diff-thumbnail-container {
   background: var(--panel-bg);
 }
+
+:root[data-theme="light"] .diff-tag {
+  background-color: #f1f5f9;
+  border: 1px solid var(--border-color);
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .diff-tag:hover {
+  background-color: #e2e8f0;
+  border-color: #64748b;
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .diff-tag.common {
+  background-color: #f1f5f9;
+  border: 1px solid var(--border-color);
+  color: #0f172a;
+  font-weight: 500;
+}
