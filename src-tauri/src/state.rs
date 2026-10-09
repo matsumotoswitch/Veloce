@@ -208,7 +208,7 @@ mod tests {
     fn create_test_file(path: &str, mtime: u64) -> Arc<ImageFile> {
         Arc::new(ImageFile {
             name: path.split(&['/', '\\'][..]).last().unwrap_or("").to_string(),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: path.to_string(),
             size: 1024,
             mtime,
@@ -223,7 +223,7 @@ mod tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
-            hash_key: String::new(),
+            hash_key: Default::default(),
         })
     }
 

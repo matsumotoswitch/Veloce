@@ -304,7 +304,7 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
 
     ImageFile {
         name: file_name,
-        ext: if ext.is_empty() { String::new() } else { format!(".{}", ext) },
+        ext: if ext.is_empty() { CompactString::default() } else { format_compact!(".{}", ext) },
         path: clean_path,
         size,
         mtime,
@@ -319,7 +319,7 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         meta_loaded,
         search_text,
         unified_search_text,
-        hash_key: String::new(),
+        hash_key: CompactString::default(),
     }
 }
 
@@ -607,7 +607,7 @@ fn query_smart_folder_image_files(
             let width: u32 = row.get(4)?;
             let height: u32 = row.get(5)?;
             let has_thumbnail: bool = row.get(6)?;
-            let hash_key: String = row.get(7).unwrap_or_default();
+            let hash_key: CompactString = row.get::<_, String>(7).map(CompactString::from).unwrap_or_default();
 
             let clean_path = normalize_unc_path(&raw_path).into_owned();
 
@@ -621,8 +621,8 @@ fn query_smart_folder_image_files(
                 };
                 let ext_dot = name_slice.as_bytes().iter().rposition(|&b| b == b'.');
                 let ext_str = match ext_dot {
-                    Some(pos) => format!(".{}", name_slice[pos + 1..].to_lowercase()),
-                    None => String::new(),
+                    Some(pos) => format_compact!(".{}", name_slice[pos + 1..].to_lowercase()),
+                    None => CompactString::default(),
                 };
                 (name_slice.to_string(), ext_str)
             };
@@ -1072,7 +1072,7 @@ fn load_directory(
 
                                         return Some(ImageFile {
                                             name: file_name,
-                                            ext: format!(".{}", ext_lower),
+                                            ext: format_compact!(".{}", ext_lower),
                                             path: clean_path,
                                             size,
                                             mtime,
@@ -1087,7 +1087,7 @@ fn load_directory(
                                             meta_loaded: false,
                                             search_text: String::new(),
                                             unified_search_text: String::new(),
-                                            hash_key: String::new(),
+                                            hash_key: CompactString::default(),
                                         });
                                     }
                                 }
@@ -1873,7 +1873,7 @@ fn notify_file_changed(
     let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
     file.path = clean.clone();
     if file.hash_key.is_empty() {
-        file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime);
+        file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime).into();
     }
     {
         let mut all_files = state.all_files.write();
@@ -5371,7 +5371,7 @@ fn main() {
                                                     let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
                                                     let img_file = ImageFile {
                                                         name: file_name,
-                                                        ext: format!(".{}", ext_lower),
+                                                        ext: format_compact!(".{}", ext_lower),
                                                         path: path_str.clone(),
                                                         size,
                                                         mtime,
@@ -5386,7 +5386,7 @@ fn main() {
                                                         meta_loaded: false,
                                                         search_text: String::new(),
                                                         unified_search_text: String::new(),
-                                                        hash_key,
+                                                        hash_key: hash_key.into(),
                                                     };
                                                     let _ = app_handle
                                                         .emit_all("file-changed", img_file);
@@ -5413,7 +5413,7 @@ fn main() {
                                                 let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
                                                 let img_file = ImageFile {
                                                     name: file_name,
-                                                    ext: format!(".{}", ext_lower),
+                                                    ext: format_compact!(".{}", ext_lower),
                                                     path: path_str.clone(),
                                                     size,
                                                     mtime,
@@ -5428,7 +5428,7 @@ fn main() {
                                                     meta_loaded: false,
                                                     search_text: String::new(),
                                                     unified_search_text: String::new(),
-                                                    hash_key,
+                                                    hash_key: hash_key.into(),
                                                 };
                                                 let _ =
                                                     app_handle.emit_all("file-changed", img_file);
@@ -6570,7 +6570,7 @@ mod viewer_tests {
         *state.all_files.write() = vec![
             Arc::new(ImageFile {
                 name: "b.jpg".to_string(),
-                ext: ".jpg".to_string(),
+                ext: ".jpg".into(),
                 path: "C:\\b.jpg".to_string(),
                 size: 100,
                 mtime: 2000,
@@ -6585,11 +6585,11 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: "".to_string(),
                 unified_search_text: "".to_string(),
-                hash_key: "".to_string(),
+                hash_key: Default::default(),
             }),
             Arc::new(ImageFile {
                 name: "a.jpg".to_string(),
-                ext: ".jpg".to_string(),
+                ext: ".jpg".into(),
                 path: "C:\\a.jpg".to_string(),
                 size: 100,
                 mtime: 1000,
@@ -6604,7 +6604,7 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: "".to_string(),
                 unified_search_text: "".to_string(),
-                hash_key: "".to_string(),
+                hash_key: Default::default(),
             }),
         ];
 
@@ -6922,7 +6922,7 @@ mod viewer_tests {
         let files = vec![
             std::sync::Arc::new(ImageFile {
                 name: "img_a.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "img_a.png".to_string(),
                 size: 100,
                 mtime: 100,
@@ -6937,11 +6937,11 @@ mod viewer_tests {
                 meta_loaded: true,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
             std::sync::Arc::new(ImageFile {
                 name: "img_b.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "img_b.png".to_string(),
                 size: 100,
                 mtime: 100,
@@ -6956,11 +6956,11 @@ mod viewer_tests {
                 meta_loaded: true,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
             std::sync::Arc::new(ImageFile {
                 name: "img_c.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "img_c.png".to_string(),
                 size: 100,
                 mtime: 100,
@@ -6975,7 +6975,7 @@ mod viewer_tests {
                 meta_loaded: true,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
         ];
 
@@ -7007,7 +7007,7 @@ mod viewer_tests {
         let mut all_files = vec![
             std::sync::Arc::new(ImageFile {
                 name: "1.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "C:\\img\\1.png".to_string(),
                 size: 100,
                 mtime: 100,
@@ -7022,11 +7022,11 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
             std::sync::Arc::new(ImageFile {
                 name: "2.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "C:\\img\\2.png".to_string(),
                 size: 200,
                 mtime: 200,
@@ -7041,7 +7041,7 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
         ];
 
@@ -7444,7 +7444,7 @@ mod viewer_tests {
 
         let initial_file = ImageFile {
             name: "test.png".to_string(),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: "C:\\images\\test.png".to_string(),
             size: 1024,
             mtime: 1000,
@@ -7459,7 +7459,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
-            hash_key: String::new(),
+            hash_key: Default::default(),
         };
 
         let mut all_files = vec![Arc::new(initial_file.clone())];
@@ -7489,7 +7489,7 @@ mod viewer_tests {
         // 2. notify_file_changed で幅・高さが0のイベントが届いた際の寸法保持ロジックの検証
         let mut incoming_file = ImageFile {
             name: "test.png".to_string(),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: "C:\\images\\test.png".to_string(),
             size: 2048,
             mtime: 2000,
@@ -7504,7 +7504,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
-            hash_key: String::new(),
+            hash_key: Default::default(),
         };
 
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == incoming_file.path) {
@@ -7681,7 +7681,7 @@ mod viewer_tests {
 
         let file1 = std::sync::Arc::new(ImageFile {
             name: "img1.png".to_string(),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: "\\\\?\\C:\\images\\img1.png".to_string(),
             size: 1024,
             mtime: 1700000001,
@@ -7696,12 +7696,12 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: "".to_string(),
             unified_search_text: "".to_string(),
-            hash_key: "".to_string(),
+            hash_key: Default::default(),
         });
 
         let file2 = std::sync::Arc::new(ImageFile {
             name: "img2.webp".to_string(),
-            ext: ".webp".to_string(),
+            ext: ".webp".into(),
             path: "C:\\images\\img2.webp".to_string(),
             size: 2048,
             mtime: 1700000002,
@@ -7716,7 +7716,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: "".to_string(),
             unified_search_text: "".to_string(),
-            hash_key: "".to_string(),
+            hash_key: Default::default(),
         });
 
         let files = vec![file1, file2];
@@ -8071,7 +8071,7 @@ mod viewer_tests {
         // sort_files_by_natural_name のテスト
         let make_file = |name: &str| std::sync::Arc::new(ImageFile {
             name: name.to_string(),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: format!("C:\\test\\{}", name),
             size: 100,
             mtime: 100,
@@ -8086,7 +8086,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
-            hash_key: String::new(),
+            hash_key: Default::default(),
         });
 
         let mut files = vec![
@@ -8583,7 +8583,7 @@ mod viewer_tests {
 
         let dummy_files: Vec<ImageFile> = (0..500).map(|i| ImageFile {
             name: format!("image_{:04}.png", i),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: format!("C:\\images\\sub\\image_{:04}.png", i),
             size: 1024 * i as u64,
             mtime: 1700000000 + i as u64,
@@ -8598,7 +8598,7 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: String::new(),
             unified_search_text: String::new(),
-            hash_key: String::new(),
+            hash_key: Default::default(),
         }).collect();
 
         // シーケンシャル計算
@@ -8637,7 +8637,7 @@ mod viewer_tests {
         let files = vec![
             Arc::new(ImageFile {
                 name: "img1.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "C:\\images\\img1.png".to_string(),
                 size: 1000,
                 mtime: 1700000010,
@@ -8652,11 +8652,11 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
             Arc::new(ImageFile {
                 name: "img2.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "\\\\?\\C:\\images\\img2.png".to_string(),
                 size: 2000,
                 mtime: 1700000020,
@@ -8671,11 +8671,11 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
             Arc::new(ImageFile {
                 name: "img3.png".to_string(),
-                ext: ".png".to_string(),
+                ext: ".png".into(),
                 path: "\\\\?\\UNC\\win81\\share\\img3.png".to_string(),
                 size: 3000,
                 mtime: 1700000030,
@@ -8690,7 +8690,7 @@ mod viewer_tests {
                 meta_loaded: false,
                 search_text: String::new(),
                 unified_search_text: String::new(),
-                hash_key: String::new(),
+                hash_key: Default::default(),
             }),
         ];
 
@@ -9198,7 +9198,7 @@ mod viewer_tests {
         // 1. 新規ファイルの通知（UNC接頭辞あり、hash_key空）
         let mut new_file = ImageFile {
             name: "new_pic.png".to_string(),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: "\\\\?\\C:/images/new_pic.png".to_string(),
             size: 2048,
             mtime: 1700000000,
@@ -9213,14 +9213,14 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: "".to_string(),
             unified_search_text: "".to_string(),
-            hash_key: "".to_string(),
+            hash_key: Default::default(),
         };
 
         // notify_file_changed の内部ロジックをシミュレート
         let clean = new_file.path.replace("\\\\?\\", "").replace('/', "\\");
         new_file.path = clean.clone();
         if new_file.hash_key.is_empty() {
-            new_file.hash_key = crate::utils::hash_path_mtime_hex(&clean, new_file.mtime);
+            new_file.hash_key = crate::utils::hash_path_mtime_hex(&clean, new_file.mtime).into();
         }
 
         {
@@ -9238,7 +9238,7 @@ mod viewer_tests {
         // 2. 既存ファイルの更新（寸法0が届いた場合の寸法保持）
         let mut updated_file = ImageFile {
             name: "new_pic.png".to_string(),
-            ext: ".png".to_string(),
+            ext: ".png".into(),
             path: "C:\\images\\new_pic.png".to_string(),
             size: 4096,
             mtime: 1700000050,
@@ -9253,12 +9253,12 @@ mod viewer_tests {
             meta_loaded: false,
             search_text: "".to_string(),
             unified_search_text: "".to_string(),
-            hash_key: "".to_string(),
+            hash_key: Default::default(),
         };
         let clean_update = updated_file.path.replace("\\\\?\\", "").replace('/', "\\");
         updated_file.path = clean_update.clone();
         if updated_file.hash_key.is_empty() {
-            updated_file.hash_key = crate::utils::hash_path_mtime_hex(&clean_update, updated_file.mtime);
+            updated_file.hash_key = crate::utils::hash_path_mtime_hex(&clean_update, updated_file.mtime).into();
         }
 
         {

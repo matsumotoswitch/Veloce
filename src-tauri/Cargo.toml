@@ -41,6 +41,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 mimalloc = "0.1.48"
 parking_lot = "0.12"
 smallvec = "1.13"
+compact_str = { version = "0.8", features = ["serde"] }
 
 fast_image_resize = "5.1.4"
 rayon = "1.10.0"
