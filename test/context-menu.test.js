@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { initInspectorDelegation, resetInspectorDelegationForTest } from '../src/renderer/renderer-inspector.js';
 
@@ -292,6 +294,37 @@ describe('ContextMenuManager', () => {
     manager.hide();
     expect(menuContainer.classList.contains('show')).toBe(false);
     expect(manager.activeContext).toBeNull();
+  });
+});
+
+describe('Thumbnail & Grid Context Menu (Removal of Sort Item)', () => {
+  it('should not contain sort-root in thumbnail-item or grid-background context menu definitions in renderer.js', () => {
+    const rendererPath = path.resolve(__dirname, '../src/renderer/renderer.js');
+    const content = fs.readFileSync(rendererPath, 'utf-8');
+
+    // thumbnail-item の登録定義を取得
+    const thumbItemMatch = content.match(/contextMenuManager\.register\(\s*'thumbnail-item'\s*,\s*\[([\s\S]*?)\]\s*\);/);
+    expect(thumbItemMatch).not.toBeNull();
+    expect(thumbItemMatch[1]).not.toContain('sort-root');
+    expect(thumbItemMatch[1]).not.toContain('menuSortRoot');
+
+    // grid-background の登録定義を取得
+    const gridBgMatch = content.match(/contextMenuManager\.register\(\s*'grid-background'\s*,\s*\[([\s\S]*?)\]\s*\);/);
+    expect(gridBgMatch).not.toBeNull();
+    expect(gridBgMatch[1]).not.toContain('sort-root');
+    expect(gridBgMatch[1]).not.toContain('menuSortRoot');
+
+    // 「並べ替え」メニュー項目要素（menuSortRoot や sortSubmenu）の不要な作成ロジックが存在しないこと
+    expect(content).not.toContain('const menuSortRoot');
+    expect(content).not.toContain('const sortSubmenu');
+    expect(content).not.toContain('updateSortCheckmarks');
+  });
+
+  it('should preserve applySortChange in renderer.js for thumbnail header controls and table headers', () => {
+    const rendererPath = path.resolve(__dirname, '../src/renderer/renderer.js');
+    const content = fs.readFileSync(rendererPath, 'utf-8');
+
+    expect(content).toContain('function applySortChange(');
   });
 });
 

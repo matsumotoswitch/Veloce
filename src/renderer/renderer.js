@@ -889,83 +889,6 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
 });
 const menuDeleteFile = createMenuItem('ファイルを削除', UIManager.ICONS.FILE_X, deleteSelectedFiles, true, 'Delete');
 
-// --- コンテキストメニュー「並べ替え」の作成 ---
-const menuSortRoot = document.createElement('div');
-menuSortRoot.className = 'context-menu-item';
-menuSortRoot.innerHTML = `
-  ${UIManager.ICONS.SORT || '<div class="menu-icon-placeholder"></div>'}
-  <span class="menu-label">並べ替え</span>
-  <span></span>
-  <span class="menu-arrow">${UIManager.ICONS.CHEVRON_RIGHT}</span>
-`;
-
-menuSortRoot.onmouseenter = () => {
-  menuSortRoot.classList.add('open');
-  // Reset position
-  sortSubmenu.style.left = 'calc(100% + 2px)';
-  sortSubmenu.style.right = 'auto';
-  sortSubmenu.style.top = '-7px';
-  sortSubmenu.style.bottom = 'auto';;
-
-  // We need to temporarily force display block if not already to measure it
-  // But CSS :hover handles display:block immediately.
-  const rect = sortSubmenu.getBoundingClientRect();
-
-  let originX = 'left';
-  let originY = 'top';
-
-  if (rect.right > window.innerWidth) {
-    sortSubmenu.style.left = 'auto';
-    sortSubmenu.style.right = 'calc(100% + 2px)';
-    originX = 'right';
-  }
-
-  if (rect.bottom > window.innerHeight) {
-    sortSubmenu.style.top = 'auto';
-    sortSubmenu.style.bottom = '-7px';
-    originY = 'bottom';
-  }
-
-  sortSubmenu.style.transformOrigin = `${originY} ${originX}`;
-
-  sortSubmenu.animate([
-    { opacity: 0, transform: 'scale(0.95)' },
-    { opacity: 1, transform: 'scale(1)' }
-  ], { duration: 80, easing: 'cubic-bezier(0, 0, 0.2, 1)', fill: 'forwards' });
-};
-
-menuSortRoot.onmouseleave = () => {
-  menuSortRoot.classList.remove('open');
-};
-
-const sortSubmenu = document.createElement('div');
-sortSubmenu.className = 'submenu';
-
-const sortOptions = [
-  { key: 'name', label: '名前' },
-  { key: 'ext', label: '拡張子' },
-  { key: 'width', label: '幅' },
-  { key: 'height', label: '高さ' },
-  { key: 'ratio', label: '比率' },
-  { key: 'size', label: 'サイズ' },
-  { key: 'mtime', label: '更新日時' },
-  { key: 'rating', label: 'レーティング' }
-];
-
-const updateSortCheckmarks = () => {
-  Array.from(sortSubmenu.children).forEach(child => {
-    if (child.dataset.sortKey) {
-      const check = child.querySelector('.menu-check');
-      if (check) check.innerHTML = appState.sortConfig.key === child.dataset.sortKey ? UIManager.ICONS.CHECK : '';
-    }
-    if (child.dataset.sortOrder) {
-      const check = child.querySelector('.menu-check');
-      const isAsc = child.dataset.sortOrder === 'asc';
-      if (check) check.innerHTML = appState.sortConfig.asc === isAsc ? UIManager.ICONS.CHECK : '';
-    }
-  });
-};
-
 /**
  * ソート条件を変更し、UIインジケーター・現在のフォルダ・アクティブタブ・グローバル設定へ同期して再描画をスケジュールします。
  * @param {string} [key] - ソート対象キー（省略時は現在のキー）
@@ -989,44 +912,6 @@ function applySortChange(key, asc) {
   updateSortIndicators();
   scheduleRefresh();
 }
-
-const handleSortChange = (key, asc) => {
-  applySortChange(key, asc);
-  contextMenu.classList.remove('show');
-};
-
-const createSubOption = (label, onClick, dataKey, dataVal) => {
-  const opt = document.createElement('div');
-  opt.className = 'context-menu-item';
-  if (dataKey === 'sortKey') opt.dataset.sortKey = dataVal;
-  if (dataKey === 'sortOrder') opt.dataset.sortOrder = dataVal;
-
-  opt.innerHTML = `
-    <span class="menu-check menu-check-box"></span>
-    <span class="menu-label">${label}</span>
-    <span></span>
-    <div></div>
-  `;
-
-  opt.addEventListener('click', (e) => {
-    e.stopPropagation();
-    onClick();
-  });
-  return opt;
-};
-
-sortOptions.forEach(opt => {
-  sortSubmenu.appendChild(createSubOption(opt.label, () => handleSortChange(opt.key, undefined), 'sortKey', opt.key));
-});
-
-const menuSeparatorSortSub = createMenuSeparator();
-sortSubmenu.appendChild(menuSeparatorSortSub);
-sortSubmenu.appendChild(createSubOption('昇順', () => handleSortChange(undefined, true), 'sortOrder', 'asc'));
-sortSubmenu.appendChild(createSubOption('降順', () => handleSortChange(undefined, false), 'sortOrder', 'desc'));
-
-menuSortRoot.appendChild(sortSubmenu);
-
-const menuSeparatorSort = createMenuSeparator();
 
 const menuAddFavorite = createMenuItem('お気に入りに追加', UIManager.ICONS.STAR, async () => {
   if (!contextMenu.targetFolder) return;
@@ -1412,17 +1297,13 @@ contextMenuManager.register('thumbnail-item', [
   { id: 'diff-files', element: menuDiffFiles, visible: (ctx) => ctx.selectionSize === 2 },
   { id: 'delete-file', element: menuDeleteFile },
   { type: 'separator' },
-  { id: 'rebuild-cache', element: menuRebuildCache },
-  { type: 'separator' },
-  { id: 'sort-root', element: menuSortRoot, visible: (ctx) => ctx.isGrid, beforeShow: () => updateSortCheckmarks() }
+  { id: 'rebuild-cache', element: menuRebuildCache }
 ]);
 
 contextMenuManager.register('grid-background', [
   { id: 'reload-folder', element: menuReloadFolder },
   { type: 'separator' },
-  { id: 'rebuild-folder-cache', element: menuRebuildFolderCache },
-  { type: 'separator' },
-  { id: 'sort-root', element: menuSortRoot, beforeShow: () => updateSortCheckmarks() }
+  { id: 'rebuild-folder-cache', element: menuRebuildFolderCache }
 ]);
 
 contextMenuManager.register('favorite', [
