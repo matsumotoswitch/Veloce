@@ -83,7 +83,7 @@ pub fn init_settings(
     state: State<'_, AppState>,
     entries_from_localstorage: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, String> {
-    let mut existed_guard = state.settings_db_existed.lock().map_err(|e| e.to_string())?;
+    let mut existed_guard = state.settings_db_existed.lock();
     let mut conn = state.settings_db_conn.get().map_err(|e| e.to_string())?;
 
     if !*existed_guard {

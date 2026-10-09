@@ -10,20 +10,19 @@ pub fn get_viewer_image(
     index: usize,
 ) -> Option<ViewerImageResult> {
     let label = window.label();
-    if let Ok(viewer_paths) = state.viewer_paths.lock() {
-        if let Some(paths) = viewer_paths.get(label) {
-            if let Some(path) = paths.get(index) {
-                let chunk_start = index.saturating_sub(32);
-                let chunk_end = std::cmp::min(paths.len(), index + 33);
-                let chunk = paths[chunk_start..chunk_end].to_vec();
-                return Some(ViewerImageResult {
-                    path: path.clone(),
-                    total: paths.len(),
-                    index,
-                    chunk_start,
-                    chunk,
-                });
-            }
+    let viewer_paths = state.viewer_paths.read();
+    if let Some(paths) = viewer_paths.get(label) {
+        if let Some(path) = paths.get(index) {
+            let chunk_start = index.saturating_sub(32);
+            let chunk_end = std::cmp::min(paths.len(), index + 33);
+            let chunk = paths[chunk_start..chunk_end].to_vec();
+            return Some(ViewerImageResult {
+                path: path.clone(),
+                total: paths.len(),
+                index,
+                chunk_start,
+                chunk,
+            });
         }
     }
     None
@@ -53,26 +52,19 @@ pub async fn open_viewer(
     monitor_height: f64,
 ) -> Result<(), String> {
     let (target_path, resolved_index, current_paths) = {
-        if let Ok(paths) = state.image_paths.lock() {
-            let (target, resolved_idx) = if let Some(ref fp) = file_path {
-                if paths.get(current_index).map(|p| p == fp).unwrap_or(false) {
-                    (Some(fp.clone()), current_index)
-                } else {
-                    // O(1) 逆引きインデックスを活用して即座にインデックスを解決（O(N) 線形探索を排除）
-                    let idx = if let Ok(idx_map) = state.path_to_filtered_idx.lock() {
-                        idx_map.get(fp).copied().unwrap_or(current_index)
-                    } else {
-                        current_index
-                    };
-                    (Some(fp.clone()), idx)
-                }
+        let paths = state.image_paths.read();
+        let (target, resolved_idx) = if let Some(ref fp) = file_path {
+            if paths.get(current_index).map(|p| p == fp).unwrap_or(false) {
+                (Some(fp.clone()), current_index)
             } else {
-                (paths.get(current_index).cloned(), current_index)
-            };
-            (target, resolved_idx, std::sync::Arc::clone(&paths))
+                // O(1) 逆引きインデックスを活用して即座にインデックスを解決（O(N) 線形探索を排除）
+                let idx = state.path_to_filtered_idx.read().get(fp).copied().unwrap_or(current_index);
+                (Some(fp.clone()), idx)
+            }
         } else {
-            (file_path.clone(), current_index, std::sync::Arc::new(Vec::new()))
-        }
+            (paths.get(current_index).cloned(), current_index)
+        };
+        (target, resolved_idx, std::sync::Arc::clone(&paths))
     };
 
     let mut win_width = width;
@@ -101,7 +93,8 @@ pub async fn open_viewer(
 
     // 既に同じ画像（ハッシュ値が一致）のビューアーが開いている場合は、フォーカスを当てるだけで終了
     let mut found_existing = false;
-    if let Ok(hashes) = state.viewer_hashes.lock() {
+    {
+        let hashes = state.viewer_hashes.read();
         for (label, hash) in hashes.iter() {
             if hash == &hash_str {
                 if let Some(window) = app.get_window(label) {
@@ -134,12 +127,8 @@ pub async fn open_viewer(
     // viewer_pool_0 が非表示であればそれを再利用する
     if let Some(pool_win) = app.get_window("viewer_pool_0") {
         if !pool_win.is_visible().unwrap_or(false) {
-            if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-                viewer_paths.insert("viewer_pool_0".to_string(), current_paths.clone());
-            }
-            if let Ok(mut hashes) = state.viewer_hashes.lock() {
-                hashes.insert("viewer_pool_0".to_string(), hash_str.clone());
-            }
+            state.viewer_paths.write().insert("viewer_pool_0".to_string(), current_paths.clone());
+            state.viewer_hashes.write().insert("viewer_pool_0".to_string(), hash_str.clone());
 
             // JS側に新しい画像のロードを指示
             #[derive(Clone, serde::Serialize)]
@@ -176,9 +165,7 @@ pub async fn open_viewer(
 
     let label = format!("viewer_{:016}_{}", now_ms, hash_str);
 
-    if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-        viewer_paths.insert(label.clone(), current_paths);
-    }
+    state.viewer_paths.write().insert(label.clone(), current_paths);
 
     let data_dir = get_veloce_data_dir().unwrap_or_default();
 

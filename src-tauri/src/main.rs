@@ -20,7 +20,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::io::Read; // flate2のread_to_stringやバイナリ解析用
 
-use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 use tauri::Manager;
 
@@ -781,44 +780,18 @@ fn load_directory(
     let app_clone = window.app_handle();
     let db_conn_clone = state.db_conn.clone();
     let db_conn_purge = state.db_conn.clone();
-    let ratings_map = if let Ok(lock) = state.ratings.lock() {
-        lock.clone()
-    } else {
-        std::collections::HashMap::new()
-    };
-    let smart_folders_clone = if let Ok(lock) = state.smart_folders.lock() {
-        lock.clone()
-    } else {
-        Vec::new()
-    };
-    let current_sort = if let Ok(lock) = state.sort_config.lock() {
-        lock.clone()
-    } else {
-        SortConfig { key: "name".to_string(), asc: true }
-    };
+    let ratings_map = state.ratings.read().clone();
+    let smart_folders_clone = state.smart_folders.read().clone();
+    let current_sort = state.sort_config.read().clone();
 
     // ディレクトリ変更時にRust側の状態をリセット
-    if let Ok(mut lock) = state.all_files.lock() {
-        lock.clear();
-    }
-    if let Ok(mut lock) = state.filtered_files.lock() {
-        lock.clear();
-    }
-    if let Ok(mut lock) = state.image_paths.lock() {
-        *lock = std::sync::Arc::new(Vec::new());
-    }
-    if let Ok(mut lock) = state.path_to_all_idx.lock() {
-        lock.clear();
-    }
-    if let Ok(mut lock) = state.path_to_filtered_idx.lock() {
-        lock.clear();
-    }
-    if let Ok(mut lock) = state.path_to_mtime.lock() {
-        lock.clear();
-    }
-    if let Ok(mut dir_lock) = state.current_dir.lock() {
-        *dir_lock = path_clone.clone();
-    }
+    state.all_files.write().clear();
+    state.filtered_files.write().clear();
+    *state.image_paths.write() = std::sync::Arc::new(Vec::new());
+    state.path_to_all_idx.write().clear();
+    state.path_to_filtered_idx.write().clear();
+    state.path_to_mtime.write().clear();
+    *state.current_dir.write() = path_clone.clone();
 
     tauri::async_runtime::spawn(async move {
         let path_for_spawn = path_clone.clone();
@@ -920,24 +893,19 @@ fn load_directory(
 
                 // タブ切り替えチェック: ユーザーが別フォルダに移動していない場合のみ AppState 更新・emit
                 if let Some(state) = app_clone.try_state::<AppState>() {
-                    if let Ok(dir_lock) = state.current_dir.lock() {
-                        if *dir_lock != path_clone {
-                            return;
-                        }
+                    if *state.current_dir.read() != path_clone {
+                        return;
                     }
 
                     // 検索クエリおよびレーティングフィルタの確認
-                    let search_terms: Vec<String> = state.search_query.lock()
-                        .map(|q| {
-                            q.to_lowercase()
-                                .split(',')
-                                .map(|t| t.trim().to_string())
-                                .filter(|t| !t.is_empty())
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let rating_val = state.rating_filter_val.lock().map(|l| *l).unwrap_or(0);
-                    let rating_op = state.rating_filter_op.lock().map(|l| l.clone()).unwrap_or_else(|_| "gte".to_string());
+                    let search_terms: Vec<String> = state.search_query.read()
+                        .to_lowercase()
+                        .split(',')
+                        .map(|t| t.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect();
+                    let rating_val = *state.rating_filter_val.lock();
+                    let rating_op = state.rating_filter_op.lock().clone();
 
                     let has_filter = !search_terms.is_empty() || rating_val > 0;
 
@@ -947,15 +915,9 @@ fn load_directory(
                         let paths = std::sync::Arc::new(files.iter().map(|f| f.path.clone()).collect::<Vec<String>>());
                         state.rebuild_all_and_filtered_indices(&files);
 
-                        if let Ok(mut lock) = state.all_files.lock() {
-                            *lock = files.clone();
-                        }
-                        if let Ok(mut lock) = state.filtered_files.lock() {
-                            *lock = files.clone();
-                        }
-                        if let Ok(mut lock) = state.image_paths.lock() {
-                            *lock = paths;
-                        }
+                        *state.all_files.write() = files.clone();
+                        *state.filtered_files.write() = files.clone();
+                        *state.image_paths.write() = paths;
                         files
                     } else {
                         // フィルタあり: 既にソート済みの順序を維持したまま高速並列フィルタリング（再ソート不要）
@@ -967,37 +929,30 @@ fn load_directory(
                                 .par_iter()
                                 .filter(|f| {
                                     search_terms.iter().all(|term| f.unified_search_text.contains(term))
-                                })
+                                    })
                                 .cloned()
                                 .collect()
                         };
 
                         if rating_val > 0 {
-                            if let Ok(ratings_map) = state.ratings.lock() {
-                                filtered_vec.retain(|f| {
-                                    let rating = ratings_map.get(&f.path).copied().unwrap_or(0);
-                                    match rating_op.as_str() {
-                                        "eq" => rating == rating_val,
-                                        "lte" => rating > 0 && rating <= rating_val,
-                                        "gte" | _ => rating >= rating_val,
-                                    }
-                                });
-                            }
+                            let ratings_map = state.ratings.read();
+                            filtered_vec.retain(|f| {
+                                let rating = ratings_map.get(&f.path).copied().unwrap_or(0);
+                                match rating_op.as_str() {
+                                    "eq" => rating == rating_val,
+                                    "lte" => rating > 0 && rating <= rating_val,
+                                    "gte" | _ => rating >= rating_val,
+                                }
+                            });
                         }
 
                         let paths = std::sync::Arc::new(filtered_vec.iter().map(|f| f.path.clone()).collect::<Vec<String>>());
                         state.rebuild_all_indices(&files);
                         state.rebuild_filtered_indices(&filtered_vec);
 
-                        if let Ok(mut lock) = state.all_files.lock() {
-                            *lock = files.clone();
-                        }
-                        if let Ok(mut lock) = state.filtered_files.lock() {
-                            *lock = filtered_vec.clone();
-                        }
-                        if let Ok(mut lock) = state.image_paths.lock() {
-                            *lock = paths;
-                        }
+                        *state.all_files.write() = files.clone();
+                        *state.filtered_files.write() = filtered_vec.clone();
+                        *state.image_paths.write() = paths;
                         filtered_vec
                     };
 
@@ -1058,10 +1013,9 @@ fn load_directory(
 
                             if purged > 0 {
                                 if let Some(state) = app_handle_for_purge.try_state::<AppState>() {
-                                    if let Ok(mut r_lock) = state.ratings.lock() {
-                                        for p in &missing_for_db {
-                                            r_lock.remove(p);
-                                        }
+                                    let mut r_lock = state.ratings.write();
+                                    for p in &missing_for_db {
+                                        r_lock.remove(p);
                                     }
                                 }
                                 let _ = app_handle_for_purge.emit_all("smart-folder-purged", ());
@@ -1203,27 +1157,19 @@ fn load_directory(
 
         // Rust側のAppStateに全ファイルを格納（Source of Truth）
         if let Some(state) = app_clone.try_state::<AppState>() {
-            if let Ok(dir_lock) = state.current_dir.lock() {
-                if *dir_lock != path_clone {
-                    return;
-                }
+            if *state.current_dir.read() != path_clone {
+                return;
             }
 
-            if let Ok(mut lock) = state.all_files.lock() {
-                *lock = files.clone();
-            }
-            if let Ok(mut lock) = state.filtered_files.lock() {
-                *lock = files.clone();
-            }
-            if let Ok(mut lock) = state.image_paths.lock() {
-                *lock = std::sync::Arc::new(files.iter().map(|f| f.path.clone()).collect());
-            }
+            *state.all_files.write() = files.clone();
+            *state.filtered_files.write() = files.clone();
+            *state.image_paths.write() = std::sync::Arc::new(files.iter().map(|f| f.path.clone()).collect());
             state.rebuild_all_indices(&files);
 
             let total_count = apply_filters_and_sort(None, &state);
 
             let initial_chunk = {
-                let lock = state.filtered_files.lock().unwrap();
+                let lock = state.filtered_files.read();
                 let chunk_size = std::cmp::min(lock.len(), 200);
                 Some(lock[..chunk_size].iter().map(|f| (**f).clone()).collect())
             };
@@ -1255,10 +1201,9 @@ fn load_directory(
 
                 if purged > 0 {
                     if let Some(state) = app_handle_for_purge.try_state::<AppState>() {
-                        if let Ok(mut r_lock) = state.ratings.lock() {
-                            for p in &missing_to_purge {
-                                r_lock.remove(p);
-                            }
+                        let mut r_lock = state.ratings.write();
+                        for p in &missing_to_purge {
+                            r_lock.remove(p);
                         }
                     }
                     let _ = app_handle_for_purge.emit_all("smart-folder-purged", ());
@@ -1274,17 +1219,14 @@ fn load_directory(
             // 未解析パスのみを抽出し、インデックスマップを構築する（O(N²) → O(N) 化）
             let paths_to_process = {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
-                    if let Ok(lock) = state.all_files.lock() {
-                        lock.iter().enumerate().filter_map(|(i, f)| {
-                            if !f.meta_loaded {
-                                Some((i, f.path.clone(), f.mtime, f.ctime, f.size))
-                            } else {
-                                None
-                            }
-                        }).collect::<Vec<_>>()
-                    } else {
-                        Vec::new()
-                    }
+                    let lock = state.all_files.read();
+                    lock.iter().enumerate().filter_map(|(i, f)| {
+                        if !f.meta_loaded {
+                            Some((i, f.path.clone(), f.mtime, f.ctime, f.size))
+                        } else {
+                            None
+                        }
+                    }).collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 }
@@ -1299,10 +1241,8 @@ fn load_directory(
 
             for chunk in paths_to_process.chunks(METADATA_CHUNK_SIZE) {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
-                    if let Ok(dir_lock) = state.current_dir.lock() {
-                        if *dir_lock != path_for_bg {
-                            break;
-                        }
+                    if *state.current_dir.read() != path_for_bg {
+                        break;
                     }
 
                     let chunk_paths = chunk.to_vec();
@@ -1354,8 +1294,8 @@ fn load_directory(
 
                     processed_count += metadata_results.len();
 
-                    let mut all_files_lock = state.all_files.lock().unwrap();
-                    let mut filtered_files_lock = state.filtered_files.lock().unwrap();
+                    let mut all_files_lock = state.all_files.write();
+                    let mut filtered_files_lock = state.filtered_files.write();
 
                     // Filtered files are updated efficiently using a sorted list of updates for O(N + M log N) without HashMap
                     let mut chunk_updates: Vec<(String, std::sync::Arc<ImageFile>)> = Vec::with_capacity(metadata_results.len());
@@ -1408,9 +1348,7 @@ fn load_directory(
         });
 
         if let Some(state) = app_clone.try_state::<AppState>() {
-            if let Ok(mut dir_lock) = state.current_dir.lock() {
-                *dir_lock = path_clone;
-            }
+            *state.current_dir.write() = path_clone;
         }
     });
 
@@ -1508,19 +1446,13 @@ fn sync_ratings(
     state: tauri::State<'_, AppState>,
     ratings: std::collections::HashMap<String, u8>,
 ) -> usize {
-    if let Ok(mut lock) = state.ratings.lock() {
-        *lock = ratings;
-    }
+    *state.ratings.write() = ratings;
     apply_filters_and_sort(None, &state)
 }
 
 #[tauri::command]
 fn get_all_ratings(state: tauri::State<'_, AppState>) -> std::collections::HashMap<String, u8> {
-    if let Ok(lock) = state.ratings.lock() {
-        lock.clone()
-    } else {
-        std::collections::HashMap::new()
-    }
+    state.ratings.read().clone()
 }
 
 #[tauri::command]
@@ -1538,7 +1470,8 @@ fn migrate_ratings(
         }
         tx.commit().map_err(|e| e.to_string())?;
     }
-    if let Ok(mut lock) = state.ratings.lock() {
+    {
+        let mut lock = state.ratings.write();
         for (path, rating) in ratings {
             lock.insert(path, rating);
         }
@@ -1553,11 +1486,7 @@ fn get_smart_folder_counts(
 ) -> std::collections::HashMap<String, usize> {
     let mut result = std::collections::HashMap::new();
     
-    let ratings_map = if let Ok(lock) = state.ratings.lock() {
-        lock.clone()
-    } else {
-        std::collections::HashMap::new()
-    };
+    let ratings_map = state.ratings.read().clone();
     
     let db_conn = state.db_conn.clone();
     
@@ -1614,7 +1543,8 @@ fn set_rating(
         }
     }
 
-    if let Ok(mut lock) = state.ratings.lock() {
+    {
+        let mut lock = state.ratings.write();
         if rating == 0 {
             lock.remove(&path);
         } else {
@@ -1632,9 +1562,9 @@ fn set_rating(
 }
 
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
-    let all_files = state.all_files.lock().unwrap();
-    let sort_config = state.sort_config.lock().unwrap();
-    let search_query = state.search_query.lock().unwrap();
+    let all_files = state.all_files.read();
+    let sort_config = state.sort_config.read().clone();
+    let search_query = state.search_query.read().clone();
 
     let mut filtered: Vec<std::sync::Arc<ImageFile>> = if search_query.trim().is_empty() {
         all_files.clone()
@@ -1655,18 +1585,10 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
             .collect()
     };
 
-    let Ok(rating_val_lock) = state.rating_filter_val.lock() else {
-        return 0;
-    };
-    let rating_val = *rating_val_lock;
-    let Ok(rating_op_lock) = state.rating_filter_op.lock() else {
-        return 0;
-    };
-    let rating_op = rating_op_lock.clone();
+    let rating_val = *state.rating_filter_val.lock();
+    let rating_op = state.rating_filter_op.lock().clone();
     if rating_val > 0 {
-        let Ok(ratings_map) = state.ratings.lock() else {
-            return 0;
-        };
+        let ratings_map = state.ratings.read();
         filtered.retain(|f| {
             let rating = ratings_map.get(&f.path).copied().unwrap_or(0);
             match rating_op.as_str() {
@@ -1683,11 +1605,11 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     
     use rayon::prelude::*;
     if key == "rating" {
-        let ratings_map = state.ratings.lock().ok();
+        let ratings_map = state.ratings.read();
         let mut paired: Vec<(u8, std::sync::Arc<ImageFile>)> = filtered
             .into_par_iter()
             .map(|f| {
-                let r = ratings_map.as_ref().and_then(|m| m.get(&f.path).copied()).unwrap_or(0);
+                let r = ratings_map.get(&f.path).copied().unwrap_or(0);
                 (r, f)
             })
             .collect();
@@ -1741,26 +1663,15 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
     let paths = std::sync::Arc::new(filtered.iter().map(|f| f.path.clone()).collect::<Vec<String>>());
 
     drop(all_files);
-    drop(sort_config);
-    drop(search_query);
 
-    if let Ok(mut lock) = state.filtered_files.lock() {
-        state.rebuild_filtered_indices(&filtered);
-        *lock = filtered;
-    }
-    if let Ok(mut lock) = state.image_paths.lock() {
-        *lock = std::sync::Arc::clone(&paths);
-    }
+    state.rebuild_filtered_indices(&filtered);
+    *state.filtered_files.write() = filtered;
+    *state.image_paths.write() = std::sync::Arc::clone(&paths);
 
     if let Some(app_handle) = app {
         use std::path::Path;
         use tauri::Manager;
-        let is_smart_folder = state
-            .current_dir
-            .lock()
-            .ok()
-            .map(|d| d.starts_with("smart://"))
-            .unwrap_or(false);
+        let is_smart_folder = state.current_dir.read().starts_with("smart://");
 
         let target_dir = if let Some(first_path) = paths.first() {
             Some(
@@ -1771,39 +1682,38 @@ fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> u
                     .to_string(),
             )
         } else {
-            state.current_dir.lock().ok().map(|d| d.clone())
+            Some(state.current_dir.read().clone())
         };
 
-        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-            if !viewer_paths.is_empty() {
-                let path_set: Option<std::collections::HashSet<&str>> = if is_smart_folder {
-                    Some(paths.iter().map(|s| s.as_str()).collect())
+        let mut viewer_paths = state.viewer_paths.write();
+        if !viewer_paths.is_empty() {
+            let path_set: Option<std::collections::HashSet<&str>> = if is_smart_folder {
+                Some(paths.iter().map(|s| s.as_str()).collect())
+            } else {
+                None
+            };
+
+            for (label, viewer_list) in viewer_paths.iter_mut() {
+                let should_update = if is_smart_folder {
+                    if let Some(ref set) = path_set {
+                        viewer_list.is_empty() || viewer_list.iter().any(|p| set.contains(p.as_str()))
+                    } else {
+                        viewer_list.is_empty()
+                    }
+                } else if let Some(ref dir_str) = target_dir {
+                    let v_dir = viewer_list
+                        .first()
+                        .and_then(|p| Path::new(p).parent())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    v_dir == *dir_str
                 } else {
-                    None
+                    false
                 };
 
-                for (label, viewer_list) in viewer_paths.iter_mut() {
-                    let should_update = if is_smart_folder {
-                        if let Some(ref set) = path_set {
-                            viewer_list.is_empty() || viewer_list.iter().any(|p| set.contains(p.as_str()))
-                        } else {
-                            viewer_list.is_empty()
-                        }
-                    } else if let Some(ref dir_str) = target_dir {
-                        let v_dir = viewer_list
-                            .first()
-                            .and_then(|p| Path::new(p).parent())
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        v_dir == *dir_str
-                    } else {
-                        false
-                    };
-
-                    if should_update {
-                        *viewer_list = std::sync::Arc::clone(&paths);
-                        let _ = app_handle.emit_to(&label, "viewer-list-updated", paths.as_ref());
-                    }
+                if should_update {
+                    *viewer_list = std::sync::Arc::clone(&paths);
+                    let _ = app_handle.emit_to(&label, "viewer-list-updated", paths.as_ref());
                 }
             }
         }
@@ -1823,18 +1733,10 @@ fn set_view_params(
     rating_filter_val: u8,
     rating_filter_op: String,
 ) -> usize {
-    if let Ok(mut lock) = state.sort_config.lock() {
-        *lock = SortConfig { key: sort_key, asc };
-    }
-    if let Ok(mut lock) = state.search_query.lock() {
-        *lock = search_query;
-    }
-    if let Ok(mut lock) = state.rating_filter_val.lock() {
-        *lock = rating_filter_val;
-    }
-    if let Ok(mut lock) = state.rating_filter_op.lock() {
-        *lock = rating_filter_op;
-    }
+    *state.sort_config.write() = SortConfig { key: sort_key, asc };
+    *state.search_query.write() = search_query;
+    *state.rating_filter_val.lock() = rating_filter_val;
+    *state.rating_filter_op.lock() = rating_filter_op;
     apply_filters_and_sort(Some(&app), &state)
 }
 
@@ -1845,7 +1747,7 @@ async fn get_items(
     offset: usize,
     limit: usize,
 ) -> Result<Vec<std::sync::Arc<ImageFile>>, String> {
-    let lock = state.filtered_files.lock().unwrap();
+    let lock = state.filtered_files.read();
     let end = std::cmp::min(offset + limit, lock.len());
     if offset >= lock.len() {
         return Ok(Vec::new());
@@ -1859,7 +1761,7 @@ async fn get_file_by_index(
     state: tauri::State<'_, AppState>,
     index: usize,
 ) -> Result<Option<std::sync::Arc<ImageFile>>, String> {
-    let lock = state.filtered_files.lock().unwrap();
+    let lock = state.filtered_files.read();
     Ok(lock.get(index).cloned())
 }
 
@@ -1875,7 +1777,8 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
         .map(|meta| (meta.path.as_str(), meta))
         .collect();
 
-    if let Ok(mut all_files) = state.all_files.lock() {
+    {
+        let mut all_files = state.all_files.write();
         for f_arc in all_files.iter_mut() {
             if let Some(meta) = update_map.get(f_arc.path.as_str()) {
                 let file = std::sync::Arc::make_mut(f_arc);
@@ -1890,7 +1793,8 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
             }
         }
     }
-    if let Ok(mut filtered) = state.filtered_files.lock() {
+    {
+        let mut filtered = state.filtered_files.write();
         for f_arc in filtered.iter_mut() {
             if let Some(meta) = update_map.get(f_arc.path.as_str()) {
                 let file = std::sync::Arc::make_mut(f_arc);
@@ -1920,25 +1824,25 @@ fn update_file_dimensions(
     }
 
     let clean = path.replace("\\\\?\\", "");
-    if let Ok(all_idx_lock) = state.path_to_all_idx.lock() {
+    {
+        let all_idx_lock = state.path_to_all_idx.read();
         if let Some(&idx) = all_idx_lock.get(&path).or_else(|| all_idx_lock.get(&clean)) {
-            if let Ok(mut all_files) = state.all_files.lock() {
-                if let Some(f_arc) = all_files.get_mut(idx) {
-                    let file = std::sync::Arc::make_mut(f_arc);
-                    file.width = width;
-                    file.height = height;
-                }
+            let mut all_files = state.all_files.write();
+            if let Some(f_arc) = all_files.get_mut(idx) {
+                let file = std::sync::Arc::make_mut(f_arc);
+                file.width = width;
+                file.height = height;
             }
         }
     }
-    if let Ok(filt_idx_lock) = state.path_to_filtered_idx.lock() {
+    {
+        let filt_idx_lock = state.path_to_filtered_idx.read();
         if let Some(&idx) = filt_idx_lock.get(&path).or_else(|| filt_idx_lock.get(&clean)) {
-            if let Ok(mut filtered) = state.filtered_files.lock() {
-                if let Some(f_arc) = filtered.get_mut(idx) {
-                    let file = std::sync::Arc::make_mut(f_arc);
-                    file.width = width;
-                    file.height = height;
-                }
+            let mut filtered = state.filtered_files.write();
+            if let Some(f_arc) = filtered.get_mut(idx) {
+                let file = std::sync::Arc::make_mut(f_arc);
+                file.width = width;
+                file.height = height;
             }
         }
     }
@@ -1967,7 +1871,8 @@ fn notify_file_changed(
     if file.hash_key.is_empty() {
         file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime);
     }
-    if let Ok(mut all_files) = state.all_files.lock() {
+    {
+        let mut all_files = state.all_files.write();
         if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
             // 既存の幅・高さが取得済みで、通知された値が 0 の場合は既存の寸法を維持する
             if file.width == 0 && file.height == 0 && (existing.width > 0 || existing.height > 0) {
@@ -1991,7 +1896,8 @@ fn notify_file_removed(
     path: String,
 ) -> usize {
     let clean_path = path.replace("\\\\?\\", "").replace('/', "\\");
-    if let Ok(mut all_files) = state.all_files.lock() {
+    {
+        let mut all_files = state.all_files.write();
         all_files.retain(|f| f.path != clean_path && f.path != path);
         state.rebuild_all_indices(&all_files);
     }
@@ -3414,7 +3320,8 @@ async fn generate_thumbnail_batch(
     
     // Fast path: O(1) path_to_mtime lookup (avoid O(N) HashMap rebuild and linear scan)
     let mut files_to_process = Vec::new();
-    if let Ok(mtime_lock) = state.path_to_mtime.lock() {
+    {
+        let mtime_lock = state.path_to_mtime.read();
         for file_path in &file_paths {
             let clean = file_path.replace("\\\\?\\", "");
             if let Some(&mtime) = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)) {
@@ -3455,7 +3362,8 @@ async fn get_cached_thumbnail_batch(
 
     // Fast path: O(1) path_to_mtime lookup (avoid O(N) HashMap rebuild)
     let mut files_with_mtime: Vec<(String, u64)> = Vec::new();
-    if let Ok(mtime_lock) = state.path_to_mtime.lock() {
+    {
+        let mtime_lock = state.path_to_mtime.read();
         for file_path in &file_paths {
             let clean = file_path.replace("\\\\?\\", "");
             if let Some(&mtime) = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)) {
@@ -3965,9 +3873,7 @@ async fn precache_directory_recursively(
 
 #[tauri::command]
 fn update_smart_folders(rules: Vec<SmartFolderRule>, state: tauri::State<'_, AppState>) {
-    if let Ok(mut lock) = state.smart_folders.lock() {
-        *lock = rules;
-    }
+    *state.smart_folders.write() = rules;
 }
 
 
@@ -4032,7 +3938,7 @@ fn get_files_by_indices(
     state: tauri::State<'_, AppState>,
     indices: Vec<usize>,
 ) -> Result<Vec<std::sync::Arc<ImageFile>>, String> {
-    let lock = state.filtered_files.lock().unwrap();
+    let lock = state.filtered_files.read();
     let mut files = Vec::with_capacity(indices.len());
     for idx in indices {
         if let Some(f) = lock.get(idx) {
@@ -4062,7 +3968,8 @@ async fn clear_metadata_cache(
         file_paths_set.insert(norm_f);
     }
 
-    if let Ok(mut lock) = state.all_files.lock() {
+    {
+        let mut lock = state.all_files.write();
         for f in lock.iter_mut() {
             if file_paths_set.contains(&f.path) {
                 let f_mut = std::sync::Arc::make_mut(f);
@@ -4072,7 +3979,8 @@ async fn clear_metadata_cache(
             }
         }
     }
-    if let Ok(mut lock) = state.filtered_files.lock() {
+    {
+        let mut lock = state.filtered_files.write();
         for f in lock.iter_mut() {
             if file_paths_set.contains(&f.path) {
                 let f_mut = std::sync::Arc::make_mut(f);
@@ -4148,9 +4056,7 @@ async fn trash_file(state: tauri::State<'_, AppState>, file_path: String) -> Res
             let clean_path = file_path_clone.replace("\\\\?\\", "");
             let _ = conn.execute("DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE", rusqlite::params![&file_path_clone, &clean_path]);
         }
-        if let Ok(mut lock) = state.ratings.lock() {
-            lock.remove(&file_path_clone);
-        }
+        state.ratings.write().remove(&file_path_clone);
     }
     
     Ok(result)
@@ -4196,7 +4102,8 @@ async fn trash_folder(state: tauri::State<'_, AppState>, folder_path: String) ->
             let _ = conn.execute("DELETE FROM ratings WHERE path = ?1 OR path LIKE ?2", rusqlite::params![&folder_path_clone, &like_query]);
             let _ = conn.execute("DELETE FROM cache WHERE path = ?1 COLLATE NOCASE OR path LIKE ?2 COLLATE NOCASE OR path = ?3 COLLATE NOCASE OR path LIKE ?4 COLLATE NOCASE", rusqlite::params![&folder_path_clone, &like_query, &clean_path, &clean_like_query]);
         }
-        if let Ok(mut lock) = state.ratings.lock() {
+        {
+            let mut lock = state.ratings.write();
             let mut keys_to_remove = Vec::new();
             for p in lock.keys() {
                 if p == &folder_path_clone || p.starts_with(&old_dir_prefix) || p.starts_with(&format!("{}/", folder_path_clone)) {
@@ -4273,7 +4180,8 @@ pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) 
     }
 
     // メモリ上のレーティングキャッシュの同期
-    if let Ok(mut lock) = state.ratings.lock() {
+    {
+        let mut lock = state.ratings.write();
         let rating = lock.remove(old_path).or_else(|| lock.remove(&old_clean));
         if let Some(r) = rating {
             lock.insert(new_clean.clone(), r);
@@ -4376,7 +4284,8 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
     };
     // 厳密な前方一致置換は面倒なので、Rustのメモリ側で計算したペアでDBも更新する
     let mut updates = Vec::new();
-    if let Ok(mut lock) = state.ratings.lock() {
+    {
+        let mut lock = state.ratings.write();
         let mut keys_to_remove = Vec::new();
         for (p, rating) in lock.iter() {
             if p == &old_path_exact {
@@ -5100,27 +5009,27 @@ fn main() {
 
     builder
         .manage(AppState {
-            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
-            current_dir: Mutex::new(String::new()),
-            viewer_paths: Mutex::new(std::collections::HashMap::new()),
-            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
-            all_files: Mutex::new(Vec::new()),
-            filtered_files: Mutex::new(Vec::new()),
-            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
-            sort_config: Mutex::new(SortConfig {
+            image_paths: parking_lot::RwLock::new(std::sync::Arc::new(Vec::new())),
+            current_dir: parking_lot::RwLock::new(String::new()),
+            viewer_paths: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            viewer_hashes: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            all_files: parking_lot::RwLock::new(Vec::new()),
+            filtered_files: parking_lot::RwLock::new(Vec::new()),
+            path_to_all_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            path_to_filtered_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            path_to_mtime: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            sort_config: parking_lot::RwLock::new(SortConfig {
                 key: "name".to_string(),
                 asc: true,
             }),
-            search_query: Mutex::new(String::new()),
-            ratings: Mutex::new(std::collections::HashMap::new()),
-            rating_filter_val: Mutex::new(0),
-            rating_filter_op: Mutex::new("gte".to_string()),
+            search_query: parking_lot::RwLock::new(String::new()),
+            ratings: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            rating_filter_val: parking_lot::Mutex::new(0),
+            rating_filter_op: parking_lot::Mutex::new("gte".to_string()),
             db_conn,
             settings_db_conn,
-            settings_db_existed: Mutex::new(settings_db_existed),
-            smart_folders: Mutex::new(Vec::new()),
+            settings_db_existed: parking_lot::Mutex::new(settings_db_existed),
+            smart_folders: parking_lot::RwLock::new(Vec::new()),
             db_tx,
             video_server_port: video_port,
         })
@@ -5141,10 +5050,9 @@ fn main() {
                         if let Ok(rows) = stmt.query_map([], |row| {
                             Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
                         }) {
-                            if let Ok(mut lock) = state.ratings.lock() {
-                                for r in rows.flatten() {
-                                    lock.insert(r.0, r.1);
-                                }
+                            let mut lock = state.ratings.write();
+                            for r in rows.flatten() {
+                                lock.insert(r.0, r.1);
                             }
                         }
                     }
@@ -5228,11 +5136,7 @@ fn main() {
                 loop {
                     let current_dir = {
                         let state = app_handle.state::<AppState>();
-                        let dir = if let Ok(dir_lock) = state.current_dir.lock() {
-                            dir_lock.clone()
-                        } else {
-                            String::new()
-                        };
+                        let dir = state.current_dir.read().clone();
                         dir
                     };
 
@@ -5318,11 +5222,7 @@ fn main() {
 
                     let current_dir = {
                         let state = app_handle.state::<AppState>();
-                        let dir = if let Ok(dir_lock) = state.current_dir.lock() {
-                            dir_lock.clone()
-                        } else {
-                            String::new()
-                        };
+                        let dir = state.current_dir.read().clone();
                         dir
                     };
 
@@ -5592,22 +5492,14 @@ fn main() {
                         api.prevent_close();
                         let _ = event.window().hide();
                         let state = event.window().state::<AppState>();
-                        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-                            viewer_paths.remove(&label);
-                        };
-                        if let Ok(mut hashes) = state.viewer_hashes.lock() {
-                            hashes.remove(&label);
-                        };
+                        state.viewer_paths.write().remove(&label);
+                        state.viewer_hashes.write().remove(&label);
                     } else if label.starts_with("viewer_") {
                         let _ = event.window().set_always_on_top(false);
                         // ビューアウィンドウが閉じられた際にキャッシュを破棄
                         let state = event.window().state::<AppState>();
-                        if let Ok(mut viewer_paths) = state.viewer_paths.lock() {
-                            viewer_paths.remove(&label);
-                        };
-                        if let Ok(mut hashes) = state.viewer_hashes.lock() {
-                            hashes.remove(&label);
-                        };
+                        state.viewer_paths.write().remove(&label);
+                        state.viewer_hashes.write().remove(&label);
                     }
                 }
                 tauri::WindowEvent::Destroyed => {
@@ -5677,6 +5569,36 @@ fn main() {
         ])
         .run(context)
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState {
+    let db_conn = init_db().unwrap();
+    crate::state::AppState {
+        image_paths: parking_lot::RwLock::new(std::sync::Arc::new(Vec::new())),
+        current_dir: parking_lot::RwLock::new(current_dir.to_string()),
+        viewer_paths: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        viewer_hashes: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        path_to_all_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        path_to_filtered_idx: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        path_to_mtime: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        all_files: parking_lot::RwLock::new(Vec::new()),
+        filtered_files: parking_lot::RwLock::new(Vec::new()),
+        sort_config: parking_lot::RwLock::new(SortConfig {
+            key: "name".to_string(),
+            asc: true,
+        }),
+        search_query: parking_lot::RwLock::new(String::new()),
+        ratings: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        rating_filter_val: parking_lot::Mutex::new(0),
+        rating_filter_op: parking_lot::Mutex::new("gte".to_string()),
+        db_conn: db_conn.clone(),
+        settings_db_conn: db_conn,
+        settings_db_existed: parking_lot::Mutex::new(true),
+        smart_folders: parking_lot::RwLock::new(Vec::new()),
+        db_tx: tokio::sync::mpsc::channel(1).0,
+        video_server_port: 0,
+    }
 }
 
 #[cfg(test)]
@@ -6619,81 +6541,56 @@ mod viewer_tests {
     #[test]
     fn test_apply_filters_and_sort_does_not_skip_smart_folder() {
         use super::*;
-        use std::sync::Mutex;
         use std::sync::Arc;
 
-        let db_conn = init_db().unwrap();
-        let state = AppState {
-            image_paths: Mutex::new(Arc::new(Vec::new())),
-            current_dir: Mutex::new("smart://fav_5".to_string()),
-            viewer_paths: Mutex::new(std::collections::HashMap::new()),
-            viewer_hashes: Mutex::new(std::collections::HashMap::new()), // Trigger refresh
-            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
-            all_files: Mutex::new(vec![
-                Arc::new(ImageFile {
-                    name: "b.jpg".to_string(),
-                    ext: ".jpg".to_string(),
-                    path: "C:\\b.jpg".to_string(),
-                    size: 100,
-                    mtime: 2000,
-                    ctime: 2000,
-                    has_thumbnail_cache: false,
-                    has_metadata_cache: false,
-                    width: 0,
-                    height: 0,
-                    prompt: "".to_string(),
-                    negative_prompt: "".to_string(),
-                    source: "".to_string(),
-                    meta_loaded: false,
-                    search_text: "".to_string(),
-                    unified_search_text: "".to_string(),
-                    hash_key: "".to_string(),
-                }),
-                Arc::new(ImageFile {
-                    name: "a.jpg".to_string(),
-                    ext: ".jpg".to_string(),
-                    path: "C:\\a.jpg".to_string(),
-                    size: 100,
-                    mtime: 1000,
-                    ctime: 1000,
-                    has_thumbnail_cache: false,
-                    has_metadata_cache: false,
-                    width: 0,
-                    height: 0,
-                    prompt: "".to_string(),
-                    negative_prompt: "".to_string(),
-                    source: "".to_string(),
-                    meta_loaded: false,
-                    search_text: "".to_string(),
-                    unified_search_text: "".to_string(),
-                    hash_key: "".to_string(),
-                }),
-            ]),
-            filtered_files: Mutex::new(Vec::new()),
-            sort_config: Mutex::new(super::SortConfig {
-                key: "name".to_string(),
-                asc: true,
+        let state = create_test_app_state("smart://fav_5");
+        *state.all_files.write() = vec![
+            Arc::new(ImageFile {
+                name: "b.jpg".to_string(),
+                ext: ".jpg".to_string(),
+                path: "C:\\b.jpg".to_string(),
+                size: 100,
+                mtime: 2000,
+                ctime: 2000,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 0,
+                height: 0,
+                prompt: "".to_string(),
+                negative_prompt: "".to_string(),
+                source: "".to_string(),
+                meta_loaded: false,
+                search_text: "".to_string(),
+                unified_search_text: "".to_string(),
+                hash_key: "".to_string(),
             }),
-            search_query: Mutex::new(String::new()),
-            ratings: Mutex::new(std::collections::HashMap::new()),
-            rating_filter_val: Mutex::new(0),
-            rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn: db_conn.clone(),
-            settings_db_conn: db_conn,
-            settings_db_existed: Mutex::new(true),
-            smart_folders: Mutex::new(Vec::new()),
-            db_tx: tokio::sync::mpsc::channel(1).0,
-            video_server_port: 0,
-        };
+            Arc::new(ImageFile {
+                name: "a.jpg".to_string(),
+                ext: ".jpg".to_string(),
+                path: "C:\\a.jpg".to_string(),
+                size: 100,
+                mtime: 1000,
+                ctime: 1000,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 0,
+                height: 0,
+                prompt: "".to_string(),
+                negative_prompt: "".to_string(),
+                source: "".to_string(),
+                meta_loaded: false,
+                search_text: "".to_string(),
+                unified_search_text: "".to_string(),
+                hash_key: "".to_string(),
+            }),
+        ];
 
         // Call the function
         let count = apply_filters_and_sort(None, &state);
         assert_eq!(count, 2);
 
         // Verify that the files were sorted by name despite being a smart folder
-        let filtered = state.filtered_files.lock().unwrap();
+        let filtered = state.filtered_files.read();
         assert_eq!(filtered[0].name, "a.jpg");
         assert_eq!(filtered[1].name, "b.jpg");
     }
@@ -7757,31 +7654,7 @@ mod viewer_tests {
 
     #[test]
     fn test_path_index_o1_lookup_and_flag_update() {
-        let app_state = AppState {
-            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
-            current_dir: Mutex::new(String::new()),
-            viewer_paths: Mutex::new(std::collections::HashMap::new()),
-            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
-            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
-            all_files: Mutex::new(Vec::new()),
-            filtered_files: Mutex::new(Vec::new()),
-            sort_config: Mutex::new(super::SortConfig {
-                key: "name".to_string(),
-                asc: true,
-            }),
-            search_query: Mutex::new(String::new()),
-            ratings: Mutex::new(std::collections::HashMap::new()),
-            rating_filter_val: Mutex::new(0),
-            rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn: init_db().unwrap(),
-            settings_db_conn: init_db().unwrap(),
-            settings_db_existed: Mutex::new(true),
-            smart_folders: Mutex::new(Vec::new()),
-            db_tx: tokio::sync::mpsc::channel(1).0,
-            video_server_port: 0,
-        };
+        let app_state = create_test_app_state("");
 
         let file1 = std::sync::Arc::new(ImageFile {
             name: "img1.png".to_string(),
@@ -7826,12 +7699,8 @@ mod viewer_tests {
         let files = vec![file1, file2];
 
         // 状態にセット & インデックス再構築
-        if let Ok(mut lock) = app_state.all_files.lock() {
-            *lock = files.clone();
-        }
-        if let Ok(mut lock) = app_state.filtered_files.lock() {
-            *lock = files.clone();
-        }
+        *app_state.all_files.write() = files.clone();
+        *app_state.filtered_files.write() = files.clone();
         app_state.rebuild_all_indices(&files);
         app_state.rebuild_filtered_indices(&files);
 
@@ -7846,9 +7715,9 @@ mod viewer_tests {
         // 2. mark_thumbnail_cached による O(1) フラグ更新検証（スラッシュ区切り対応含む）
         app_state.mark_thumbnail_cached("C:/images/img1.png");
         {
-            let all = app_state.all_files.lock().unwrap();
+            let all = app_state.all_files.read();
             assert!(all[0].has_thumbnail_cache, "all_files のキャッシュフラグが更新されること");
-            let filtered = app_state.filtered_files.lock().unwrap();
+            let filtered = app_state.filtered_files.read();
             assert!(filtered[0].has_thumbnail_cache, "filtered_files のキャッシュフラグが更新されること");
             assert!(!filtered[1].has_thumbnail_cache, "無関係なファイルのフラグは変更されないこと");
         }
@@ -7856,7 +7725,7 @@ mod viewer_tests {
         // プレフィックス付きパスでも更新可能か検証
         app_state.mark_thumbnail_cached("\\\\?\\C:\\images\\img2.webp");
         {
-            let filtered = app_state.filtered_files.lock().unwrap();
+            let filtered = app_state.filtered_files.read();
             assert!(filtered[1].has_thumbnail_cache, "プレフィックスパス指定でも更新されること");
         }
     }
@@ -8715,35 +8584,9 @@ mod viewer_tests {
 
     #[test]
     fn test_rebuild_all_and_filtered_indices_single_pass() {
-        use std::sync::Mutex;
         use std::sync::Arc;
 
-        let db_conn = init_db().unwrap();
-        let state = AppState {
-            image_paths: Mutex::new(Arc::new(Vec::new())),
-            current_dir: Mutex::new("smart://test".to_string()),
-            viewer_paths: Mutex::new(std::collections::HashMap::new()),
-            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
-            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
-            all_files: Mutex::new(Vec::new()),
-            filtered_files: Mutex::new(Vec::new()),
-            sort_config: Mutex::new(super::SortConfig {
-                key: "name".to_string(),
-                asc: true,
-            }),
-            search_query: Mutex::new(String::new()),
-            ratings: Mutex::new(std::collections::HashMap::new()),
-            rating_filter_val: Mutex::new(0),
-            rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn: db_conn.clone(),
-            settings_db_conn: db_conn,
-            settings_db_existed: Mutex::new(true),
-            smart_folders: Mutex::new(Vec::new()),
-            db_tx: tokio::sync::mpsc::channel(1).0,
-            video_server_port: 0,
-        };
+        let state = create_test_app_state("smart://test");
 
         let files = vec![
             Arc::new(ImageFile {
@@ -8808,7 +8651,7 @@ mod viewer_tests {
         state.rebuild_all_and_filtered_indices(&files);
 
         // 1. path_to_all_idx の整合性検証
-        let all_idx = state.path_to_all_idx.lock().unwrap();
+        let all_idx = state.path_to_all_idx.read();
         assert_eq!(all_idx.get("C:\\images\\img1.png"), Some(&0));
         assert_eq!(all_idx.get("\\\\?\\C:\\images\\img2.png"), Some(&1));
         assert_eq!(all_idx.get("C:\\images\\img2.png"), Some(&1), "UNCプレフィックス除去後のパスでもO(1)検索可能であること");
@@ -8816,7 +8659,7 @@ mod viewer_tests {
         assert_eq!(all_idx.get("\\\\win81\\share\\img3.png"), Some(&2), "UNCネットワーク共有パス正規化後でもO(1)検索可能であること");
 
         // 2. path_to_filtered_idx の整合性検証（全件一致）
-        let filt_idx = state.path_to_filtered_idx.lock().unwrap();
+        let filt_idx = state.path_to_filtered_idx.read();
         assert_eq!(*all_idx, *filt_idx, "フィルタ未指定時、全インデックスとフィルタ後インデックスが同一であること");
 
         // 3. path_to_mtime の整合性検証
@@ -9049,34 +8892,10 @@ mod viewer_tests {
             ).unwrap();
         }
 
-        let mut ratings_map = std::collections::HashMap::new();
-        ratings_map.insert(old_path.to_string(), 4);
-
-        let app_state = AppState {
-            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
-            current_dir: Mutex::new(String::new()),
-            viewer_paths: Mutex::new(std::collections::HashMap::new()),
-            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
-            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
-            all_files: Mutex::new(Vec::new()),
-            filtered_files: Mutex::new(Vec::new()),
-            sort_config: Mutex::new(super::SortConfig {
-                key: "name".to_string(),
-                asc: true,
-            }),
-            search_query: Mutex::new(String::new()),
-            ratings: Mutex::new(ratings_map),
-            rating_filter_val: Mutex::new(0),
-            rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn: pool.clone(),
-            settings_db_conn: pool,
-            settings_db_existed: Mutex::new(true),
-            smart_folders: Mutex::new(Vec::new()),
-            db_tx: tokio::sync::mpsc::channel(1).0,
-            video_server_port: 0,
-        };
+        let mut app_state = create_test_app_state("");
+        app_state.db_conn = pool.clone();
+        app_state.settings_db_conn = pool;
+        app_state.ratings.write().insert(old_path.to_string(), 4);
 
         sync_path_rename_in_db(&app_state, old_path, new_path);
 
@@ -9085,14 +8904,14 @@ mod viewer_tests {
         let old_rating_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM ratings WHERE path = ?1",
             rusqlite::params![old_path],
-            |r| r.get(0),
+            |r: &rusqlite::Row| r.get(0),
         ).unwrap();
         assert_eq!(old_rating_count, 0, "旧パスのレーティングは削除されていること");
 
         let new_rating: i64 = conn.query_row(
             "SELECT rating FROM ratings WHERE path = ?1",
             rusqlite::params![new_path],
-            |r| r.get(0),
+            |r: &rusqlite::Row| r.get(0),
         ).unwrap();
         assert_eq!(new_rating, 4, "新パスにレーティング値が引き継がれていること");
 
@@ -9100,7 +8919,7 @@ mod viewer_tests {
         let old_cache_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM cache WHERE hash_key = ?1",
             rusqlite::params![old_hash],
-            |r| r.get(0),
+            |r: &rusqlite::Row| r.get(0),
         ).unwrap();
         assert_eq!(old_cache_count, 0, "旧ハッシュキーのキャッシュは更新されていること");
 
@@ -9108,13 +8927,13 @@ mod viewer_tests {
         let (cached_path, cached_thumb): (String, Vec<u8>) = conn.query_row(
             "SELECT path, thumbnail FROM cache WHERE hash_key = ?1",
             rusqlite::params![expected_new_hash],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r: &rusqlite::Row| Ok((r.get(0)?, r.get(1)?)),
         ).unwrap();
         assert_eq!(cached_path, new_path, "キャッシュのパスが新パスになっていること");
         assert_eq!(cached_thumb, vec![10, 20, 30, 40], "キャッシュのサムネイルデータが保持されていること");
 
         // 検証3: メモリ上の ratings
-        let lock = app_state.ratings.lock().unwrap();
+        let lock = app_state.ratings.read();
         assert!(!lock.contains_key(old_path), "メモリ上から旧パスが削除されていること");
         assert_eq!(lock.get(new_path).copied(), Some(4), "メモリ上で新パスにレーティングが反映されていること");
     }
@@ -9328,31 +9147,7 @@ mod viewer_tests {
     /// notify_file_changed および notify_file_removed のパス自動正規化とインデックス再構築同期検証
     #[test]
     fn test_notify_file_changed_and_removed_state_sync() {
-        let app_state = AppState {
-            image_paths: Mutex::new(std::sync::Arc::new(Vec::new())),
-            current_dir: Mutex::new(String::new()),
-            viewer_paths: Mutex::new(std::collections::HashMap::new()),
-            viewer_hashes: Mutex::new(std::collections::HashMap::new()),
-            path_to_all_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_filtered_idx: Mutex::new(std::collections::HashMap::new()),
-            path_to_mtime: Mutex::new(std::collections::HashMap::new()),
-            all_files: Mutex::new(Vec::new()),
-            filtered_files: Mutex::new(Vec::new()),
-            sort_config: Mutex::new(super::SortConfig {
-                key: "name".to_string(),
-                asc: true,
-            }),
-            search_query: Mutex::new(String::new()),
-            ratings: Mutex::new(std::collections::HashMap::new()),
-            rating_filter_val: Mutex::new(0),
-            rating_filter_op: Mutex::new("gte".to_string()),
-            db_conn: init_db().unwrap(),
-            settings_db_conn: init_db().unwrap(),
-            settings_db_existed: Mutex::new(true),
-            smart_folders: Mutex::new(Vec::new()),
-            db_tx: tokio::sync::mpsc::channel(1).0,
-            video_server_port: 0,
-        };
+        let app_state = create_test_app_state("");
 
         // 1. 新規ファイルの通知（UNC接頭辞あり、hash_key空）
         let mut new_file = ImageFile {
@@ -9383,7 +9178,7 @@ mod viewer_tests {
         }
 
         {
-            let mut all = app_state.all_files.lock().unwrap();
+            let mut all = app_state.all_files.write();
             all.push(std::sync::Arc::new(new_file.clone()));
             app_state.rebuild_all_indices(&all);
         }
@@ -9391,7 +9186,7 @@ mod viewer_tests {
         // インデックスとall_filesが正しく同期されていることを検証
         assert_eq!(new_file.path, "C:\\images\\new_pic.png");
         assert_eq!(new_file.hash_key.len(), 16);
-        assert_eq!(app_state.path_to_all_idx.lock().unwrap().get("C:\\images\\new_pic.png").copied(), Some(0));
+        assert_eq!(app_state.path_to_all_idx.read().get("C:\\images\\new_pic.png").copied(), Some(0));
         assert_eq!(app_state.get_mtime("C:\\images\\new_pic.png"), Some(1700000000));
 
         // 2. 既存ファイルの更新（寸法0が届いた場合の寸法保持）
@@ -9421,7 +9216,7 @@ mod viewer_tests {
         }
 
         {
-            let mut all = app_state.all_files.lock().unwrap();
+            let mut all = app_state.all_files.write();
             if let Some(existing) = all.iter_mut().find(|f| f.path == updated_file.path) {
                 if updated_file.width == 0 && updated_file.height == 0 && (existing.width > 0 || existing.height > 0) {
                     updated_file.width = existing.width;
@@ -9433,7 +9228,7 @@ mod viewer_tests {
         }
 
         {
-            let all = app_state.all_files.lock().unwrap();
+            let all = app_state.all_files.read();
             assert_eq!(all[0].size, 4096, "サイズが更新されること");
             assert_eq!(all[0].width, 1024, "寸法が保持されること");
             assert_eq!(all[0].height, 768, "寸法が保持されること");
@@ -9444,12 +9239,12 @@ mod viewer_tests {
         let remove_path = "C:/images/new_pic.png"; // スラッシュ区切りで削除要求
         let clean_remove = remove_path.replace("\\\\?\\", "").replace('/', "\\");
         {
-            let mut all = app_state.all_files.lock().unwrap();
+            let mut all = app_state.all_files.write();
             all.retain(|f| f.path != clean_remove && f.path != remove_path);
             app_state.rebuild_all_indices(&all);
         }
 
-        assert_eq!(app_state.path_to_all_idx.lock().unwrap().get("C:\\images\\new_pic.png").copied(), None, "削除後にインデックスから消去されること");
+        assert_eq!(app_state.path_to_all_idx.read().get("C:\\images\\new_pic.png").copied(), None, "削除後にインデックスから消去されること");
         assert_eq!(app_state.get_mtime("C:\\images\\new_pic.png"), None);
     }
 }

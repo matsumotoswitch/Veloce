@@ -4,31 +4,32 @@
 //! O(1) 逆引きインデックスを管理する `AppState` 構造体の定義。
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::{Mutex, RwLock};
 use crate::models::{DbMsg, ImageFile, SmartFolderRule, SortConfig};
 use crate::utils::{normalize_unc_path, strip_unc_prefix};
 
 pub struct AppState {
-    pub image_paths: Mutex<Arc<Vec<String>>>,
-    pub current_dir: Mutex<String>,
-    pub viewer_paths: Mutex<HashMap<String, Arc<Vec<String>>>>,
-    pub viewer_hashes: Mutex<HashMap<String, String>>,
+    pub image_paths: RwLock<Arc<Vec<String>>>,
+    pub current_dir: RwLock<String>,
+    pub viewer_paths: RwLock<HashMap<String, Arc<Vec<String>>>>,
+    pub viewer_hashes: RwLock<HashMap<String, String>>,
     // Source of Truth: 全ファイルとフィルタリング済みファイルをRust側で保持
-    pub all_files: Mutex<Vec<Arc<ImageFile>>>,
-    pub filtered_files: Mutex<Vec<Arc<ImageFile>>>,
+    pub all_files: RwLock<Vec<Arc<ImageFile>>>,
+    pub filtered_files: RwLock<Vec<Arc<ImageFile>>>,
     // O(1) 高速逆引きインデックス
-    pub path_to_all_idx: Mutex<HashMap<String, usize>>,
-    pub path_to_filtered_idx: Mutex<HashMap<String, usize>>,
-    pub path_to_mtime: Mutex<HashMap<String, u64>>,
-    pub sort_config: Mutex<SortConfig>,
-    pub search_query: Mutex<String>,
-    pub ratings: Mutex<HashMap<String, u8>>,
+    pub path_to_all_idx: RwLock<HashMap<String, usize>>,
+    pub path_to_filtered_idx: RwLock<HashMap<String, usize>>,
+    pub path_to_mtime: RwLock<HashMap<String, u64>>,
+    pub sort_config: RwLock<SortConfig>,
+    pub search_query: RwLock<String>,
+    pub ratings: RwLock<HashMap<String, u8>>,
     pub rating_filter_val: Mutex<u8>,
     pub rating_filter_op: Mutex<String>,
     pub db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     pub settings_db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     pub settings_db_existed: Mutex<bool>,
-    pub smart_folders: Mutex<Vec<SmartFolderRule>>,
+    pub smart_folders: RwLock<Vec<SmartFolderRule>>,
     pub db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     pub video_server_port: u16,
 }
@@ -42,27 +43,27 @@ impl AppState {
         video_server_port: u16,
     ) -> Self {
         Self {
-            image_paths: Mutex::new(Arc::new(Vec::new())),
-            current_dir: Mutex::new(String::new()),
-            viewer_paths: Mutex::new(HashMap::new()),
-            viewer_hashes: Mutex::new(HashMap::new()),
-            all_files: Mutex::new(Vec::new()),
-            filtered_files: Mutex::new(Vec::new()),
-            path_to_all_idx: Mutex::new(HashMap::new()),
-            path_to_filtered_idx: Mutex::new(HashMap::new()),
-            path_to_mtime: Mutex::new(HashMap::new()),
-            sort_config: Mutex::new(SortConfig {
+            image_paths: RwLock::new(Arc::new(Vec::new())),
+            current_dir: RwLock::new(String::new()),
+            viewer_paths: RwLock::new(HashMap::new()),
+            viewer_hashes: RwLock::new(HashMap::new()),
+            all_files: RwLock::new(Vec::new()),
+            filtered_files: RwLock::new(Vec::new()),
+            path_to_all_idx: RwLock::new(HashMap::new()),
+            path_to_filtered_idx: RwLock::new(HashMap::new()),
+            path_to_mtime: RwLock::new(HashMap::new()),
+            sort_config: RwLock::new(SortConfig {
                 key: "name".to_string(),
                 asc: true,
             }),
-            search_query: Mutex::new(String::new()),
-            ratings: Mutex::new(HashMap::new()),
+            search_query: RwLock::new(String::new()),
+            ratings: RwLock::new(HashMap::new()),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
             db_conn,
             settings_db_conn,
             settings_db_existed: Mutex::new(settings_db_existed),
-            smart_folders: Mutex::new(Vec::new()),
+            smart_folders: RwLock::new(Vec::new()),
             db_tx,
             video_server_port,
         }
@@ -86,15 +87,9 @@ impl AppState {
             mtime_map.insert(f.path.clone(), f.mtime);
         }
 
-        if let Ok(mut lock) = self.path_to_filtered_idx.lock() {
-            *lock = all_map.clone();
-        }
-        if let Ok(mut lock) = self.path_to_all_idx.lock() {
-            *lock = all_map;
-        }
-        if let Ok(mut lock) = self.path_to_mtime.lock() {
-            *lock = mtime_map;
-        }
+        *self.path_to_filtered_idx.write() = all_map.clone();
+        *self.path_to_all_idx.write() = all_map;
+        *self.path_to_mtime.write() = mtime_map;
     }
 
     /// all_files のインデックスと mtime の逆引きマップを再構築する
@@ -113,12 +108,8 @@ impl AppState {
             }
             mtime_map.insert(f.path.clone(), f.mtime);
         }
-        if let Ok(mut lock) = self.path_to_all_idx.lock() {
-            *lock = all_map;
-        }
-        if let Ok(mut lock) = self.path_to_mtime.lock() {
-            *lock = mtime_map;
-        }
+        *self.path_to_all_idx.write() = all_map;
+        *self.path_to_mtime.write() = mtime_map;
     }
 
     /// filtered_files のインデックス逆引きマップを再構築する
@@ -133,14 +124,12 @@ impl AppState {
                 filtered_map.insert(norm.into_owned(), i);
             }
         }
-        if let Ok(mut lock) = self.path_to_filtered_idx.lock() {
-            *lock = filtered_map;
-        }
+        *self.path_to_filtered_idx.write() = filtered_map;
     }
 
-    /// パスから mtime を O(1) で取得する
+    /// パスから mtime を O(1) で取得する（並行読み取り対応）
     pub fn get_mtime(&self, path: &str) -> Option<u64> {
-        let Ok(lock) = self.path_to_mtime.lock() else { return None; };
+        let lock = self.path_to_mtime.read();
         if let Some(&m) = lock.get(path) {
             return Some(m);
         }
@@ -158,8 +147,9 @@ impl AppState {
 
     /// サムネイルキャッシュ保持フラグを all_files と filtered_files の両方で O(1) 更新する
     pub fn mark_thumbnail_cached(&self, path: &str) {
-        if let Ok(all_idx_lock) = self.path_to_all_idx.lock() {
-            let idx_opt = all_idx_lock.get(path).copied().or_else(|| {
+        let idx_opt = {
+            let all_idx_lock = self.path_to_all_idx.read();
+            all_idx_lock.get(path).copied().or_else(|| {
                 let clean = strip_unc_prefix(path).unwrap_or(path);
                 all_idx_lock.get(clean).copied().or_else(|| {
                     let norm_back = clean.replace('/', "\\");
@@ -168,20 +158,21 @@ impl AppState {
                         all_idx_lock.get(&norm_fwd).copied()
                     })
                 })
-            });
+            })
+        };
 
-            if let Some(idx) = idx_opt {
-                if let Ok(mut lock) = self.all_files.lock() {
-                    if let Some(f) = lock.get_mut(idx) {
-                        if !f.has_thumbnail_cache {
-                            Arc::make_mut(f).has_thumbnail_cache = true;
-                        }
-                    }
+        if let Some(idx) = idx_opt {
+            let mut lock = self.all_files.write();
+            if let Some(f) = lock.get_mut(idx) {
+                if !f.has_thumbnail_cache {
+                    Arc::make_mut(f).has_thumbnail_cache = true;
                 }
             }
         }
-        if let Ok(filt_idx_lock) = self.path_to_filtered_idx.lock() {
-            let idx_opt = filt_idx_lock.get(path).copied().or_else(|| {
+
+        let filt_idx_opt = {
+            let filt_idx_lock = self.path_to_filtered_idx.read();
+            filt_idx_lock.get(path).copied().or_else(|| {
                 let clean = strip_unc_prefix(path).unwrap_or(path);
                 filt_idx_lock.get(clean).copied().or_else(|| {
                     let norm_back = clean.replace('/', "\\");
@@ -190,17 +181,168 @@ impl AppState {
                         filt_idx_lock.get(&norm_fwd).copied()
                     })
                 })
-            });
+            })
+        };
 
-            if let Some(idx) = idx_opt {
-                if let Ok(mut lock) = self.filtered_files.lock() {
-                    if let Some(f) = lock.get_mut(idx) {
-                        if !f.has_thumbnail_cache {
-                            Arc::make_mut(f).has_thumbnail_cache = true;
-                        }
-                    }
+        if let Some(idx) = filt_idx_opt {
+            let mut lock = self.filtered_files.write();
+            if let Some(f) = lock.get_mut(idx) {
+                if !f.has_thumbnail_cache {
+                    Arc::make_mut(f).has_thumbnail_cache = true;
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    fn create_test_file(path: &str, mtime: u64) -> Arc<ImageFile> {
+        Arc::new(ImageFile {
+            name: path.split(&['/', '\\'][..]).last().unwrap_or("").to_string(),
+            ext: ".png".to_string(),
+            path: path.to_string(),
+            size: 1024,
+            mtime,
+            ctime: mtime,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 512,
+            height: 512,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: String::new(),
+        })
+    }
+
+    #[test]
+    fn test_rebuild_and_lookup_unc() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        let state = AppState::new(pool.clone(), pool, false, tx, 0);
+
+        let files = vec![
+            create_test_file(r"C:\test\img1.png", 100),
+            create_test_file(r"\\?\C:\test\img2.png", 200),
+            create_test_file("C:/test/img3.png", 300),
+        ];
+
+        state.rebuild_all_and_filtered_indices(&files);
+
+        // 正引き・逆引きの検証
+        assert_eq!(state.get_mtime(r"C:\test\img1.png"), Some(100));
+        assert_eq!(state.get_mtime(r"C:/test/img1.png"), Some(100));
+        assert_eq!(state.get_mtime(r"\\?\C:\test\img2.png"), Some(200));
+        assert_eq!(state.get_mtime(r"C:\test\img2.png"), Some(200));
+        assert_eq!(state.get_mtime("C:/test/img3.png"), Some(300));
+        assert_eq!(state.get_mtime(r"C:\test\img3.png"), Some(300));
+        assert_eq!(state.get_mtime(r"C:\test\not_found.png"), None);
+    }
+
+    #[test]
+    fn test_concurrent_read_write() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        let state = Arc::new(AppState::new(pool.clone(), pool, false, tx, 0));
+
+        let initial_files: Vec<Arc<ImageFile>> = (0..100)
+            .map(|i| create_test_file(&format!(r"C:\test\img_{}.png", i), 1000 + i as u64))
+            .collect();
+        state.rebuild_all_and_filtered_indices(&initial_files);
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut handles = Vec::new();
+
+        // 4本の読み込み（Read）スレッド: get_mtime を高頻度で実行
+        for thread_id in 0..4 {
+            let state_clone = Arc::clone(&state);
+            let stop_clone = Arc::clone(&stop);
+            handles.push(thread::spawn(move || {
+                let mut count = 0;
+                while !stop_clone.load(Ordering::Relaxed) {
+                    let idx = (count + thread_id) % 100;
+                    let path = format!(r"C:\test\img_{}.png", idx);
+                    let _ = state_clone.get_mtime(&path);
+                    count += 1;
+                }
+                count
+            }));
+        }
+
+        // 1本の書き込み（Write）スレッド: rebuild を繰り返し実行
+        let state_write = Arc::clone(&state);
+        let stop_write = Arc::clone(&stop);
+        let write_handle = thread::spawn(move || {
+            let mut iter = 0;
+            while !stop_write.load(Ordering::Relaxed) && iter < 50 {
+                let updated_files: Vec<Arc<ImageFile>> = (0..100)
+                    .map(|i| create_test_file(&format!(r"C:\test\img_{}.png", i), (1000 + i + iter) as u64))
+                    .collect();
+                state_write.rebuild_all_and_filtered_indices(&updated_files);
+                iter += 1;
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+
+        // 100ms並行実行させた後に停止シグナル
+        thread::sleep(Duration::from_millis(100));
+        stop.store(true, Ordering::Relaxed);
+
+        write_handle.join().unwrap();
+        for h in handles {
+            let count = h.join().unwrap();
+            assert!(count > 0, "並行読み取りスレッドが正常に処理を実行できたこと");
+        }
+    }
+
+    #[test]
+    fn test_mark_thumbnail_cached_concurrent() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        let state = Arc::new(AppState::new(pool.clone(), pool, false, tx, 0));
+
+        let files: Vec<Arc<ImageFile>> = (0..50)
+            .map(|i| create_test_file(&format!(r"C:\test\img_{}.png", i), 1000))
+            .collect();
+        *state.all_files.write() = files.clone();
+        *state.filtered_files.write() = files.clone();
+        state.rebuild_all_and_filtered_indices(&files);
+
+        let mut handles = Vec::new();
+        for i in 0..50 {
+            let state_clone = Arc::clone(&state);
+            handles.push(thread::spawn(move || {
+                let path = format!(r"C:\test\img_{}.png", i);
+                state_clone.mark_thumbnail_cached(&path);
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // 全件キャッシュフラグが true に更新されていること
+        let all_files = state.all_files.read();
+        for f in all_files.iter() {
+            assert!(f.has_thumbnail_cache, "サムネイルキャッシュフラグが true に更新されていること: {}", f.path);
         }
     }
 }
