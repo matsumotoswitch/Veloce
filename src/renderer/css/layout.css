@@ -209,10 +209,10 @@
 
 /* Left Pane Smart Folder & Directory Tree Content Backgrounds */
 :root[data-theme="light"] #smart-folders-section,
-:root[data-theme="directories-section"],
+:root[data-theme="light"] #directories-section,
 :root[data-theme="light"] #smart-folders-list,
 :root[data-theme="light"] #dir-tree {
-  background-color: var(--panel-bg);
+  background-color: var(--bg-color);
 }
 
 /* Pane Headers & Central Control Bars: Unified #e2eef0 Background */
@@ -397,7 +397,7 @@ body.is-resizing .app-content {
 
 /* Panes */
 #left-pane {
-  background: var(--panel-bg);
+  background: var(--bg-color);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -409,7 +409,7 @@ body.is-resizing .app-content {
 }
 
 #right-pane {
-  background: var(--panel-bg);
+  background: var(--bg-color);
   display: flex;
   flex-direction: column;
   padding: 0;

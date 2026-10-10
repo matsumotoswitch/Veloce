@@ -336,6 +336,8 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     // 5. Pane headers and resize handles share the exact same color (--panel-bg)
     expect(cssContent).toContain('--panel-bg: #182529;');
     expect(cssContent).toMatch(/\.pane-header\s*\{[^}]*background:\s*var\(--panel-bg\);/);
+    expect(cssContent).toMatch(/#left-pane\s*\{[^}]*background:\s*var\(--bg-color\);/);
+    expect(cssContent).toMatch(/#right-pane\s*\{[^}]*background:\s*var\(--bg-color\);/);
     expect(cssContent).toMatch(/#file-table th\s*\{[^}]*background:\s*var\(--panel-bg\);/);
     expect(cssContent).toMatch(/#thumbnail-controls\s*\{[^}]*background:\s*var\(--panel-bg\);/);
     expect(cssContent).toMatch(/\.resizer\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);

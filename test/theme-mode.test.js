@@ -102,7 +102,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
 
       expect(cssContent).toContain(':root[data-theme="light"] {');
-      expect(cssContent).toContain('--bg-color: #ffffff;');
+      expect(cssContent).toContain('--bg-color: #f0f5f7;');
       expect(cssContent).toContain('--panel-bg: #f8fbfc;');
       expect(cssContent).toContain('--top-bar-bg: #cbdee1;');
       expect(cssContent).toContain('--text-color: #0f262a;');
@@ -203,13 +203,20 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toContain(':root[data-theme="light"] #search-container');
     });
 
-    it('should set var(--panel-bg) background for smart folders and directory tree interiors in light mode', () => {
+    it('should set var(--bg-color) background for smart folders and directory tree interiors in light mode', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
       expect(cssContent).toContain(':root[data-theme="light"] #smart-folders-list');
       expect(cssContent).toContain(':root[data-theme="light"] #dir-tree');
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#smart-folders-list[\s\S]*?background-color:\s*var\(--panel-bg\);/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#smart-folders-list[\s\S]*?background-color:\s*var\(--bg-color\);/);
+    });
+
+    it('should ensure inspector tag display container retains pure white (#ffffff) background in light mode', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#right-pane\s+\.prompt-look\s*\{[^}]*background-color:\s*#ffffff;/);
     });
 
     it('should ensure pane headers and resizer dividers reference --panel-bg (#f1f5f9)', () => {
@@ -223,6 +230,8 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       expect(layoutContent).toContain('.pane-header {');
       expect(layoutContent).toMatch(/\.pane-header\s*\{[^}]*background:\s*var\(--panel-bg\);/);
+      expect(layoutContent).toMatch(/#left-pane\s*\{[^}]*background:\s*var\(--bg-color\);/);
+      expect(layoutContent).toMatch(/#right-pane\s*\{[^}]*background:\s*var\(--bg-color\);/);
       expect(baseContent).toMatch(/\.resizer\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
       expect(componentsContent).toMatch(/\.resizer-h\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
     });
