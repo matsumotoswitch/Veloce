@@ -126,7 +126,7 @@
 }
 
 :root[data-theme="light"] #tab-container .tab-item:not(.active):hover {
-  background-color: #edf2f7 !important;
+  background-color: #d7e6e8 !important;
   color: #0f262a !important;
 }
 
@@ -151,6 +151,11 @@
 
 :root[data-theme="light"] .tab-close-btn:hover {
   color: var(--danger-red);
+}
+
+:root[data-theme="light"] .titlebar #new-tab-btn:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: var(--text-color) !important;
 }
 
 /* Toolbars, Bookmark Bar & Thumbnail Controls Borders */
@@ -232,7 +237,7 @@
 }
 
 :root[data-theme="light"] .inspector-header-layout {
-  border-left: 1px solid var(--border-color-light) !important;
+  border-left: none !important;
 }
 
 /* Center Pane Header Edge Covers: Match #e2eef0 to eliminate bright scrollbar gutter spot */
@@ -338,7 +343,6 @@
   background-color: #eef4f5;
   border: 1px solid var(--border-color-light);
   color: #0f262a;
-  font-weight: 500;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
 }
 

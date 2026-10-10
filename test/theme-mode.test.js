@@ -106,7 +106,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toContain('--panel-bg: #f8fbfc;');
       expect(cssContent).toContain('--top-bar-bg: #cbdee1;');
       expect(cssContent).toContain('--text-color: #0f262a;');
-      expect(cssContent).toContain('--titlebar-bg: #e2eef0;');
+      expect(cssContent).toContain('--titlebar-bg: #ffffff;');
       expect(cssContent).toContain('--tab-inactive-bg: #e2eef0;');
       expect(cssContent).toContain('--accent-color: #08979c;');
       expect(cssContent).toContain('--folder-icon-color: #d97706;');
@@ -132,6 +132,13 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*background-color:\s*var\(--tab-active-bg,\s*var\(--top-bar-bg\)\)\s*!important;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*border-bottom:\s*1px\s+solid\s+var\(--top-bar-bg\)\s*!important;/);
+    });
+
+    it('should ensure inactive tab hover background is intermediate cyan-slate #d7e6e8 between inactive #e2eef0 and active #cbdee1 in light mode', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item:not\(\.active\):hover\s*\{[^}]*background-color:\s*#d7e6e8\s*!important;/);
     });
 
     it('should ensure light theme component contrast (resizers matching pane header #e2eef0, custom-select, icon-btn:hover)', () => {
@@ -368,16 +375,16 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
 
       expect(componentsContent).toContain(':root[data-theme="light"] .thumbnail-label');
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.45\);/);
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.75\);/);
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.85\);/);
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.95\);/);
       expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-label\s*\{[^}]*text-shadow:\s*none;/);
 
       const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
       const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
 
       expect(dialogsContent).toContain(':root[data-theme="light"] .rating-badge');
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.45\);/);
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.75\);/);
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.85\);/);
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.95\);/);
       expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*text-shadow:\s*none;/);
     });
 
@@ -436,8 +443,43 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s+svg\s*\{[^}]*drop-shadow\([^)]*rgba\(255,\s*255,\s*255/);
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\.window-ctrl-btn--close:hover\s*\{[^}]*background-color:\s*var\(--danger-red\);/);
     });
+
+    it('should ensure diff-tag does not have custom font-weight in light mode to maintain identical wrapping with dark mode', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
+
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
+
+      // #right-pane .prompt-look .diff-tag が font-weight を上書きせず通常ウェイトを維持すること
+      const layoutMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#right-pane\s+\.prompt-look\s+\.diff-tag\s*\{([^}]+)\}/);
+      expect(layoutMatch).not.toBeNull();
+      expect(layoutMatch[1]).not.toContain('font-weight');
+
+      // dialogs.css の light theme diff-tag も font-weight を上書きしないこと
+      const dialogsMatch = dialogsContent.match(/:root\[data-theme="light"\]\s+\.diff-tag\.common\s*\{([^}]+)\}/);
+      expect(dialogsMatch).not.toBeNull();
+      expect(dialogsMatch[1]).not.toContain('font-weight');
+
+      // viewer.css の light theme diff-tag も font-weight を上書きしないこと
+      const viewerMatch = viewerContent.match(/:root\[data-theme="light"]\s+\.viewer-metadata-overlay\s+\.prompt-look\s+\.diff-tag\s*\{([^}]+)\}/);
+      expect(viewerMatch).not.toBeNull();
+      expect(viewerMatch[1]).not.toContain('font-weight');
+    });
+
+    it('should ensure inspector-header-layout has no left border in light mode to match dark mode continuity', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      const match = layoutContent.match(/:root\[data-theme="light"]\s+\.inspector-header-layout\s*\{([^}]+)\}/);
+      expect(match).not.toBeNull();
+      expect(match[1]).toMatch(/border-left:\s*none\s*!important;/);
+    });
   });
 });
+
 
 
 

@@ -626,7 +626,6 @@ html.viewer-html,
   background-color: rgba(238, 244, 245, 0.85);
   border: 1px solid var(--border-color-light);
   color: #0f262a;
-  font-weight: 500;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
 }
 
