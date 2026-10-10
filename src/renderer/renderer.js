@@ -370,14 +370,18 @@ export function applyRatingUI(path, rating, isOptimistic = false) {
   }
 }
 
-const scheduleRefresh = debounce(async () => {
+let pendingRefreshResetScroll = false;
+
+const _internalScheduleRefresh = debounce(async () => {
+  const shouldReset = pendingRefreshResetScroll;
+  pendingRefreshResetScroll = false;
   appState.preloadCursor = 0;
   if (window.thumbnailManager) {
     window.thumbnailManager._preloadAnchor = 0;
     window.thumbnailManager._preloadWrapped = false;
   }
   await appState.setViewParams();
-  uiManager.renderAll();
+  uiManager.renderAll(shouldReset);
   uiManager.updateSelectionUI();
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
@@ -389,6 +393,13 @@ const scheduleRefresh = debounce(async () => {
     });
   }
 }, CONFIG.REFRESH_DELAY);
+
+const scheduleRefresh = (resetScroll = false) => {
+  if (resetScroll === true) {
+    pendingRefreshResetScroll = true;
+  }
+  _internalScheduleRefresh();
+};
 
 initFileOps({
   refreshFileList,
@@ -2711,7 +2722,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
     uiManager.elements.searchBar.addEventListener('input', debounce((e) => {
       appState.searchQuery = e.target.value;
-      scheduleRefresh();
+      scheduleRefresh(true);
     }, CONFIG.SEARCH_DELAY));
     uiManager.elements.searchBar.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' || e.keyCode === 27) {
@@ -2764,12 +2775,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       updateFilterIndicator();
 
       if (changed) {
-        scheduleRefresh();
+        scheduleRefresh(true);
       } else if (uiManager.elements.searchBar) {
         // Fallback for visual clear even if already empty
         uiManager.elements.searchBar.value = '';
         appState.searchQuery = '';
-        scheduleRefresh();
+        scheduleRefresh(true);
       }
 
       uiManager.applyGlowEffect(uiManager.elements.searchClearBtn);
@@ -3066,7 +3077,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           items.forEach(i => i.classList.remove('selected'));
           item.classList.add('selected');
           updateFilterIndicator();
-          scheduleRefresh();
+          scheduleRefresh(true);
         }
         container.classList.remove('open');
       });

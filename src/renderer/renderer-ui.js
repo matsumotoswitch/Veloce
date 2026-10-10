@@ -1597,6 +1597,10 @@ class UIManager {
       const fileListContainer = document.getElementById('center-top');
       if (fileListContainer) fileListContainer.scrollTop = 0;
       if (this.elements.thumbnailGrid) this.elements.thumbnailGrid.scrollTop = 0;
+      if (typeof appState !== 'undefined') {
+        appState.savedScrollTopGrid = 0;
+        appState.savedScrollTopList = 0;
+      }
     }
 
     if (typeof this.updateVirtualGrid === 'function') {
@@ -1664,12 +1668,25 @@ class UIManager {
     const rowHeight = 28; 
     const totalRows = appState.totalCount;
     
-    const scrollTop = (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) 
+    const containerHeight = container.clientHeight || window.innerHeight;
+    const totalHeight = totalRows * rowHeight;
+    const maxScrollTop = Math.max(0, totalHeight - containerHeight);
+
+    let scrollTop = (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) 
       ? appState.savedScrollTopList 
       : container.scrollTop;
-    const containerHeight = container.clientHeight || window.innerHeight;
 
-    const startRow = Math.floor(Math.max(0, scrollTop) / rowHeight);
+    // スクロール位置がコンテンツの高さを超えている場合は安全にクランプする
+    if (scrollTop > maxScrollTop) {
+      scrollTop = maxScrollTop;
+      container.scrollTop = maxScrollTop;
+      if (appState.savedScrollTopList !== undefined && appState.savedScrollTopList !== 0) {
+        appState.savedScrollTopList = maxScrollTop;
+      }
+    }
+
+    const maxStartRow = Math.max(0, totalRows - 1);
+    const startRow = Math.min(maxStartRow, Math.floor(Math.max(0, scrollTop) / rowHeight));
     const safeStartRow = Math.max(0, startRow - 10);
     const endRow = Math.min(totalRows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 10);
 
@@ -1931,7 +1948,15 @@ class UIManager {
       appState.savedScrollTopGrid = 0;
     }
 
-    const scrollTop = container.scrollTop;
+    const containerHeight = container.clientHeight || window.innerHeight;
+    const maxScrollTop = Math.max(0, totalHeight - containerHeight);
+
+    // アイテム数急減時等でスクロール位置が最大高さを超えている場合は安全にクランプする
+    if (container.scrollTop > maxScrollTop) {
+      container.scrollTop = maxScrollTop;
+    }
+    const scrollTop = Math.min(container.scrollTop, maxScrollTop);
+
     if (typeof this._lastScrollTop === 'number') {
       if (scrollTop < this._lastScrollTop) {
         this.scrollDirection = 'up';
@@ -1940,19 +1965,19 @@ class UIManager {
       }
     }
     this._lastScrollTop = scrollTop;
-    const containerHeight = container.clientHeight || window.innerHeight;
 
     // 表示すべき行の計算 (上下に8行ずつのバッファ)
-    const startRow = Math.floor(Math.max(0, scrollTop - padding) / rowHeight);
+    const maxStartRow = Math.max(0, rows - 1);
+    const startRow = Math.min(maxStartRow, Math.floor(Math.max(0, scrollTop - padding) / rowHeight));
     const safeStartRow = Math.max(0, startRow - 8);
     const visibleRowCount = Math.ceil(containerHeight / rowHeight);
     const visibleEndRow = Math.min(rows - 1, startRow + visibleRowCount);
     const endRow = Math.min(rows - 1, startRow + visibleRowCount + 8);
 
-    const startIndex = safeStartRow * cols;
-    const endIndex = Math.min(appState.totalCount - 1, ((endRow + 1) * cols) - 1);
-    const visibleStartIndex = Math.min(appState.totalCount - 1, startRow * cols);
-    const visibleEndIndex = Math.min(appState.totalCount - 1, ((visibleEndRow + 1) * cols) - 1);
+    const startIndex = Math.min(Math.max(0, appState.totalCount - 1), safeStartRow * cols);
+    const endIndex = Math.max(startIndex, Math.min(appState.totalCount - 1, ((endRow + 1) * cols) - 1));
+    const visibleStartIndex = Math.min(Math.max(0, appState.totalCount - 1), startRow * cols);
+    const visibleEndIndex = Math.max(visibleStartIndex, Math.min(appState.totalCount - 1, ((visibleEndRow + 1) * cols) - 1));
 
     // スクロール位置が変わっていなければスキップ
     if (!force && this.lastGridStartIndex === startIndex && this.lastGridEndIndex === endIndex) {
@@ -1976,10 +2001,10 @@ class UIManager {
     }
 
     // 非同期呼び出し中にスクロールが遷移した場合は古い結果を破棄し、同期外れによるちらつきと表示崩れを防止する
-    const currentScrollTop = container.scrollTop;
-    const currentStartRow = Math.floor(Math.max(0, currentScrollTop - padding) / rowHeight);
+    const currentScrollTop = Math.min(container.scrollTop, maxScrollTop);
+    const currentStartRow = Math.min(maxStartRow, Math.floor(Math.max(0, currentScrollTop - padding) / rowHeight));
     const currentSafeStartRow = Math.max(0, currentStartRow - 8);
-    const currentStartIndex = currentSafeStartRow * cols;
+    const currentStartIndex = Math.min(Math.max(0, appState.totalCount - 1), currentSafeStartRow * cols);
     if (!force && currentStartIndex !== startIndex) {
       return;
     }
