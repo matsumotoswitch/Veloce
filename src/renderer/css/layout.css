@@ -303,7 +303,7 @@
 :root[data-theme="light"] .smart-folder-item.selected {
   background-color: rgba(var(--accent-rgb), 0.12);
   color: var(--accent-hover);
-  font-weight: 600;
+  font-weight: normal;
 }
 
 :root[data-theme="light"] .smart-folder-item:hover:not(.selected) {
@@ -315,7 +315,7 @@
 :root[data-theme="light"] .bookmark-item.selected {
   background: rgba(var(--accent-rgb), 0.14);
   color: var(--accent-hover);
-  font-weight: 600;
+  font-weight: normal;
   box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
 }
 
@@ -356,7 +356,7 @@
 :root[data-theme="light"] #file-table tr.selected {
   background: rgba(var(--accent-rgb), 0.12);
   color: var(--text-color);
-  font-weight: 600;
+  font-weight: normal;
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
 

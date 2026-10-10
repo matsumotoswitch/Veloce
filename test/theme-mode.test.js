@@ -477,6 +477,47 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(match).not.toBeNull();
       expect(match[1]).toMatch(/border-left:\s*none\s*!important;/);
     });
+
+    it('should ensure slider-tooltip and resizer-toggle hover use var(--text-on-accent) for white text/icon contrast in both modes', () => {
+      const varsCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+
+      const varsContent = fs.readFileSync(varsCssPath, 'utf-8');
+      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+
+      // variables.css でダークモード・ライトモード双方に --text-on-accent: #ffffff が定義されていること
+      expect(varsContent).toMatch(/:root\s*\{[\s\S]*?--text-on-accent:\s*#ffffff;/);
+      expect(varsContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--text-on-accent:\s*#ffffff;/);
+
+      // slider-tooltip が var(--text-on-accent) を使用していること
+      expect(dialogsContent).toMatch(/\.slider-tooltip\s*\{[\s\S]*?color:\s*var\(--text-on-accent\);/);
+
+      // resizer-toggle:hover およびその svg が var(--text-on-accent) を使用していること
+      expect(componentsContent).toMatch(/\.resizer-toggle:hover\s*\{[\s\S]*?color:\s*var\(--text-on-accent\)\s*!important;/);
+      expect(componentsContent).toMatch(/\.resizer-toggle:hover\s+svg\s*\{[\s\S]*?stroke:\s*var\(--text-on-accent\);/);
+    });
+
+    it('should ensure light mode table selection, smart folder, and bookmark do not use bold font-weight', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      // #file-table tr.selected がライトモードで font-weight: normal であること（太字化の防止）
+      const tableMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr\.selected\s*\{([^}]+)\}/);
+      expect(tableMatch).not.toBeNull();
+      expect(tableMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // .smart-folder-item.selected がライトモードで font-weight: normal であること
+      const smartFolderMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-item\.selected\s*\{([^}]+)\}/);
+      expect(smartFolderMatch).not.toBeNull();
+      expect(smartFolderMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // .bookmark-item.selected がライトモードで font-weight: normal であること
+      const bookmarkMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item\.selected\s*\{([^}]+)\}/);
+      expect(bookmarkMatch).not.toBeNull();
+      expect(bookmarkMatch[1]).toMatch(/font-weight:\s*normal;/);
+    });
   });
 });
 

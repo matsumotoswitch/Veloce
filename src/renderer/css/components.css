@@ -85,13 +85,17 @@
 .resizer-toggle:hover {
   background-color: var(--accent-color) !important;
   border-color: var(--accent-color) !important;
-  color: var(--text-light) !important;
+  color: var(--text-on-accent) !important;
   opacity: 1 !important;
   transform: translate(-50%, -50%) scale(1.05);
 }
 
 .resizer-toggle.expanded svg {
   transform: rotate(180deg);
+}
+
+.resizer-toggle:hover svg {
+  stroke: var(--text-on-accent);
 }
 
 .resizer-toggle svg {

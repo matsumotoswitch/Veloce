@@ -65,6 +65,8 @@
   --transition-close: cubic-bezier(0.36, 0, 0.66, -0.56);
   --transition-glow: cubic-bezier(0.16, 1, 0.3, 1);
   --text-light: #ffffff;
+  --text-white: #ffffff;
+  --text-on-accent: #ffffff;
   --bg-darker: #1e1e1e;
   --bg-darker-rgb: 30, 30, 30;
 
@@ -110,6 +112,8 @@
   --text-color: #0f262a;
   --text-rgb: 15, 38, 42;
   --text-light: #0f262a;
+  --text-white: #ffffff;
+  --text-on-accent: #ffffff;
 
   /* パレットカラー（お気に入り・スマートフォルダ用：ライトモード時は黒および高コントラスト配色） */
   --palette-default: #0f262a;

@@ -1096,7 +1096,7 @@ kbd {
   left: 0;
   transform: translateX(-50%);
   background-color: var(--accent-color);
-  color: var(--text-light);
+  color: var(--text-on-accent);
   padding: 2px 6px;
   border-radius: var(--radius-xs);
   font-size: var(--font-size-xs);
