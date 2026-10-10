@@ -175,7 +175,7 @@
 
 /* Search Bar Container: Clean White Field */
 :root[data-theme="light"] #search-container {
-  background: #ffffff;
+  background: #e2eef0;
   border: 1px solid #94a3b8;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -293,7 +293,7 @@
 }
 
 :root[data-theme="light"] #thumbnail-controls .custom-select {
-  background-color: #ffffff !important;
+  background-color: #e2eef0 !important;
   border: 1px solid var(--border-color);
   color: #0f262a;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -808,8 +808,8 @@ body.is-resizing .app-content {
   align-items: center;
   width: 100%;
   height: 28px;
-  background: rgba(0, 0, 0, 0.25);
-  /* タイトルバーより少し暗く凹ませる */
+  background: var(--panel-bg);
+  /* ペインヘッダやパネルと同色の背景 */
   border: 1px solid var(--border-color-light);
   border-radius: var(--radius-sm);
   padding: 0 2px;

@@ -146,7 +146,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const cssContent = fs.readFileSync(componentsCssPath, 'utf-8');
 
       expect(cssContent).toContain(':root[data-theme="light"] .custom-select');
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#ffffff;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#e2eef0;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*#0f262a;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h,\s*:root\[data-theme="light"\]\s+\.resizer-toggle\s*\{[^}]*background-color:\s*#e2eef0;/);
     });
@@ -254,7 +254,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.md-blockquote\s*\{[^}]*background:\s*transparent\s*!important;/);
     });
 
-    it('should ensure dropdown boxes (.custom-select) have clear #ffffff background in light theme for visibility', () => {
+    it('should ensure dropdown boxes (.custom-select) unify to #e2eef0 background in light theme matching pane headers', () => {
       const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
       const thumbnailCssPath = path.resolve(__dirname, '../src/renderer/css/thumbnail.css');
 
@@ -263,9 +263,9 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       // ソート順の基底ドロップダウン定義が存在すること
       expect(thumbnailContent).toContain('#thumbnail-controls .custom-select');
-      // ライトモードで .custom-select 全般が #ffffff で浮き彫りになること
+      // ライトモードで .custom-select 全般が #e2eef0 でペインヘッダと同色になること
       expect(componentsContent).toContain(':root[data-theme="light"] .custom-select');
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#ffffff;/);
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#e2eef0;/);
     });
 
     it('should ensure all pane headers, file-table th, and thumbnail-controls unify to #e2eef0 in light mode', () => {
@@ -682,6 +682,30 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const resizerMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.resizer,\s*[\r\n]+:root\[data-theme="light"\]\s+\.resizer-h,\s*[\r\n]+:root\[data-theme="light"\]\s+\.resizer-toggle\s*\{([^}]+)\}/);
       expect(resizerMatch).not.toBeNull();
       expect(resizerMatch[1]).toMatch(/background-color:\s*#e2eef0;/);
+    });
+
+    it('should set var(--panel-bg) background for search-container and custom-select in dark/base theme', () => {
+      const searchMatch = layoutContent.match(/(?:^|\n)#search-container\s*\{([^}]+)\}/);
+      expect(searchMatch).not.toBeNull();
+      expect(searchMatch[1]).toMatch(/background:\s*var\(--panel-bg\);/);
+
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+      const selectMatch = componentsContent.match(/(?:^|\n)\.custom-select\s*\{([^}]+)\}/);
+      expect(selectMatch).not.toBeNull();
+      expect(selectMatch[1]).toMatch(/background-color:\s*var\(--panel-bg\);/);
+    });
+
+    it('should set #e2eef0 background for search-container and custom-select in light theme matching pane headers', () => {
+      const lightSearchMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#search-container\s*\{([^}]+)\}/);
+      expect(lightSearchMatch).not.toBeNull();
+      expect(lightSearchMatch[1]).toMatch(/background:\s*#e2eef0;/);
+
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+      const lightSelectMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select\s*\{([^}]+)\}/);
+      expect(lightSelectMatch).not.toBeNull();
+      expect(lightSelectMatch[1]).toMatch(/background-color:\s*#e2eef0;/);
     });
   });
 });
