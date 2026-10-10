@@ -610,7 +610,7 @@ html.viewer-html,
 
 :root[data-theme="light"] .viewer-metadata-overlay .inspector-section-h3 {
   color: #0f262a !important;
-  font-weight: 600;
+  font-weight: normal;
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .prompt-look {

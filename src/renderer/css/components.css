@@ -1069,7 +1069,7 @@ th[data-sort] .sort-arrow.desc {
 :root[data-theme="light"] .custom-select-item.selected {
   background-color: rgba(var(--accent-rgb), 0.12);
   color: var(--accent-hover);
-  font-weight: 600;
+  font-weight: normal;
 }
 
 /* Icon Buttons: Prevent text/icon disappearing on hover in light mode */

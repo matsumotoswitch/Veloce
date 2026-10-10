@@ -122,7 +122,7 @@
   border-top: 2px solid transparent !important;
   border-bottom: 1px solid var(--border-color) !important;
   box-shadow: none !important;
-  font-weight: 500;
+  font-weight: normal;
 }
 
 :root[data-theme="light"] #tab-container .tab-item:not(.active):hover {
@@ -133,7 +133,7 @@
 :root[data-theme="light"] #tab-container .tab-item.active {
   background-color: var(--tab-active-bg, var(--top-bar-bg)) !important;
   color: var(--tab-active-color, #0f262a) !important;
-  font-weight: 600 !important;
+  font-weight: normal !important;
   border-left: 1px solid var(--border-color) !important;
   border-right: 1px solid var(--border-color) !important;
   border-top: 2px solid var(--accent-color) !important;
@@ -226,13 +226,13 @@
 }
 
 :root[data-theme="light"] .pane-header {
-  font-weight: 700;
+  font-weight: normal;
   font-size: 11px;
   letter-spacing: 0.5px;
 }
 
 :root[data-theme="light"] #file-table th {
-  font-weight: 600;
+  font-weight: normal;
   border-right: 1px solid var(--border-color-light) !important;
 }
 
@@ -268,7 +268,7 @@
 :root[data-theme="light"] #dir-tree .tree-item.selected {
   background-color: rgba(var(--accent-rgb), 0.15);
   color: var(--accent-hover);
-  font-weight: 600;
+  font-weight: normal;
 }
 
 :root[data-theme="light"] #dir-tree .tree-item:hover:not(.selected) {
@@ -279,7 +279,7 @@
 /* Thumbnail Controls in Light Theme */
 :root[data-theme="light"] #thumbnail-controls label:not(.custom-checkbox-wrapper) {
   color: #0f262a;
-  font-weight: 500;
+  font-weight: normal;
 }
 
 :root[data-theme="light"] #thumbnail-controls .custom-select {
@@ -327,7 +327,7 @@
 /* Inspector Cards & Headers in Light Mode */
 :root[data-theme="light"] .inspector-section-h3 {
   color: #0f262a !important;
-  font-weight: 600;
+  font-weight: normal;
 }
 
 :root[data-theme="light"] #right-pane .prompt-look {

@@ -518,6 +518,61 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(bookmarkMatch).not.toBeNull();
       expect(bookmarkMatch[1]).toMatch(/font-weight:\s*normal;/);
     });
+
+    it('should ensure all light mode components (tabs, headers, tree, controls, inspector, dropdowns, viewer) use font-weight normal', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
+
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
+
+      // 非アクティブタブ
+      const tabMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\s*\{([^}]+)\}/);
+      expect(tabMatch).not.toBeNull();
+      expect(tabMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // アクティブタブ
+      const activeTabMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{([^}]+)\}/);
+      expect(activeTabMatch).not.toBeNull();
+      expect(activeTabMatch[1]).toMatch(/font-weight:\s*normal\s*!important;/);
+
+      // ペインヘッダー
+      const paneHeaderMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.pane-header\s*\{([^}]+)\}/);
+      expect(paneHeaderMatch).not.toBeNull();
+      expect(paneHeaderMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // ファイルテーブルヘッダー
+      const tableThMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+th\s*\{([^}]+)\}/);
+      expect(tableThMatch).not.toBeNull();
+      expect(tableThMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // ディレクトリツリー選択アイテム
+      const treeMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#dir-tree\s+\.tree-item\.selected\s*\{([^}]+)\}/);
+      expect(treeMatch).not.toBeNull();
+      expect(treeMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // サムネイルコントロールラベル
+      const thumbCtrlMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#thumbnail-controls\s+label:not\(\.custom-checkbox-wrapper\)\s*\{([^}]+)\}/);
+      expect(thumbCtrlMatch).not.toBeNull();
+      expect(thumbCtrlMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // インスペクターセクション見出し
+      const inspectorH3Match = layoutContent.match(/:root\[data-theme="light"\]\s+\.inspector-section-h3\s*\{([^}]+)\}/);
+      expect(inspectorH3Match).not.toBeNull();
+      expect(inspectorH3Match[1]).toMatch(/font-weight:\s*normal;/);
+
+      // カスタムセレクト選択中アイテム
+      const selectMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select-item\.selected\s*\{([^}]+)\}/);
+      expect(selectMatch).not.toBeNull();
+      expect(selectMatch[1]).toMatch(/font-weight:\s*normal;/);
+
+      // 独立ビューアーメタデータ見出し
+      const viewerH3Match = viewerContent.match(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.inspector-section-h3\s*\{([^}]+)\}/);
+      expect(viewerH3Match).not.toBeNull();
+      expect(viewerH3Match[1]).toMatch(/font-weight:\s*normal;/);
+    });
   });
 });
 
