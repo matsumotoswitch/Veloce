@@ -707,6 +707,14 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(lightSelectMatch).not.toBeNull();
       expect(lightSelectMatch[1]).toMatch(/background-color:\s*#e2eef0;/);
     });
+
+    it('should set #e2eef0 background for .thumbnail-item in light theme matching pane headers', () => {
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+      const thumbMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.thumbnail-item\s*\{([^}]+)\}/);
+      expect(thumbMatch).not.toBeNull();
+      expect(thumbMatch[1]).toMatch(/background-color:\s*#e2eef0;/);
+    });
   });
 });
 

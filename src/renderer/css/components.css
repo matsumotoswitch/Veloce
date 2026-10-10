@@ -407,6 +407,10 @@ body.show-thumbnail-names .thumbnail-label {
 }
 
 /* Light Theme Thumbnail Hover & Selection */
+:root[data-theme="light"] .thumbnail-item {
+  background-color: #e2eef0;
+}
+
 :root[data-theme="light"] .thumbnail-item.selected {
   border-color: var(--accent-color);
   box-shadow: 0 0 0 2px var(--accent-color), 0 4px 14px rgba(var(--accent-rgb), 0.25);
