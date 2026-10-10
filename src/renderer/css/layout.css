@@ -195,7 +195,7 @@
 :root[data-theme="light"] #search-container:focus-within {
   background: #ffffff;
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
+  box-shadow: 0 0 0 2px var(--accent-hover-tint);
 }
 
 /* Directory Tree Folder & Drive Icons */
@@ -276,7 +276,7 @@
 
 /* Directory Tree Selection & Hover */
 :root[data-theme="light"] #dir-tree .tree-item.selected {
-  background-color: rgba(var(--accent-rgb), 0.15);
+  background-color: var(--accent-subtle);
   color: var(--accent-hover);
   font-weight: normal;
 }
@@ -311,7 +311,7 @@
 
 /* Smart Folder Selection & Hover */
 :root[data-theme="light"] .smart-folder-item.selected {
-  background-color: rgba(var(--accent-rgb), 0.12);
+  background-color: var(--accent-subtle);
   color: var(--accent-hover);
   font-weight: normal;
 }
@@ -364,7 +364,7 @@
 
 /* File Table Selection */
 :root[data-theme="light"] #file-table tr.selected {
-  background: rgba(var(--accent-rgb), 0.12);
+  background: var(--accent-subtle);
   color: var(--text-color);
   font-weight: normal;
   box-shadow: none;
@@ -678,12 +678,12 @@ body.is-resizing .app-content {
 }
 
 .smart-folder-item:hover {
-  background-color: rgba(var(--accent-rgb), 0.15);
+  background-color: var(--accent-hover-tint);
   color: var(--text-light);
 }
 
 .smart-folder-item.selected {
-  background-color: rgba(var(--accent-rgb), 0.3);
+  background-color: var(--accent-active-tint);
   color: var(--text-light);
   font-weight: normal;
 }
@@ -823,7 +823,7 @@ body.is-resizing .app-content {
 #search-container:focus-within {
   background: var(--bg-darker);
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 0 0 2px var(--accent-hover-tint);
 }
 
 #search-clear-btn {
@@ -847,7 +847,7 @@ body.is-resizing .app-content {
 #search-clear-btn.active {
   color: var(--accent-hover);
   opacity: 1;
-  filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.6));
+  filter: drop-shadow(0 0 4px var(--accent-focus-ring));
 }
 
 #search-bar {
@@ -986,7 +986,7 @@ table#file-table {
 }
 
 #file-table tr:hover {
-  background: rgba(var(--accent-rgb), 0.15);
+  background: var(--accent-hover-tint);
 }
 
 #file-list-body tr {
@@ -995,8 +995,13 @@ table#file-table {
   transition: background-color 0.15s ease;
 }
 
+#file-list-body tr:last-child,
+#file-list-body tr:last-child td {
+  border-bottom: none;
+}
+
 #file-table tr.selected {
-  background: rgba(var(--accent-rgb), 0.35);
+  background: var(--accent-active-tint);
   color: var(--text-light);
   font-weight: normal;
 }
@@ -1073,19 +1078,19 @@ table#file-table {
 }
 
 #dir-tree .tree-item:hover {
-  background-color: rgba(var(--accent-rgb), 0.15);
+  background-color: var(--accent-hover-tint);
   color: var(--text-light);
 }
 
 #dir-tree .tree-item.selected {
-  background: rgba(var(--accent-rgb), 0.4);
+  background: var(--accent-active-tint);
   color: var(--text-light);
   box-shadow: none;
   transition: background 0.2s ease;
 }
 
 #dir-tree .tree-item.drop-target {
-  background-color: rgba(var(--accent-rgb), 0.3);
+  background-color: var(--accent-active-tint);
 }
 
 #dir-tree .tree-item.selected::before {
@@ -1456,7 +1461,7 @@ table#file-table {
 
 /* クリックした瞬間は押し込まれつつVeloceのテーマカラーで微発光 */
 .titlebar #new-tab-btn:active {
-  background: rgba(var(--accent-rgb), 0.2) !important;
+  background: var(--accent-hover-tint) !important;
   /* Veloceのテーマ色で微発光 */
   transform: scale(0.92);
 }

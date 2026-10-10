@@ -118,7 +118,7 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
 
   it('should maintain outer accent border and box-shadow on search container while suppressing inner focus line on search bar', () => {
     expect(cssContent).toMatch(/#search-container:focus-within\s*\{[^}]*border-color:\s*var\(--accent-color\);/);
-    expect(cssContent).toMatch(/#search-container:focus-within\s*\{[^}]*box-shadow:\s*0 0 0 2px rgba\(var\(--accent-rgb\),\s*0\.25\);/);
+    expect(cssContent).toMatch(/#search-container:focus-within\s*\{[^}]*box-shadow:\s*0 0 0 2px var\(--accent-hover-tint\);/);
     expect(cssContent).toMatch(/#search-bar:focus-visible\s*\{[^}]*box-shadow:\s*none;/);
   });
 
@@ -329,9 +329,15 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/\.toolbar\s*\{[^}]*background-color:\s*var\(--top-bar-bg\);/);
 
     // 4. Clear distinction: titlebar (0%) < inactive tab (9%) < active tab (18%)
-    expect(cssContent).toContain('--tab-inactive-bg: #121b1e;');
+    expect(cssContent).toContain('--tab-inactive-bg: #141a1d;');
     expect(cssContent).toContain('--top-bar-bg: #22343a;');
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*background-color:\s*var\(--tab-inactive-bg\)/);
+
+    // Consolidated dark surface tokens (Proposal 1, 2, 3)
+    expect(cssContent).toContain('--viewer-bg: #141a1d;');
+    expect(cssContent).toContain('--modal-bg: #141a1d;');
+    expect(cssContent).toContain('--dialog-bg: #182529;');
+    expect(cssContent).toContain('--checkerboard-light: #22343a;');
 
     // 5. Pane headers and resize handles share the exact same color (--panel-bg)
     expect(cssContent).toContain('--panel-bg: #182529;');
@@ -375,17 +381,63 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(cssContent).toMatch(/\.titlebar\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color-light\)/);
     expect(cssContent).toMatch(/\.toolbar\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color-light\);/);
     expect(cssContent).toMatch(/#bookmark-bar\s*\{[^}]*border-bottom:\s*1px solid var\(--border-color-light\);/);
-    expect(cssContent).toMatch(/\.control-divider\s*\{[^}]*background-color:\s*var\(--border-color-light\);/);
+    // Proposal 4-1 (Option B): .control-divider uses var(--border-color) instead of high-contrast --border-color-light
     expect(cssContent).toMatch(/\.viewer-metadata-overlay\s*\{[^}]*border-left:\s*1px solid var\(--border-color-light\);/);
     expect(cssContent).toMatch(/\.viewer-metadata-overlay \.prompt-look\s*\{[^}]*border-color:\s*var\(--border-color-light\);/);
   });
 
   it('should define --viewer-bg-rgb and --marker-hud-bg tokens and use them for position markers', () => {
-    expect(cssContent).toContain('--viewer-bg-rgb: 19, 27, 30;');
+    expect(cssContent).toContain('--viewer-bg-rgb: 20, 26, 29;');
     expect(cssContent).toContain('--marker-hud-bg: rgba(var(--viewer-bg-rgb), 0.85);');
     expect(cssContent).toMatch(/\.inspector-position-marker\s*\{[^}]*background-color:\s*var\(--marker-hud-bg\);/);
     expect(cssContent).toMatch(/\.inspector-coord-badge\s*\{[^}]*background-color:\s*var\(--marker-hud-bg\);/);
     expect(cssContent).not.toMatch(/\.inspector-position-marker\s*\{[^}]*background-color:\s*rgba\(19,\s*27,\s*30/);
+  });
+
+  it('should eliminate duplicate borders and reduce control divider contrast (Proposal 4-1 Option B & 4-2)', () => {
+    // 提案4-1 (案B): .control-divider の白浮きを高コントラストな --border-color-light から --border-color に引き下げて低減
+    expect(cssContent).toMatch(/\.control-divider\s*\{[^}]*background-color:\s*var\(--border-color\);/);
+    expect(cssContent).not.toMatch(/\.control-divider\s*\{[^}]*background-color:\s*var\(--border-color-light\);/);
+
+    // 提案4-2: テーブル最下行のセル下線を解除し、コンテナ下端(#center-top)の境界線との重複を排除して単一化
+    const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+    const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+    const lastRowMatch = layoutContent.match(/#file-list-body\s+tr:last-child,\s*[\r\n]+#file-list-body\s+tr:last-child\s+td\s*\{([^}]+)\}/);
+    expect(lastRowMatch).not.toBeNull();
+    expect(lastRowMatch[1]).toMatch(/border-bottom:\s*none;/);
+  });
+
+  it('should define unified translucent accent tokens and apply them across controls (Proposal 5)', () => {
+    // 提案5: 半透明アクセント（アルファ値）の4段階トークン定義
+    expect(cssContent).toContain('--accent-subtle: rgba(var(--accent-rgb), 0.12);');
+    expect(cssContent).toContain('--accent-hover-tint: rgba(var(--accent-rgb), 0.25);');
+    expect(cssContent).toContain('--accent-active-tint: rgba(var(--accent-rgb), 0.40);');
+    expect(cssContent).toContain('--accent-focus-ring: rgba(var(--accent-rgb), 0.60);');
+
+    // コントロールへの段階的適用
+    const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+    const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+    const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+    const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+    const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+    const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+
+    // 検索ボックス・ドロップダウンのフォーカスリング (0.25)
+    expect(layoutContent).toMatch(/#search-container:focus-within\s*\{[^}]*box-shadow:\s*0 0 0 2px var\(--accent-hover-tint\);/);
+    expect(componentsContent).toMatch(/\.custom-select:focus,\s*[\r\n]+\.custom-select\.open\s*\{[^}]*box-shadow:\s*0 0 0 2px var\(--accent-hover-tint\);/);
+
+    // ドロップダウンメニューのホバー (0.25) と選択 (0.12)
+    expect(dialogsContent).toMatch(/\.custom-select-item:hover\s*\{[^}]*background-color:\s*var\(--accent-hover-tint\);/);
+    expect(dialogsContent).toMatch(/\.custom-select-item\.selected\s*\{[^}]*background-color:\s*var\(--accent-subtle\);/);
+
+    // テーブル・ツリー行ホバー (0.25) と選択 (0.40)
+    expect(layoutContent).toMatch(/#file-table\s+tr:hover\s*\{[^}]*background:\s*var\(--accent-hover-tint\);/);
+    expect(layoutContent).toMatch(/#file-table\s+tr\.selected\s*\{[^}]*background:\s*var\(--accent-active-tint\);/);
+    expect(layoutContent).toMatch(/#dir-tree\s+\.tree-item:hover\s*\{[^}]*background-color:\s*var\(--accent-hover-tint\);/);
+    expect(layoutContent).toMatch(/#dir-tree\s+\.tree-item\.selected\s*\{[^}]*background:\s*var\(--accent-active-tint\);/);
+
+    // スライダーつまみホバー・キーボードフォーカスリング (0.60)
+    expect(componentsContent).toMatch(/input\[type="range"\]::-webkit-slider-thumb:hover\s*\{[^}]*box-shadow:\s*0 0 6px var\(--accent-focus-ring\);/);
   });
 });
 

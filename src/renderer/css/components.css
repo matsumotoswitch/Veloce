@@ -154,7 +154,7 @@
 .control-divider {
   width: 1px;
   height: 16px;
-  background-color: var(--border-color-light);
+  background-color: var(--border-color);
   margin: 0 4px;
 }
 
@@ -210,7 +210,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 input[type="range"]::-webkit-slider-thumb:hover {
   background: var(--accent-color);
-  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 6px var(--accent-focus-ring);
 }
 
 input[type="range"]:focus {
@@ -648,8 +648,8 @@ body.show-thumbnail-names .thumbnail-label {
 }
 
 .context-menu-item:hover {
-  background-color: rgba(var(--accent-rgb), 0.3);
-  /* アクセントカラーの透過 */
+  background-color: var(--accent-hover-tint);
+  /* アクセントカラーの透過 (提案5: 通常ホバー 0.25) */
   color: var(--text-light);
 }
 
@@ -699,13 +699,13 @@ body.show-thumbnail-names .thumbnail-label {
 /* tab-list-item 固有の調整 */
 .tab-list-item.active {
   color: var(--text-light);
-  background-color: rgba(var(--accent-rgb), 0.15);
+  background-color: var(--accent-subtle);
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
 
 .tab-list-item.active:hover {
-  background-color: rgba(var(--accent-rgb), 0.3);
-  /* アクティブかつホバー時は少し明るく */
+  background-color: var(--accent-active-tint);
+  /* アクティブかつホバー時は少し明るく (提案5: 強ホバー 0.40) */
 }
 
 .tab-list-item .tab-list-icon {
@@ -840,7 +840,7 @@ th[data-sort] svg path {
 .custom-select:focus,
 .custom-select.open {
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 0 0 2px var(--accent-hover-tint);
 }
 
 .custom-select-label {
@@ -1071,7 +1071,7 @@ th[data-sort] .sort-arrow.desc {
 }
 
 :root[data-theme="light"] .custom-select-item.selected {
-  background-color: rgba(var(--accent-rgb), 0.12);
+  background-color: var(--accent-subtle);
   color: var(--accent-hover);
   font-weight: normal;
 }

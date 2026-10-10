@@ -131,7 +131,7 @@
 .dialog-input:focus {
   outline: none;
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 0 0 2px var(--accent-hover-tint);
 }
 
 select.dialog-input {
@@ -545,7 +545,7 @@ input:-webkit-autofill:focus {
 }
 
 .diff-tag.added {
-  background-color: rgba(var(--accent-rgb), 0.25);
+  background-color: var(--accent-hover-tint);
   color: var(--accent-hover);
   border: 1px solid var(--accent-color);
 }
@@ -643,7 +643,7 @@ input:-webkit-autofill:focus {
 
 .icon-grid .icon-btn.active {
   border-color: var(--accent-color) !important;
-  background: rgba(var(--accent-rgb), 0.2) !important;
+  background: var(--accent-hover-tint) !important;
 }
 
 /* --- お気に入り: カラー選択パレット --- */
@@ -787,7 +787,7 @@ input:-webkit-autofill:focus {
 }
 
 .license-link-btn:hover {
-  background-color: rgba(var(--accent-rgb), 0.15);
+  background-color: var(--accent-hover-tint);
   border-color: var(--accent-color);
   color: var(--text-light);
 }
@@ -827,7 +827,7 @@ input:-webkit-autofill:focus {
 
 .help-tab:hover {
   opacity: 1;
-  background-color: rgba(var(--accent-rgb), 0.08);
+  background-color: var(--accent-subtle);
 }
 
 .help-tab.active {
@@ -991,12 +991,12 @@ kbd {
 }
 
 .custom-select-item:hover {
-  background-color: rgba(var(--accent-rgb), 0.3);
+  background-color: var(--accent-hover-tint);
 }
 
 .custom-select-item.selected {
   color: var(--accent-color);
-  background-color: rgba(var(--accent-rgb), 0.1);
+  background-color: var(--accent-subtle);
 }
 
 .rating-badge {
@@ -1183,7 +1183,7 @@ input[type="range"]:active~.slider-tooltip {
 }
 
 :root[data-theme="light"] .license-link-btn:hover {
-  background-color: rgba(var(--accent-rgb), 0.12);
+  background-color: var(--accent-subtle);
   border-color: var(--accent-color);
   color: var(--accent-hover);
 }

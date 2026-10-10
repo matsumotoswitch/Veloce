@@ -16,7 +16,7 @@
   --panel-bg: #182529;
   --panel-rgb: 24, 37, 41;
   --top-bar-bg: #22343a;
-  --tab-inactive-bg: #121b1e;
+  --tab-inactive-bg: #141a1d;
   --border-color: #3b5057;
   --border-color-light: #4a656d;
   --border-light: var(--border-color-light);
@@ -31,6 +31,12 @@
   --danger-red: #e05263;
   --danger-rgb: 224, 82, 99;
   --accent-hover-translucent: rgba(var(--accent-hover-rgb), 0.5);
+
+  /* Translucent Accent System (Proposal 5) */
+  --accent-subtle: rgba(var(--accent-rgb), 0.12);
+  --accent-hover-tint: rgba(var(--accent-rgb), 0.25);
+  --accent-active-tint: rgba(var(--accent-rgb), 0.40);
+  --accent-focus-ring: rgba(var(--accent-rgb), 0.60);
   --danger-red-translucent: rgba(var(--danger-rgb), 0.55);
   --glow-gold: #e6c762;
   --glow-gold-rgb: 230, 199, 98;
@@ -53,9 +59,9 @@
   --header-height: 32px;
   --titlebar-bg: #000000;
   --input-bg: #000000;
-  --dialog-bg: #1a2327;
-  --viewer-bg: #131b1e;
-  --viewer-bg-rgb: 19, 27, 30;
+  --dialog-bg: #182529;
+  --viewer-bg: #141a1d;
+  --viewer-bg-rgb: 20, 26, 29;
   --marker-hud-bg: rgba(var(--viewer-bg-rgb), 0.85);
 
   /* v1.11.0 Unifications */
@@ -72,7 +78,7 @@
 
   /* Checkerboard Pattern for Transparent Backgrounds */
   --checkerboard-dark: #141f23;
-  --checkerboard-light: #223238;
+  --checkerboard-light: #22343a;
   --checkerboard-size: 16px;
 
   /* Palette Colors for Favorites & Smart Folders */
@@ -131,6 +137,12 @@
   --accent-hover: #006d75;
   --accent-hover-rgb: 0, 109, 117;
   --accent-hover-translucent: rgba(var(--accent-rgb), 0.12);
+
+  /* Translucent Accent System (Proposal 5: Light Theme) */
+  --accent-subtle: rgba(var(--accent-rgb), 0.12);
+  --accent-hover-tint: rgba(var(--accent-rgb), 0.25);
+  --accent-active-tint: rgba(var(--accent-rgb), 0.40);
+  --accent-focus-ring: rgba(var(--accent-rgb), 0.60);
 
   /* フォルダ・ドライブ専用カラー */
   --folder-icon-color: #d97706;
