@@ -160,9 +160,17 @@
 
 /* Toolbars, Bookmark Bar & Thumbnail Controls Borders */
 :root[data-theme="light"] .toolbar,
-:root[data-theme="light"] #bookmark-bar,
 :root[data-theme="light"] #thumbnail-controls {
   border-bottom: 1px solid var(--border-color) !important;
+}
+
+:root[data-theme="light"] #bookmark-bar {
+  border-bottom: 1px solid var(--border-color) !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  box-sizing: border-box !important;
+  padding: 0 8px !important;
 }
 
 /* Search Bar Container: Clean White Field */
@@ -227,8 +235,6 @@
 
 :root[data-theme="light"] .pane-header {
   font-weight: normal;
-  font-size: 11px;
-  letter-spacing: 0.5px;
 }
 
 :root[data-theme="light"] #file-table th {
@@ -420,11 +426,15 @@ body.is-resizing .app-content {
 #bookmark-bar {
   display: flex;
   align-items: center;
-  height: 32px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  box-sizing: border-box;
   background-color: var(--top-bar-bg);
   border-bottom: 1px solid var(--border-color-light);
   padding: 0 8px;
   gap: 4px;
+  overflow: hidden;
 }
 
 #bookmark-list {
@@ -433,18 +443,23 @@ body.is-resizing .app-content {
   gap: 4px;
   overflow: hidden;
   flex: 1;
+  height: 100%;
 }
 
 .bookmark-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
+  height: 22px;
+  max-height: 22px;
+  box-sizing: border-box;
+  padding: 0 8px;
   border-radius: var(--radius-xs);
   cursor: pointer;
   white-space: nowrap;
   color: var(--text-color);
   font-size: var(--font-size-xs);
+  line-height: 1;
   transition: background-color 0.2s, color 0.2s;
   user-select: none;
 }

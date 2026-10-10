@@ -551,6 +551,9 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const paneHeaderMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.pane-header\s*\{([^}]+)\}/);
       expect(paneHeaderMatch).not.toBeNull();
       expect(paneHeaderMatch[1]).toMatch(/font-weight:\s*normal;/);
+      // ライトモード独自で縮小された 11px や letter-spacing が存在せず、ダークモード (var(--font-size-xs): 12px) と完全に一致すること
+      expect(paneHeaderMatch[1]).not.toContain('font-size');
+      expect(paneHeaderMatch[1]).not.toContain('letter-spacing');
 
       // ファイルテーブルヘッダー
       const tableThMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+th\s*\{([^}]+)\}/);
@@ -583,7 +586,43 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(viewerH3Match[1]).toMatch(/font-weight:\s*normal;/);
     });
   });
+
+  describe('Bookmark Bar Height and Pane Position Consistency', () => {
+    it('should have strictly synchronized height (28px) and border-box sizing across dark and light themes', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      // #bookmark-bar デフォルト（ダークモード）
+      const baseBookmarkMatch = layoutContent.match(/(?:^|\n)#bookmark-bar\s*\{([^}]+)\}/);
+      expect(baseBookmarkMatch).not.toBeNull();
+      const baseRules = baseBookmarkMatch[1];
+      expect(baseRules).toMatch(/height:\s*28px;/);
+      expect(baseRules).toMatch(/min-height:\s*28px;/);
+      expect(baseRules).toMatch(/max-height:\s*28px;/);
+      expect(baseRules).toMatch(/box-sizing:\s*border-box;/);
+      expect(baseRules).toMatch(/overflow:\s*hidden;/);
+
+      // :root[data-theme="light"] #bookmark-bar（ライトモード）
+      const lightBookmarkMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#bookmark-bar\s*\{([^}]+)\}/);
+      expect(lightBookmarkMatch).not.toBeNull();
+      const lightRules = lightBookmarkMatch[1];
+      expect(lightRules).toMatch(/height:\s*28px\s*!important;/);
+      expect(lightRules).toMatch(/min-height:\s*28px\s*!important;/);
+      expect(lightRules).toMatch(/max-height:\s*28px\s*!important;/);
+      expect(lightRules).toMatch(/box-sizing:\s*border-box\s*!important;/);
+      expect(lightRules).toMatch(/padding:\s*0\s+8px\s*!important;/);
+
+      // .bookmark-item のサイズ制限（親バーを押し広げない定義）
+      const itemMatch = layoutContent.match(/(?:^|\n)\.bookmark-item\s*\{([^}]+)\}/);
+      expect(itemMatch).not.toBeNull();
+      const itemRules = itemMatch[1];
+      expect(itemRules).toMatch(/height:\s*22px;/);
+      expect(itemRules).toMatch(/max-height:\s*22px;/);
+      expect(itemRules).toMatch(/box-sizing:\s*border-box;/);
+    });
+  });
 });
+
 
 
 
