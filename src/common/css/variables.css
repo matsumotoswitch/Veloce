@@ -95,52 +95,52 @@
  * Light Theme (data-theme="light")
  * ============================================================================ */
 :root[data-theme="light"] {
-  /* 背景システム: ナビゲーション・お気に入りバーを最濃色（#cbd5e1）とし、アクティブタブとシームレスに同期 */
+  /* 背景システム: ナビゲーション・お気に入りバーを最濃色（#cbdee1）とし、アクティブタブとシームレスに同期 */
   --bg-color: #ffffff;
   --bg-rgb: 255, 255, 255;
-  --panel-bg: #f8fafc;
-  --panel-rgb: 248, 250, 252;
-  --top-bar-bg: #cbd5e1;
-  --tab-inactive-bg: #e2e8f0;
-  --border-color: #94a3b8;
-  --border-color-light: #cbd5e1;
+  --panel-bg: #f8fbfc;
+  --panel-rgb: 248, 251, 252;
+  --top-bar-bg: #cbdee1;
+  --tab-inactive-bg: #e2eef0;
+  --border-color: #94b3b8;
+  --border-color-light: #cbdee1;
   --border-light: var(--border-color-light);
 
-  /* タイポグラフィ・テキストカラー（純黒に近いディープスレートで最高水準のコントラスト） */
-  --text-color: #0f172a;
-  --text-rgb: 15, 23, 42;
-  --text-light: #0f172a;
+  /* タイポグラフィ・テキストカラー（純黒に近いディープシアン・スレートで最高水準のコントラスト） */
+  --text-color: #0f262a;
+  --text-rgb: 15, 38, 42;
+  --text-light: #0f262a;
 
   /* パレットカラー（お気に入り・スマートフォルダ用：ライトモード時は黒および高コントラスト配色） */
-  --palette-default: #0f172a;
+  --palette-default: #0f262a;
   --palette-red: #dc2626;
   --palette-blue: #2563eb;
   --palette-green: #16a34a;
   --palette-yellow: #d97706;
   --palette-purple: #9333ea;
   --palette-pink: #db2777;
-  --palette-cyan: #0891b2;
+  --palette-cyan: #08979c;
 
-  /* アクセントカラー（視認性と品格を両立したディープセルリアン） */
-  --accent-color: #0284c7;
-  --accent-rgb: 2, 132, 199;
-  --accent-hover: #0369a1;
-  --accent-hover-rgb: 3, 105, 161;
+  /* アクセントカラー（青みを抑えシアン・青緑のニュアンスを際立たせたピュアシアン） */
+  --accent-color: #08979c;
+  --accent-rgb: 8, 151, 156;
+  --accent-hover: #006d75;
+  --accent-hover-rgb: 0, 109, 117;
   --accent-hover-translucent: rgba(var(--accent-rgb), 0.12);
 
   /* フォルダ・ドライブ専用カラー */
   --folder-icon-color: #d97706;
-  --drive-icon-color: #475569;
+  --drive-icon-color: #476469;
 
   /* モーダル・ダイアログ・インプット（入力枠は純白で浮き上がる） */
   --modal-bg: #ffffff;
   --modal-border: rgba(0, 0, 0, 0.2);
   --dialog-bg: #ffffff;
   --input-bg: #ffffff;
-  --bg-darker: #cbd5e1;
-  --titlebar-bg: #e2e8f0;
-  --viewer-bg: #f8fafc;
-  --viewer-bg-rgb: 248, 250, 252;
+  --bg-darker: #cbdee1;
+  --titlebar-bg: #e2eef0;
+  --viewer-bg: #f8fbfc;
+  --viewer-bg-rgb: 248, 251, 252;
 
   /* デンジャー・ゴールド */
   --danger-red: #ef4444;
@@ -150,7 +150,7 @@
   --glow-gold-rgb: 217, 119, 6;
 
   /* 透明背景用チェッカーボード（ライト調） */
-  --checkerboard-dark: #cbd5e1;
+  --checkerboard-dark: #cbdee1;
   --checkerboard-light: #ffffff;
 
   /* ポップアップ・モーダルシャドウ（ライト調） */
@@ -167,7 +167,7 @@
 
   /* タブ固有スタイル（アクティブタブの背景色を下のナビゲーション・お気に入りバーと完全一致） */
   --tab-active-bg: var(--top-bar-bg);
-  --tab-active-color: #0f172a;
+  --tab-active-color: #0f262a;
 }
 
 

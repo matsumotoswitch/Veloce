@@ -103,17 +103,17 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       expect(cssContent).toContain(':root[data-theme="light"] {');
       expect(cssContent).toContain('--bg-color: #ffffff;');
-      expect(cssContent).toContain('--panel-bg: #f8fafc;');
-      expect(cssContent).toContain('--top-bar-bg: #cbd5e1;');
-      expect(cssContent).toContain('--text-color: #0f172a;');
-      expect(cssContent).toContain('--titlebar-bg: #e2e8f0;');
-      expect(cssContent).toContain('--tab-inactive-bg: #e2e8f0;');
-      expect(cssContent).toContain('--accent-color: #0284c7;');
+      expect(cssContent).toContain('--panel-bg: #f8fbfc;');
+      expect(cssContent).toContain('--top-bar-bg: #cbdee1;');
+      expect(cssContent).toContain('--text-color: #0f262a;');
+      expect(cssContent).toContain('--titlebar-bg: #e2eef0;');
+      expect(cssContent).toContain('--tab-inactive-bg: #e2eef0;');
+      expect(cssContent).toContain('--accent-color: #08979c;');
       expect(cssContent).toContain('--folder-icon-color: #d97706;');
-      expect(cssContent).toContain('--border-color: #94a3b8;');
-      expect(cssContent).toContain('--border-color-light: #cbd5e1;');
+      expect(cssContent).toContain('--border-color: #94b3b8;');
+      expect(cssContent).toContain('--border-color-light: #cbdee1;');
       expect(cssContent).toContain('--tab-active-bg: var(--top-bar-bg);');
-      expect(cssContent).toContain('--tab-active-color: #0f172a;');
+      expect(cssContent).toContain('--tab-active-color: #0f262a;');
       expect(cssContent).toContain('--titlebar-divider-color: rgba(0, 0, 0, 0.25);');
     });
 
@@ -134,14 +134,14 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*border-bottom:\s*1px\s+solid\s+var\(--top-bar-bg\)\s*!important;/);
     });
 
-    it('should ensure light theme component contrast (resizers matching pane header #e2e8f0, custom-select, icon-btn:hover)', () => {
+    it('should ensure light theme component contrast (resizers matching pane header #e2eef0, custom-select, icon-btn:hover)', () => {
       const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
       const cssContent = fs.readFileSync(componentsCssPath, 'utf-8');
 
       expect(cssContent).toContain(':root[data-theme="light"] .custom-select');
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#ffffff;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*#0f172a;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h\s*\{[^}]*background-color:\s*#e2e8f0;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*#0f262a;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h\s*\{[^}]*background-color:\s*#e2eef0;/);
     });
 
     it('should define folder icon tokens and class in variables.css', () => {
@@ -252,7 +252,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#ffffff;/);
     });
 
-    it('should ensure all pane headers, file-table th, and thumbnail-controls unify to #e2e8f0 in light mode', () => {
+    it('should ensure all pane headers, file-table th, and thumbnail-controls unify to #e2eef0 in light mode', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
@@ -260,24 +260,24 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(layoutContent).toContain(':root[data-theme="light"] #file-table th');
       expect(layoutContent).toContain(':root[data-theme="light"] #thumbnail-controls');
       expect(layoutContent).toContain(':root[data-theme="light"] #inspector-header');
-      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+\.pane-header[\s\S]*?background-color:\s*#e2e8f0\s*!important;/);
+      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+\.pane-header[\s\S]*?background-color:\s*#e2eef0\s*!important;/);
     });
 
-    it('should ensure #center-pane::before and #center-pane::after match #e2e8f0 in light mode to eliminate bright scrollbar gutter spot', () => {
+    it('should ensure #center-pane::before and #center-pane::after match #e2eef0 in light mode to eliminate bright scrollbar gutter spot', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
       expect(layoutContent).toContain(':root[data-theme="light"] #center-pane::before');
       expect(layoutContent).toContain(':root[data-theme="light"] #center-pane::after');
-      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+#center-pane::before,\s*:root\[data-theme="light"\]\s+#center-pane::after\s*\{[^}]*background:\s*#e2e8f0\s*!important;/);
+      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+#center-pane::before,\s*:root\[data-theme="light"\]\s+#center-pane::after\s*\{[^}]*background:\s*#e2eef0\s*!important;/);
     });
 
     it('should define --viewer-bg and --viewer-bg-rgb in light mode tokens in variables.css', () => {
       const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
       const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
 
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg:\s*#f8fafc;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg-rgb:\s*248,\s*250,\s*252;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg:\s*#f8fbfc;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg-rgb:\s*248,\s*251,\s*252;/);
     });
 
     it('should ensure viewer metadata overlay and prompt-look match light theme styling with translucent parity', () => {
@@ -287,12 +287,12 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       // 背景およびヘッダーがダークモードと同等の0.85不透明度であること
       expect(viewerContent).toContain(':root[data-theme="light"] .viewer-metadata-overlay');
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s*\{[^}]*background:\s*rgba\(var\(--bg-rgb\),\s*0\.85\);/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-header\s*\{[^}]*background:\s*rgba\(226,\s*232,\s*240,\s*0\.85\)\s*!important;/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-title\s*\{[^}]*color:\s*#0f172a\s*!important;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-header\s*\{[^}]*background:\s*rgba\(226,\s*238,\s*240,\s*0\.85\)\s*!important;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-title\s*\{[^}]*color:\s*#0f262a\s*!important;/);
 
       // プロンプトボックスが半透明（0.65）で背後を透過すること
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.prompt-look\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.65\)\s*!important;/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.prompt-look\s+\.diff-tag\s*\{[^}]*background-color:\s*rgba\(241,\s*245,\s*249,\s*0\.85\);/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.prompt-look\s+\.diff-tag\s*\{[^}]*background-color:\s*rgba\(238,\s*244,\s*245,\s*0\.85\);/);
     });
 
     it('should broadcast theme-changed event in renderer.js when theme is toggled', () => {
@@ -302,22 +302,22 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(rendererContent).toMatch(/window\.__TAURI__\.event\.emit\('theme-changed',\s*nextTheme\)/);
     });
 
-    it('should set --text-light to #0f172a and define high-contrast palette colors in light mode tokens', () => {
+    it('should set --text-light to #0f262a and define high-contrast palette colors in light mode tokens', () => {
       const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
       const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
 
-      // ライトモード時に --text-light が白ではなく黒（#0f172a）に設定されていること
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--text-light:\s*#0f172a;/);
+      // ライトモード時に --text-light が白ではなく黒（#0f262a）に設定されていること
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--text-light:\s*#0f262a;/);
 
       // ライトモード時にパレットカラー（デフォルトが黒、他色も高コントラスト）が定義されていること
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-default:\s*#0f172a;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-default:\s*#0f262a;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-red:\s*#dc2626;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-blue:\s*#2563eb;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-green:\s*#16a34a;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-yellow:\s*#d97706;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-purple:\s*#9333ea;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-pink:\s*#db2777;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-cyan:\s*#0891b2;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-cyan:\s*#08979c;/);
     });
 
     it('should ensure smart folder and bookmark icons use var(--palette-default) in light mode', () => {
@@ -419,20 +419,20 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       // ファイル名・レーティング・拡大率の黒文字と白シャドウ
       expect(viewerContent).toContain(':root[data-theme="light"] .window-filename');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-filename\s*\{[^}]*color:\s*#0f172a;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-filename\s*\{[^}]*color:\s*#0f262a;/);
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-filename\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
 
       expect(viewerContent).toContain(':root[data-theme="light"] .viewer-rating-display');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-rating-display\s*\{[^}]*color:\s*#0f172a;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-rating-display\s*\{[^}]*color:\s*#0f262a;/);
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-rating-display\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
 
       expect(viewerContent).toContain(':root[data-theme="light"] .window-scale-display');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-scale-display\s*\{[^}]*color:\s*#0f172a;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-scale-display\s*\{[^}]*color:\s*#0f262a;/);
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-scale-display\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
 
       // コントロールボタンのダークカラーと白シャドウ
       expect(viewerContent).toContain(':root[data-theme="light"] .window-ctrl-btn');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s*\{[^}]*color:\s*#334155;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s*\{[^}]*color:\s*#334549;/);
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s+svg\s*\{[^}]*drop-shadow\([^)]*rgba\(255,\s*255,\s*255/);
       expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\.window-ctrl-btn--close:hover\s*\{[^}]*background-color:\s*var\(--danger-red\);/);
     });

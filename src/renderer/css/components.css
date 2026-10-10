@@ -436,7 +436,7 @@ body.show-thumbnail-names .thumbnail-label {
 /* Light Theme Dialog & Form Inputs (一番明るい純白 #ffffff 背景) */
 :root[data-theme="light"] .dialog-input {
   background-color: #ffffff !important;
-  color: #0f172a;
+  color: #0f262a;
   border: 1px solid var(--border-color);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -449,7 +449,7 @@ body.show-thumbnail-names .thumbnail-label {
 
 :root[data-theme="light"] select.dialog-input option {
   background-color: #ffffff;
-  color: #0f172a;
+  color: #0f262a;
 }
 
 
@@ -1044,7 +1044,7 @@ th[data-sort] .sort-arrow.desc {
 }
 
 :root[data-theme="light"] .custom-select-arrow {
-  color: #64748b;
+  color: #647b80;
 }
 
 :root[data-theme="light"] .custom-select-menu {
@@ -1058,7 +1058,7 @@ th[data-sort] .sort-arrow.desc {
 }
 
 :root[data-theme="light"] .custom-select-item:hover {
-  background-color: #f1f5f9;
+  background-color: #eef4f5;
   color: var(--text-color);
 }
 
@@ -1070,25 +1070,25 @@ th[data-sort] .sort-arrow.desc {
 
 /* Icon Buttons: Prevent text/icon disappearing on hover in light mode */
 :root[data-theme="light"] .icon-btn {
-  color: #334155;
+  color: #334549;
   opacity: 0.85;
 }
 
 :root[data-theme="light"] .icon-btn:hover:not(:disabled) {
-  background-color: #e2e8f0;
-  color: #0f172a;
+  background-color: #e2eef0;
+  color: #0f262a;
   opacity: 1;
 }
 
 :root[data-theme="light"] .icon-btn:disabled {
-  color: #94a3b8 !important;
+  color: #94b3b8 !important;
   opacity: 0.4 !important;
 }
 
 /* Checkbox in Light Mode */
 :root[data-theme="light"] .custom-checkbox {
   background-color: #ffffff;
-  border: 1px solid #94a3b8;
+  border: 1px solid #94b3b8;
 }
 
 :root[data-theme="light"] .custom-checkbox-wrapper input[type="checkbox"]:checked + .custom-checkbox {
@@ -1099,5 +1099,5 @@ th[data-sort] .sort-arrow.desc {
 /* Resizers in Light Mode: Match pane header background to avoid visual distraction */
 :root[data-theme="light"] .resizer,
 :root[data-theme="light"] .resizer-h {
-  background-color: #e2e8f0;
+  background-color: #e2eef0;
 }

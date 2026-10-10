@@ -116,7 +116,7 @@
 /* Tabs: Clear Separation & Pure White Active Tab */
 :root[data-theme="light"] #tab-container .tab-item {
   background-color: var(--tab-inactive-bg) !important;
-  color: #475569 !important;
+  color: #476469 !important;
   border-left: 1px solid transparent !important;
   border-right: 1px solid rgba(0, 0, 0, 0.12) !important;
   border-top: 2px solid transparent !important;
@@ -127,12 +127,12 @@
 
 :root[data-theme="light"] #tab-container .tab-item:not(.active):hover {
   background-color: #edf2f7 !important;
-  color: #0f172a !important;
+  color: #0f262a !important;
 }
 
 :root[data-theme="light"] #tab-container .tab-item.active {
   background-color: var(--tab-active-bg, var(--top-bar-bg)) !important;
-  color: var(--tab-active-color, #0f172a) !important;
+  color: var(--tab-active-color, #0f262a) !important;
   font-weight: 600 !important;
   border-left: 1px solid var(--border-color) !important;
   border-right: 1px solid var(--border-color) !important;
@@ -168,7 +168,7 @@
 }
 
 :root[data-theme="light"] #search-container input {
-  color: #0f172a;
+  color: #0f262a;
 }
 
 :root[data-theme="light"] #search-container input::placeholder {
@@ -210,13 +210,13 @@
   background-color: var(--panel-bg);
 }
 
-/* Pane Headers & Central Control Bars: Unified #e2e8f0 Background */
+/* Pane Headers & Central Control Bars: Unified #e2eef0 Background */
 :root[data-theme="light"] .pane-header,
 :root[data-theme="light"] #file-table th,
 :root[data-theme="light"] #thumbnail-controls,
 :root[data-theme="light"] #inspector-header {
-  background-color: #e2e8f0 !important;
-  color: #0f172a !important;
+  background-color: #e2eef0 !important;
+  color: #0f262a !important;
   border-bottom: 1px solid var(--border-color) !important;
 }
 
@@ -235,10 +235,10 @@
   border-left: 1px solid var(--border-color-light) !important;
 }
 
-/* Center Pane Header Edge Covers: Match #e2e8f0 to eliminate bright scrollbar gutter spot */
+/* Center Pane Header Edge Covers: Match #e2eef0 to eliminate bright scrollbar gutter spot */
 :root[data-theme="light"] #center-pane::before,
 :root[data-theme="light"] #center-pane::after {
-  background: #e2e8f0 !important;
+  background: #e2eef0 !important;
   border-bottom: 1px solid var(--border-color) !important;
 }
 
@@ -273,19 +273,19 @@
 
 /* Thumbnail Controls in Light Theme */
 :root[data-theme="light"] #thumbnail-controls label:not(.custom-checkbox-wrapper) {
-  color: #0f172a;
+  color: #0f262a;
   font-weight: 500;
 }
 
 :root[data-theme="light"] #thumbnail-controls .custom-select {
   background-color: #ffffff !important;
   border: 1px solid var(--border-color);
-  color: #0f172a;
+  color: #0f262a;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 :root[data-theme="light"] #thumbnail-controls .custom-select-label {
-  color: #0f172a;
+  color: #0f262a;
 }
 
 :root[data-theme="light"] #dir-tree .tree-item.selected .toggle-icon,
@@ -321,7 +321,7 @@
 
 /* Inspector Cards & Headers in Light Mode */
 :root[data-theme="light"] .inspector-section-h3 {
-  color: #0f172a !important;
+  color: #0f262a !important;
   font-weight: 600;
 }
 
@@ -335,17 +335,17 @@
 }
 
 :root[data-theme="light"] #right-pane .prompt-look .diff-tag {
-  background-color: #f1f5f9;
+  background-color: #eef4f5;
   border: 1px solid var(--border-color-light);
-  color: #0f172a;
+  color: #0f262a;
   font-weight: 500;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
 }
 
 :root[data-theme="light"] #right-pane .prompt-look .diff-tag:hover {
-  background-color: #e2e8f0;
+  background-color: #e2eef0;
   border-color: var(--border-color);
-  color: #0f172a;
+  color: #0f262a;
 }
 
 /* File Table Selection */
