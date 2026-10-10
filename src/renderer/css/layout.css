@@ -245,8 +245,8 @@
 /* Smart Folder Count: Simple clean text without pill or border */
 :root[data-theme="light"] .smart-folder-count {
   background-color: transparent !important;
-  color: #64748b !important;
-  font-weight: 500;
+  color: inherit !important;
+  font-weight: inherit;
   border: none !important;
   padding: 0 !important;
   border-radius: 0 !important;
@@ -255,7 +255,7 @@
 
 :root[data-theme="light"] .smart-folder-item.selected .smart-folder-count {
   background-color: transparent !important;
-  color: var(--accent-hover) !important;
+  color: inherit !important;
   border: none !important;
 }
 
@@ -682,11 +682,12 @@ body.is-resizing .app-content {
 
 .smart-folder-count {
   margin-left: auto;
-  font-size: var(--font-size-xs);
-  color: rgba(255, 255, 255, 0.5);
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+  color: inherit;
   display: none;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: inherit;
 }
 
 .smart-folder-count.show {
@@ -694,7 +695,7 @@ body.is-resizing .app-content {
 }
 
 .smart-folder-item.selected .smart-folder-count {
-  color: rgba(255, 255, 255, 0.9);
+  color: inherit;
 }
 
 #directories-section {

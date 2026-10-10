@@ -179,5 +179,17 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(css).toMatch(/\.empty-state-text\s*\{[^}]*user-select:\s*none;/);
     expect(css).toMatch(/\.empty-state-text\s*\{[^}]*pointer-events:\s*none;/);
   });
+
+  it('verifies smart-folder-count inherits font and color styling to match smart folder name', () => {
+    const css = getFullCssContent();
+
+    expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*font-size:\s*inherit;/);
+    expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*font-family:\s*inherit;/);
+    expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*font-weight:\s*inherit;/);
+    expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*color:\s*inherit;/);
+    expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*line-height:\s*inherit;/);
+    expect(css).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*color:\s*inherit\s*!important;/);
+  });
 });
+
 
