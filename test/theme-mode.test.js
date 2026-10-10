@@ -148,7 +148,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toContain(':root[data-theme="light"] .custom-select');
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#ffffff;/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*#0f262a;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h\s*\{[^}]*background-color:\s*#e2eef0;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h,\s*:root\[data-theme="light"\]\s+\.resizer-toggle\s*\{[^}]*background-color:\s*#e2eef0;/);
     });
 
     it('should define folder icon tokens and class in variables.css', () => {
@@ -621,7 +621,71 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(itemRules).toMatch(/box-sizing:\s*border-box;/);
     });
   });
+
+  describe('Visual Style Unification across Themes', () => {
+    const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+    const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+    it('should have plain text smart-folder-count without pill background or padding in base and light theme', () => {
+      // ベーススタイル
+      const baseCountMatch = layoutContent.match(/(?:^|\n)\.smart-folder-count\s*\{([^}]+)\}/);
+      expect(baseCountMatch).not.toBeNull();
+      expect(baseCountMatch[1]).toMatch(/background:\s*transparent;/);
+      expect(baseCountMatch[1]).toMatch(/padding:\s*0;/);
+      expect(baseCountMatch[1]).toMatch(/border-radius:\s*0;/);
+
+      // ライトモードオーバーライド
+      const lightCountMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{([^}]+)\}/);
+      expect(lightCountMatch).not.toBeNull();
+      expect(lightCountMatch[1]).toMatch(/background-color:\s*transparent\s*!important;/);
+      expect(lightCountMatch[1]).toMatch(/padding:\s*0\s*!important;/);
+    });
+
+    it('should not have left accent bar (box-shadow) on #file-table tr.selected in both dark and light themes', () => {
+      // ダークモード
+      const darkRowMatch = layoutContent.match(/(?:^|\n)#file-table\s+tr\.selected\s*\{([^}]+)\}/);
+      expect(darkRowMatch).not.toBeNull();
+      expect(darkRowMatch[1]).not.toContain('box-shadow');
+
+      // ライトモード
+      const lightRowMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr\.selected\s*\{([^}]+)\}/);
+      expect(lightRowMatch).not.toBeNull();
+      expect(lightRowMatch[1]).toMatch(/box-shadow:\s*none;/);
+    });
+
+    it('should eliminate vertical borders on #file-table th and td in both dark and light themes', () => {
+      // ベース（ダークモード含む共通）スタイルで border-right: none であること
+      const baseCellsMatch = layoutContent.match(/(?:^|\n)#file-table\s+th,\s*[\r\n]+#file-table\s+td\s*\{([^}]+)\}/);
+      expect(baseCellsMatch).not.toBeNull();
+      expect(baseCellsMatch[1]).toMatch(/border-right:\s*none;/);
+
+      // ライトモードの th および td でも border-right: none !important であること
+      const lightThMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+th\s*\{([^}]+)\}/);
+      expect(lightThMatch).not.toBeNull();
+      expect(lightThMatch[1]).toMatch(/border-right:\s*none\s*!important;/);
+
+      const lightTdMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+td\s*\{([^}]+)\}/);
+      expect(lightTdMatch).not.toBeNull();
+      expect(lightTdMatch[1]).toMatch(/border-right:\s*none\s*!important;/);
+    });
+
+    it('should have enhanced hover background for bookmark items in light theme', () => {
+      const lightHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item:hover:not\(\.selected\)\s*\{([^}]+)\}/);
+      expect(lightHoverMatch).not.toBeNull();
+      expect(lightHoverMatch[1]).toMatch(/background-color:\s*rgba\(var\(--accent-rgb\),\s*0\.16\);/);
+    });
+
+    it('should set resizer-toggle background to #e2eef0 matching pane headers in light theme', () => {
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+
+      const resizerMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.resizer,\s*[\r\n]+:root\[data-theme="light"\]\s+\.resizer-h,\s*[\r\n]+:root\[data-theme="light"\]\s+\.resizer-toggle\s*\{([^}]+)\}/);
+      expect(resizerMatch).not.toBeNull();
+      expect(resizerMatch[1]).toMatch(/background-color:\s*#e2eef0;/);
+    });
+  });
 });
+
 
 
 

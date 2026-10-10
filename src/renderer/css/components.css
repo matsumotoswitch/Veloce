@@ -1102,6 +1102,7 @@ th[data-sort] .sort-arrow.desc {
 
 /* Resizers in Light Mode: Match pane header background to avoid visual distraction */
 :root[data-theme="light"] .resizer,
-:root[data-theme="light"] .resizer-h {
+:root[data-theme="light"] .resizer-h,
+:root[data-theme="light"] .resizer-toggle {
   background-color: #e2eef0;
 }

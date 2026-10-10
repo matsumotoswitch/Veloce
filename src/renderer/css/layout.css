@@ -239,7 +239,11 @@
 
 :root[data-theme="light"] #file-table th {
   font-weight: normal;
-  border-right: 1px solid var(--border-color-light) !important;
+  border-right: none !important;
+}
+
+:root[data-theme="light"] #file-table td {
+  border-right: none !important;
 }
 
 :root[data-theme="light"] .inspector-header-layout {
@@ -326,7 +330,7 @@
 }
 
 :root[data-theme="light"] .bookmark-item:hover:not(.selected) {
-  background-color: rgba(var(--accent-rgb), 0.07);
+  background-color: rgba(var(--accent-rgb), 0.16);
   color: var(--text-color);
 }
 
@@ -363,7 +367,7 @@
   background: rgba(var(--accent-rgb), 0.12);
   color: var(--text-color);
   font-weight: normal;
-  box-shadow: inset 3px 0 0 var(--accent-color);
+  box-shadow: none;
 }
 
 :root[data-theme="light"] #file-table tr:hover:not(.selected) {
@@ -707,6 +711,11 @@ body.is-resizing .app-content {
   color: inherit;
   display: none;
   line-height: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .smart-folder-count.show {
@@ -953,7 +962,7 @@ table#file-table {
 #file-table td {
   padding: 4px 8px;
   border-bottom: 1px solid var(--border-color);
-  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  border-right: none;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -990,7 +999,6 @@ table#file-table {
   background: rgba(var(--accent-rgb), 0.35);
   color: var(--text-light);
   font-weight: normal;
-  box-shadow: inset 3px 0 0 var(--accent-hover);
 }
 
 #file-table td {
