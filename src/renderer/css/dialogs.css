@@ -1213,10 +1213,27 @@ input[type="range"]:active~.slider-tooltip {
   color: var(--text-color);
 }
 
-:root[data-theme="light"] .dialog-btn.primary,
-:root[data-theme="light"] .dialog-btn.danger {
+:root[data-theme="light"] .dialog-btn.primary {
+  background-color: var(--accent-color);
   color: #ffffff;
   border: none;
+}
+
+:root[data-theme="light"] .dialog-btn.primary:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .dialog-btn.danger {
+  background-color: var(--danger-red);
+  color: #ffffff;
+  border: none;
+}
+
+:root[data-theme="light"] .dialog-btn.danger:hover:not(:disabled) {
+  background-color: var(--danger-red);
+  filter: brightness(0.9);
+  color: #ffffff;
 }
 
 :root[data-theme="light"] .diff-thumbnail-container {
@@ -1241,3 +1258,58 @@ input[type="range"]:active~.slider-tooltip {
   color: #0f172a;
   font-weight: 500;
 }
+
+/* --- カラー選択ボタン（8色）のライトモード連動 --- */
+:root[data-theme="light"] .color-btn[data-color="default"] {
+  background-color: var(--palette-default) !important;
+}
+
+:root[data-theme="light"] .color-btn[data-color="red"] {
+  background-color: var(--palette-red) !important;
+}
+
+:root[data-theme="light"] .color-btn[data-color="blue"] {
+  background-color: var(--palette-blue) !important;
+}
+
+:root[data-theme="light"] .color-btn[data-color="green"] {
+  background-color: var(--palette-green) !important;
+}
+
+:root[data-theme="light"] .color-btn[data-color="yellow"] {
+  background-color: var(--palette-yellow) !important;
+}
+
+:root[data-theme="light"] .color-btn[data-color="purple"] {
+  background-color: var(--palette-purple) !important;
+}
+
+:root[data-theme="light"] .color-btn[data-color="pink"] {
+  background-color: var(--palette-pink) !important;
+}
+
+:root[data-theme="light"] .color-btn[data-color="cyan"] {
+  background-color: var(--palette-cyan) !important;
+}
+
+:root[data-theme="light"] .color-btn.active {
+  border-color: #ffffff !important;
+  box-shadow: 0 0 0 2px var(--accent-color) !important;
+}
+
+/* --- サムネイル上のレーティングバッジのライトモード連動（透明度 0.45 / 0.75 で同期） --- */
+:root[data-theme="light"] .rating-badge {
+  background-color: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  color: var(--text-color);
+  text-shadow: none;
+}
+
+:root[data-theme="light"] .thumbnail-item:hover .rating-badge {
+  background-color: rgba(255, 255, 255, 0.75);
+  border-color: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+

@@ -4,7 +4,8 @@ import { viewerState } from '../src/viewer/viewer-state.js';
 import {
   createMetadataOverlay,
   toggleMetadataOverlay,
-  updateMetadataOverlay
+  updateMetadataOverlay,
+  applyViewerTheme
 } from '../src/viewer/viewer.js';
 
 describe('Viewer Metadata Overlay (A-4)', () => {
@@ -471,5 +472,35 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     // 画像マップや座標リストが存在しないこと
     expect(positionBlock.querySelector('.inspector-position-map-wrapper')).toBeNull();
     expect(positionBlock.querySelector('.inspector-position-coords')).toBeNull();
+  });
+
+  it('applyViewerTheme should toggle data-theme attribute on documentElement', () => {
+    applyViewerTheme('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+
+    applyViewerTheme('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+
+    applyViewerTheme('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    applyViewerTheme('dark');
+  });
+
+  it('updateMetadataOverlay should render prompt sections properly under light theme', async () => {
+    applyViewerTheme('light');
+    viewerState.isMetadataVisible = true;
+    toggleMetadataOverlay(true);
+    await updateMetadataOverlay();
+
+    const content = document.getElementById('viewer-metadata-content');
+    expect(content).not.toBeNull();
+
+    // diff-tag が生成されていること
+    const tags = content.querySelectorAll('.diff-tag');
+    expect(tags.length).toBeGreaterThan(0);
+    const tagTexts = Array.from(tags).map(t => t.textContent);
+    expect(tagTexts).toContain('1girl');
+
+    applyViewerTheme('dark');
   });
 });

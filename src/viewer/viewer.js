@@ -24,6 +24,24 @@ import { extractMetadataFields, parsePromptTags, buildInspectorSections } from '
 
 blockDevtoolsShortcuts();
 
+/**
+ * ビューアー全体のテーマ（dark / light）を適用します。
+ * @param {'dark' | 'light' | string} theme
+ */
+export function applyViewerTheme(theme) {
+  if (theme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+}
+
+// 起動時に同期的にテーマを反映（チラつき・黒画面防止）
+try {
+  const currentTheme = (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) || 'dark';
+  applyViewerTheme(currentTheme);
+} catch (_) {}
+
 let viewerRatings = {};
 
 const CONFIG = {
@@ -717,6 +735,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.currentIndex = newIndex;
         
         // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        applyViewerTheme(savedTheme);
         cleanupCurrentImage();
         clearPreloadCache();
         viewerState.isAlphaOverlayMode = false;
@@ -735,7 +755,18 @@ window.addEventListener('DOMContentLoaded', async () => {
         // リセット後、loadImageが確実に新しい画像をロード
         await loadImage();
       });
+
+      // メインウィンドウからのテーマ変更通知を受信して即時反映
+      window.__TAURI__.event.listen('theme-changed', (event) => {
+        applyViewerTheme(event.payload);
+      });
     }
+
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'theme') {
+        applyViewerTheme(e.newValue || 'dark');
+      }
+    });
 
     const pathsJson = localStorage.getItem('viewerPaths');
     let initialTotal = 0;

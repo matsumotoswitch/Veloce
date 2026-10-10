@@ -194,6 +194,14 @@
   color: var(--drive-icon-color);
 }
 
+/* Smart Folders & Bookmark Icons: Black by default in light theme */
+:root[data-theme="light"] .smart-folder-icon:not([class*="icon-color-"]),
+:root[data-theme="light"] .bookmark-icon:not([class*="icon-color-"]),
+:root[data-theme="light"] .bookmark-icon-fav:not([class*="icon-color-"]),
+:root[data-theme="light"] .favorite-item .tree-icon:not([class*="icon-color-"]) {
+  color: var(--palette-default);
+}
+
 /* Left Pane Smart Folder & Directory Tree Content Backgrounds */
 :root[data-theme="light"] #smart-folders-section,
 :root[data-theme="directories-section"],
@@ -234,22 +242,21 @@
   border-bottom: 1px solid var(--border-color) !important;
 }
 
-/* Smart Folder Count Badge: White pill on slate background */
+/* Smart Folder Count: Simple clean text without pill or border */
 :root[data-theme="light"] .smart-folder-count {
-  background-color: #ffffff !important;
-  color: #1e293b !important;
-  font-weight: 600 !important;
-  font-size: 11px !important;
-  padding: 1px 7px !important;
-  border-radius: 10px !important;
-  line-height: 1.2 !important;
-  border: 1px solid #cbd5e1;
+  background-color: transparent !important;
+  color: #64748b !important;
+  font-weight: 500;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 
 :root[data-theme="light"] .smart-folder-item.selected .smart-folder-count {
-  background-color: rgba(var(--accent-rgb), 0.18) !important;
+  background-color: transparent !important;
   color: var(--accent-hover) !important;
-  border-color: rgba(var(--accent-rgb), 0.4) !important;
+  border: none !important;
 }
 
 /* Directory Tree Selection & Hover */

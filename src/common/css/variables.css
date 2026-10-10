@@ -109,7 +109,17 @@
   /* タイポグラフィ・テキストカラー（純黒に近いディープスレートで最高水準のコントラスト） */
   --text-color: #0f172a;
   --text-rgb: 15, 23, 42;
-  --text-light: #ffffff;
+  --text-light: #0f172a;
+
+  /* パレットカラー（お気に入り・スマートフォルダ用：ライトモード時は黒および高コントラスト配色） */
+  --palette-default: #0f172a;
+  --palette-red: #dc2626;
+  --palette-blue: #2563eb;
+  --palette-green: #16a34a;
+  --palette-yellow: #d97706;
+  --palette-purple: #9333ea;
+  --palette-pink: #db2777;
+  --palette-cyan: #0891b2;
 
   /* アクセントカラー（視認性と品格を両立したディープセルリアン） */
   --accent-color: #0284c7;
@@ -129,6 +139,8 @@
   --input-bg: #ffffff;
   --bg-darker: #cbd5e1;
   --titlebar-bg: #e2e8f0;
+  --viewer-bg: #f8fafc;
+  --viewer-bg-rgb: 248, 250, 252;
 
   /* デンジャー・ゴールド */
   --danger-red: #ef4444;

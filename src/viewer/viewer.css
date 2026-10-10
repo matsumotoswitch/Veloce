@@ -581,4 +581,160 @@ html.viewer-html,
   padding: 30px 10px;
 }
 
+/* ============================================================================
+ * Light Theme Overrides for Viewer Metadata Overlay (Matching Dark Theme Transparency)
+ * ============================================================================ */
+:root[data-theme="light"] .viewer-metadata-overlay {
+  background: rgba(var(--bg-rgb), 0.85);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay::after {
+  background: rgba(var(--bg-rgb), 0.85);
+}
+
+:root[data-theme="light"] .viewer-metadata-header {
+  background: rgba(226, 232, 240, 0.85) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+:root[data-theme="light"] .viewer-metadata-header::after {
+  background: rgba(226, 232, 240, 0.85) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+:root[data-theme="light"] .viewer-metadata-title {
+  color: #0f172a !important;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .inspector-section-h3 {
+  color: #0f172a !important;
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .prompt-look {
+  background-color: rgba(255, 255, 255, 0.65) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  color: var(--text-color);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .prompt-look .diff-tag {
+  background-color: rgba(241, 245, 249, 0.85);
+  border: 1px solid var(--border-color-light);
+  color: #0f172a;
+  font-weight: 500;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .prompt-look .diff-tag:hover {
+  background-color: rgba(226, 232, 240, 0.95);
+  border-color: var(--border-color);
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn {
+  color: #64748b;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn:hover {
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn svg {
+  stroke: #64748b;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn:hover svg {
+  stroke: #0f172a;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay label {
+  color: #475569 !important;
+}
+
+:root[data-theme="light"] .viewer-metadata-overlay textarea,
+:root[data-theme="light"] .viewer-metadata-overlay input {
+  background-color: rgba(255, 255, 255, 0.7);
+  border-color: var(--border-color);
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .viewer-meta-empty,
+:root[data-theme="light"] .viewer-meta-loading {
+  color: #64748b;
+}
+
+:root[data-theme="light"] .viewer-body.metadata-open .window-ctrl-btn,
+:root[data-theme="light"] #window-controls.metadata-open .window-ctrl-btn {
+  color: #475569;
+}
+
+:root[data-theme="light"] .viewer-body.metadata-open .window-ctrl-btn--min:hover,
+:root[data-theme="light"] .viewer-body.metadata-open .window-ctrl-btn--max:hover,
+:root[data-theme="light"] #window-controls.metadata-open .window-ctrl-btn--min:hover,
+:root[data-theme="light"] #window-controls.metadata-open .window-ctrl-btn--max:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .viewer-body.metadata-open .window-ctrl-btn--close:hover,
+:root[data-theme="light"] #window-controls.metadata-open .window-ctrl-btn--close:hover {
+  background: var(--danger-red);
+  color: #ffffff;
+}
+
+/* Light Theme Viewer Titlebar & Controls (白グラデーション背景と黒文字で視認性確保) */
+:root[data-theme="light"] .viewer-body #window-controls.has-gradient {
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.65) 0%, rgba(255, 255, 255, 0.35) 60%, rgba(255, 255, 255, 0) 100%);
+}
+
+:root[data-theme="light"] .viewer-body.metadata-open #window-controls.has-gradient,
+:root[data-theme="light"] #window-controls.metadata-open.has-gradient {
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.70) 0%, rgba(255, 255, 255, 0.40) 60%, rgba(255, 255, 255, 0) 100%);
+}
+
+:root[data-theme="light"] .viewer-body #window-controls:not(.has-gradient) .window-info-container,
+:root[data-theme="light"] .viewer-body #window-controls:not(.has-gradient) .window-ctrl-btn,
+:root[data-theme="light"] .viewer-body #window-controls:not(.has-gradient).showing-scale .window-scale-display {
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+:root[data-theme="light"] .window-filename {
+  color: #0f172a;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 2px 6px rgba(255, 255, 255, 0.8);
+}
+
+:root[data-theme="light"] .viewer-rating-display {
+  color: #0f172a;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 2px 6px rgba(255, 255, 255, 0.8);
+}
+
+:root[data-theme="light"] .window-scale-display {
+  color: #0f172a;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 2px 6px rgba(255, 255, 255, 0.8);
+}
+
+:root[data-theme="light"] .window-ctrl-btn {
+  color: #334155;
+}
+
+:root[data-theme="light"] .window-ctrl-btn svg {
+  filter: drop-shadow(0 1px 2px rgba(255, 255, 255, 0.8));
+}
+
+:root[data-theme="light"] .window-ctrl-btn:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .window-ctrl-btn.window-ctrl-btn--close:hover {
+  background-color: var(--danger-red);
+  color: #ffffff;
+}
+
+
 

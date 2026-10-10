@@ -117,13 +117,13 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toContain('--titlebar-divider-color: rgba(0, 0, 0, 0.25);');
     });
 
-    it('should ensure smart-folder-count in light mode has high-contrast white pill badge (#1e293b)', () => {
+    it('should ensure smart-folder-count in light mode is clean unbordered text without background pill', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
       expect(cssContent).toContain(':root[data-theme="light"] .smart-folder-count');
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*color:\s*#1e293b/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*background-color:\s*#ffffff/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*background-color:\s*transparent/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*border:\s*none/);
     });
 
     it('should ensure active tab synchronizes background and bottom border with top-bar-bg in light mode', () => {
@@ -271,7 +271,173 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(layoutContent).toContain(':root[data-theme="light"] #center-pane::after');
       expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+#center-pane::before,\s*:root\[data-theme="light"\]\s+#center-pane::after\s*\{[^}]*background:\s*#e2e8f0\s*!important;/);
     });
+
+    it('should define --viewer-bg and --viewer-bg-rgb in light mode tokens in variables.css', () => {
+      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+      const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
+
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg:\s*#f8fafc;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg-rgb:\s*248,\s*250,\s*252;/);
+    });
+
+    it('should ensure viewer metadata overlay and prompt-look match light theme styling with translucent parity', () => {
+      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
+      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
+
+      // 背景およびヘッダーがダークモードと同等の0.85不透明度であること
+      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-metadata-overlay');
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s*\{[^}]*background:\s*rgba\(var\(--bg-rgb\),\s*0\.85\);/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-header\s*\{[^}]*background:\s*rgba\(226,\s*232,\s*240,\s*0\.85\)\s*!important;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-title\s*\{[^}]*color:\s*#0f172a\s*!important;/);
+
+      // プロンプトボックスが半透明（0.65）で背後を透過すること
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.prompt-look\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.65\)\s*!important;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.prompt-look\s+\.diff-tag\s*\{[^}]*background-color:\s*rgba\(241,\s*245,\s*249,\s*0\.85\);/);
+    });
+
+    it('should broadcast theme-changed event in renderer.js when theme is toggled', () => {
+      const rendererPath = path.resolve(__dirname, '../src/renderer/renderer.js');
+      const rendererContent = fs.readFileSync(rendererPath, 'utf-8');
+
+      expect(rendererContent).toMatch(/window\.__TAURI__\.event\.emit\('theme-changed',\s*nextTheme\)/);
+    });
+
+    it('should set --text-light to #0f172a and define high-contrast palette colors in light mode tokens', () => {
+      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+      const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
+
+      // ライトモード時に --text-light が白ではなく黒（#0f172a）に設定されていること
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--text-light:\s*#0f172a;/);
+
+      // ライトモード時にパレットカラー（デフォルトが黒、他色も高コントラスト）が定義されていること
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-default:\s*#0f172a;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-red:\s*#dc2626;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-blue:\s*#2563eb;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-green:\s*#16a34a;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-yellow:\s*#d97706;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-purple:\s*#9333ea;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-pink:\s*#db2777;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-cyan:\s*#0891b2;/);
+    });
+
+    it('should ensure smart folder and bookmark icons use var(--palette-default) in light mode', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      expect(layoutContent).toContain(':root[data-theme="light"] .smart-folder-icon:not([class*="icon-color-"])');
+      expect(layoutContent).toContain(':root[data-theme="light"] .bookmark-icon:not([class*="icon-color-"])');
+      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-icon:not\(\[class\*="icon-color-"\]\)[\s\S]*?color:\s*var\(--palette-default\);/);
+    });
+
+    it('should assign icon-color-${color} to smart folders in renderer.js', () => {
+      const rendererPath = path.resolve(__dirname, '../src/renderer/renderer.js');
+      const rendererContent = fs.readFileSync(rendererPath, 'utf-8');
+
+      // smart-folder-icon にタイポなく icon-color-${...} が付与されること
+      expect(rendererContent).toContain('iconSpan.className = `smart-folder-icon icon-color-${f.color || \'default\'}`;');
+      expect(rendererContent).not.toMatch(/smart-folder-icon color-\$/);
+    });
+
+    it('should assign icon-color-${color} or bookmark-icon-fav to bookmarks in renderer-bookmarks.js', () => {
+      const bookmarksPath = path.resolve(__dirname, '../src/renderer/renderer-bookmarks.js');
+      const bookmarksContent = fs.readFileSync(bookmarksPath, 'utf-8');
+
+      expect(bookmarksContent).toContain('icon.classList.add(\'bookmark-icon-fav\');');
+      expect(bookmarksContent).toContain('icon.classList.add(`icon-color-${fav.color}`);');
+      expect(bookmarksContent).toContain('icon.classList.add(`icon-color-${fav.color || \'default\'}`);');
+    });
+
+    it('should preserve custom palette color on bookmark icons and not override svg in layout.css', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      // .bookmark-item svg に直接 color を当てて子要素の色を上書きしていないこと
+      expect(layoutContent).not.toMatch(/:root\[data-theme="light"\]\s+\.bookmark-item\s+svg/);
+    });
+
+    it('should bind color-btn styles in dialogs.css to palette variables in light mode', () => {
+      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+
+      expect(dialogsContent).toContain(':root[data-theme="light"] .color-btn[data-color="default"]');
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.color-btn\[data-color="default"\]\s*\{[^}]*background-color:\s*var\(--palette-default\)\s*!important;/);
+    });
+
+    it('should style thumbnail-label and rating-badge with white background and text-shadow none in light mode', () => {
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+
+      expect(componentsContent).toContain(':root[data-theme="light"] .thumbnail-label');
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.45\);/);
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.75\);/);
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-label\s*\{[^}]*text-shadow:\s*none;/);
+
+      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+
+      expect(dialogsContent).toContain(':root[data-theme="light"] .rating-badge');
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.45\);/);
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.75\);/);
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*text-shadow:\s*none;/);
+    });
+
+    it('should ensure dialog-input in light mode has pure white background and uses --input-bg', () => {
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+
+      // ベースルールで --input-bg が使用されていること
+      expect(componentsContent).toMatch(/\.dialog-input\s*\{[\s\S]*?background-color:\s*var\(--input-bg/);
+
+      // ライトモード時に純白 #ffffff が適用されること
+      expect(componentsContent).toContain(':root[data-theme="light"] .dialog-input');
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-input\s*\{[^}]*background-color:\s*#ffffff\s*!important;/);
+    });
+
+    it('should ensure dialog-btn.primary and dialog-btn.danger have explicit visible backgrounds in light mode', () => {
+      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+
+      expect(dialogsContent).toContain(':root[data-theme="light"] .dialog-btn.primary');
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-btn\.primary\s*\{[^}]*background-color:\s*var\(--accent-color\);/);
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-btn\.primary:hover:not\(:disabled\)\s*\{[^}]*background-color:\s*var\(--accent-hover\);/);
+
+      expect(dialogsContent).toContain(':root[data-theme="light"] .dialog-btn.danger');
+      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-btn\.danger\s*\{[^}]*background-color:\s*var\(--danger-red\);/);
+    });
+
+    it('should ensure viewer titlebar has white gradient background and dark text with white shadow in light mode', () => {
+      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
+      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
+
+      // タイトルバーの白グラデーション背景（画像がしっかり透けて見える半透明グラデーション）
+      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-body #window-controls.has-gradient');
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-body\s+#window-controls\.has-gradient\s*\{[^}]*background:\s*linear-gradient\(to bottom,\s*rgba\(255,\s*255,\s*255,\s*0\.65\)\s*0%,\s*rgba\(255,\s*255,\s*255,\s*0\.35\)\s*60%/);
+
+      // メタデータ展開時の白グラデーション背景
+      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-body.metadata-open #window-controls.has-gradient');
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-body\.metadata-open\s+#window-controls\.has-gradient[^{]*\{[^}]*background:\s*linear-gradient\(to bottom,\s*rgba\(255,\s*255,\s*255,\s*0\.70\)\s*0%,\s*rgba\(255,\s*255,\s*255,\s*0\.40\)\s*60%/);
+
+      // ファイル名・レーティング・拡大率の黒文字と白シャドウ
+      expect(viewerContent).toContain(':root[data-theme="light"] .window-filename');
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-filename\s*\{[^}]*color:\s*#0f172a;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-filename\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
+
+      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-rating-display');
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-rating-display\s*\{[^}]*color:\s*#0f172a;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-rating-display\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
+
+      expect(viewerContent).toContain(':root[data-theme="light"] .window-scale-display');
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-scale-display\s*\{[^}]*color:\s*#0f172a;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-scale-display\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
+
+      // コントロールボタンのダークカラーと白シャドウ
+      expect(viewerContent).toContain(':root[data-theme="light"] .window-ctrl-btn');
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s*\{[^}]*color:\s*#334155;/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s+svg\s*\{[^}]*drop-shadow\([^)]*rgba\(255,\s*255,\s*255/);
+      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\.window-ctrl-btn--close:hover\s*\{[^}]*background-color:\s*var\(--danger-red\);/);
+    });
   });
 });
+
 
 

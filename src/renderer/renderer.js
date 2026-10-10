@@ -2575,6 +2575,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
       uiManager.applyTheme(nextTheme);
       setSetting('theme', nextTheme);
+      if (window.__TAURI__ && window.__TAURI__.event && typeof window.__TAURI__.event.emit === 'function') {
+        window.__TAURI__.event.emit('theme-changed', nextTheme);
+      }
     });
   }
 
@@ -3303,9 +3306,9 @@ function createSmartFolderNode(f) {
     iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
   } else if (f.icon && f.icon.startsWith('FAV_')) {
     iconSpan.innerHTML = UIManager.ICONS[f.icon] || UIManager.ICONS['FAV_STAR'];
-    iconSpan.className = `smart-folder-icon color-${f.color || 'default'}`;
+    iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
   } else {
-    iconSpan.className = 'smart-folder-icon';
+    iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
     iconSpan.innerHTML = f.icon || UIManager.ICONS.FAV_STAR;
   }
 

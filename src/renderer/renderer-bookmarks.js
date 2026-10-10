@@ -71,9 +71,20 @@ export function renderFavorites() {
       icon.classList.add(`icon-color-${fav.color || 'default'}`);
     } else if (fav.icon && fav.icon.startsWith('FAV_')) {
       icon.innerHTML = UIManager.ICONS[fav.icon] || UIManager.ICONS['FAV_STAR'];
-      icon.classList.add('bookmark-icon-fav');
+      if (fav.color) {
+        icon.classList.add(`icon-color-${fav.color}`);
+      } else {
+        icon.classList.add('bookmark-icon-fav');
+        icon.classList.add('icon-color-default');
+      }
     } else {
       icon.innerHTML = UIManager.ICONS.FAV_STAR;
+      if (fav.color) {
+        icon.classList.add(`icon-color-${fav.color}`);
+      } else {
+        icon.classList.add('bookmark-icon-fav');
+        icon.classList.add('icon-color-default');
+      }
     }
 
     const label = document.createElement('span');
@@ -159,7 +170,12 @@ export function initBookmarkEvents(options = {}) {
         const iconSpan = menuItem.querySelector('svg, div');
         if (iconSpan && iconSpan.tagName.toLowerCase() === 'svg') {
           if (fav.icon && fav.icon.startsWith('FAV_')) {
-            iconSpan.classList.add('bookmark-icon-fav');
+            if (fav.color) {
+              iconSpan.classList.add(`icon-color-${fav.color}`);
+            } else {
+              iconSpan.classList.add('bookmark-icon-fav');
+              iconSpan.classList.add('icon-color-default');
+            }
           } else {
             iconSpan.classList.add(`icon-color-${fav.color || 'default'}`);
           }
