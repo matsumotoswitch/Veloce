@@ -102,11 +102,17 @@ img.thumbnail-img.loading {
 /* 空状態表示アイコン・テキスト */
 .empty-state-icon {
   margin-bottom: 16px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
 }
 
 .empty-state-text {
   font-size: var(--font-size-base);
   letter-spacing: 0.5px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
 }
 
 

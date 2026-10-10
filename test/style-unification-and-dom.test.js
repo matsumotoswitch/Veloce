@@ -166,4 +166,18 @@ describe('Style Unification and DOM Optimization Tests', () => {
     // #resizer-center に margin-bottom: -4px が設定されていること
     expect(css).toMatch(/#resizer-center\s*\{[^}]*margin-bottom:\s*-4px;/);
   });
+
+  it('verifies empty state elements (.empty-state-msg, .empty-state-text, .empty-state-icon) prevent text selection', () => {
+    const css = getFullCssContent();
+
+    expect(css).toMatch(/\.empty-state-msg\s*\{[^}]*user-select:\s*none;/);
+    expect(css).toMatch(/\.empty-state-msg\s*\{[^}]*pointer-events:\s*none;/);
+
+    expect(css).toMatch(/\.empty-state-icon\s*\{[^}]*user-select:\s*none;/);
+    expect(css).toMatch(/\.empty-state-icon\s*\{[^}]*pointer-events:\s*none;/);
+
+    expect(css).toMatch(/\.empty-state-text\s*\{[^}]*user-select:\s*none;/);
+    expect(css).toMatch(/\.empty-state-text\s*\{[^}]*pointer-events:\s*none;/);
+  });
 });
+

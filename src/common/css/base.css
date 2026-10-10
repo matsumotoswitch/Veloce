@@ -99,6 +99,9 @@ textarea {
   gap: 12px;
   font-size: var(--font-size-sm);
   padding: 24px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
 }
 
 .empty-state-msg.show {
