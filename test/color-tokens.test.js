@@ -440,5 +440,21 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     // スライダーつまみホバー・キーボードフォーカスリング (0.60)
     expect(componentsContent).toMatch(/input\[type="range"\]::-webkit-slider-thumb:hover\s*\{[^}]*box-shadow:\s*0 0 6px var\(--accent-focus-ring\);/);
   });
+
+  it('should ensure prompt-look uses var(--prompt-bg) (#000000) and diff-tag uses var(--panel-bg) to maintain correct visual depth', () => {
+    const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+    const variablesContent = fs.readFileSync(variablesCssPath, 'utf-8');
+    const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+    const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+
+    // ダークモード・ライトモードで --prompt-bg が定義されていること（タグ領域の背景色: ダーク時は #000000）
+    expect(variablesContent).toContain('--prompt-bg: #000000;');
+    expect(variablesContent).toContain('--prompt-bg: #ffffff;');
+
+    // タグ領域（奥に沈むコンテナ）が var(--prompt-bg) であること
+    expect(dialogsContent).toMatch(/\.prompt-look\s*\{[^}]*background-color:\s*var\(--prompt-bg\);/);
+    // タグチップ（手前に浮き出る要素）が var(--panel-bg) であること
+    expect(dialogsContent).toMatch(/\.diff-tag\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
+  });
 });
 

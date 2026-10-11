@@ -59,6 +59,7 @@
   --header-height: 32px;
   --titlebar-bg: #000000;
   --input-bg: #182529;
+  --prompt-bg: #000000;
   --dialog-bg: #22343a;
   --viewer-bg: #141a1d;
   --viewer-bg-rgb: 20, 26, 29;
@@ -153,6 +154,7 @@
   --modal-border: rgba(0, 0, 0, 0.2);
   --dialog-bg: #cbdee1;
   --input-bg: #e2eef0;
+  --prompt-bg: #ffffff;
   --bg-darker: #cbdee1;
   --titlebar-bg: #ffffff;
   --viewer-bg: #f8fbfc;
