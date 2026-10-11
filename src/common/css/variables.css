@@ -26,7 +26,7 @@
   --accent-rgb: 37, 126, 140;
   --accent-hover: #2e96a6;
   --accent-hover-rgb: 46, 150, 166;
-  --modal-bg: #141a1d;
+  --modal-bg: #22343a;
   --modal-border: rgba(255, 255, 255, 0.2);
   --danger-red: #e05263;
   --danger-rgb: 224, 82, 99;
@@ -58,8 +58,8 @@
   --font-size-lg: 16px;
   --header-height: 32px;
   --titlebar-bg: #000000;
-  --input-bg: #000000;
-  --dialog-bg: #182529;
+  --input-bg: #182529;
+  --dialog-bg: #22343a;
   --viewer-bg: #141a1d;
   --viewer-bg-rgb: 20, 26, 29;
   --marker-hud-bg: rgba(var(--viewer-bg-rgb), 0.85);
@@ -149,10 +149,10 @@
   --drive-icon-color: #476469;
 
   /* モーダル・ダイアログ・インプット（入力枠は純白で浮き上がる） */
-  --modal-bg: #ffffff;
+  --modal-bg: #cbdee1;
   --modal-border: rgba(0, 0, 0, 0.2);
-  --dialog-bg: #ffffff;
-  --input-bg: #ffffff;
+  --dialog-bg: #cbdee1;
+  --input-bg: #e2eef0;
   --bg-darker: #cbdee1;
   --titlebar-bg: #ffffff;
   --viewer-bg: #f8fbfc;

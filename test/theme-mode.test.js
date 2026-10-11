@@ -397,16 +397,16 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*text-shadow:\s*none;/);
     });
 
-    it('should ensure dialog-input in light mode has pure white background and uses --input-bg', () => {
+    it('should ensure dialog-input in light mode matches search bar background and uses --input-bg', () => {
       const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
       const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
 
       // ベースルールで --input-bg が使用されていること
       expect(componentsContent).toMatch(/\.dialog-input\s*\{[\s\S]*?background-color:\s*var\(--input-bg/);
 
-      // ライトモード時に純白 #ffffff が適用されること
+      // ライトモード時に --input-bg が適用されること
       expect(componentsContent).toContain(':root[data-theme="light"] .dialog-input');
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-input\s*\{[^}]*background-color:\s*#ffffff\s*!important;/);
+      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-input\s*\{[^}]*background-color:\s*var\(--input-bg\)\s*!important;/);
     });
 
     it('should ensure dialog-btn.primary and dialog-btn.danger have explicit visible backgrounds in light mode', () => {
@@ -785,6 +785,26 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const iconBtnDisabledMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.icon-btn:disabled\s*\{([^}]+)\}/);
       expect(iconBtnDisabledMatch).not.toBeNull();
       expect(iconBtnDisabledMatch[1]).toMatch(/color:\s*var\(--border-color\)\s*!important;/);
+    });
+
+    it('should unify dialog box backgrounds to toolbar/bookmark-bar color and text box backgrounds to panel/inactive-tab color in both themes', () => {
+      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+      const variablesCss = fs.readFileSync(variablesCssPath, 'utf-8');
+
+      // ダークモード: ダイアログ背景は #22343a、入力背景は #182529
+      expect(variablesCss).toMatch(/:root\s*\{[\s\S]*?--dialog-bg:\s*#22343a;/);
+      expect(variablesCss).toMatch(/:root\s*\{[\s\S]*?--modal-bg:\s*#22343a;/);
+      expect(variablesCss).toMatch(/:root\s*\{[\s\S]*?--input-bg:\s*#182529;/);
+
+      // ライトモード: ダイアログ背景は #cbdee1、入力背景は #e2eef0
+      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--dialog-bg:\s*#cbdee1;/);
+      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--modal-bg:\s*#cbdee1;/);
+      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--input-bg:\s*#e2eef0;/);
+
+      // ダイアログ入力フォーカス時も背景色（--input-bg）を維持すること
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsCss = fs.readFileSync(componentsCssPath, 'utf-8');
+      expect(componentsCss).toMatch(/:root\[data-theme="light"\]\s+\.dialog-input:focus\s*\{[^}]*background-color:\s*var\(--input-bg\)\s*!important;/);
     });
   });
 });

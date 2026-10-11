@@ -335,8 +335,9 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
 
     // Consolidated dark surface tokens (Proposal 1, 2, 3)
     expect(cssContent).toContain('--viewer-bg: #141a1d;');
-    expect(cssContent).toContain('--modal-bg: #141a1d;');
-    expect(cssContent).toContain('--dialog-bg: #182529;');
+    expect(cssContent).toContain('--modal-bg: #22343a;');
+    expect(cssContent).toContain('--dialog-bg: #22343a;');
+    expect(cssContent).toContain('--input-bg: #182529;');
     expect(cssContent).toContain('--checkerboard-light: #22343a;');
 
     // 5. Pane headers and resize handles share the exact same color (--panel-bg)
