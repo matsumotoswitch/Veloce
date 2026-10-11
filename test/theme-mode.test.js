@@ -147,7 +147,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       expect(cssContent).toContain(':root[data-theme="light"] .custom-select');
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*#e2eef0;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*#0f262a;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*var\(--text-color\);/);
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h,\s*:root\[data-theme="light"\]\s+\.resizer-toggle\s*\{[^}]*background-color:\s*#e2eef0;/);
     });
 
@@ -672,7 +672,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
     it('should have enhanced hover background for bookmark items in light theme', () => {
       const lightHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item:hover:not\(\.selected\)\s*\{([^}]+)\}/);
       expect(lightHoverMatch).not.toBeNull();
-      expect(lightHoverMatch[1]).toMatch(/background-color:\s*rgba\(var\(--accent-rgb\),\s*0\.16\);/);
+      expect(lightHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-hover-tint\);/);
     });
 
     it('should set resizer-toggle background to #e2eef0 matching pane headers in light theme', () => {
@@ -714,6 +714,77 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const thumbMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.thumbnail-item\s*\{([^}]+)\}/);
       expect(thumbMatch).not.toBeNull();
       expect(thumbMatch[1]).toMatch(/background-color:\s*#e2eef0;/);
+    });
+
+    it('should configure optimized 4-step translucent accent tokens in light theme and apply them consistently (Proposal L-1, L-2, L-3)', () => {
+      // 提案 L-1: ライトモード専用4段階アクセントトークン
+      const variablesCss = fs.readFileSync(path.resolve(__dirname, '../src/common/css/variables.css'), 'utf-8');
+      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-subtle:\s*rgba\(var\(--accent-rgb\),\s*0\.10\);/);
+      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-hover-tint:\s*rgba\(var\(--accent-rgb\),\s*0\.16\);/);
+      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-active-tint:\s*rgba\(var\(--accent-rgb\),\s*0\.25\);/);
+      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-focus-ring:\s*rgba\(var\(--accent-rgb\),\s*0\.60\);/);
+
+      // 提案 L-2: ホバーと選択の階層逆転解消（ホバー 10%/16% < 選択 25%）
+      const tableSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr\.selected\s*\{([^}]+)\}/);
+      expect(tableSelectMatch).not.toBeNull();
+      expect(tableSelectMatch[1]).toMatch(/background:\s*var\(--accent-active-tint\);/);
+
+      const tableHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr:hover:not\(\.selected\)\s*\{([^}]+)\}/);
+      expect(tableHoverMatch).not.toBeNull();
+      expect(tableHoverMatch[1]).toMatch(/background:\s*var\(--accent-subtle\);/);
+
+      const treeSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#dir-tree\s+\.tree-item\.selected\s*\{([^}]+)\}/);
+      expect(treeSelectMatch).not.toBeNull();
+      expect(treeSelectMatch[1]).toMatch(/background-color:\s*var\(--accent-active-tint\);/);
+
+      const treeHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#dir-tree\s+\.tree-item:hover:not\(\.selected\)\s*\{([^}]+)\}/);
+      expect(treeHoverMatch).not.toBeNull();
+      expect(treeHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-subtle\);/);
+
+      const smartSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-item\.selected\s*\{([^}]+)\}/);
+      expect(smartSelectMatch).not.toBeNull();
+      expect(smartSelectMatch[1]).toMatch(/background-color:\s*var\(--accent-active-tint\);/);
+
+      const smartHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-item:hover:not\(\.selected\)\s*\{([^}]+)\}/);
+      expect(smartHoverMatch).not.toBeNull();
+      expect(smartHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-subtle\);/);
+
+      const bookmarkSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item\.selected\s*\{([^}]+)\}/);
+      expect(bookmarkSelectMatch).not.toBeNull();
+      expect(bookmarkSelectMatch[1]).toMatch(/background:\s*var\(--accent-active-tint\);/);
+
+      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
+
+      const selectHoverMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select-item:hover\s*\{([^}]+)\}/);
+      expect(selectHoverMatch).not.toBeNull();
+      expect(selectHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-hover-tint\);/);
+
+      const selectItemActiveMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select-item\.selected\s*\{([^}]+)\}/);
+      expect(selectItemActiveMatch).not.toBeNull();
+      expect(selectItemActiveMatch[1]).toMatch(/background-color:\s*var\(--accent-active-tint\);/);
+
+      // 提案 L-3: 枠線ハードコードの解消
+      const searchMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#search-container\s*\{([^}]+)\}/);
+      expect(searchMatch).not.toBeNull();
+      expect(searchMatch[1]).toMatch(/border:\s*1px solid var\(--border-color\);/);
+
+      const checkboxMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-checkbox\s*\{([^}]+)\}/);
+      expect(checkboxMatch).not.toBeNull();
+      expect(checkboxMatch[1]).toMatch(/border:\s*1px solid var\(--border-color\);/);
+
+      // 提案 L-3: アイコンボタン通常色・無効色のトークン化
+      const iconBtnMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.icon-btn\s*\{([^}]+)\}/);
+      expect(iconBtnMatch).not.toBeNull();
+      expect(iconBtnMatch[1]).toMatch(/color:\s*var\(--text-color\);/);
+
+      const iconBtnHoverMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{([^}]+)\}/);
+      expect(iconBtnHoverMatch).not.toBeNull();
+      expect(iconBtnHoverMatch[1]).toMatch(/color:\s*var\(--text-color\);/);
+
+      const iconBtnDisabledMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.icon-btn:disabled\s*\{([^}]+)\}/);
+      expect(iconBtnDisabledMatch).not.toBeNull();
+      expect(iconBtnDisabledMatch[1]).toMatch(/color:\s*var\(--border-color\)\s*!important;/);
     });
   });
 });

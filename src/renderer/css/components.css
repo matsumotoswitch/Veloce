@@ -1066,37 +1066,37 @@ th[data-sort] .sort-arrow.desc {
 }
 
 :root[data-theme="light"] .custom-select-item:hover {
-  background-color: #eef4f5;
+  background-color: var(--accent-hover-tint);
   color: var(--text-color);
 }
 
 :root[data-theme="light"] .custom-select-item.selected {
-  background-color: var(--accent-subtle);
+  background-color: var(--accent-active-tint);
   color: var(--accent-hover);
   font-weight: normal;
 }
 
 /* Icon Buttons: Prevent text/icon disappearing on hover in light mode */
 :root[data-theme="light"] .icon-btn {
-  color: #334549;
-  opacity: 0.85;
+  color: var(--text-color);
+  opacity: 0.8;
 }
 
 :root[data-theme="light"] .icon-btn:hover:not(:disabled) {
   background-color: #e2eef0;
-  color: #0f262a;
+  color: var(--text-color);
   opacity: 1;
 }
 
 :root[data-theme="light"] .icon-btn:disabled {
-  color: #94b3b8 !important;
+  color: var(--border-color) !important;
   opacity: 0.4 !important;
 }
 
 /* Checkbox in Light Mode */
 :root[data-theme="light"] .custom-checkbox {
   background-color: #ffffff;
-  border: 1px solid #94b3b8;
+  border: 1px solid var(--border-color);
 }
 
 :root[data-theme="light"] .custom-checkbox-wrapper input[type="checkbox"]:checked + .custom-checkbox {

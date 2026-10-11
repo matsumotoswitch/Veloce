@@ -138,10 +138,10 @@
   --accent-hover-rgb: 0, 109, 117;
   --accent-hover-translucent: rgba(var(--accent-rgb), 0.12);
 
-  /* Translucent Accent System (Proposal 5: Light Theme) */
-  --accent-subtle: rgba(var(--accent-rgb), 0.12);
-  --accent-hover-tint: rgba(var(--accent-rgb), 0.25);
-  --accent-active-tint: rgba(var(--accent-rgb), 0.40);
+  /* Translucent Accent System (Proposal L-1: Light Theme Optimized) */
+  --accent-subtle: rgba(var(--accent-rgb), 0.10);
+  --accent-hover-tint: rgba(var(--accent-rgb), 0.16);
+  --accent-active-tint: rgba(var(--accent-rgb), 0.25);
   --accent-focus-ring: rgba(var(--accent-rgb), 0.60);
 
   /* フォルダ・ドライブ専用カラー */
