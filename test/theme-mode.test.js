@@ -155,7 +155,7 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
       const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
 
-      expect(cssContent).toContain('--folder-icon-color: #f59e0b;');
+      expect(cssContent).toContain('--folder-icon-color: var(--accent-hover);');
       expect(cssContent).toContain('--drive-icon-color:');
       expect(cssContent).toContain('.icon-color-folder {');
     });

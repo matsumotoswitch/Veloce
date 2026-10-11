@@ -93,7 +93,7 @@
   /* Titlebar Divider */
   --titlebar-divider-color: rgba(255, 255, 255, 0.4);
   /* Folder & Drive Icon Colors */
-  --folder-icon-color: #f59e0b;
+  --folder-icon-color: var(--accent-hover);
   --drive-icon-color: #94a3b8;
   --tab-active-bg: var(--top-bar-bg);
   --tab-active-color: var(--text-light);
