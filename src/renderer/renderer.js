@@ -3145,9 +3145,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       transition: all 0.2s !important;
     }
     .prompt-tag:hover, .diff-tag:hover {
-      opacity: 0.7 !important;
+      opacity: 0.85 !important;
       transform: scale(1.05) !important;
-      background-color: rgba(255, 255, 255, 0.1) !important;
+      background-color: var(--accent-hover-tint) !important;
     }
   `;
   document.head.appendChild(globalTagStyle);

@@ -433,8 +433,9 @@ html.viewer-html,
 }
 
 .prompt-tag:hover {
-  opacity: 0.8;
+  opacity: 0.85;
   transform: scale(1.02);
+  background-color: var(--accent-hover-tint);
 }
 
 /* --- Viewer Metadata Overlay (A-4) --- */

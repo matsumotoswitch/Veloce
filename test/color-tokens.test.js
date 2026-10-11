@@ -456,5 +456,25 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     // タグチップ（手前に浮き出る要素）が var(--panel-bg) であること
     expect(dialogsContent).toMatch(/\.diff-tag\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
   });
+
+  it('should ensure tag hover uses var(--accent-hover-tint) for cyan hue consistency without hardcoded white tints', () => {
+    const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
+    const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+    const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
+    const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
+    const rendererJsPath = path.resolve(__dirname, '../src/renderer/renderer.js');
+    const rendererJsContent = fs.readFileSync(rendererJsPath, 'utf-8');
+
+    // dialogs.css の .diff-tag:hover で var(--accent-hover-tint) が使用されていること
+    expect(dialogsContent).toMatch(/\.diff-tag:hover\s*\{[^}]*background-color:\s*var\(--accent-hover-tint\);/);
+    expect(dialogsContent).not.toMatch(/\.diff-tag:hover\s*\{[^}]*rgba\(255,\s*255,\s*255/);
+
+    // viewer.css の .prompt-tag:hover で var(--accent-hover-tint) が使用されていること
+    expect(viewerContent).toMatch(/\.prompt-tag:hover\s*\{[^}]*background-color:\s*var\(--accent-hover-tint\);/);
+
+    // renderer.js の globalTagStyle で var(--accent-hover-tint) が使用され、ハードコードの白透過がないこと
+    expect(rendererJsContent).toContain('background-color: var(--accent-hover-tint) !important;');
+    expect(rendererJsContent).not.toContain('background-color: rgba(255, 255, 255, 0.1) !important;');
+  });
 });
 
