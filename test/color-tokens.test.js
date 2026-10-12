@@ -328,8 +328,8 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     // 3. Active tab and nav/toolbar share the exact same background
     expect(cssContent).toMatch(/\.toolbar\s*\{[^}]*background-color:\s*var\(--top-bar-bg\);/);
 
-    // 4. Clear distinction: titlebar (0%) < inactive tab (9%) < active tab (18%)
-    expect(cssContent).toContain('--tab-inactive-bg: #141a1d;');
+    // 4. Inactive tab background integrated to #080d0f
+    expect(cssContent).toContain('--tab-inactive-bg: #080d0f;');
     expect(cssContent).toContain('--top-bar-bg: #22343a;');
     expect(cssContent).toMatch(/#tab-container \.tab-item\s*\{[^}]*background-color:\s*var\(--tab-inactive-bg\)/);
 
@@ -441,11 +441,13 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     expect(componentsContent).toMatch(/input\[type="range"\]::-webkit-slider-thumb:hover\s*\{[^}]*box-shadow:\s*0 0 6px var\(--accent-focus-ring\);/);
   });
 
-  it('should ensure prompt-look uses var(--prompt-bg) (#000000) and diff-tag uses var(--panel-bg) to maintain correct visual depth', () => {
+  it('should ensure prompt-look uses var(--prompt-bg) (#000000) and diff-tag uses var(--bg-color) to maintain user 5-tier design scheme', () => {
     const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
     const variablesContent = fs.readFileSync(variablesCssPath, 'utf-8');
     const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
     const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
+    const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+    const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
     // ダークモード・ライトモードで --prompt-bg が定義されていること（タグ領域の背景色: ダーク時は #000000）
     expect(variablesContent).toContain('--prompt-bg: #000000;');
@@ -453,8 +455,15 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
 
     // タグ領域（奥に沈むコンテナ）が var(--prompt-bg) であること
     expect(dialogsContent).toMatch(/\.prompt-look\s*\{[^}]*background-color:\s*var\(--prompt-bg\);/);
-    // タグチップ（手前に浮き出る要素）が var(--panel-bg) であること
-    expect(dialogsContent).toMatch(/\.diff-tag\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
+    // タグチップが var(--bg-color) (#080d0f) であること
+    expect(dialogsContent).toMatch(/\.diff-tag\s*\{[^}]*background-color:\s*var\(--bg-color\);/);
+
+    // 検索バー（ツールバー全体）が #22343a (var(--top-bar-bg)) であり、検索入力枠（テキストボックス）が #182529 (var(--panel-bg)) であること
+    expect(layoutContent).toMatch(/\.toolbar\s*\{[^}]*background-color:\s*var\(--top-bar-bg\);/);
+    expect(layoutContent).toMatch(/#search-container\s*\{[^}]*background:\s*var\(--panel-bg\);/);
+
+    // 非アクティブタブホバーが #182529 (var(--panel-bg)) に統合されていること
+    expect(layoutContent).toMatch(/#tab-container \.tab-item:not\(\.active\):hover\s*\{[^}]*background-color:\s*var\(--panel-bg\)/);
   });
 
   it('should ensure tag hover uses var(--accent-hover-tint) for cyan hue consistency without hardcoded white tints', () => {
