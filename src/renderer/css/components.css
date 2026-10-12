@@ -408,22 +408,26 @@ body.show-thumbnail-names .thumbnail-label {
 
 /* Light Theme Thumbnail Hover & Selection */
 :root[data-theme="light"] .thumbnail-item {
-  background-color: #e2eef0;
+  background-color: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
 }
 
 :root[data-theme="light"] .thumbnail-item.selected {
+  background-color: var(--accent-subtle);
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px var(--accent-color), 0 4px 14px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 0 0 1px var(--accent-color), 0 0 10px rgba(var(--accent-rgb), 0.25);
 }
 
 :root[data-theme="light"] .thumbnail-item.selected:hover {
+  background-color: var(--accent-hover-tint);
   border-color: var(--accent-hover);
-  box-shadow: 0 0 0 2px var(--accent-hover), 0 6px 18px rgba(0, 0, 0, 0.12), 0 0 8px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 0 0 1px var(--accent-hover), 0 4px 14px rgba(0, 0, 0, 0.1), 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 :root[data-theme="light"] .thumbnail-item:hover {
   border-color: var(--accent-hover);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1), 0 0 6px rgba(var(--accent-rgb), 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 0 8px rgba(var(--accent-rgb), 0.2);
 }
 
 /* Light Theme Thumbnail Label (背景画像に埋もれず高い視認性を確保するため不透明度を 0.85 / 0.95 に調整) */
@@ -457,7 +461,7 @@ body.show-thumbnail-names .thumbnail-label {
 
 :root[data-theme="light"] select.dialog-input option {
   background-color: #ffffff;
-  color: #0f262a;
+  color: var(--text-color);
 }
 
 
@@ -1037,7 +1041,7 @@ th[data-sort] .sort-arrow.desc {
  * Light Theme Component Overrides
  * ============================================================================ */
 :root[data-theme="light"] .custom-select {
-  background-color: #e2eef0;
+  background-color: var(--panel-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -1052,7 +1056,7 @@ th[data-sort] .sort-arrow.desc {
 }
 
 :root[data-theme="light"] .custom-select-arrow {
-  color: #647b80;
+  color: #64748b;
 }
 
 :root[data-theme="light"] .custom-select-menu {
@@ -1083,7 +1087,7 @@ th[data-sort] .sort-arrow.desc {
 }
 
 :root[data-theme="light"] .icon-btn:hover:not(:disabled) {
-  background-color: #e2eef0;
+  background-color: var(--panel-bg);
   color: var(--text-color);
   opacity: 1;
 }
@@ -1108,5 +1112,12 @@ th[data-sort] .sort-arrow.desc {
 :root[data-theme="light"] .resizer,
 :root[data-theme="light"] .resizer-h,
 :root[data-theme="light"] .resizer-toggle {
-  background-color: #e2eef0;
+  background-color: var(--panel-bg);
 }
+
+/* Range Slider Track in Light Mode: Clear contrast against toolbar background */
+:root[data-theme="light"] input[type="range"]::-webkit-slider-runnable-track {
+  background: #9ca3af;
+}
+
+

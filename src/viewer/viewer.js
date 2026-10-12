@@ -25,15 +25,11 @@ import { extractMetadataFields, parsePromptTags, buildInspectorSections } from '
 blockDevtoolsShortcuts();
 
 /**
- * ビューアー全体のテーマ（dark / light）を適用します。
- * @param {'dark' | 'light' | string} theme
+ * ビューアー全体のテーマをダークモードに固定適用します。
+ * @param {'dark'} [_theme]
  */
-export function applyViewerTheme(theme) {
-  if (theme === 'light') {
-    document.documentElement.setAttribute('data-theme', 'light');
-  } else {
-    document.documentElement.removeAttribute('data-theme');
-  }
+export function applyViewerTheme(_theme) {
+  document.documentElement.removeAttribute('data-theme');
 }
 
 // 起動時に同期的にテーマを反映（チラつき・黒画面防止）
@@ -756,17 +752,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         await loadImage();
       });
 
-      // メインウィンドウからのテーマ変更通知を受信して即時反映
-      window.__TAURI__.event.listen('theme-changed', (event) => {
-        applyViewerTheme(event.payload);
-      });
     }
-
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'theme') {
-        applyViewerTheme(e.newValue || 'dark');
-      }
-    });
 
     const pathsJson = localStorage.getItem('viewerPaths');
     let initialTotal = 0;

@@ -2400,24 +2400,13 @@ class UIManager {
   }
 
   /**
-   * アプリケーション全体のテーマ（dark / light）を適用します。
-   * @param {'dark' | 'light'} theme
+   * アプリケーション全体のテーマをダークモードに固定適用します。
+   * @param {'dark'} [_theme]
    */
-  applyTheme(theme) {
-    const isLight = theme === 'light';
-    if (isLight) {
-      document.documentElement.setAttribute('data-theme', 'light');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
+  applyTheme(_theme) {
+    document.documentElement.removeAttribute('data-theme');
     if (this.state) {
-      this.state.theme = isLight ? 'light' : 'dark';
-    }
-
-    const btn = document.getElementById('titlebar-theme-toggle');
-    if (btn) {
-      btn.innerHTML = isLight ? UIManager.ICONS.THEME_DARK : UIManager.ICONS.THEME_LIGHT;
-      btn.removeAttribute('title');
+      this.state.theme = 'dark';
     }
   }
 }

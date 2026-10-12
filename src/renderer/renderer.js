@@ -2569,28 +2569,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     closeBtn.addEventListener('click', () => window.veloceAPI.closeWindow());
   }
 
-  // テーマ切り替えボタンの初期化とイベント設定
-  const themeToggleBtn = document.getElementById('titlebar-theme-toggle');
-  const initialTheme = getSetting('theme') || 'dark';
-  uiManager.applyTheme(initialTheme);
-
-  if (themeToggleBtn) {
-    uiManager.bindTooltip(themeToggleBtn, () => {
-      return uiManager.state && uiManager.state.theme === 'light' ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
-    });
-
-    themeToggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      uiManager.hideCustomTooltip();
-      const currentTheme = (uiManager.state && uiManager.state.theme) || 'dark';
-      const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
-      uiManager.applyTheme(nextTheme);
-      setSetting('theme', nextTheme);
-      if (window.__TAURI__ && window.__TAURI__.event && typeof window.__TAURI__.event.emit === 'function') {
-        window.__TAURI__.event.emit('theme-changed', nextTheme);
-      }
-    });
-  }
+  // テーマの初期化（ダークモード固定）
+  uiManager.applyTheme('dark');
 
   const savedWinW = getSetting('mainWinWidth');
   const savedWinH = getSetting('mainWinHeight');

@@ -596,21 +596,21 @@ html.viewer-html,
 }
 
 :root[data-theme="light"] .viewer-metadata-header {
-  background: rgba(226, 238, 240, 0.85) !important;
+  background: rgba(var(--panel-rgb), 0.85) !important;
   border-bottom: 1px solid var(--border-color) !important;
 }
 
 :root[data-theme="light"] .viewer-metadata-header::after {
-  background: rgba(226, 238, 240, 0.85) !important;
+  background: rgba(var(--panel-rgb), 0.85) !important;
   border-bottom: 1px solid var(--border-color) !important;
 }
 
 :root[data-theme="light"] .viewer-metadata-title {
-  color: #0f262a !important;
+  color: var(--text-color) !important;
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .inspector-section-h3 {
-  color: #0f262a !important;
+  color: var(--text-color) !important;
   font-weight: normal;
 }
 
@@ -624,36 +624,36 @@ html.viewer-html,
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .prompt-look .diff-tag {
-  background-color: rgba(238, 244, 245, 0.85);
-  border: 1px solid var(--border-color-light);
-  color: #0f262a;
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
+  background-color: rgba(var(--panel-rgb), 0.85);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  box-shadow: none;
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .prompt-look .diff-tag:hover {
-  background-color: rgba(226, 238, 240, 0.95);
-  border-color: var(--border-color);
-  color: #0f262a;
+  background-color: var(--accent-hover-tint);
+  border-color: var(--accent-hover);
+  color: var(--accent-hover);
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn {
-  color: #647b80;
+  color: #64748b;
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn:hover {
-  color: #0f262a;
+  color: var(--text-color);
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn svg {
-  stroke: #647b80;
+  stroke: #64748b;
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay .diff-copy-btn:hover svg {
-  stroke: #0f262a;
+  stroke: var(--text-color);
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay label {
-  color: #476469 !important;
+  color: var(--text-color) !important;
 }
 
 :root[data-theme="light"] .viewer-metadata-overlay textarea,
@@ -704,17 +704,17 @@ html.viewer-html,
 }
 
 :root[data-theme="light"] .window-filename {
-  color: #0f262a;
+  color: var(--text-color);
   text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 2px 6px rgba(255, 255, 255, 0.8);
 }
 
 :root[data-theme="light"] .viewer-rating-display {
-  color: #0f262a;
+  color: var(--text-color);
   text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 2px 6px rgba(255, 255, 255, 0.8);
 }
 
 :root[data-theme="light"] .window-scale-display {
-  color: #0f262a;
+  color: var(--text-color);
   text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 2px 6px rgba(255, 255, 255, 0.8);
 }
 
@@ -728,7 +728,7 @@ html.viewer-html,
 
 :root[data-theme="light"] .window-ctrl-btn:hover {
   background-color: rgba(0, 0, 0, 0.08);
-  color: #0f262a;
+  color: var(--text-color);
 }
 
 :root[data-theme="light"] .window-ctrl-btn.window-ctrl-btn--close:hover {
