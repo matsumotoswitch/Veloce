@@ -107,10 +107,10 @@
   /* 背景システム: ナビゲーション・お気に入りバーを最濃色（#cbdee1）とし、アクティブタブとシームレスに同期 */
   --bg-color: #f0f5f7;
   --bg-rgb: 240, 245, 247;
-  --panel-bg: #f8fbfc;
-  --panel-rgb: 248, 251, 252;
+  --panel-bg: #e2eef0;
+  --panel-rgb: 226, 238, 240;
   --top-bar-bg: #cbdee1;
-  --tab-inactive-bg: #e2eef0;
+  --tab-inactive-bg: #f0f5f7;
   --border-color: #94b3b8;
   --border-color-light: #cbdee1;
   --border-light: var(--border-color-light);

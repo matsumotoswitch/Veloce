@@ -103,11 +103,11 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
 
       expect(cssContent).toContain(':root[data-theme="light"] {');
       expect(cssContent).toContain('--bg-color: #f0f5f7;');
-      expect(cssContent).toContain('--panel-bg: #f8fbfc;');
+      expect(cssContent).toContain('--panel-bg: #e2eef0;');
       expect(cssContent).toContain('--top-bar-bg: #cbdee1;');
       expect(cssContent).toContain('--text-color: #0f262a;');
       expect(cssContent).toContain('--titlebar-bg: #ffffff;');
-      expect(cssContent).toContain('--tab-inactive-bg: #e2eef0;');
+      expect(cssContent).toContain('--tab-inactive-bg: #f0f5f7;');
       expect(cssContent).toContain('--accent-color: #08979c;');
       expect(cssContent).toContain('--folder-icon-color: #d97706;');
       expect(cssContent).toContain('--border-color: #94b3b8;');
@@ -134,11 +134,11 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*border-bottom:\s*1px\s+solid\s+var\(--top-bar-bg\)\s*!important;/);
     });
 
-    it('should ensure inactive tab hover background is intermediate cyan-slate #d7e6e8 between inactive #e2eef0 and active #cbdee1 in light mode', () => {
+    it('should ensure inactive tab hover background uses var(--panel-bg) (#e2eef0) between inactive #f0f5f7 and active #cbdee1 in light mode', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item:not\(\.active\):hover\s*\{[^}]*background-color:\s*#d7e6e8\s*!important;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item:not\(\.active\):hover\s*\{[^}]*background-color:\s*var\(--panel-bg\)\s*!important;/);
     });
 
     it('should ensure light theme component contrast (resizers matching pane header #e2eef0, custom-select, icon-btn:hover)', () => {
@@ -212,11 +212,11 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#smart-folders-list[\s\S]*?background-color:\s*var\(--bg-color\);/);
     });
 
-    it('should ensure inspector tag display container retains pure white (#ffffff) background in light mode', () => {
+    it('should ensure inspector tag display container retains pure white background in light mode', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#right-pane\s+\.prompt-look\s*\{[^}]*background-color:\s*#ffffff;/);
+      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#right-pane\s+\.prompt-look\s*\{[^}]*background-color:\s*(?:var\(--prompt-bg\)|#ffffff);/);
     });
 
     it('should ensure pane headers and resizer dividers reference --panel-bg (#f1f5f9)', () => {

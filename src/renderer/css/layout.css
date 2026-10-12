@@ -126,7 +126,7 @@
 }
 
 :root[data-theme="light"] #tab-container .tab-item:not(.active):hover {
-  background-color: #d7e6e8 !important;
+  background-color: var(--panel-bg) !important;
   color: #0f262a !important;
 }
 
@@ -341,7 +341,7 @@
 }
 
 :root[data-theme="light"] #right-pane .prompt-look {
-  background-color: #ffffff;
+  background-color: var(--prompt-bg);
   border: 1px solid var(--border-color);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   color: var(--text-color);
@@ -350,14 +350,14 @@
 }
 
 :root[data-theme="light"] #right-pane .prompt-look .diff-tag {
-  background-color: #eef4f5;
+  background-color: var(--bg-color);
   border: 1px solid var(--border-color-light);
   color: #0f262a;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
 }
 
 :root[data-theme="light"] #right-pane .prompt-look .diff-tag:hover {
-  background-color: #e2eef0;
+  background-color: var(--accent-hover-tint);
   border-color: var(--border-color);
   color: #0f262a;
 }
