@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { UIManager } from '../src/renderer/renderer-ui.js';
 import { appState } from '../src/renderer/renderer-state.js';
+import { applyViewerTheme } from '../src/viewer/viewer.js';
 
-describe('Theme Mode (Light / Dark Theme Switching)', () => {
+describe('Theme Architecture (Deprecation of Light Mode & Dark Theme Single Architecture)', () => {
   beforeEach(() => {
     document.documentElement.removeAttribute('data-theme');
     document.body.innerHTML = `
@@ -16,8 +17,6 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
         <div class="titlebar-controls">
           <div class="titlebar-button" id="titlebar-tab-list"></div>
           <div class="titlebar-divider"></div>
-          <div class="titlebar-button" id="titlebar-theme-toggle"></div>
-          <div class="titlebar-divider"></div>
           <div class="titlebar-button" id="titlebar-minimize"></div>
           <div class="titlebar-button" id="titlebar-maximize"></div>
           <div class="titlebar-button titlebar-close" id="titlebar-close"></div>
@@ -26,574 +25,131 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
     `;
   });
 
-  describe('Titlebar DOM Layout Order', () => {
-    it('should have controls in strict order: tab-list, divider, theme-toggle, divider, minimize, maximize, close', () => {
+  describe('Titlebar DOM & Controls (UI Simplification)', () => {
+    it('should have controls in strict order without theme toggle: tab-list, divider, minimize, maximize, close', () => {
       const controls = document.querySelector('.titlebar-controls');
       expect(controls).not.toBeNull();
       const children = Array.from(controls.children);
 
-      expect(children.length).toBe(7);
+      expect(children.length).toBe(5);
       expect(children[0].id).toBe('titlebar-tab-list');
       expect(children[1].classList.contains('titlebar-divider')).toBe(true);
-      expect(children[2].id).toBe('titlebar-theme-toggle');
-      expect(children[3].classList.contains('titlebar-divider')).toBe(true);
-      expect(children[4].id).toBe('titlebar-minimize');
-      expect(children[5].id).toBe('titlebar-maximize');
-      expect(children[6].id).toBe('titlebar-close');
+      expect(children[2].id).toBe('titlebar-minimize');
+      expect(children[3].id).toBe('titlebar-maximize');
+      expect(children[4].id).toBe('titlebar-close');
     });
 
-    it('should match index.html titlebar controls layout', () => {
+    it('should match index.html titlebar controls layout without theme toggle button', () => {
       const indexHtmlPath = path.resolve(__dirname, '../src/index.html');
       const htmlContent = fs.readFileSync(indexHtmlPath, 'utf-8');
 
-      // titlebar-controls 内の順序が指定通りであることを検証
-      const regex = /id="titlebar-tab-list"[\s\S]*?class="titlebar-divider"[\s\S]*?id="titlebar-theme-toggle"[\s\S]*?class="titlebar-divider"[\s\S]*?id="titlebar-minimize"/;
+      // titlebar-theme-toggle が存在しないこと
+      expect(htmlContent).not.toContain('titlebar-theme-toggle');
+
+      // titlebar-controls 内の順序が tab-list -> divider -> minimize -> maximize -> close であること
+      const regex = /id="titlebar-tab-list"[\s\S]*?class="titlebar-divider"[\s\S]*?id="titlebar-minimize"[\s\S]*?id="titlebar-maximize"[\s\S]*?id="titlebar-close"/;
       expect(htmlContent).toMatch(regex);
     });
   });
 
-  describe('UIManager.prototype.applyTheme', () => {
-    it('should set data-theme="light" and update button icon to Moon in light mode', () => {
+  describe('UIManager Theme Handling (Dark Mode Single Architecture)', () => {
+    it('should maintain dark mode without data-theme attribute when applyTheme is called', () => {
       const ui = new UIManager(appState);
-      ui.applyTheme('light');
-
-      expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-      expect(ui.state.theme).toBe('light');
-
-      const btn = document.getElementById('titlebar-theme-toggle');
-      expect(btn.querySelector('svg')).not.toBeNull();
-      // 月アイコンのパスが存在すること
-      expect(btn.querySelector('path[d*="M12 3a6 6 0 0 0 9 9"]')).not.toBeNull();
-      expect(btn.hasAttribute('title')).toBe(false);
-    });
-
-    it('should remove data-theme attribute and update button icon to Sun in dark mode', () => {
-      const ui = new UIManager(appState);
-      // 先にライトモードにしてからダークモードへ
-      ui.applyTheme('light');
       ui.applyTheme('dark');
 
       expect(document.documentElement.getAttribute('data-theme')).toBeNull();
       expect(ui.state.theme).toBe('dark');
-
-      const btn = document.getElementById('titlebar-theme-toggle');
-      expect(btn.querySelector('svg')).not.toBeNull();
-      // 太陽アイコンの円と光線パスが存在すること
-      expect(btn.querySelector('circle[cx="12"]')).not.toBeNull();
-      expect(btn.hasAttribute('title')).toBe(false);
     });
 
-    it('should prevent duplicate tooltips by not setting native title attribute on applyTheme', () => {
+    it('should safely fall back to dark mode even if light theme is requested', () => {
       const ui = new UIManager(appState);
-      const btn = document.getElementById('titlebar-theme-toggle');
-      btn.setAttribute('title', 'Some native title');
-
       ui.applyTheme('light');
-      expect(btn.hasAttribute('title')).toBe(false);
 
-      ui.applyTheme('dark');
-      expect(btn.hasAttribute('title')).toBe(false);
+      // ライトモード廃止により、data-theme 属性は設定されず常にダークモードを維持
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+      expect(ui.state.theme).toBe('dark');
+    });
+
+    it('should operate safely without throwing when theme toggle button is absent in DOM', () => {
+      const ui = new UIManager(appState);
+      expect(() => {
+        ui.applyTheme('dark');
+        ui.applyTheme();
+      }).not.toThrow();
     });
   });
 
-  describe('CSS Variables and Tokens for Light Mode', () => {
-    it('should define complete :root[data-theme="light"] tokens in variables.css', () => {
-      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
-      const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
+  describe('Viewer Theme Handling (Independent Viewer Window)', () => {
+    it('should maintain dark mode without data-theme attribute on viewer window', () => {
+      applyViewerTheme('dark');
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
 
-      expect(cssContent).toContain(':root[data-theme="light"] {');
-      expect(cssContent).toContain('--bg-color: #ffffff;');
-      expect(cssContent).toContain('--side-pane-bg: #f8fafc;');
-      expect(cssContent).toContain('--panel-bg: #e5e7eb;');
-      expect(cssContent).toContain('--top-bar-bg: #e5e7eb;');
-      expect(cssContent).toContain('--text-color: #334155;');
-      expect(cssContent).toContain('--titlebar-bg: #ffffff;');
-      expect(cssContent).toContain('--tab-inactive-bg: #ffffff;');
-      expect(cssContent).toContain('--accent-color: #0d9488;');
-      expect(cssContent).toContain('--folder-icon-color: #d97706;');
-      expect(cssContent).toContain('--border-color: #cbd5e1;');
-      expect(cssContent).toContain('--border-color-light: #cbd5e1;');
-      expect(cssContent).toContain('--tab-active-bg: var(--top-bar-bg);');
-      expect(cssContent).toContain('--tab-active-color: #334155;');
-      expect(cssContent).toContain('--titlebar-divider-color: rgba(0, 0, 0, 0.10);');
+      applyViewerTheme('light');
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+    });
+  });
+
+  describe('Complete Absence of Light Mode Selectors in CSS (Regression Prevention)', () => {
+    const cssFiles = [
+      '../src/common/css/variables.css',
+      '../src/renderer/css/layout.css',
+      '../src/renderer/css/components.css',
+      '../src/renderer/css/dialogs.css',
+      '../src/renderer/css/inspector.css',
+      '../src/viewer/viewer.css'
+    ];
+
+    it.each(cssFiles)('should not contain any [data-theme="light"] rules in %s', (relPath) => {
+      const filePath = path.resolve(__dirname, relPath);
+      const content = fs.readFileSync(filePath, 'utf-8');
+
+      expect(content).not.toContain('data-theme="light"');
+      expect(content).not.toContain("data-theme='light'");
+      expect(content).not.toContain(':root[data-theme="light"]');
     });
 
-    it('should ensure smart-folder-count in light mode is clean unbordered text without background pill', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(cssContent).toContain(':root[data-theme="light"] .smart-folder-count');
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*background-color:\s*transparent/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*border:\s*none/);
-    });
-
-    it('should ensure active tab synchronizes background and bottom border with top-bar-bg in light mode', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*background-color:\s*var\(--tab-active-bg,\s*var\(--top-bar-bg\)\)\s*!important;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{[^}]*border-bottom:\s*1px\s+solid\s+var\(--top-bar-bg\)\s*!important;/);
-    });
-
-    it('should ensure inactive tab hover background uses var(--panel-bg) in light mode', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item:not\(\.active\):hover\s*\{[^}]*background-color:\s*var\(--panel-bg\)\s*!important;/);
-    });
-
-    it('should ensure light theme component contrast (resizers matching pane header var(--panel-bg), custom-select, icon-btn:hover)', () => {
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const cssContent = fs.readFileSync(componentsCssPath, 'utf-8');
-
-      expect(cssContent).toContain(':root[data-theme="light"] .custom-select');
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*color:\s*var\(--text-color\);/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+\.resizer,\s*:root\[data-theme="light"\]\s+\.resizer-h,\s*:root\[data-theme="light"\]\s+\.resizer-toggle\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
-    });
-
-    it('should define folder icon tokens and class in variables.css', () => {
-      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
-      const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
-
-      expect(cssContent).toContain('--folder-icon-color: var(--accent-hover);');
-      expect(cssContent).toContain('--drive-icon-color:');
-      expect(cssContent).toContain('.icon-color-folder {');
-    });
-
-    it('should use --titlebar-divider-color in layout.css for titlebar divider', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(cssContent).toMatch(/\.titlebar-divider\s*\{[^}]*background-color:\s*var\(--titlebar-divider-color/);
-      expect(cssContent).toMatch(/#titlebar-theme-toggle svg\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;/);
-    });
-
-    it('should ensure #tab-bar right offset is at least 260px so new-tab-btn does not overlap titlebar-controls', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      const match = cssContent.match(/#tab-bar\s*\{[^}]*right:\s*(\d+)px;/);
-      expect(match).not.toBeNull();
-      const rightVal = parseInt(match[1], 10);
-      expect(rightVal).toBeGreaterThanOrEqual(260);
-    });
-
-    it('should apply folder-icon-color to tree icons and preserve folder color on selection', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(cssContent).toContain('color: var(--folder-icon-color');
-      // .tree-item.selected .tree-icon が白反転されていないこと
-      expect(cssContent).not.toMatch(/\.tree-item\.selected\s+\.tree-icon[^{]*\{\s*color:\s*var\(--text-light\)/);
-    });
-
-    it('should define modern light theme selection styles in layout.css', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      // ディレクトリツリーの選択スタイル
-      expect(cssContent).toContain(':root[data-theme="light"] #dir-tree .tree-item.selected');
-      // スマートフォルダの選択スタイル
-      expect(cssContent).toContain(':root[data-theme="light"] .smart-folder-item.selected');
-      // ブックマークの選択スタイル
-      expect(cssContent).toContain(':root[data-theme="light"] .bookmark-item.selected');
-      // アクティブタブのスタイル
-      expect(cssContent).toContain(':root[data-theme="light"] #tab-container .tab-item.active');
-      // 検索バーのスタイル
-      expect(cssContent).toContain(':root[data-theme="light"] #search-container');
-    });
-
-    it('should set var(--bg-color) background for smart folders and directory tree interiors in light mode', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(cssContent).toContain(':root[data-theme="light"] #smart-folders-list');
-      expect(cssContent).toContain(':root[data-theme="light"] #dir-tree');
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#smart-folders-list[\s\S]*?background-color:\s*var\(--bg-color\);/);
-    });
-
-    it('should ensure inspector tag display container retains pure white background in light mode', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const cssContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s+#right-pane\s+\.prompt-look\s*\{[^}]*background-color:\s*(?:var\(--prompt-bg\)|#ffffff);/);
-    });
-
-    it('should ensure pane headers and resizer dividers reference --panel-bg (#f1f5f9)', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const baseCssPath = path.resolve(__dirname, '../src/common/css/base.css');
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-      const baseContent = fs.readFileSync(baseCssPath, 'utf-8');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-
-      expect(layoutContent).toContain('.pane-header {');
-      expect(layoutContent).toMatch(/\.pane-header\s*\{[^}]*background:\s*var\(--panel-bg\);/);
-      expect(layoutContent).toMatch(/#left-pane\s*\{[^}]*background:\s*var\(--bg-color\);/);
-      expect(layoutContent).toMatch(/#right-pane\s*\{[^}]*background:\s*var\(--bg-color\);/);
-      expect(baseContent).toMatch(/\.resizer\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
-      expect(componentsContent).toMatch(/\.resizer-h\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
-    });
-
-    it('should ensure help overlay and dialog text colors use --text-color in light theme for readability', () => {
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
-
-      expect(dialogsContent).toContain(':root[data-theme="light"] #help-overlay');
-      expect(dialogsContent).toContain(':root[data-theme="light"] .help-table td');
-      expect(dialogsContent).toContain(':root[data-theme="light"] kbd');
-      expect(dialogsContent).toContain(':root[data-theme="light"] .dialog-btn');
-    });
-
-    it('should ensure license markdown blockquote background is transparent in light theme', () => {
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
-
-      expect(dialogsContent).toContain(':root[data-theme="light"] .md-blockquote');
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.md-blockquote\s*\{[^}]*background:\s*transparent\s*!important;/);
-    });
-
-    it('should ensure dropdown boxes (.custom-select) unify to #e2eef0 background in light theme matching pane headers', () => {
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const thumbnailCssPath = path.resolve(__dirname, '../src/renderer/css/thumbnail.css');
-
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-      const thumbnailContent = fs.readFileSync(thumbnailCssPath, 'utf-8');
-
-      // ソート順の基底ドロップダウン定義が存在すること
-      expect(thumbnailContent).toContain('#thumbnail-controls .custom-select');
-      // ライトモードで .custom-select 全般が var(--panel-bg) でペインヘッダと同色になること
-      expect(componentsContent).toContain(':root[data-theme="light"] .custom-select');
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.custom-select\s*\{[^}]*background-color:\s*var\(--panel-bg\);/);
-    });
-
-    it('should ensure all pane headers, file-table th, and thumbnail-controls unify to var(--panel-bg) in light mode', () => {
+    it('should not contain #titlebar-theme-toggle rule in layout.css', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+      expect(layoutContent).not.toContain('#titlebar-theme-toggle');
+    });
+  });
 
-      expect(layoutContent).toContain(':root[data-theme="light"] .pane-header');
-      expect(layoutContent).toContain(':root[data-theme="light"] #file-table th');
-      expect(layoutContent).toContain(':root[data-theme="light"] #thumbnail-controls');
-      expect(layoutContent).toContain(':root[data-theme="light"] #inspector-header');
-      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+\.pane-header[\s\S]*?background-color:\s*var\(--panel-bg\)\s*!important;/);
+  describe('Dark Mode Core Token Integrity', () => {
+    const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+    const variablesContent = fs.readFileSync(variablesCssPath, 'utf-8');
+
+    it('should define essential dark theme variables in :root', () => {
+      expect(variablesContent).toContain('--bg-color: #080d0f;');
+      expect(variablesContent).toContain('--panel-bg: #182529;');
+      expect(variablesContent).toContain('--top-bar-bg: #22343a;');
+      expect(variablesContent).toContain('--text-color: #cddbe0;');
+      expect(variablesContent).toContain('--prompt-bg: #000000;');
+      expect(variablesContent).toContain('--border-color: #3b5057;');
+      expect(variablesContent).toContain('--accent-color: #257e8c;');
+      expect(variablesContent).toContain('--accent-rgb: 37, 126, 140;');
     });
 
-    it('should ensure #center-pane::before and #center-pane::after match var(--panel-bg) in light mode to eliminate bright scrollbar gutter spot', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(layoutContent).toContain(':root[data-theme="light"] #center-pane::before');
-      expect(layoutContent).toContain(':root[data-theme="light"] #center-pane::after');
-      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+#center-pane::before,\s*:root\[data-theme="light"\]\s+#center-pane::after\s*\{[^}]*background:\s*var\(--panel-bg\)\s*!important;/);
+    it('should define 4-step translucent accent tint tokens for unified interaction', () => {
+      expect(variablesContent).toMatch(/--accent-subtle:\s*rgba\(var\(--accent-rgb\),\s*0\.12\);/);
+      expect(variablesContent).toMatch(/--accent-hover-tint:\s*rgba\(var\(--accent-rgb\),\s*0\.25\);/);
+      expect(variablesContent).toMatch(/--accent-active-tint:\s*rgba\(var\(--accent-rgb\),\s*0\.40\);/);
+      expect(variablesContent).toMatch(/--accent-focus-ring:\s*rgba\(var\(--accent-rgb\),\s*0\.60\);/);
     });
 
-    it('should define --viewer-bg and --viewer-bg-rgb in light mode tokens in variables.css', () => {
-      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
-      const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
-
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg:\s*#ffffff;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--viewer-bg-rgb:\s*255,\s*255,\s*255;/);
-    });
-
-    it('should ensure viewer metadata overlay and prompt-look match light theme styling with translucent parity', () => {
-      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
-      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
-
-      // 背景およびヘッダーがダークモードと同等の0.85不透明度であること
-      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-metadata-overlay');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s*\{[^}]*background:\s*rgba\(var\(--bg-rgb\),\s*0\.85\);/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-header\s*\{[^}]*background:\s*rgba\(var\(--panel-rgb\),\s*0\.85\)\s*!important;/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-title\s*\{[^}]*color:\s*var\(--text-color\)\s*!important;/);
-
-      // プロンプトボックスが半透明（0.65）で背後を透過すること
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.prompt-look\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.65\)\s*!important;/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.prompt-look\s+\.diff-tag\s*\{[^}]*background-color:\s*rgba\(var\(--panel-rgb\),\s*0\.85\);/);
-    });
-
-    it('should broadcast theme-changed event in renderer.js when theme is toggled', () => {
-      const rendererPath = path.resolve(__dirname, '../src/renderer/renderer.js');
-      const rendererContent = fs.readFileSync(rendererPath, 'utf-8');
-
-      expect(rendererContent).toMatch(/window\.__TAURI__\.event\.emit\('theme-changed',\s*nextTheme\)/);
-    });
-
-    it('should set --text-light to #334155 and define high-contrast palette colors in light mode tokens', () => {
-      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
-      const cssContent = fs.readFileSync(variablesCssPath, 'utf-8');
-
-      // ライトモード時に --text-light がダークスレート（#334155）に設定されていること
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--text-light:\s*#334155;/);
-
-      // ライトモード時にパレットカラー（デフォルトがダークスレート、他色も高コントラスト）が定義されていること
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-default:\s*#334155;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-red:\s*#dc2626;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-blue:\s*#2563eb;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-green:\s*#16a34a;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-yellow:\s*#d97706;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-purple:\s*#9333ea;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-pink:\s*#db2777;/);
-      expect(cssContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--palette-cyan:\s*#0d9488;/);
-    });
-
-    it('should ensure smart folder and bookmark icons use var(--palette-default) in light mode', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      expect(layoutContent).toContain(':root[data-theme="light"] .smart-folder-icon:not([class*="icon-color-"])');
-      expect(layoutContent).toContain(':root[data-theme="light"] .bookmark-icon:not([class*="icon-color-"])');
-      expect(layoutContent).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-icon:not\(\[class\*="icon-color-"\]\)[\s\S]*?color:\s*var\(--palette-default\);/);
-    });
-
-    it('should assign icon-color-${color} to smart folders in renderer.js', () => {
-      const rendererPath = path.resolve(__dirname, '../src/renderer/renderer.js');
-      const rendererContent = fs.readFileSync(rendererPath, 'utf-8');
-
-      // smart-folder-icon にタイポなく icon-color-${...} が付与されること
-      expect(rendererContent).toContain('iconSpan.className = `smart-folder-icon icon-color-${f.color || \'default\'}`;');
-      expect(rendererContent).not.toMatch(/smart-folder-icon color-\$/);
-    });
-
-    it('should assign icon-color-${color} or bookmark-icon-fav to bookmarks in renderer-bookmarks.js', () => {
-      const bookmarksPath = path.resolve(__dirname, '../src/renderer/renderer-bookmarks.js');
-      const bookmarksContent = fs.readFileSync(bookmarksPath, 'utf-8');
-
-      expect(bookmarksContent).toContain('icon.classList.add(\'bookmark-icon-fav\');');
-      expect(bookmarksContent).toContain('icon.classList.add(`icon-color-${fav.color}`);');
-      expect(bookmarksContent).toContain('icon.classList.add(`icon-color-${fav.color || \'default\'}`);');
-    });
-
-    it('should preserve custom palette color on bookmark icons and not override svg in layout.css', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      // .bookmark-item svg に直接 color を当てて子要素の色を上書きしていないこと
-      expect(layoutContent).not.toMatch(/:root\[data-theme="light"\]\s+\.bookmark-item\s+svg/);
-    });
-
-    it('should bind color-btn styles in dialogs.css to palette variables in light mode', () => {
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
-
-      expect(dialogsContent).toContain(':root[data-theme="light"] .color-btn[data-color="default"]');
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.color-btn\[data-color="default"\]\s*\{[^}]*background-color:\s*var\(--palette-default\)\s*!important;/);
-    });
-
-    it('should style thumbnail-label and rating-badge with white background and text-shadow none in light mode', () => {
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-
-      expect(componentsContent).toContain(':root[data-theme="light"] .thumbnail-label');
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.85\);/);
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.thumbnail-label\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.95\);/);
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-label\s*\{[^}]*text-shadow:\s*none;/);
-
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
-
-      expect(dialogsContent).toContain(':root[data-theme="light"] .rating-badge');
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.85\);/);
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.thumbnail-item:hover\s+\.rating-badge\s*\{[^}]*background-color:\s*rgba\(255,\s*255,\s*255,\s*0\.95\);/);
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.rating-badge\s*\{[^}]*text-shadow:\s*none;/);
-    });
-
-    it('should ensure dialog-input in light mode matches search bar background and uses --input-bg', () => {
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-
-      // ベースルールで --input-bg が使用されていること
-      expect(componentsContent).toMatch(/\.dialog-input\s*\{[\s\S]*?background-color:\s*var\(--input-bg/);
-
-      // ライトモード時に --input-bg が適用されること
-      expect(componentsContent).toContain(':root[data-theme="light"] .dialog-input');
-      expect(componentsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-input\s*\{[^}]*background-color:\s*var\(--input-bg\)\s*!important;/);
-    });
-
-    it('should ensure dialog-btn.primary and dialog-btn.danger have explicit visible backgrounds in light mode', () => {
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
-
-      expect(dialogsContent).toContain(':root[data-theme="light"] .dialog-btn.primary');
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-btn\.primary\s*\{[^}]*background-color:\s*var\(--accent-color\);/);
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-btn\.primary:hover:not\(:disabled\)\s*\{[^}]*background-color:\s*var\(--accent-hover\);/);
-
-      expect(dialogsContent).toContain(':root[data-theme="light"] .dialog-btn.danger');
-      expect(dialogsContent).toMatch(/:root\[data-theme="light"\]\s+\.dialog-btn\.danger\s*\{[^}]*background-color:\s*var\(--danger-red\);/);
-    });
-
-    it('should ensure viewer titlebar has white gradient background and dark text with white shadow in light mode', () => {
-      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
-      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
-
-      // タイトルバーの白グラデーション背景（画像がしっかり透けて見える半透明グラデーション）
-      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-body #window-controls.has-gradient');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-body\s+#window-controls\.has-gradient\s*\{[^}]*background:\s*linear-gradient\(to bottom,\s*rgba\(255,\s*255,\s*255,\s*0\.65\)\s*0%,\s*rgba\(255,\s*255,\s*255,\s*0\.35\)\s*60%/);
-
-      // メタデータ展開時の白グラデーション背景
-      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-body.metadata-open #window-controls.has-gradient');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-body\.metadata-open\s+#window-controls\.has-gradient[^{]*\{[^}]*background:\s*linear-gradient\(to bottom,\s*rgba\(255,\s*255,\s*255,\s*0\.70\)\s*0%,\s*rgba\(255,\s*255,\s*255,\s*0\.40\)\s*60%/);
-
-      // ファイル名・レーティング・拡大率のダークスレート文字と白シャドウ
-      expect(viewerContent).toContain(':root[data-theme="light"] .window-filename');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-filename\s*\{[^}]*color:\s*var\(--text-color\);/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-filename\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
-
-      expect(viewerContent).toContain(':root[data-theme="light"] .viewer-rating-display');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-rating-display\s*\{[^}]*color:\s*var\(--text-color\);/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.viewer-rating-display\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
-
-      expect(viewerContent).toContain(':root[data-theme="light"] .window-scale-display');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-scale-display\s*\{[^}]*color:\s*var\(--text-color\);/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-scale-display\s*\{[^}]*text-shadow:[^}]*rgba\(255,\s*255,\s*255/);
-
-      // コントロールボタンのダークカラーと白シャドウ
-      expect(viewerContent).toContain(':root[data-theme="light"] .window-ctrl-btn');
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s*\{[^}]*color:\s*#334549;/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\s+svg\s*\{[^}]*drop-shadow\([^)]*rgba\(255,\s*255,\s*255/);
-      expect(viewerContent).toMatch(/:root\[data-theme="light"\]\s+\.window-ctrl-btn\.window-ctrl-btn--close:hover\s*\{[^}]*background-color:\s*var\(--danger-red\);/);
-    });
-
-    it('should ensure diff-tag does not have custom font-weight in light mode to maintain identical wrapping with dark mode', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
-
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
-      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
-
-      // #right-pane .prompt-look .diff-tag が font-weight を上書きせず通常ウェイトを維持すること
-      const layoutMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#right-pane\s+\.prompt-look\s+\.diff-tag\s*\{([^}]+)\}/);
-      expect(layoutMatch).not.toBeNull();
-      expect(layoutMatch[1]).not.toContain('font-weight');
-
-      // dialogs.css の light theme diff-tag も font-weight を上書きしないこと
-      const dialogsMatch = dialogsContent.match(/:root\[data-theme="light"\]\s+\.diff-tag\.common\s*\{([^}]+)\}/);
-      expect(dialogsMatch).not.toBeNull();
-      expect(dialogsMatch[1]).not.toContain('font-weight');
-
-      // viewer.css の light theme diff-tag も font-weight を上書きしないこと
-      const viewerMatch = viewerContent.match(/:root\[data-theme="light"]\s+\.viewer-metadata-overlay\s+\.prompt-look\s+\.diff-tag\s*\{([^}]+)\}/);
-      expect(viewerMatch).not.toBeNull();
-      expect(viewerMatch[1]).not.toContain('font-weight');
-    });
-
-    it('should ensure inspector-header-layout has no left border in light mode to match dark mode continuity', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      const match = layoutContent.match(/:root\[data-theme="light"]\s+\.inspector-header-layout\s*\{([^}]+)\}/);
-      expect(match).not.toBeNull();
-      expect(match[1]).toMatch(/border-left:\s*none\s*!important;/);
-    });
-
-    it('should ensure slider-tooltip and resizer-toggle hover use var(--text-on-accent) for white text/icon contrast in both modes', () => {
-      const varsCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-
-      const varsContent = fs.readFileSync(varsCssPath, 'utf-8');
-      const dialogsContent = fs.readFileSync(dialogsCssPath, 'utf-8');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-
-      // variables.css でダークモード・ライトモード双方に --text-on-accent: #ffffff が定義されていること
-      expect(varsContent).toMatch(/:root\s*\{[\s\S]*?--text-on-accent:\s*#ffffff;/);
-      expect(varsContent).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--text-on-accent:\s*#ffffff;/);
-
-      // slider-tooltip が var(--text-on-accent) を使用していること
-      expect(dialogsContent).toMatch(/\.slider-tooltip\s*\{[\s\S]*?color:\s*var\(--text-on-accent\);/);
-
-      // resizer-toggle:hover およびその svg が var(--text-on-accent) を使用していること
-      expect(componentsContent).toMatch(/\.resizer-toggle:hover\s*\{[\s\S]*?color:\s*var\(--text-on-accent\)\s*!important;/);
-      expect(componentsContent).toMatch(/\.resizer-toggle:hover\s+svg\s*\{[\s\S]*?stroke:\s*var\(--text-on-accent\);/);
-    });
-
-    it('should ensure light mode table selection, smart folder, and bookmark do not use bold font-weight', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-
-      // #file-table tr.selected がライトモードで font-weight: normal であること（太字化の防止）
-      const tableMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr\.selected\s*\{([^}]+)\}/);
-      expect(tableMatch).not.toBeNull();
-      expect(tableMatch[1]).toMatch(/font-weight:\s*normal;/);
-
-      // .smart-folder-item.selected がライトモードで font-weight: normal であること
-      const smartFolderMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-item\.selected\s*\{([^}]+)\}/);
-      expect(smartFolderMatch).not.toBeNull();
-      expect(smartFolderMatch[1]).toMatch(/font-weight:\s*normal;/);
-
-      // .bookmark-item.selected がライトモードで font-weight: normal であること
-      const bookmarkMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item\.selected\s*\{([^}]+)\}/);
-      expect(bookmarkMatch).not.toBeNull();
-      expect(bookmarkMatch[1]).toMatch(/font-weight:\s*normal;/);
-    });
-
-    it('should ensure all light mode components (tabs, headers, tree, controls, inspector, dropdowns, viewer) use font-weight normal', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
-
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-      const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
-
-      // 非アクティブタブ
-      const tabMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\s*\{([^}]+)\}/);
-      expect(tabMatch).not.toBeNull();
-      expect(tabMatch[1]).toMatch(/font-weight:\s*normal;/);
-
-      // アクティブタブ
-      const activeTabMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#tab-container\s+\.tab-item\.active\s*\{([^}]+)\}/);
-      expect(activeTabMatch).not.toBeNull();
-      expect(activeTabMatch[1]).toMatch(/font-weight:\s*normal\s*!important;/);
-
-      // ペインヘッダー
-      const paneHeaderMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.pane-header\s*\{([^}]+)\}/);
-      expect(paneHeaderMatch).not.toBeNull();
-      expect(paneHeaderMatch[1]).toMatch(/font-weight:\s*normal;/);
-      // ライトモード独自で縮小された 11px や letter-spacing が存在せず、ダークモード (var(--font-size-xs): 12px) と完全に一致すること
-      expect(paneHeaderMatch[1]).not.toContain('font-size');
-      expect(paneHeaderMatch[1]).not.toContain('letter-spacing');
-
-      // ファイルテーブルヘッダー
-      const tableThMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+th\s*\{([^}]+)\}/);
-      expect(tableThMatch).not.toBeNull();
-      expect(tableThMatch[1]).toMatch(/font-weight:\s*normal;/);
-
-      // ディレクトリツリー選択アイテム
-      const treeMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#dir-tree\s+\.tree-item\.selected\s*\{([^}]+)\}/);
-      expect(treeMatch).not.toBeNull();
-      expect(treeMatch[1]).toMatch(/font-weight:\s*normal;/);
-
-      // サムネイルコントロールラベル
-      const thumbCtrlMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#thumbnail-controls\s+label:not\(\.custom-checkbox-wrapper\)\s*\{([^}]+)\}/);
-      expect(thumbCtrlMatch).not.toBeNull();
-      expect(thumbCtrlMatch[1]).toMatch(/font-weight:\s*normal;/);
-
-      // インスペクターセクション見出し
-      const inspectorH3Match = layoutContent.match(/:root\[data-theme="light"\]\s+\.inspector-section-h3\s*\{([^}]+)\}/);
-      expect(inspectorH3Match).not.toBeNull();
-      expect(inspectorH3Match[1]).toMatch(/font-weight:\s*normal;/);
-
-      // カスタムセレクト選択中アイテム
-      const selectMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select-item\.selected\s*\{([^}]+)\}/);
-      expect(selectMatch).not.toBeNull();
-      expect(selectMatch[1]).toMatch(/font-weight:\s*normal;/);
-
-      // 独立ビューアーメタデータ見出し
-      const viewerH3Match = viewerContent.match(/:root\[data-theme="light"\]\s+\.viewer-metadata-overlay\s+\.inspector-section-h3\s*\{([^}]+)\}/);
-      expect(viewerH3Match).not.toBeNull();
-      expect(viewerH3Match[1]).toMatch(/font-weight:\s*normal;/);
+    it('should define dialog and modal background tokens matching top-bar-bg and panel-bg hierarchy', () => {
+      expect(variablesContent).toMatch(/--dialog-bg:\s*#22343a;/);
+      expect(variablesContent).toMatch(/--modal-bg:\s*#22343a;/);
+      expect(variablesContent).toMatch(/--input-bg:\s*#182529;/);
     });
   });
 
   describe('Bookmark Bar Height and Pane Position Consistency', () => {
-    it('should have strictly synchronized height (28px) and border-box sizing across dark and light themes', () => {
+    it('should have strictly synchronized height (28px) and border-box sizing', () => {
       const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
       const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
-      // #bookmark-bar デフォルト（ダークモード）
+      // #bookmark-bar
       const baseBookmarkMatch = layoutContent.match(/(?:^|\n)#bookmark-bar\s*\{([^}]+)\}/);
       expect(baseBookmarkMatch).not.toBeNull();
       const baseRules = baseBookmarkMatch[1];
@@ -602,16 +158,6 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
       expect(baseRules).toMatch(/max-height:\s*28px;/);
       expect(baseRules).toMatch(/box-sizing:\s*border-box;/);
       expect(baseRules).toMatch(/overflow:\s*hidden;/);
-
-      // :root[data-theme="light"] #bookmark-bar（ライトモード）
-      const lightBookmarkMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#bookmark-bar\s*\{([^}]+)\}/);
-      expect(lightBookmarkMatch).not.toBeNull();
-      const lightRules = lightBookmarkMatch[1];
-      expect(lightRules).toMatch(/height:\s*28px\s*!important;/);
-      expect(lightRules).toMatch(/min-height:\s*28px\s*!important;/);
-      expect(lightRules).toMatch(/max-height:\s*28px\s*!important;/);
-      expect(lightRules).toMatch(/box-sizing:\s*border-box\s*!important;/);
-      expect(lightRules).toMatch(/padding:\s*0\s+8px\s*!important;/);
 
       // .bookmark-item のサイズ制限（親バーを押し広げない定義）
       const itemMatch = layoutContent.match(/(?:^|\n)\.bookmark-item\s*\{([^}]+)\}/);
@@ -623,220 +169,47 @@ describe('Theme Mode (Light / Dark Theme Switching)', () => {
     });
   });
 
-  describe('Visual Style Unification across Themes', () => {
+  describe('Visual Style Unification across Components', () => {
     const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
     const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+    const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
+    const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
 
-    it('should have plain text smart-folder-count without pill background or padding in base and light theme', () => {
-      // ベーススタイル
+    it('should have plain text smart-folder-count without pill background or padding', () => {
       const baseCountMatch = layoutContent.match(/(?:^|\n)\.smart-folder-count\s*\{([^}]+)\}/);
       expect(baseCountMatch).not.toBeNull();
       expect(baseCountMatch[1]).toMatch(/background:\s*transparent;/);
       expect(baseCountMatch[1]).toMatch(/padding:\s*0;/);
       expect(baseCountMatch[1]).toMatch(/border-radius:\s*0;/);
-
-      // ライトモードオーバーライド
-      const lightCountMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{([^}]+)\}/);
-      expect(lightCountMatch).not.toBeNull();
-      expect(lightCountMatch[1]).toMatch(/background-color:\s*transparent\s*!important;/);
-      expect(lightCountMatch[1]).toMatch(/padding:\s*0\s*!important;/);
     });
 
-    it('should not have left accent bar (box-shadow) on #file-table tr.selected in both dark and light themes', () => {
-      // ダークモード
+    it('should not have left accent bar (box-shadow) on #file-table tr.selected', () => {
       const darkRowMatch = layoutContent.match(/(?:^|\n)#file-table\s+tr\.selected\s*\{([^}]+)\}/);
       expect(darkRowMatch).not.toBeNull();
       expect(darkRowMatch[1]).not.toContain('box-shadow');
-
-      // ライトモード
-      const lightRowMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr\.selected\s*\{([^}]+)\}/);
-      expect(lightRowMatch).not.toBeNull();
-      expect(lightRowMatch[1]).toMatch(/box-shadow:\s*none;/);
     });
 
-    it('should eliminate vertical borders on #file-table th and td in both dark and light themes', () => {
-      // ベース（ダークモード含む共通）スタイルで border-right: none であること
+    it('should eliminate vertical borders on #file-table th and td', () => {
       const baseCellsMatch = layoutContent.match(/(?:^|\n)#file-table\s+th,\s*[\r\n]+#file-table\s+td\s*\{([^}]+)\}/);
       expect(baseCellsMatch).not.toBeNull();
       expect(baseCellsMatch[1]).toMatch(/border-right:\s*none;/);
-
-      // ライトモードの th および td でも border-right: none !important であること
-      const lightThMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+th\s*\{([^}]+)\}/);
-      expect(lightThMatch).not.toBeNull();
-      expect(lightThMatch[1]).toMatch(/border-right:\s*none\s*!important;/);
-
-      const lightTdMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+td\s*\{([^}]+)\}/);
-      expect(lightTdMatch).not.toBeNull();
-      expect(lightTdMatch[1]).toMatch(/border-right:\s*none\s*!important;/);
     });
 
-    it('should have enhanced hover background for bookmark items in light theme', () => {
-      const lightHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item:hover:not\(\.selected\)\s*\{([^}]+)\}/);
-      expect(lightHoverMatch).not.toBeNull();
-      expect(lightHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-hover-tint\);/);
+    it('should maintain natural transparent placement for thumbnail items without cards or borders', () => {
+      const thumbMatch = componentsContent.match(/(?:^|\n)\.thumbnail-item\s*\{([^}]+)\}/);
+      expect(thumbMatch).not.toBeNull();
+      expect(thumbMatch[1]).not.toContain('box-shadow: 0 1px 3px');
+      expect(thumbMatch[1]).not.toContain('background-color: #');
     });
 
-    it('should set resizer-toggle background to #e2eef0 matching pane headers in light theme', () => {
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-
-      const resizerMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.resizer,\s*[\r\n]+:root\[data-theme="light"\]\s+\.resizer-h,\s*[\r\n]+:root\[data-theme="light"\]\s+\.resizer-toggle\s*\{([^}]+)\}/);
-      expect(resizerMatch).not.toBeNull();
-      expect(resizerMatch[1]).toMatch(/background-color:\s*var\(--panel-bg\);/);
-    });
-
-    it('should set var(--panel-bg) background for search-container and custom-select in dark/base theme', () => {
+    it('should set var(--panel-bg) background for search-container and custom-select', () => {
       const searchMatch = layoutContent.match(/(?:^|\n)#search-container\s*\{([^}]+)\}/);
       expect(searchMatch).not.toBeNull();
       expect(searchMatch[1]).toMatch(/background:\s*var\(--panel-bg\);/);
 
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
       const selectMatch = componentsContent.match(/(?:^|\n)\.custom-select\s*\{([^}]+)\}/);
       expect(selectMatch).not.toBeNull();
       expect(selectMatch[1]).toMatch(/background-color:\s*var\(--panel-bg\);/);
     });
-
-    it('should set var(--input-bg) for search-container and var(--panel-bg) for custom-select in light theme', () => {
-      const lightSearchMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#search-container\s*\{([^}]+)\}/);
-      expect(lightSearchMatch).not.toBeNull();
-      expect(lightSearchMatch[1]).toMatch(/background:\s*var\(--input-bg\);/);
-
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-      const lightSelectMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select\s*\{([^}]+)\}/);
-      expect(lightSelectMatch).not.toBeNull();
-      expect(lightSelectMatch[1]).toMatch(/background-color:\s*var\(--panel-bg\);/);
-    });
-
-    it('should set transparent background and remove card border/shadow for .thumbnail-item in light theme', () => {
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-      const thumbMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.thumbnail-item\s*\{([^}]+)\}/);
-      expect(thumbMatch).not.toBeNull();
-      expect(thumbMatch[1]).toMatch(/background-color:\s*transparent;/);
-      expect(thumbMatch[1]).toMatch(/box-shadow:\s*none;/);
-
-      const thumbSelectMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.thumbnail-item\.selected\s*\{([^}]+)\}/);
-      expect(thumbSelectMatch).not.toBeNull();
-      expect(thumbSelectMatch[1]).toMatch(/background-color:\s*var\(--accent-subtle\);/);
-    });
-
-    it('should configure optimized 4-step translucent accent tokens in light theme and apply them consistently (Proposal L-1, L-2, L-3)', () => {
-      // 提案 L-1: ライトモード専用4段階アクセントトークン
-      const variablesCss = fs.readFileSync(path.resolve(__dirname, '../src/common/css/variables.css'), 'utf-8');
-      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-subtle:\s*rgba\(var\(--accent-rgb\),\s*0\.10\);/);
-      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-hover-tint:\s*rgba\(var\(--accent-rgb\),\s*0\.16\);/);
-      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-active-tint:\s*rgba\(var\(--accent-rgb\),\s*0\.25\);/);
-      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--accent-focus-ring:\s*rgba\(var\(--accent-rgb\),\s*0\.60\);/);
-
-      // 提案 L-2: ホバーと選択の階層逆転解消（ホバー 10%/16% < 選択 25%）
-      const tableSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr\.selected\s*\{([^}]+)\}/);
-      expect(tableSelectMatch).not.toBeNull();
-      expect(tableSelectMatch[1]).toMatch(/background:\s*var\(--accent-active-tint\);/);
-
-      const tableHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#file-table\s+tr:hover:not\(\.selected\)\s*\{([^}]+)\}/);
-      expect(tableHoverMatch).not.toBeNull();
-      expect(tableHoverMatch[1]).toMatch(/background:\s*var\(--accent-subtle\);/);
-
-      const treeSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#dir-tree\s+\.tree-item\.selected\s*\{([^}]+)\}/);
-      expect(treeSelectMatch).not.toBeNull();
-      expect(treeSelectMatch[1]).toMatch(/background-color:\s*var\(--accent-active-tint\);/);
-
-      const treeHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#dir-tree\s+\.tree-item:hover:not\(\.selected\)\s*\{([^}]+)\}/);
-      expect(treeHoverMatch).not.toBeNull();
-      expect(treeHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-subtle\);/);
-
-      const smartSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-item\.selected\s*\{([^}]+)\}/);
-      expect(smartSelectMatch).not.toBeNull();
-      expect(smartSelectMatch[1]).toMatch(/background-color:\s*var\(--accent-active-tint\);/);
-
-      const smartHoverMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.smart-folder-item:hover:not\(\.selected\)\s*\{([^}]+)\}/);
-      expect(smartHoverMatch).not.toBeNull();
-      expect(smartHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-subtle\);/);
-
-      const bookmarkSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item\.selected\s*\{([^}]+)\}/);
-      expect(bookmarkSelectMatch).not.toBeNull();
-      expect(bookmarkSelectMatch[1]).toMatch(/background:\s*var\(--accent-active-tint\);/);
-
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsContent = fs.readFileSync(componentsCssPath, 'utf-8');
-
-      const selectHoverMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select-item:hover\s*\{([^}]+)\}/);
-      expect(selectHoverMatch).not.toBeNull();
-      expect(selectHoverMatch[1]).toMatch(/background-color:\s*var\(--accent-hover-tint\);/);
-
-      const selectItemActiveMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-select-item\.selected\s*\{([^}]+)\}/);
-      expect(selectItemActiveMatch).not.toBeNull();
-      expect(selectItemActiveMatch[1]).toMatch(/background-color:\s*var\(--accent-active-tint\);/);
-
-      // 提案 L-3: 枠線ハードコードの解消
-      const searchMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#search-container\s*\{([^}]+)\}/);
-      expect(searchMatch).not.toBeNull();
-      expect(searchMatch[1]).toMatch(/border:\s*1px solid var\(--border-color\);/);
-
-      const checkboxMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.custom-checkbox\s*\{([^}]+)\}/);
-      expect(checkboxMatch).not.toBeNull();
-      expect(checkboxMatch[1]).toMatch(/border:\s*1px solid var\(--border-color\);/);
-
-      // 提案 L-3: アイコンボタン通常色・無効色のトークン化
-      const iconBtnMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.icon-btn\s*\{([^}]+)\}/);
-      expect(iconBtnMatch).not.toBeNull();
-      expect(iconBtnMatch[1]).toMatch(/color:\s*var\(--text-color\);/);
-
-      const iconBtnHoverMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.icon-btn:hover:not\(:disabled\)\s*\{([^}]+)\}/);
-      expect(iconBtnHoverMatch).not.toBeNull();
-      expect(iconBtnHoverMatch[1]).toMatch(/color:\s*var\(--text-color\);/);
-
-      const iconBtnDisabledMatch = componentsContent.match(/:root\[data-theme="light"\]\s+\.icon-btn:disabled\s*\{([^}]+)\}/);
-      expect(iconBtnDisabledMatch).not.toBeNull();
-      expect(iconBtnDisabledMatch[1]).toMatch(/color:\s*var\(--border-color\)\s*!important;/);
-    });
-
-    it('should unify dialog box backgrounds to toolbar/bookmark-bar color and text box backgrounds to panel/inactive-tab color in both themes', () => {
-      const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
-      const variablesCss = fs.readFileSync(variablesCssPath, 'utf-8');
-
-      // ダークモード: ダイアログ背景は #22343a、入力背景は #182529
-      expect(variablesCss).toMatch(/:root\s*\{[\s\S]*?--dialog-bg:\s*#22343a;/);
-      expect(variablesCss).toMatch(/:root\s*\{[\s\S]*?--modal-bg:\s*#22343a;/);
-      expect(variablesCss).toMatch(/:root\s*\{[\s\S]*?--input-bg:\s*#182529;/);
-
-      // ライトモード: ダイアログ背景は #e5e7eb、入力背景は #ffffff
-      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--dialog-bg:\s*#e5e7eb;/);
-      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--modal-bg:\s*#e5e7eb;/);
-      expect(variablesCss).toMatch(/:root\[data-theme="light"\]\s*\{[\s\S]*?--input-bg:\s*#ffffff;/);
-
-      // ダイアログ入力フォーカス時も背景色（--input-bg）を維持すること
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsCss = fs.readFileSync(componentsCssPath, 'utf-8');
-      expect(componentsCss).toMatch(/:root\[data-theme="light"\]\s+\.dialog-input:focus\s*\{[^}]*background-color:\s*var\(--input-bg\)\s*!important;/);
-    });
-
-    it('should restore diff-tag borders, slider track contrast, and pane separator borders in light mode', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const layoutCss = fs.readFileSync(layoutCssPath, 'utf-8');
-      const componentsCssPath = path.resolve(__dirname, '../src/renderer/css/components.css');
-      const componentsCss = fs.readFileSync(componentsCssPath, 'utf-8');
-      const dialogsCssPath = path.resolve(__dirname, '../src/renderer/css/dialogs.css');
-      const dialogsCss = fs.readFileSync(dialogsCssPath, 'utf-8');
-
-      // スライダートラックの視認性回復 (#9ca3af)
-      expect(componentsCss).toMatch(/:root\[data-theme="light"\]\s+input\[type="range"\]::-webkit-slider-runnable-track\s*\{[^}]*background:\s*#9ca3af;/);
-
-      // プロンプトタグのボーダー復活 (layout.css, dialogs.css)
-      expect(layoutCss).toMatch(/:root\[data-theme="light"\]\s+#right-pane\s+\.prompt-look\s+\.diff-tag\s*\{[^}]*border:\s*1px solid var\(--border-color\);/);
-      expect(dialogsCss).toMatch(/:root\[data-theme="light"\]\s+\.diff-tag\s*\{[^}]*border:\s*1px solid var\(--border-color\);/);
-
-      // ペイン区切り線の実線化 (layout.css)
-      expect(layoutCss).toMatch(/:root\[data-theme="light"\]\s+#left-pane\s*\{[^}]*border-right:\s*1px solid var\(--border-color\);/);
-      expect(layoutCss).toMatch(/:root\[data-theme="light"\]\s+#right-pane\s*\{[^}]*border-left:\s*1px solid var\(--border-color\);/);
-    });
   });
 });
-
-
-
-
-
-

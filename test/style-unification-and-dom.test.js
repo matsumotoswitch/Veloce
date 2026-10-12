@@ -188,7 +188,7 @@ describe('Style Unification and DOM Optimization Tests', () => {
     expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*font-weight:\s*inherit;/);
     expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*color:\s*inherit;/);
     expect(css).toMatch(/\.smart-folder-count\s*\{[^}]*line-height:\s*inherit;/);
-    expect(css).toMatch(/:root\[data-theme="light"\]\s+\.smart-folder-count\s*\{[^}]*color:\s*inherit\s*!important;/);
+    expect(css).not.toContain(':root[data-theme="light"]');
   });
 });
 

@@ -474,20 +474,16 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     expect(positionBlock.querySelector('.inspector-position-coords')).toBeNull();
   });
 
-  it('applyViewerTheme should toggle data-theme attribute on documentElement', () => {
+  it('applyViewerTheme should maintain dark theme (no data-theme attribute) on documentElement', () => {
     applyViewerTheme('light');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBeNull();
 
     applyViewerTheme('dark');
     expect(document.documentElement.getAttribute('data-theme')).toBeNull();
-
-    applyViewerTheme('light');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-    applyViewerTheme('dark');
   });
 
-  it('updateMetadataOverlay should render prompt sections properly under light theme', async () => {
-    applyViewerTheme('light');
+  it('updateMetadataOverlay should render prompt sections properly under dark theme', async () => {
+    applyViewerTheme('dark');
     viewerState.isMetadataVisible = true;
     toggleMetadataOverlay(true);
     await updateMetadataOverlay();

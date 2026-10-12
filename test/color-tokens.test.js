@@ -449,9 +449,8 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
     const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
     const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
-    // ダークモード・ライトモードで --prompt-bg が定義されていること（タグ領域の背景色: ダーク時は #000000）
+    // タグ領域の背景色（奥に沈むコンテナ）: #000000
     expect(variablesContent).toContain('--prompt-bg: #000000;');
-    expect(variablesContent).toContain('--prompt-bg: #ffffff;');
 
     // タグ領域（奥に沈むコンテナ）が var(--prompt-bg) であること
     expect(dialogsContent).toMatch(/\.prompt-look\s*\{[^}]*background-color:\s*var\(--prompt-bg\);/);
