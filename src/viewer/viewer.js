@@ -32,11 +32,8 @@ export function applyViewerTheme(_theme) {
   document.documentElement.removeAttribute('data-theme');
 }
 
-// 起動時に同期的にテーマを反映（チラつき・黒画面防止）
-try {
-  const currentTheme = (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) || 'dark';
-  applyViewerTheme(currentTheme);
-} catch (_) {}
+// 起動時に同期的にテーマ属性を確定させ、初回描画時のスタイル再計算を防止する
+applyViewerTheme('dark');
 
 let viewerRatings = {};
 
@@ -731,8 +728,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.currentIndex = newIndex;
         
         // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        applyViewerTheme(savedTheme);
+        applyViewerTheme('dark');
         cleanupCurrentImage();
         clearPreloadCache();
         viewerState.isAlphaOverlayMode = false;

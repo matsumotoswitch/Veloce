@@ -215,7 +215,7 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>F2</kbd></td><td>選択中のファイル/フォルダの名前を変更</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>選択中のファイル/フォルダを安全にゴミ箱へ移動</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>選択中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
-        <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>直前の操作（移動・削除・名前変更）を元に戻す</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>直前の操作（名前変更・移動・コピー）を元に戻す</td></tr>
         <tr><td><kbd>0</kbd> 〜 <kbd>5</kbd></td><td>選択中の画像にレーティングを設定 / 解除</td></tr>
         <tr><td><kbd>タグをクリック</kbd></td><td>プロンプトタグをコピー（<kbd>Ctrl</kbd> + クリックで追加コピー）</td></tr>
       </table>

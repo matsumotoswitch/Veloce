@@ -9,6 +9,14 @@
 ### 1.1 技術スタック & コア最適化
 * **基本設計思想:** 確実にサムネイル表示が行われ、正常に動作することを大前提とした上で極限の速度を追求する。特定の破損ファイルや環境依存のAPI遅延によって処理が沈黙（ハングアップ）しないよう、タイムアウト制御やフェイルセーフを徹底した堅牢な基盤の上に最適化を構築する。
 * **バックエンド:** Rust (Tauri v1)
+  * **モジュール分離アーキテクチャ:** 保守性と凝集度を高めるため、ドメイン・責務ごとに7つのモジュールへ分割（`main.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）。
+    * `main.rs`: アプリケーション初期化、Tauri コマンドハンドラ、ファイル監視、DBマイグレーション統括
+    * `models.rs`: 画像メタデータ、スマートフォルダ定義、IPCリクエスト/レスポンスの型定義
+    * `server.rs`: ローカルHTTPストリーミングサーバー（動画2MBチャンク配信およびサムネイルバイナリ直接保存）
+    * `settings.rs`: SQLite設定DB (`veloce_settings.db`) の管理、設定CRUDおよびWALチェックポイント
+    * `state.rs`: スレッドセーフなグローバル状態管理（`AppState`）、高速ハッシャーマップ
+    * `utils.rs`: パス正規化、ハッシュ生成、Windows APIバインディング等のユーティリティ
+    * `viewer.rs`: 独立ビューアーウィンドウの生成・プール管理・前面化整列制御
   * **高効率メモリ管理:** `mimalloc` (`MiMalloc`) をグローバルアロケータに指定し、長時間の画像処理における断片化とメモリ肥大化を徹底的に抑制。さらに `compact_str::CompactString` を採用し、`ImageFile` の `ext`（拡張子）や `hash_key`（xxh3 16進文字列）等の小文字列を24バイト以内スタックインライン化することで、数万件規模の走査時におけるヒープ割り当て数万回削減とヒープ断片化を防止。
   * **高効率並行同期:** バックエンド内部の排他制御において、標準の `std::sync::Mutex` / `RwLock` ではなく `parking_lot` クレートを採用。ロック構造体のメモリサイズ縮小、ポイズニング排除、スピンウェイトとOSフューテックスのハイブリッド制御によるロック競合オーバーヘッド削減を実現。
   * **小要素コレクション最適化:** `smallvec` クレートを導入し、要素数が少ないコレクションにおけるヒープアロケーションを回避してスタック領域を活用。
@@ -16,7 +24,7 @@
   * **超高速ディレクトリ走査:** 標準の `std::fs::read_dir` ではなく `jwalk` クレートを採用し、並列処理による極めて高速なディレクトリツリー展開を実現。
 * **データベース (キャッシュレイヤー):** SQLite (r2d2接続プール接続、最大16スレッド)
   * **高速化設定:** `journal_mode = WAL`, `synchronous = NORMAL`, `mmap_size = 268435456 (256MB)`, `cache_size = -4000 (4MB)`, `temp_store = MEMORY`, `busy_timeout = 5000` を指定し、16スレッドでのメモリ肥大化をOSメモリマッピングに逃がしつつロック競合を防止。
-  * **インデックス設計:** パス検索用 `idx_cache_path`、更新日時用 `idx_cache_mtime`、アクセス日時用 `idx_cache_last_accessed`、レーティング用 `idx_ratings_rating` に加え、スマートフォルダ一覧取得をカバーする複合カバリングインデックス `idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)` を配備。
+  * **インデックス設計:** パス検索用 `idx_cache_path`、更新日時用 `idx_cache_mtime`、アクセス日時用 `idx_cache_last_accessed`、レーティング用 `idx_ratings_rating` に加え、スマートフォルダ一覧取得をカバーする複合カバリングインデックス群（`idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)`、`idx_cache_smart_cover_mtime ON cache (mtime DESC, path, size, ctime, width, height, hash_key)`、`idx_cache_smart_cover_mtime_v3 ON cache (mtime DESC, path, size, ctime, width, height, hash_key, (thumbnail IS NOT NULL))`）を配備。
   * **FTS5 全文検索エンジン:** `cache_fts USING fts5(...)` 仮想テーブルを配備し、生成プロンプト・ネガティブプロンプト・生成元の全文検索インデックスを構築。`cache` テーブルへの追加・更新・削除と同期するトリガー (`cache_ai`, `cache_au`, `cache_ad`) により、O(1) の行識別子 (`rowid`) ベースで常に完全同期を維持。
   * **データベースの定期最適化と終了時クリーンアップ:** 「キャッシュの精査と修復 (`audit_cache`)」実行時、非存在ファイル削除、パス正規化による重複排除、欠落寸法・サイズ・タイムスタンプ補完、未生成サムネイルの非同期生成を実施後、自動的に `VACUUM`、`ANALYZE`、および `PRAGMA wal_checkpoint(TRUNCATE);` が走り、不要領域の回収と `-wal` ファイルサイズのゼロ切り詰めを完了する設計。また、アプリケーション終了時にもメインDBおよび設定DB (`veloce_settings.db`) に対して `PRAGMA wal_checkpoint(TRUNCATE);` を実行し、両DBのWALファイルを0バイトに切り詰めて安全に終了。
   * **デバッグログとリリースビルド設計:** 開発・デバッグ時は Windows API の `AttachConsole(ATTACH_PARENT_PROCESS)` を用いて親プロセス（ターミナル）に接続し標準出力を表示。本番用リリースバイナリでは開発者ツール（DevTools）の起動をショートカットキー（F12, Ctrl+Shift+I等）を含めて無効化。
@@ -32,6 +40,7 @@
       * `settings-store.js`: SQLite (`veloce_settings.db`) を Single Source of Truth とするアプリケーション設定ストア。起動時に4条件調停（localStorage/DBの有無の組み合わせ）で設定を最新化し、メモリ内キャッシュによるO(1)同期取得・100msデバウンスでのSQLiteバッチ書き込み。タブ状態、ペインレイアウト、フォルダ別ソート設定等の永続化を一元管理
     * **メインウィンドウ (`src/renderer/`):**
       * `renderer.js`: アプリ全体のライフサイクル管理、グローバルショートカット、初期化統括
+      * `renderer-state.js`: アプリケーション状態管理、4つのサブドメイン状態オブジェクト（`dndState`, `fileOpsState`, `layoutState`, `thumbnailState`）とファサード（`appState`）
       * `renderer-ui.js`: DOM構造管理、仮想スクロール制御、ツールチップ/トースト通知基盤、カスタムプロンプト
       * `renderer-thumbnails.js`: Workerプールによる並列サムネイル生成、キャッシュ取得・保存パイプライン
       * `renderer-folder-tree.js`: 左ペインのフォルダツリー走査、遅延読み込み、選択・展開状態同期
@@ -50,8 +59,8 @@
       * `viewer-ui.js`: ビューアーUIオーケストレーション、グロー効果
       * `viewer-state.js`: ビューアー状態管理
       * `viewer.css`: ビューアー固有のスタイル定義（ビューアーフォルダ内にコロケーション）
-  * **CSS モジュール構成 & テーマシステム (`style.css`):** 単一のマスターエントリポイントとして `style.css` を配置し、責務・ドメインごとに8つのサブモジュール（`common/css/variables.css`, `common/css/base.css`, `renderer/css/layout.css`, `renderer/css/components.css`, `renderer/css/dialogs.css`, `renderer/css/thumbnail.css`, `renderer/css/inspector.css`, `viewer/viewer.css`）を集約管理。インラインスタイルを排除して CSS クラスおよびカラートークン（CSS変数）に統一。さらに、CSSカスタムプロパティを基盤としたダークモードおよびライトモードのテーマ切り替えに対応し、選択されたテーマは `settings-store.js` 経由でSQLite設定DBに永続化。
-* **ファイルハッシュ & 高速ハッシャー:** 暗号学的ハッシュではなく、極めて高速な非暗号学的ハッシュ `xxHash (xxh3_64)` をベースに「`パス_更新日時(mtime)`」から16進数16文字の `hash_key` を生成してキャッシュを一元管理。また、逆引きインデックス等の内部マップ・セットにも高速非暗号化ハッシャーを適用し、テーブルルックアップを高速化。
+  * **CSS モジュール構成 & テーマシステム (`style.css`):** 単一のマスターエントリポイントとして `style.css` を配置し、責務・ドメインごとに8つのサブモジュール（`common/css/variables.css`, `common/css/base.css`, `renderer/css/layout.css`, `renderer/css/components.css`, `renderer/css/dialogs.css`, `renderer/css/thumbnail.css`, `renderer/css/inspector.css`, `viewer/viewer.css`）を集約管理。インラインスタイルを排除して CSS クラスおよびカラートークン（CSS変数）に統一。イラスト本来の発色やコントラストを忠実に鑑賞できるダークモード単一アーキテクチャに一本化されており、深みのあるブルーグレーとシアンの階層的サーフェス設計により洗練されたUIを提供。
+* **ファイルハッシュ & 高速ハッシャー:** 暗号学的ハッシュではなく、極めて高速な非暗号学的ハッシュ `xxHash (xxh3_64)` をベースに「`パス_更新日時(mtime)`」から16進数16文字の `hash_key` を生成してキャッシュを一元管理。また、逆引きインデックス等の内部マップ・セットにも高速非暗号化ハッシャー（`FastHashMap`）を適用し、テーブルルックアップを高速化。
 
 ### 1.2 動作環境要件
 * **OS:** Windows 8.1 環境（WebView2 v109 / Chromium 109 互換）への完全準拠。
@@ -111,12 +120,12 @@
 ## 4. サムネイル & パフォーマンス最適化
 
 ### 4.1 ハイブリッド・サムネイル生成パイプライン
-サムネイル処理パイプラインは独立モジュール（`src/renderer-thumbnails.js`）として分離され、Web Worker プールと Rust バックエンドを組み合わせた往復バッチシステムとして稼働。
+サムネイル処理パイプラインは独立モジュール（`src/renderer/renderer-thumbnails.js`）として分離され、ブラウザネイティブの非同期デコードパイプラインと Rust バックエンドを組み合わせた往復バッチシステムとして稼働。
 1. **ファストパス表示:** ディレクトリ展開時、Rust側がSQLiteを検索し、すでにキャッシュが存在するファイルは `generate_thumbnail` IPC コマンドが返す Tauri Asset URL をそのまま画像の `src` に使用。
-2. **Web Workerプールによる並列生成とフェイルセーフ:** キャッシュが未生成の画像は、`ThumbnailWorkerPool`（最大8スレッド同時実行）によってメインスレッドをブロックせずに並列生成される。Chromium 109環境で一部の非互換画像が `createImageBitmap` や `fetch` を永続的にハングアップさせる問題に対処するため、**内部で `AbortController` と `Promise.race` を用いた「5秒間の絶対タイムアウト機構」**を組み込んでおり、タイムアウト時は即座に代替アイコンへフォールバックして後続の生成キューの詰まりを防止する。さらに定期的なスタック検知タイマー（ドラッグ＆ドロップ中は誤検知防止のためガード付きでスキップ）が稼働し、不測の滞留タスクを自己修復する。
-3. **即時描画（Blob URL）と非同期保存の分離:** サムネイル画像のデコード完了後、DOMの `src` にはメモリ効率の良い `Blob URL`（`URL.createObjectURL`）を即座に適用してUIに表示させる。同時に、Base64変換 と Rust（SQLite）への保存処理をバックグラウンドの非同期Promiseとして分離して実行する。保存完了後、一時的なBlob URLは解放され、軽量な SQLite 経由のURLに差し替えられる。
+2. **非同期バッチ生成とフェイルセーフ:** キャッシュが未生成の画像は、`ThumbnailWorkerPool` および `ThumbnailQueueManager`（バッチサイズ8）によって並列要求を制御しながら生成される。ブラウザの `createImageBitmap`（別スレッドデコード）や `HTMLImageElement` を活用し、Chromium 109環境で一部の非互換画像がハングアップするのを防ぐため、**5秒間の絶対タイムアウト機構**および**2秒間のデコードレース制御（`Promise.race`）**を組み込んでおり、タイムアウト・失敗時は即座に代替アイコンまたは Rust 側バックエンド処理へフォールバックしてキューの詰まりを防止する。さらに定期的なスタック検知タイマー（ドラッグ＆ドロップ中は誤検知防止のためガード付きでスキップ）が稼働し、不測の滞留タスクを自己修復する。
+3. **即時描画（Blob URL）とバイナリダイレクト保存:** サムネイル画像のデコード完了後、DOMの `src` にはメモリ効率の良い `Blob URL`（`URL.createObjectURL`）を即座に適用してUIに表示させる。同時に、Base64文字列への変換オーバーヘッドを回避するため、生成された生の画像 Blob をローカル HTTP サーバー（`http://127.0.0.1:{port}/save-thumbnail`）へダイレクトに POST 送信して SQLite へ高速保存する。HTTP サーバーが利用できない場合のみ Base64 IPC へ安全にフォールバックする。保存完了後、一時的なBlob URLは解放され、軽量な SQLite 経由のURLに差し替えられる。
 4. **Rust側サムネイル生成パイプラインのゼロコピー化と高速エンコード:** 事前キャッシュやキャッシュ監査、Workerフォールバック時のバックエンドサムネイル生成において、デコード済み `DynamicImage` からのピクセルバッファ取得を `to_rgba8()`（借用による原寸複製）から `into_rgba8()` / `into_rgb8()`（ムーブ）へ移行し、約4MBの重複メモリ確保・コピーを撤廃。アルファ付きサムネイルPNG出力時は `PngEncoder::new_with_quality(..., CompressionType::Fast, FilterType::Adaptive)` により高速圧縮エンコードを行い、リサイズ処理では `fast_image_resize::Resizer` を `thread_local!` でスレッドごとに再利用して作業バッファの頻繁な割り当て・解放を排除。
-5. **表示中アイテムの即応枠（リザーブ）と動画サムネイル並行枠分離:** ユーザーが高速でスクロールし、画面外に通り過ぎた大量のアイテムがキューに溜まった場合でも遅延を防ぐため、**全8枠の並行実行枠のうち、最大4枠を「現在画面外のアイテムのバックグラウンド生成」に制限**している。これにより、残りの4枠は**「いま画面に表示されているアイテム」のために常に即応枠として予約（リザーブ）**され、スクロールを止めた際に最優先で表示される。さらに、動画サムネイル抽出（MP4）は専用の並行枠として画像サムネイル枠から分離し、動画処理による画像生成キューの滞留を防止。
+5. **表示中アイテムの即応枠（リザーブ）と動画サムネイル並行枠分離:** ユーザーが高速でスクロールし、画面外に通り過ぎた大量のアイテムがキューに溜まった場合でも遅延を防ぐため、**全8枠の並行実行枠のうち、最大4枠を「現在画面外のアイテムのバックグラウンド生成」に制限**している。これにより、残りの4枠は**「いま画面に表示されているアイテム」のために常に即応枠として予約（リザーブ）**され、スクロールを止めた際に最優先で表示される。さらに、動画サムネイル抽出（MP4）は専用の並行枠（最大2枠）として画像サムネイル枠から分離し、動画処理による画像生成キューの滞留を防止。
 6. **キューの即時破棄（Abort）機構:** 別フォルダへの移動や「ソート順の変更」が行われた際は、現在バックグラウンドで実行中・待機中のすべてのサムネイルタスクに対して `AbortController` で即座に中断シグナルを発行しキューを破棄する。これにより、古い画面状態のタスクが新しい画面状態の処理をブロックする遅延を完全に防ぐ。
 7. **キャッシュ再構築の即時反映:** ユーザーが「選択項目のキャッシュ再構築」を実行した際、再生成された画像をブラウザのハードキャッシュを回避して即座に画面へ反映させるため、画像URLにキャッシュバスター（`&_cb=日時`）を付与し、画面のリロードなしで即座にUIをアップデートする。
 
@@ -173,7 +182,7 @@
 * **インテリジェント動作判定:** ドロップ先のドライブ（ルート）と移動元のドライブが同じであればデフォルト動作を「移動（`move`）」、異なるドライブ間であれば「コピー（`copy`）」に自動で切り替え（Ctrlキーで強制コピー、Shiftキーで強制移動）。
 
 ### 6.2 堅牢なファイルウォッチャー & キャッシュライフサイクル管理
-* **変更監視ポーリング:** 外部のエクスプローラやブラウザからの画像保存、ゴミ箱からの復元を検知するため、バックエンド側で1500ms間隔の軽量なフォルダポーリングスレッドを常時稼働。
+* **変更監視（イベント駆動＆適応型ポーリング）:** 外部のエクスプローラやブラウザからの画像保存、ゴミ箱からの復元等を検知するため、バックエンド側で `notify` クレートを活用した OS ネイティブのファイル変更監視（対象フォルダおよび親フォルダ）を稼働。安定状態では待機時間を1000ms、変更頻発時は500ms（100msのデバウンス付き）へと動的に適応制御し、不要なディスクI/Oを抑えつつ俊敏に変更を検知してフロントエンドに通知。
 * **自動クリーンアップ仕様:** ウォッチャーがファイルシステム上での「ファイル削除」を検知した際、あるいはユーザーがアプリ内からファイルをゴミ箱（`trash` クレート経由）に移動した際、そのファイルに関連付けられていた SQLite 内のサムネイルバイナリおよびメタデータキャッシュ、さらに古いファイルベースのキャッシュ（`Thumbnails/*.jpg`, `Metadata/*.json`）を**ハッシュキーベースでストレージから即座に自動完全削除**。不要な残滓を残さない自動クリーンアップ機構により、ディスク容量の浪費を防止。
 * **キャッシュの精査と修復 (`audit_cache`):**
   1. **整合性スキャン:** キャッシュ内の全レコードを走査し、実ファイルが存在しないレコードや、大文字小文字・UNCパス正規化による重複レコードをトランザクション内で一括削除。
@@ -261,6 +270,6 @@
 ### 8.1 コードコメントとドキュメンテーション品質規範
 * **場当たり的・カジュアルなコメントの排除:** 不具合修正時の一時的なチケットIDや「〜対策」等の短絡的コメントは一切残さず、修正理由をブラウザのレンダリングパイプライン（Chromium 109 / WebView2 同期Reflow）、OS API（Windows 8.1 論理ドライブビットマスク）、非同期並行排他制御（`_runWithUpdateLock`）などの**客観的な技術的根拠・設計意図としてコメントに昇華**する方針を徹底。
 * **Rust / JS 双方向でのドキュメンテーション標準化:**
-  * **Rust (`src-tauri/src/main.rs`):** クレートレベル（`//!`）でmimalloc、SQLite WAL/mmap、xxh3_64、jwalk並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `save_thumbnail`, `parse_metadata`, `build_smart_folder_query` 等）には `///` doc comments を完備。
+  * **Rust (`src-tauri/src/`):** クレートレベル（`//!`）および各モジュール（`main.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）でmimalloc、SQLite WAL/mmap、xxh3_64、jwalk並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `save_thumbnail`, `parse_metadata`, `build_smart_folder_query` 等）および内部構造体・関数には `///` doc comments を完備。
   * **JavaScript (`src/common/`, `src/renderer/`, `src/viewer/`):** `renderer-thumbnails.js`（Workerプール/タイムアウト/Blob URL即時描画）、`renderer-ui.js`（仮想スクロール/DOM Pool/排他ロック/ツールチップ・トースト基盤）、`viewer.js`（二重バッファリングDOM Swap/先行プリロード/Unsharp SVGフィルター）、`renderer-folder-tree.js`（ツリー走査/遅延展開）、`renderer-file-ops.js`（ファイル操作/Undo）、`renderer-bookmarks.js`（お気に入り管理）、`renderer-resizer.js`（ペインリサイズ）、`renderer.js`（ライフサイクル/グローバルショートカット統括）の各モジュールヘッダーおよび主要関数にJSDocと設計意図を網羅。
 * **過度な誇張表現・絵文字の厳禁:** コメント内であっても「一瞬」「神速」「爆速」等の過度な誇張表現や絵文字（⭐など）は使用せず、客観的で落ち着いた技術的表現を用いる。

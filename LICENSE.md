@@ -63,6 +63,8 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 * **flate2** (https://github.com/rust-lang/flate2-rs)
 * **base64** (https://github.com/marshallpierce/rust-base64)
 * **windows-rs** (https://github.com/microsoft/windows-rs)
+* **parking_lot** (https://github.com/Amanieu/parking_lot)
+* **smallvec** (https://github.com/servo/rust-smallvec)
 
 ## 2. MIT License
 以下のソフトウェアおよび多くのフロントエンド・パッケージ（Vite等）は、MIT License の下で提供されています。
@@ -73,6 +75,11 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 * **trash** (https://github.com/Byron/trash-rs)
 * **tokio** (https://tokio.rs/)
 * **r2d2** (https://github.com/sfackler/r2d2)
+* **r2d2_sqlite** (https://github.com/sfackler/r2d2-sqlite)
+* **compact_str** (https://github.com/ParkMyCar/compact_str)
+* **notify** (https://github.com/notify-rs/notify)
+* **serde_json** (https://github.com/serde-rs/json)
+* **urlencoding** (https://github.com/kornelski/urlencoding)
 * **Vite** (https://vitejs.dev/)
 
 > **The MIT License (MIT)**
