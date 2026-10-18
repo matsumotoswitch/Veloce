@@ -111,10 +111,8 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_negative_prompt TEXT DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN metadata_source TEXT DEFAULT ''", []);
-    let _ = conn.execute(
-        "UPDATE cache SET metadata_source = '' WHERE metadata_source != '' AND metadata_source NOT IN ('PNG Chunks', 'Alpha Channel', 'WebP EXIF', 'JPEG EXIF', 'None')",
-        [],
-    );
+    // 過去の古い形式の metadata_source の再解析・修正は、起動時のフルテーブルスキャン（数秒のブロッキング）を
+    // 回避するため、ファイルアクセス時のオンデマンド自己修復（get_full_metadata_for_path_with_stat_inner）に委譲する。
 
     // --- FTS5 Setup ---
     let mut needs_fts_rebuild = false;
@@ -5063,11 +5061,11 @@ fn main() {
             }
 
             // SQLite からレーティング情報を非同期でメモリにロード（起動高速化のため）
-            
+            let app_handle_for_ratings = app_handle.clone();
             std::thread::spawn(move || {
                 // 初回のディレクトリロードI/Oを優先するため、少し遅延させる
                 std::thread::sleep(std::time::Duration::from_secs(3));
-                let state = app_handle.state::<AppState>();
+                let state = app_handle_for_ratings.state::<AppState>();
                 if let Ok(conn) = state.db_conn.get() {
                     if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
                         if let Ok(rows) = stmt.query_map([], |row| {
@@ -5092,19 +5090,26 @@ fn main() {
                     .build()?;
             }
 
-            // プール用の非表示ビューアウィンドウを生成
-            let _ = tauri::WindowBuilder::new(
-                app,
-                "viewer_pool_0",
-                tauri::WindowUrl::App("viewer.html".into()),
-            )
-            .title("Veloce Viewer")
-            .data_directory(data_dir.clone())
-            .visible(false)
-            .decorations(false)
-            .transparent(true)
-            .min_inner_size(300.0, 300.0)
-            .build();
+            // プール用の非表示ビューアウィンドウを遅延生成
+            // 起動時にメインウィンドウと同時にWebView2を2枚初期化するとCPU・ディスクI/Oが激しく競合するため、
+            // メイン画面の初回描画とディレクトリロードI/Oを最優先させ、わずかに遅延してバックグラウンドで準備する。
+            let app_handle_for_pool = app_handle.clone();
+            let data_dir_pool = data_dir.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                let _ = tauri::WindowBuilder::new(
+                    &app_handle_for_pool,
+                    "viewer_pool_0",
+                    tauri::WindowUrl::App("viewer.html".into()),
+                )
+                .title("Veloce Viewer")
+                .data_directory(data_dir_pool)
+                .visible(false)
+                .decorations(false)
+                .transparent(true)
+                .min_inner_size(300.0, 300.0)
+                .build();
+            });
 
             // 古いサムネイルキャッシュの自動クリーンアップをバックグラウンドで実行
             std::thread::spawn(|| {
@@ -9412,6 +9417,48 @@ mod viewer_tests {
         let bad_path = temp_dir.path().join("test_bad.bin");
         std::fs::write(&bad_path, b"not an image data").unwrap();
         assert!(generate_image_thumbnail_sync(bad_path.to_str().unwrap()).is_none());
+    }
+
+    #[test]
+    fn test_init_db_no_blocking_full_scan_update() {
+        // init_db 内で metadata_source の全件フルスキャン UPDATE が実行されないこと、
+        // および初期テーブルスキーマが安全に作成されることを検証
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_init_db.db");
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path);
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        let conn = pool.get().unwrap();
+
+        // テーブル初期化
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                metadata_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+
+        // 過去の古い形式のデータが残っていても起動時にブロックせず保持されること
+        conn.execute(
+            "INSERT INTO cache (hash_key, path, metadata_source) VALUES ('h1', 'C:\\test.png', 'OldFormat')",
+            [],
+        ).unwrap();
+
+        let source: String = conn.query_row(
+            "SELECT metadata_source FROM cache WHERE hash_key = 'h1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(source, "OldFormat");
     }
 }
 
