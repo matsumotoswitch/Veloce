@@ -25,15 +25,24 @@ import { extractMetadataFields, parsePromptTags, buildInspectorSections } from '
 blockDevtoolsShortcuts();
 
 /**
- * ビューアー全体のテーマをダークモードに固定適用します。
- * @param {'dark'} [_theme]
+ * ビューアー全体のテーマを適用します。
+ * 'light' の場合は <html> に data-theme="light" を付与し、
+ * 'dark' または未指定の場合は属性を削除して規定のダークモードを維持します。
+ * @param {'dark'|'light'} [theme='dark']
  */
-export function applyViewerTheme(_theme) {
-  document.documentElement.removeAttribute('data-theme');
+export function applyViewerTheme(theme) {
+  if (theme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
 }
 
 // 起動時に同期的にテーマ属性を確定させ、初回描画時のスタイル再計算を防止する
-applyViewerTheme('dark');
+const initialViewerTheme = (typeof window !== 'undefined' && window.SettingsStore
+  ? window.SettingsStore.getItem('theme')
+  : (typeof localStorage !== 'undefined' ? localStorage.getItem('theme') : null)) === 'light' ? 'light' : 'dark';
+applyViewerTheme(initialViewerTheme);
 
 let viewerRatings = {};
 
@@ -728,7 +737,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.currentIndex = newIndex;
         
         // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
-        applyViewerTheme('dark');
+        const sessionTheme = (typeof window !== 'undefined' && window.SettingsStore
+          ? window.SettingsStore.getItem('theme')
+          : (typeof localStorage !== 'undefined' ? localStorage.getItem('theme') : null)) === 'light' ? 'light' : 'dark';
+        applyViewerTheme(sessionTheme);
         cleanupCurrentImage();
         clearPreloadCache();
         viewerState.isAlphaOverlayMode = false;
@@ -887,6 +899,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     updateFilenameVisibility();
     window.addEventListener('storage', (e) => {
       if (e.key === 'showViewerFilename') updateFilenameVisibility();
+      if (e.key === 'theme') applyViewerTheme(e.newValue === 'light' ? 'light' : 'dark');
     });
 });
 

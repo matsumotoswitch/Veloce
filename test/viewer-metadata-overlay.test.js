@@ -474,9 +474,9 @@ describe('Viewer Metadata Overlay (A-4)', () => {
     expect(positionBlock.querySelector('.inspector-position-coords')).toBeNull();
   });
 
-  it('applyViewerTheme should maintain dark theme (no data-theme attribute) on documentElement', () => {
+  it('applyViewerTheme should toggle light theme and dark theme on documentElement', () => {
     applyViewerTheme('light');
-    expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
 
     applyViewerTheme('dark');
     expect(document.documentElement.getAttribute('data-theme')).toBeNull();

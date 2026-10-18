@@ -1,5 +1,18 @@
 /* ============================================================================
  * Veloce - Design Tokens & Variables (variables.css)
+ *
+ * テーマ構成:
+ * - :root                      : 既定のダークテーマ。
+ * - :root[data-theme="light"]  : ライトテーマ。Windows 11 の標準ウィンドウ配色
+ *   (ニュートラルグレーの背景 + 白いサーフェス + 青系アクセント) と
+ *   Google Chrome のライト配色 (グレーのタブストリップ + 白いツールバー) を基準とする。
+ *   data-theme 属性は src/common/theme.js が <html> 要素に付与・除去する。
+ *
+ * テーマ間で意味の反転が必要な半透明色は、直書きせず以下のトークン経由で参照する。
+ * - --overlay-rgb    : サーフェス上のホバー・区切り等に重ねる前景色 (ダーク=白 / ライト=黒)
+ * - --sunken-bg*     : 周囲より一段沈んだ領域の背景
+ * - --backdrop-bg*   : モーダル背面の減光レイヤー
+ * - --text-on-overlay: 画像上の暗色HUD・バッジに載せる文字色 (両テーマで白)
  * ============================================================================ */
 
 :root {
@@ -99,6 +112,80 @@
   --drive-icon-color: #94a3b8;
   --tab-active-bg: var(--top-bar-bg);
   --tab-active-color: var(--text-light);
+
+  /* Theme-aware translucent layers (ダーク時の値は従来の直書き値と同一) */
+  --overlay-rgb: 255, 255, 255;
+  --sunken-bg: rgba(0, 0, 0, 0.2);
+  --sunken-bg-strong: rgba(0, 0, 0, 0.25);
+  --backdrop-bg: rgba(0, 0, 0, 0.35);
+  --backdrop-bg-strong: rgba(0, 0, 0, 0.7);
+  --input-focus-bg: var(--bg-darker);
+  --viewer-prompt-bg: rgba(0, 0, 0, 0.55);
+  --text-on-overlay: #ffffff;
+}
+
+/* ----------------------------------------------------------------------------
+ * Light Theme
+ * 階層: タイトルバー/非アクティブタブ (#dfe3e8) < メイン背景 (#eceef1)
+ *       < パネル/入力 (#f7f8fa) < ツールバー/アクティブタブ/ダイアログ (#ffffff)
+ * 明度差のみに頼らず、境界線 (--border-color) で各領域の輪郭を明確化する。
+ * ---------------------------------------------------------------------------- */
+:root[data-theme="light"] {
+  --popup-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.16),
+    0 2px 6px rgba(0, 0, 0, 0.10);
+  --bg-color: #f0f0f0;
+  --bg-rgb: 240, 240, 240;
+  --panel-bg: #e2e8eb;
+  --panel-rgb: 226, 232, 235;
+  --top-bar-bg: #eaf4f8;
+  --tab-inactive-bg: #bee2ee;
+  --border-color: #b8dce8;
+  --border-color-light: #cce7f0;
+  --text-color: #1e2930;
+  --text-rgb: 30, 41, 48;
+  --accent-color: #008ba3;
+  --accent-rgb: 0, 139, 163;
+  --accent-hover: #00acc1;
+  --accent-hover-rgb: 0, 172, 193;
+  --modal-bg: #ffffff;
+  --modal-border: rgba(0, 139, 163, 0.16);
+  --danger-red: #c42b1c;
+  --danger-rgb: 196, 43, 28;
+  --accent-hover-translucent: rgba(var(--accent-hover-rgb), 0.16);
+  --accent-subtle: rgba(var(--accent-rgb), 0.08);
+  --accent-hover-tint: rgba(var(--accent-rgb), 0.06);
+  --accent-active-tint: rgba(var(--accent-rgb), 0.12);
+  --accent-focus-ring: rgba(var(--accent-rgb), 0.40);
+  --danger-red-translucent: rgba(var(--danger-rgb), 0.90);
+  --glow-gold: #b8860b;
+  --glow-gold-rgb: 184, 134, 11;
+  --color-tag-inpainting: #008ba3;
+  --color-tag-vibe: #9334e6;
+  --color-tag-char-ref: #d56e0c;
+  --color-tag-img2img: #188038;
+  --modal-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  --titlebar-bg: #cdeaf4;
+  --input-bg: #ffffff;
+  --prompt-bg: #ffffff;
+  --dialog-bg: #ffffff;
+  --viewer-bg: #f0f0f0;
+  --viewer-bg-rgb: 240, 240, 240;
+  --text-light: #000000;
+  --checkerboard-dark: #d5e0e3;
+  --checkerboard-light: #f0f5f7;
+  --palette-default: #5f6368;
+  --titlebar-divider-color: rgba(0, 139, 163, 0.25);
+  --drive-icon-color: #5f6368;
+  --overlay-rgb: 0, 0, 0;
+  --sunken-bg: rgba(0, 0, 0, 0.035);
+  --sunken-bg-strong: rgba(0, 0, 0, 0.05);
+  --backdrop-bg: rgba(0, 0, 0, 0.25);
+  --backdrop-bg-strong: rgba(0, 0, 0, 0.45);
+  --input-focus-bg: #ffffff;
+  --viewer-prompt-bg: rgba(255, 255, 255, 0.75);
+  /* 画像上に重ねるマーカーHUDは画像の明暗に依らず視認できるよう暗色を維持する */
+  --marker-hud-bg: rgba(20, 26, 29, 0.85);
 }
 
 

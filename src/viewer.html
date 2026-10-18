@@ -5,6 +5,13 @@
   <title>Viewer - Veloce</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
+  <script>
+    try {
+      if (localStorage.getItem('theme') === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body class="viewer-body">
   <img id="viewer-img" decoding="async" src="" alt="">

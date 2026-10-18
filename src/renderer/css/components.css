@@ -341,7 +341,7 @@ input[type="range"]:focus {
   object-fit: contain;
   pointer-events: none;
   border-radius: inherit;
-  image-rendering: -webkit-optimize-contrast;
+  image-rendering: auto;
   transition: opacity 0.1s ease-out;
   background-color: var(--checkerboard-dark);
   background-image: conic-gradient(
@@ -363,7 +363,7 @@ input[type="range"]:focus {
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   border-radius: var(--radius-sm);
-  color: var(--text-light);
+  color: var(--text-on-overlay);
   font-size: var(--font-size-xs);
   padding: 2px 8px;
   white-space: nowrap;
@@ -777,7 +777,7 @@ th[data-sort] svg path {
 }
 
 .custom-select:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(var(--overlay-rgb), 0.3);
 }
 
 .custom-select:focus,

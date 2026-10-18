@@ -2398,13 +2398,20 @@ class UIManager {
   }
 
   /**
-   * アプリケーション全体のテーマをダークモードに固定適用します。
-   * @param {'dark'} [_theme]
+   * アプリケーション全体のテーマを適用します。
+   * 'light' の場合は <html> に data-theme="light" を付与し、
+   * 'dark' または未指定の場合は属性を削除して規定のダークモードを維持します。
+   * @param {'dark'|'light'} [theme='dark'] - 適用するテーマ
    */
-  applyTheme(_theme) {
-    document.documentElement.removeAttribute('data-theme');
+  applyTheme(theme) {
+    const isLight = theme === 'light';
+    if (isLight) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
     if (this.state) {
-      this.state.theme = 'dark';
+      this.state.theme = isLight ? 'light' : 'dark';
     }
   }
 }

@@ -74,6 +74,159 @@
   color: var(--text-light);
 }
 
+/* --- Theme Toggle (titlebar) ---
+ * 現在のテーマに応じて「切り替え先」を示すアイコンのみを表示する。
+ * 両アイコンを予め DOM に配置し data-theme 属性の CSS セレクタで切り替えるため、
+ * テーマ変更時に innerHTML 書き換えによるノード生成・破棄が発生しない。 */
+#titlebar-theme-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+#titlebar-theme-toggle .theme-icon-to-dark {
+  display: none;
+}
+
+:root[data-theme="light"] #titlebar-theme-toggle .theme-icon-to-light {
+  display: none;
+}
+
+:root[data-theme="light"] #titlebar-theme-toggle .theme-icon-to-dark {
+  display: block;
+}
+
+:root[data-theme="light"] .titlebar-button.titlebar-close:hover,
+:root[data-theme="light"] .titlebar-button.titlebar-close:active {
+  color: var(--text-on-accent);
+}
+
+:root[data-theme="light"] #tab-container .tab-item {
+  border-left: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.10) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+
+:root[data-theme="light"] #tab-container .tab-item:not(.active):hover {
+  background-color: rgba(255, 255, 255, 0.65) !important;
+  color: var(--text-color) !important;
+}
+
+/* ペインヘッダおよびペイン境界スライダー（縦・横・トグルボタン）の背景色をダークモードと同様に var(--panel-bg) で完全統一 */
+:root[data-theme="light"] .pane-header,
+:root[data-theme="light"] #file-table th,
+:root[data-theme="light"] #thumbnail-controls,
+:root[data-theme="light"] .resizer,
+:root[data-theme="light"] .resizer-h,
+:root[data-theme="light"] .resizer-toggle,
+:root[data-theme="light"] #center-pane::before,
+:root[data-theme="light"] #center-pane::after,
+:root[data-theme="light"] #center-top::before,
+:root[data-theme="light"] #center-top::after {
+  background: var(--panel-bg) !important;
+}
+
+:root[data-theme="light"] #file-table tbody {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] #center-bottom {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] #inspector-section {
+  background: var(--bg-color);
+}
+
+:root[data-theme="light"] #toolbar {
+  background-color: var(--top-bar-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+:root[data-theme="light"] #search-container {
+  background: #dbeff5;
+  border-radius: 14px;
+  border: 1px solid #b8dfea;
+  box-shadow: inset 0 1px 2px rgba(0, 80, 110, 0.05);
+}
+
+:root[data-theme="light"] #search-container:focus-within {
+  background: #ffffff;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-focus-ring);
+}
+
+:root[data-theme="light"] #bookmark-bar {
+  background-color: var(--top-bar-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+:root[data-theme="light"] .bookmark-item {
+  color: var(--text-color);
+  border-radius: 11px;
+  padding: 0 10px;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+:root[data-theme="light"] .bookmark-item:hover:not(.selected) {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  color: var(--accent-color) !important;
+  box-shadow: 0 1px 3px rgba(0, 100, 130, 0.08);
+}
+
+:root[data-theme="light"] .bookmark-item.selected {
+  background-color: #c5e6f1 !important;
+  color: #006574 !important;
+  box-shadow: inset 0 0 0 1px rgba(0, 139, 163, 0.4) !important;
+  font-weight: 500;
+}
+
+:root[data-theme="light"] #tab-container .tab-item.active {
+  background-color: #ffffff !important;
+  color: var(--text-color) !important;
+}
+
+/* --- Chromeスタイル: 選択行スタイル (淡いシアンティント背景 + 左端シアンアクセント線) --- */
+:root[data-theme="light"] #file-table tr.selected {
+  background-color: rgba(var(--accent-rgb), 0.08) !important;
+  color: var(--text-color) !important;
+}
+
+:root[data-theme="light"] #file-table tr.selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent-color);
+}
+
+:root[data-theme="light"] #file-table tr:hover:not(.selected) {
+  background-color: rgba(var(--accent-rgb), 0.04) !important;
+}
+
+:root[data-theme="light"] #dir-tree .tree-item.selected {
+  background-color: rgba(var(--accent-rgb), 0.08) !important;
+  color: var(--text-color) !important;
+}
+
+:root[data-theme="light"] #dir-tree .tree-item:hover:not(.selected) {
+  background-color: rgba(var(--accent-rgb), 0.04) !important;
+  color: var(--text-color) !important;
+}
+
+:root[data-theme="light"] #dir-tree .tree-item::before {
+  width: 3px;
+  background-color: var(--accent-color);
+}
+
+:root[data-theme="light"] .smart-folder-item.selected {
+  background-color: rgba(var(--accent-rgb), 0.08) !important;
+  color: var(--text-color) !important;
+  box-shadow: inset 3px 0 0 var(--accent-color) !important;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+:root[data-theme="light"] .smart-folder-item:hover:not(.selected) {
+  background-color: rgba(var(--accent-rgb), 0.04) !important;
+  color: var(--text-color) !important;
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -521,7 +674,7 @@ body.is-resizing .app-content {
 }
 
 #search-container:focus-within {
-  background: var(--bg-darker);
+  background: var(--input-focus-bg);
   border-color: var(--accent-color);
   box-shadow: 0 0 0 2px var(--accent-hover-tint);
 }
@@ -1154,7 +1307,7 @@ table#file-table {
 
 /* ホバー時にフワッと上品なアクリル調の丸背景を浮かび上がらせる */
 .titlebar #new-tab-btn:hover {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(var(--overlay-rgb), 0.08) !important;
   color: var(--text-light) !important;
   opacity: 1;
 }

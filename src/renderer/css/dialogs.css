@@ -102,7 +102,7 @@
   font-family: inherit;
   font-size: inherit;
   color: var(--text-light);
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(var(--overlay-rgb), 0.1);
   transition: opacity 0.2s, background-color 0.2s, filter 0.15s, transform 0.05s ease;
 }
 
@@ -122,10 +122,12 @@
 
 .dialog-btn.primary {
   background-color: var(--accent-color);
+  color: var(--text-on-accent);
 }
 
 .dialog-btn.danger {
   background-color: var(--danger-red);
+  color: var(--text-on-accent);
 }
 
 .dialog-input:focus {
@@ -232,7 +234,7 @@ input:-webkit-autofill:focus {
   display: block !important;
   margin: 1em 0 !important;
   padding: 10px 16px !important;
-  background: rgba(0, 0, 0, 0.25) !important;
+  background: var(--sunken-bg-strong) !important;
   /* 周囲より暗い背景 */
   border-left: 4px solid var(--accent-color) !important;
   color: var(--text-color) !important;
@@ -289,7 +291,7 @@ input:-webkit-autofill:focus {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: var(--backdrop-bg-strong);
   z-index: 9999;
   display: flex;
   justify-content: center;
@@ -594,7 +596,7 @@ input:-webkit-autofill:focus {
   align-items: center;
   height: 252px;
   /* サムネイルの最大高さ */
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--sunken-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xs);
   overflow: hidden;
@@ -618,7 +620,7 @@ input:-webkit-autofill:focus {
 }
 
 .icon-grid .icon-btn {
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: rgba(var(--overlay-rgb), 0.04) !important;
   border: 2px solid transparent !important;
   border-radius: var(--radius-sm);
   padding: 0 !important;
@@ -638,7 +640,7 @@ input:-webkit-autofill:focus {
 }
 
 .icon-grid .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(var(--overlay-rgb), 0.1);
 }
 
 .icon-grid .icon-btn.active {
@@ -695,7 +697,7 @@ input:-webkit-autofill:focus {
 .modal,
 .dialog-overlay,
 #help-overlay {
-  background: rgba(0, 0, 0, 0.35) !important;
+  background: var(--backdrop-bg) !important;
   /* ダイアログと同様に背後が見えやすい透過度に統一 */
   backdrop-filter: none !important;
   /* 重いぼかし処理を完全にカット */
@@ -724,7 +726,7 @@ input:-webkit-autofill:focus {
 
 #license-overlay {
   z-index: 10000;
-  background: rgba(0, 0, 0, 0.7) !important;
+  background: var(--backdrop-bg-strong) !important;
   color: var(--text-color);
 }
 
@@ -782,7 +784,7 @@ input:-webkit-autofill:focus {
   color: var(--text-color);
   font-size: 0.85em;
   cursor: pointer;
-  background-color: rgba(0, 0, 0, 0.2);
+  background-color: var(--sunken-bg);
   transition: all 0.2s ease;
 }
 
@@ -795,7 +797,7 @@ input:-webkit-autofill:focus {
 #license-text {
   flex: 1;
   overflow-y: auto;
-  background-color: rgba(0, 0, 0, 0.2);
+  background-color: var(--sunken-bg);
   padding: 0 20px 20px 20px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xs);
@@ -862,7 +864,7 @@ kbd {
   font-family: inherit;
   font-size: var(--font-size-xs);
   color: var(--text-color);
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: rgba(var(--overlay-rgb), 0.03);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xs);
   box-shadow: none;
@@ -1006,7 +1008,7 @@ kbd {
   background-color: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-  color: var(--text-light);
+  color: var(--text-on-overlay);
   border-radius: var(--radius-sm);
   padding: 2px 6px;
   font-size: var(--font-size-xs);

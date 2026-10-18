@@ -5,7 +5,7 @@ import { UIManager } from '../src/renderer/renderer-ui.js';
 import { appState } from '../src/renderer/renderer-state.js';
 import { applyViewerTheme } from '../src/viewer/viewer.js';
 
-describe('Theme Architecture (Deprecation of Light Mode & Dark Theme Single Architecture)', () => {
+describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () => {
   beforeEach(() => {
     document.documentElement.removeAttribute('data-theme');
     document.body.innerHTML = `
@@ -17,6 +17,8 @@ describe('Theme Architecture (Deprecation of Light Mode & Dark Theme Single Arch
         <div class="titlebar-controls">
           <div class="titlebar-button" id="titlebar-tab-list"></div>
           <div class="titlebar-divider"></div>
+          <div class="titlebar-button" id="titlebar-theme-toggle"></div>
+          <div class="titlebar-divider"></div>
           <div class="titlebar-button" id="titlebar-minimize"></div>
           <div class="titlebar-button" id="titlebar-maximize"></div>
           <div class="titlebar-button titlebar-close" id="titlebar-close"></div>
@@ -25,47 +27,49 @@ describe('Theme Architecture (Deprecation of Light Mode & Dark Theme Single Arch
     `;
   });
 
-  describe('Titlebar DOM & Controls (UI Simplification)', () => {
-    it('should have controls in strict order without theme toggle: tab-list, divider, minimize, maximize, close', () => {
+  describe('Titlebar DOM & Controls (UI Layout)', () => {
+    it('should have controls in strict order: tab-list, divider, theme-toggle, divider, minimize, maximize, close', () => {
       const controls = document.querySelector('.titlebar-controls');
       expect(controls).not.toBeNull();
       const children = Array.from(controls.children);
 
-      expect(children.length).toBe(5);
+      expect(children.length).toBe(7);
       expect(children[0].id).toBe('titlebar-tab-list');
       expect(children[1].classList.contains('titlebar-divider')).toBe(true);
-      expect(children[2].id).toBe('titlebar-minimize');
-      expect(children[3].id).toBe('titlebar-maximize');
-      expect(children[4].id).toBe('titlebar-close');
+      expect(children[2].id).toBe('titlebar-theme-toggle');
+      expect(children[3].classList.contains('titlebar-divider')).toBe(true);
+      expect(children[4].id).toBe('titlebar-minimize');
+      expect(children[5].id).toBe('titlebar-maximize');
+      expect(children[6].id).toBe('titlebar-close');
     });
 
-    it('should match index.html titlebar controls layout without theme toggle button', () => {
+    it('should match index.html titlebar controls layout with theme toggle button and dividers', () => {
       const indexHtmlPath = path.resolve(__dirname, '../src/index.html');
       const htmlContent = fs.readFileSync(indexHtmlPath, 'utf-8');
 
-      // titlebar-theme-toggle が存在しないこと
-      expect(htmlContent).not.toContain('titlebar-theme-toggle');
+      // titlebar-theme-toggle が存在すること
+      expect(htmlContent).toContain('titlebar-theme-toggle');
 
-      // titlebar-controls 内の順序が tab-list -> divider -> minimize -> maximize -> close であること
-      const regex = /id="titlebar-tab-list"[\s\S]*?class="titlebar-divider"[\s\S]*?id="titlebar-minimize"[\s\S]*?id="titlebar-maximize"[\s\S]*?id="titlebar-close"/;
+      // titlebar-controls 内の順序が tab-list -> divider -> theme-toggle -> divider -> minimize -> maximize -> close であること
+      const regex = /id="titlebar-tab-list"[\s\S]*?class="titlebar-divider"[\s\S]*?id="titlebar-theme-toggle"[\s\S]*?class="titlebar-divider"[\s\S]*?id="titlebar-minimize"[\s\S]*?id="titlebar-maximize"[\s\S]*?id="titlebar-close"/;
       expect(htmlContent).toMatch(regex);
     });
   });
 
-  describe('UIManager Theme Handling (Dark Mode Single Architecture)', () => {
-    it('should maintain dark mode without data-theme attribute when applyTheme is called', () => {
-      const ui = new UIManager(appState);
-      ui.applyTheme('dark');
-
-      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
-      expect(ui.state.theme).toBe('dark');
-    });
-
-    it('should safely fall back to dark mode even if light theme is requested', () => {
+  describe('UIManager Theme Handling (Dual Theme)', () => {
+    it('should set data-theme="light" and update state when applyTheme("light") is called', () => {
       const ui = new UIManager(appState);
       ui.applyTheme('light');
 
-      // ライトモード廃止により、data-theme 属性は設定されず常にダークモードを維持
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+      expect(ui.state.theme).toBe('light');
+    });
+
+    it('should remove data-theme and maintain dark mode when applyTheme("dark") is called', () => {
+      const ui = new UIManager(appState);
+      ui.applyTheme('light');
+      ui.applyTheme('dark');
+
       expect(document.documentElement.getAttribute('data-theme')).toBeNull();
       expect(ui.state.theme).toBe('dark');
     });
@@ -74,48 +78,67 @@ describe('Theme Architecture (Deprecation of Light Mode & Dark Theme Single Arch
       const ui = new UIManager(appState);
       expect(() => {
         ui.applyTheme('dark');
+        ui.applyTheme('light');
         ui.applyTheme();
       }).not.toThrow();
     });
   });
 
   describe('Viewer Theme Handling (Independent Viewer Window)', () => {
-    it('should maintain dark mode without data-theme attribute on viewer window', () => {
+    it('should toggle data-theme attribute on viewer window according to theme selection', () => {
+      applyViewerTheme('light');
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+
       applyViewerTheme('dark');
       expect(document.documentElement.getAttribute('data-theme')).toBeNull();
-
-      applyViewerTheme('light');
-      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
     });
   });
 
-  describe('Complete Absence of Light Mode Selectors in CSS (Regression Prevention)', () => {
-    const cssFiles = [
-      '../src/common/css/variables.css',
-      '../src/renderer/css/layout.css',
-      '../src/renderer/css/components.css',
-      '../src/renderer/css/dialogs.css',
-      '../src/renderer/css/inspector.css',
-      '../src/viewer/viewer.css'
-    ];
+  describe('CSS Theme Selectors & Tokens Integrity', () => {
+    const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+    const variablesContent = fs.readFileSync(variablesCssPath, 'utf-8');
+    const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+    const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
-    it.each(cssFiles)('should not contain any [data-theme="light"] rules in %s', (relPath) => {
-      const filePath = path.resolve(__dirname, relPath);
-      const content = fs.readFileSync(filePath, 'utf-8');
-
-      expect(content).not.toContain('data-theme="light"');
-      expect(content).not.toContain("data-theme='light'");
-      expect(content).not.toContain(':root[data-theme="light"]');
+    it('should define light theme overrides block in variables.css', () => {
+      expect(variablesContent).toContain(':root[data-theme="light"]');
+      expect(variablesContent).toContain('--bg-color: #f0f0f0;');
+      expect(variablesContent).toContain('--panel-bg: #e2e8eb;');
+      expect(variablesContent).toContain('--top-bar-bg: #eaf4f8;');
+      expect(variablesContent).toContain('--tab-inactive-bg: #bee2ee;');
+      expect(variablesContent).toContain('--titlebar-bg: #cdeaf4;');
+      expect(variablesContent).toContain('--text-color: #1e2930;');
+      expect(variablesContent).toContain('--accent-color: #008ba3;');
     });
 
-    it('should not contain #titlebar-theme-toggle rule in layout.css', () => {
-      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
-      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
-      expect(layoutContent).not.toContain('#titlebar-theme-toggle');
+    it('should configure light theme pane hierarchy and unified header/resizer rules in layout.css', () => {
+      expect(layoutContent).toContain(':root[data-theme="light"] .pane-header');
+      expect(layoutContent).toContain(':root[data-theme="light"] #file-table th');
+      expect(layoutContent).toContain(':root[data-theme="light"] #thumbnail-controls');
+      expect(layoutContent).toContain(':root[data-theme="light"] .resizer');
+      expect(layoutContent).toContain(':root[data-theme="light"] .resizer-h');
+      expect(layoutContent).toContain(':root[data-theme="light"] .resizer-toggle');
+      expect(layoutContent).toContain(':root[data-theme="light"] #inspector-section');
+      expect(layoutContent).toContain(':root[data-theme="light"] #tab-container .tab-item');
+    });
+
+    it('should define modern selection style rules (light tint background + crisp cyan indicator line) in layout.css', () => {
+      expect(layoutContent).toContain(':root[data-theme="light"] #file-table tr.selected');
+      expect(layoutContent).toContain(':root[data-theme="light"] #dir-tree .tree-item.selected');
+      expect(layoutContent).toContain(':root[data-theme="light"] .smart-folder-item.selected');
+      expect(layoutContent).toContain(':root[data-theme="light"] .bookmark-item.selected');
+      expect(layoutContent).toContain(':root[data-theme="light"] #search-container');
+      expect(layoutContent).toContain(':root[data-theme="light"] #bookmark-bar');
+    });
+
+    it('should define titlebar-theme-toggle rules in layout.css for CSS-driven icon switching', () => {
+      expect(layoutContent).toContain('#titlebar-theme-toggle');
+      expect(layoutContent).toContain(':root[data-theme="light"] #titlebar-theme-toggle .theme-icon-to-light');
+      expect(layoutContent).toContain(':root[data-theme="light"] #titlebar-theme-toggle .theme-icon-to-dark');
     });
   });
 
-  describe('Dark Mode Core Token Integrity', () => {
+  describe('Dark Mode Core Token Integrity (Non-Regression)', () => {
     const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
     const variablesContent = fs.readFileSync(variablesCssPath, 'utf-8');
 

@@ -2569,8 +2569,26 @@ window.addEventListener('DOMContentLoaded', async () => {
     closeBtn.addEventListener('click', () => window.veloceAPI.closeWindow());
   }
 
-  // テーマの初期化（ダークモード固定）
-  uiManager.applyTheme('dark');
+  // テーマの初期化と切り替え制御
+  const savedTheme = getSetting('theme') === 'light' ? 'light' : 'dark';
+  uiManager.applyTheme(savedTheme);
+
+  const themeToggleBtn = document.getElementById('titlebar-theme-toggle');
+  if (themeToggleBtn) {
+    uiManager.bindTooltip(themeToggleBtn, () => {
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      return isLight ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
+    });
+
+    themeToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      uiManager.hideCustomTooltip();
+      const currentIsLight = document.documentElement.getAttribute('data-theme') === 'light';
+      const nextTheme = currentIsLight ? 'dark' : 'light';
+      uiManager.applyTheme(nextTheme);
+      setSetting('theme', nextTheme);
+    });
+  }
 
   const savedWinW = getSetting('mainWinWidth');
   const savedWinH = getSetting('mainWinHeight');
