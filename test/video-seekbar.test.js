@@ -94,4 +94,17 @@ describe('Video Seek Bar', () => {
     expect(labels[0].textContent).toBe('アイコンを選択');
     expect(labels[1].textContent).toBe('カラーを選択');
   });
+
+  it('should configure high transparency (low opacity) when idle and low transparency (high opacity) when hovered/focused', () => {
+    const cssContent = getFullCssContent();
+
+    // 通常時（非ホバー時）: 存在が分かる程度に透明度を高く（opacity 0.35, 背景 0.65）
+    expect(cssContent).toMatch(/#video-controls-container\s*\{[^}]*opacity:\s*0\.35;/);
+    expect(cssContent).toMatch(/#video-controls-container\s*\{[^}]*background:\s*rgba\(var\(--panel-rgb\),\s*0\.65\);/);
+    expect(cssContent).toMatch(/#video-controls-container\s*\{[^}]*transition:[^}]*opacity/);
+
+    // ホバー時 / フォーカス時: 操作・視認に支障がない低い透明度（opacity 0.95, 背景 0.95）
+    expect(cssContent).toMatch(/#video-controls-container:hover,\s*#video-controls-container:focus-within\s*\{[^}]*opacity:\s*0\.95;/);
+    expect(cssContent).toMatch(/#video-controls-container:hover,\s*#video-controls-container:focus-within\s*\{[^}]*background:\s*rgba\(var\(--panel-rgb\),\s*0\.95\);/);
+  });
 });

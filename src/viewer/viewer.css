@@ -371,7 +371,7 @@ html.viewer-html,
   transform: translateX(-50%);
   width: 80%;
   max-width: 800px;
-  background: rgba(var(--panel-rgb), 0.92);
+  background: rgba(var(--panel-rgb), 0.65);
   border-radius: var(--radius-md);
   padding: 10px 20px;
   display: flex;
@@ -380,7 +380,14 @@ html.viewer-html,
   box-shadow: var(--popup-shadow);
   border: 1px solid var(--border-color);
   z-index: 2000;
-  transition: opacity 0.3s;
+  opacity: 0.35;
+  transition: opacity 0.25s ease, background 0.25s ease;
+}
+
+#video-controls-container:hover,
+#video-controls-container:focus-within {
+  opacity: 0.95;
+  background: rgba(var(--panel-rgb), 0.95);
 }
 
 #video-seek-bar {
