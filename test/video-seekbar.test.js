@@ -107,4 +107,76 @@ describe('Video Seek Bar', () => {
     expect(cssContent).toMatch(/#video-controls-container:hover,\s*#video-controls-container:focus-within\s*\{[^}]*opacity:\s*0\.95;/);
     expect(cssContent).toMatch(/#video-controls-container:hover,\s*#video-controls-container:focus-within\s*\{[^}]*background:\s*rgba\(var\(--panel-rgb\),\s*0\.95\);/);
   });
+
+  it('should have "show-viewer-seekbar-chk" checkbox in index.html right after filename checkbox', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const htmlPath = path.resolve(__dirname, '../src/index.html');
+    const htmlContent = fs.readFileSync(htmlPath, 'utf-8');
+
+    expect(htmlContent).toContain('id="show-viewer-seekbar-chk"');
+    expect(htmlContent).toContain('ビュー画面にシークバーを表示');
+
+    // ファイル名チェックボックスの後にシークバーチェックボックスが配置されている順序を検証
+    const nameIndex = htmlContent.indexOf('id="show-viewer-name-chk"');
+    const seekbarIndex = htmlContent.indexOf('id="show-viewer-seekbar-chk"');
+    expect(nameIndex).toBeGreaterThan(-1);
+    expect(seekbarIndex).toBeGreaterThan(nameIndex);
+  });
+
+  it('should read showViewerSeekBar setting via isDefaultSeekBarEnabled', async () => {
+    await import('../src/viewer/viewer.js');
+
+    // 規定（未設定）は false
+    localStorage.removeItem('showViewerSeekBar');
+    expect(window.isDefaultSeekBarEnabled()).toBe(false);
+
+    // true に設定された場合
+    localStorage.setItem('showViewerSeekBar', 'true');
+    expect(window.isDefaultSeekBarEnabled()).toBe(true);
+
+    // false に設定された場合
+    localStorage.setItem('showViewerSeekBar', 'false');
+    expect(window.isDefaultSeekBarEnabled()).toBe(false);
+  });
+
+  it('should show seek bar by default when showViewerSeekBar is true and video is loaded', async () => {
+    await import('../src/viewer/viewer.js');
+    localStorage.setItem('showViewerSeekBar', 'true');
+
+    window.setVideoSeekBarVisibility(window.isDefaultSeekBarEnabled());
+    const container = document.getElementById('video-controls-container');
+    expect(container).not.toBeNull();
+    expect(container.style.display).toBe('flex');
+  });
+
+  it('should not show seek bar by default when showViewerSeekBar is false', async () => {
+    await import('../src/viewer/viewer.js');
+    localStorage.setItem('showViewerSeekBar', 'false');
+
+    window.setVideoSeekBarVisibility(window.isDefaultSeekBarEnabled());
+    const container = document.getElementById('video-controls-container');
+    expect(container.style.display).toBe('none');
+  });
+
+  it('should toggle seek bar with "s" key without mutating showViewerSeekBar in storage', async () => {
+    await import('../src/viewer/viewer.js');
+    localStorage.setItem('showViewerSeekBar', 'false');
+
+    const initialStorageVal = localStorage.getItem('showViewerSeekBar');
+    expect(initialStorageVal).toBe('false');
+
+    // Sキーでトグル（表示）
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }));
+    const container = document.getElementById('video-controls-container');
+    expect(container.style.display).toBe('flex');
+
+    // 設定値は書き換わっていないこと（Sキーは設定を保存しない）
+    expect(localStorage.getItem('showViewerSeekBar')).toBe('false');
+
+    // 再度Sキーでトグル（非表示）
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }));
+    expect(container.style.display).toBe('none');
+    expect(localStorage.getItem('showViewerSeekBar')).toBe('false');
+  });
 });

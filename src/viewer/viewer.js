@@ -897,8 +897,18 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
     };
     updateFilenameVisibility();
+
+    // --- シークバーの規定表示設定の監視 ---
+    const updateSeekBarDefaultVisibility = () => {
+      const currentImg = viewerUI && viewerUI.elements ? viewerUI.elements.viewerImg : document.getElementById('viewer-img');
+      if (currentImg && currentImg.tagName === 'VIDEO' && typeof setVideoSeekBarVisibility === 'function') {
+        setVideoSeekBarVisibility(isDefaultSeekBarEnabled());
+      }
+    };
+
     window.addEventListener('storage', (e) => {
       if (e.key === 'showViewerFilename') updateFilenameVisibility();
+      if (e.key === 'showViewerSeekBar') updateSeekBarDefaultVisibility();
       if (e.key === 'theme') applyViewerTheme(e.newValue === 'light' ? 'light' : 'dark');
     });
 });
@@ -1294,8 +1304,16 @@ function swapImageElement(newImg, sequenceId) {
     });
   }
 
-  if (newImg.tagName !== 'VIDEO' && typeof videoSeekBarContainer !== 'undefined' && videoSeekBarContainer) {
-    videoSeekBarContainer.style.display = 'none';
+  if (newImg.tagName === 'VIDEO') {
+    if (typeof setVideoSeekBarVisibility === 'function') {
+      setVideoSeekBarVisibility(isDefaultSeekBarEnabled());
+    }
+  } else {
+    if (typeof setVideoSeekBarVisibility === 'function') {
+      setVideoSeekBarVisibility(false);
+    } else if (typeof videoSeekBarContainer !== 'undefined' && videoSeekBarContainer) {
+      videoSeekBarContainer.style.display = 'none';
+    }
   }
 }
 
@@ -2067,156 +2085,188 @@ window.updateScaleDisplay = updateScaleDisplay;
 
 let videoSeekBarContainer = null;
 
+function isDefaultSeekBarEnabled() {
+  return (typeof window !== 'undefined' && window.SettingsStore
+    ? window.SettingsStore.getItem('showViewerSeekBar')
+    : (typeof localStorage !== 'undefined' ? localStorage.getItem('showViewerSeekBar') : null)) === 'true';
+}
+
+function ensureVideoSeekBarContainer() {
+  if (videoSeekBarContainer) return videoSeekBarContainer;
+
+  videoSeekBarContainer = document.createElement('div');
+  videoSeekBarContainer.id = 'video-controls-container';
+  
+  const playBtn = document.createElement('button');
+  playBtn.id = 'video-play-btn';
+  const playIcon = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M8 5v14l11-7z"/></svg>';
+  const pauseIcon = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+  playBtn.innerHTML = pauseIcon; // 初期状態は再生中なのでポーズアイコン
+
+  const seekBar = document.createElement('input');
+  seekBar.type = 'range';
+  seekBar.id = 'video-seek-bar';
+  seekBar.min = 0;
+  seekBar.max = 100;
+  seekBar.step = 0.1;
+  seekBar.value = 0;
+
+  const timeDisplay = document.createElement('div');
+  timeDisplay.id = 'video-time-display';
+  timeDisplay.innerText = '0:00 / 0:00';
+
+  videoSeekBarContainer.appendChild(playBtn);
+  videoSeekBarContainer.appendChild(seekBar);
+  videoSeekBarContainer.appendChild(timeDisplay);
+  document.body.appendChild(videoSeekBarContainer);
+
+  // シークバー操作時に画面のパン（移動）やその他のクリックイベントが誤爆するのを防ぐ
+  const stopPropagation = (e) => e.stopPropagation();
+  ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'dblclick', 'contextmenu'].forEach(event => {
+    videoSeekBarContainer.addEventListener(event, stopPropagation);
+  });
+
+  // グローバルキャプチャリングフェーズでのメディアイベント監視
+  // DOMに追加される各video要素にリスナーを個別にバインドするコストを削減
+  document.addEventListener('timeupdate', (e) => {
+    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === currentImg) {
+      videoSeekBarContainer.updateProgress();
+    }
+  }, true);
+
+  let wheelTimeout;
+  let wheelDeltaAccumulator = 0;
+
+  document.addEventListener('wheel', (e) => {
+    if (viewerState.isZoomed || viewerState.isImmersiveArranged || document.querySelector('.immersive-container')) return;
+    if (e.ctrlKey) return;
+    
+    wheelDeltaAccumulator += Math.sign(e.deltaY);
+    
+    clearTimeout(wheelTimeout);
+    wheelTimeout = setTimeout(() => {
+      if (wheelDeltaAccumulator !== 0) {
+        let steps = Math.abs(wheelDeltaAccumulator);
+        if (wheelDeltaAccumulator > 0) {
+          viewerState.currentIndex = Math.min(viewerState.currentIndex + steps, viewerState.totalImages - 1);
+        } else {
+          viewerState.currentIndex = Math.max(viewerState.currentIndex - steps, 0);
+        }
+        loadImage();
+        wheelDeltaAccumulator = 0;
+      }
+    }, 100);
+  }, { passive: true });
+
+  document.addEventListener('play', (e) => {
+    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === currentImg) {
+      videoSeekBarContainer.updatePlayStateIcon();
+    }
+  }, true);
+
+  document.addEventListener('pause', (e) => {
+    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === currentImg) {
+      videoSeekBarContainer.updatePlayStateIcon();
+    }
+  }, true);
+
+  let isSeeking = false;
+
+  playBtn.addEventListener('click', () => {
+    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+    if (currentImg && currentImg.tagName === 'VIDEO') {
+      if (currentImg.paused) {
+        currentImg.play();
+      } else {
+        currentImg.pause();
+      }
+    }
+  });
+
+  let lastPausedState = null;
+  videoSeekBarContainer.updatePlayStateIcon = () => {
+    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+    if (currentImg && currentImg.tagName === 'VIDEO') {
+      if (currentImg.paused !== lastPausedState) {
+        lastPausedState = currentImg.paused;
+        playBtn.innerHTML = currentImg.paused ? playIcon : pauseIcon;
+      }
+    }
+  };
+
+  seekBar.addEventListener('input', () => {
+    isSeeking = true;
+    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+    if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
+      const time = (seekBar.value / 100) * currentImg.duration;
+      currentImg.currentTime = time;
+      timeDisplay.innerText = formatTime(time) + ' / ' + formatTime(currentImg.duration);
+    }
+  });
+
+  seekBar.addEventListener('change', () => {
+    isSeeking = false;
+  });
+
+  function formatTime(seconds) {
+    if (isNaN(seconds)) return "0:00";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  videoSeekBarContainer.updateProgress = () => {
+    if (isSeeking) return;
+    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+    if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
+      seekBar.value = (currentImg.currentTime / currentImg.duration) * 100;
+      timeDisplay.innerText = formatTime(currentImg.currentTime) + ' / ' + formatTime(currentImg.duration);
+      videoSeekBarContainer.updatePlayStateIcon();
+    }
+  };
+
+  return videoSeekBarContainer;
+}
+
+function setVideoSeekBarVisibility(visible) {
+  const img = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+  if (!visible || !img || img.tagName !== 'VIDEO') {
+    if (videoSeekBarContainer) {
+      videoSeekBarContainer.style.display = 'none';
+    }
+    return;
+  }
+
+  ensureVideoSeekBarContainer();
+  if (videoSeekBarContainer.updatePlayStateIcon) {
+    videoSeekBarContainer.updatePlayStateIcon();
+  }
+  if (videoSeekBarContainer.updateProgress) {
+    videoSeekBarContainer.updateProgress();
+  }
+  videoSeekBarContainer.style.display = 'flex';
+}
+
 function toggleVideoSeekBar() {
-  const img = viewerUI.elements.viewerImg;
+  const img = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
   if (!img || img.tagName !== 'VIDEO') {
     showToast("動画ではありません", 3000, 'warning');
     return;
   }
 
-  if (!videoSeekBarContainer) {
-    videoSeekBarContainer = document.createElement('div');
-    videoSeekBarContainer.id = 'video-controls-container';
-    
-    const playBtn = document.createElement('button');
-    playBtn.id = 'video-play-btn';
-    const playIcon = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M8 5v14l11-7z"/></svg>';
-    const pauseIcon = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
-    playBtn.innerHTML = pauseIcon; // 初期状態は再生中なのでポーズアイコン
+  ensureVideoSeekBarContainer();
+  const isVisible = videoSeekBarContainer.style.display === 'flex';
+  setVideoSeekBarVisibility(!isVisible);
+}
 
-    const seekBar = document.createElement('input');
-    seekBar.type = 'range';
-    seekBar.id = 'video-seek-bar';
-    seekBar.min = 0;
-    seekBar.max = 100;
-    seekBar.step = 0.1;
-    seekBar.value = 0;
-
-    const timeDisplay = document.createElement('div');
-    timeDisplay.id = 'video-time-display';
-    timeDisplay.innerText = '0:00 / 0:00';
-
-    videoSeekBarContainer.appendChild(playBtn);
-    videoSeekBarContainer.appendChild(seekBar);
-    videoSeekBarContainer.appendChild(timeDisplay);
-    document.body.appendChild(videoSeekBarContainer);
-
-    // シークバー操作時に画面のパン（移動）やその他のクリックイベントが誤爆するのを防ぐ
-    const stopPropagation = (e) => e.stopPropagation();
-    ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'dblclick', 'contextmenu'].forEach(event => {
-      videoSeekBarContainer.addEventListener(event, stopPropagation);
-    });
-
-    // グローバルキャプチャリングフェーズでのメディアイベント監視
-    // DOMに追加される各video要素にリスナーを個別にバインドするコストを削減
-    document.addEventListener('timeupdate', (e) => {
-      if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === viewerUI.elements.viewerImg) {
-        videoSeekBarContainer.updateProgress();
-      }
-    }, true);
-
-    let wheelTimeout;
-    let wheelDeltaAccumulator = 0;
-
-    document.addEventListener('wheel', (e) => {
-      if (viewerState.isZoomed || viewerState.isImmersiveArranged || document.querySelector('.immersive-container')) return;
-      if (e.ctrlKey) return;
-      
-      wheelDeltaAccumulator += Math.sign(e.deltaY);
-      
-      clearTimeout(wheelTimeout);
-      wheelTimeout = setTimeout(() => {
-        if (wheelDeltaAccumulator !== 0) {
-          let steps = Math.abs(wheelDeltaAccumulator);
-          if (wheelDeltaAccumulator > 0) {
-            viewerState.currentIndex = Math.min(viewerState.currentIndex + steps, viewerState.totalImages - 1);
-          } else {
-            viewerState.currentIndex = Math.max(viewerState.currentIndex - steps, 0);
-          }
-          loadImage();
-          wheelDeltaAccumulator = 0;
-        }
-      }, 100);
-    }, { passive: true });
-
-    document.addEventListener('play', (e) => {
-      if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === viewerUI.elements.viewerImg) {
-        videoSeekBarContainer.updatePlayStateIcon();
-      }
-    }, true);
-
-    document.addEventListener('pause', (e) => {
-      if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === viewerUI.elements.viewerImg) {
-        videoSeekBarContainer.updatePlayStateIcon();
-      }
-    }, true);
-
-    let isSeeking = false;
-
-    playBtn.addEventListener('click', () => {
-      const currentImg = viewerUI.elements.viewerImg;
-      if (currentImg && currentImg.tagName === 'VIDEO') {
-        if (currentImg.paused) {
-          currentImg.play();
-        } else {
-          currentImg.pause();
-        }
-      }
-    });
-
-    let lastPausedState = null;
-    videoSeekBarContainer.updatePlayStateIcon = () => {
-      const currentImg = viewerUI.elements.viewerImg;
-      if (currentImg && currentImg.tagName === 'VIDEO') {
-        if (currentImg.paused !== lastPausedState) {
-          lastPausedState = currentImg.paused;
-          playBtn.innerHTML = currentImg.paused ? playIcon : pauseIcon;
-        }
-      }
-    };
-
-    seekBar.addEventListener('input', () => {
-      isSeeking = true;
-      const currentImg = viewerUI.elements.viewerImg;
-      if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
-        const time = (seekBar.value / 100) * currentImg.duration;
-        currentImg.currentTime = time;
-        timeDisplay.innerText = formatTime(time) + ' / ' + formatTime(currentImg.duration);
-      }
-    });
-
-    seekBar.addEventListener('change', () => {
-      isSeeking = false;
-    });
-
-    function formatTime(seconds) {
-      if (isNaN(seconds)) return "0:00";
-      const m = Math.floor(seconds / 60);
-      const s = Math.floor(seconds % 60);
-      return `${m}:${s.toString().padStart(2, '0')}`;
-    }
-
-    videoSeekBarContainer.updateProgress = () => {
-      if (isSeeking) return;
-      const currentImg = viewerUI.elements.viewerImg;
-      if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
-        seekBar.value = (currentImg.currentTime / currentImg.duration) * 100;
-        timeDisplay.innerText = formatTime(currentImg.currentTime) + ' / ' + formatTime(currentImg.duration);
-        videoSeekBarContainer.updatePlayStateIcon();
-      }
-    };
-  }
-
-  // 表示時に現在の再生状態を反映させる
-  if (videoSeekBarContainer.updatePlayStateIcon) {
-    videoSeekBarContainer.updatePlayStateIcon();
-  }
-
-  if (videoSeekBarContainer.style.display === 'none' || !videoSeekBarContainer.style.display) {
-    videoSeekBarContainer.style.display = 'flex';
-  } else {
-    videoSeekBarContainer.style.display = 'none';
-  }
+if (typeof window !== 'undefined') {
+  window.isDefaultSeekBarEnabled = isDefaultSeekBarEnabled;
+  window.ensureVideoSeekBarContainer = ensureVideoSeekBarContainer;
+  window.setVideoSeekBarVisibility = setVideoSeekBarVisibility;
+  window.toggleVideoSeekBar = toggleVideoSeekBar;
 }
 
 window.addEventListener('beforeunload', () => {

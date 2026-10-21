@@ -2904,6 +2904,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  const chkViewerSeekBar = document.getElementById('show-viewer-seekbar-chk');
+  if (chkViewerSeekBar) {
+    const showViewerSeekBar = getSetting('showViewerSeekBar') === 'true'; // Default to false
+    chkViewerSeekBar.checked = showViewerSeekBar;
+    chkViewerSeekBar.addEventListener('change', (e) => {
+      setSetting('showViewerSeekBar', e.target.checked);
+    });
+  }
+
   // D&Dの受け入れ範囲を広げるため、リストではなくセクション全体を取得
   const favListElement = document.getElementById('bookmark-list');
   if (favListElement) {
