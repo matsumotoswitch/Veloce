@@ -384,8 +384,7 @@ html.viewer-html,
   transition: opacity 0.25s ease, background 0.25s ease;
 }
 
-#video-controls-container:hover,
-#video-controls-container:focus-within {
+#video-controls-container:hover {
   opacity: 0.95;
   background: rgba(var(--panel-rgb), 0.95);
 }

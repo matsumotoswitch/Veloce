@@ -2184,6 +2184,7 @@ function ensureVideoSeekBarContainer() {
         currentImg.pause();
       }
     }
+    playBtn.blur();
   });
 
   let lastPausedState = null;
@@ -2209,6 +2210,19 @@ function ensureVideoSeekBarContainer() {
 
   seekBar.addEventListener('change', () => {
     isSeeking = false;
+    seekBar.blur();
+  });
+
+  seekBar.addEventListener('mouseup', () => {
+    seekBar.blur();
+  });
+
+  // マウスカーソルがシークバー領域から離れた際、内部コントロールのフォーカスを解除して
+  // ホバー解除とともに確実に元の透明度へ戻し、スペースキー等のキーボードショートカットとの競合を防ぐ
+  videoSeekBarContainer.addEventListener('mouseleave', () => {
+    if (videoSeekBarContainer.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
   });
 
   function formatTime(seconds) {

@@ -19,6 +19,10 @@ describe('Video Seek Bar', () => {
     viewerImg.id = 'viewer-img';
     document.body.appendChild(viewerImg);
 
+    // Mock HTMLMediaElement methods for JSDOM
+    window.HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
+    window.HTMLMediaElement.prototype.pause = vi.fn();
+
     // Mock APIs
     window.veloceAPI = {
       convertFileSrc: vi.fn(),
@@ -95,7 +99,7 @@ describe('Video Seek Bar', () => {
     expect(labels[1].textContent).toBe('カラーを選択');
   });
 
-  it('should configure high transparency (low opacity) when idle and low transparency (high opacity) when hovered/focused', () => {
+  it('should configure high transparency (low opacity) when idle and low transparency (high opacity) when hovered', () => {
     const cssContent = getFullCssContent();
 
     // 通常時（非ホバー時）: 存在が分かる程度に透明度を高く（opacity 0.35, 背景 0.65）
@@ -103,9 +107,42 @@ describe('Video Seek Bar', () => {
     expect(cssContent).toMatch(/#video-controls-container\s*\{[^}]*background:\s*rgba\(var\(--panel-rgb\),\s*0\.65\);/);
     expect(cssContent).toMatch(/#video-controls-container\s*\{[^}]*transition:[^}]*opacity/);
 
-    // ホバー時 / フォーカス時: 操作・視認に支障がない低い透明度（opacity 0.95, 背景 0.95）
-    expect(cssContent).toMatch(/#video-controls-container:hover,\s*#video-controls-container:focus-within\s*\{[^}]*opacity:\s*0\.95;/);
-    expect(cssContent).toMatch(/#video-controls-container:hover,\s*#video-controls-container:focus-within\s*\{[^}]*background:\s*rgba\(var\(--panel-rgb\),\s*0\.95\);/);
+    // ホバー時: 操作・視認に支障がない低い透明度（opacity 0.95, 背景 0.95）
+    // 操作後にフォーカスが残って透明度が戻らなくなる不具合を防ぐため、:focus-withinは使用せず:hoverのみとする
+    expect(cssContent).toMatch(/#video-controls-container:hover\s*\{[^}]*opacity:\s*0\.95;/);
+    expect(cssContent).toMatch(/#video-controls-container:hover\s*\{[^}]*background:\s*rgba\(var\(--panel-rgb\),\s*0\.95\);/);
+    expect(cssContent).not.toMatch(/#video-controls-container:focus-within/);
+  });
+
+  it('should blur seek bar elements on mouseleave, click, and change to restore transparency', async () => {
+    await import('../src/viewer/viewer.js');
+    window.setVideoSeekBarVisibility(true);
+
+    const container = document.getElementById('video-controls-container');
+    const seekBar = document.getElementById('video-seek-bar');
+    const playBtn = document.getElementById('video-play-btn');
+
+    expect(container).not.toBeNull();
+    expect(seekBar).not.toBeNull();
+    expect(playBtn).not.toBeNull();
+
+    // シークバー操作完了時（change）にフォーカスが解除されること
+    seekBar.focus();
+    expect(document.activeElement).toBe(seekBar);
+    seekBar.dispatchEvent(new Event('change'));
+    expect(document.activeElement).not.toBe(seekBar);
+
+    // 再生ボタンクリック時にフォーカスが解除されること
+    playBtn.focus();
+    expect(document.activeElement).toBe(playBtn);
+    playBtn.dispatchEvent(new MouseEvent('click'));
+    expect(document.activeElement).not.toBe(playBtn);
+
+    // シークバーにフォーカスがある状態でマウスがコンテナ外へ離れた際（mouseleave）にフォーカスが解除されること
+    seekBar.focus();
+    expect(document.activeElement).toBe(seekBar);
+    container.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(document.activeElement).not.toBe(seekBar);
   });
 
   it('should have "show-viewer-seekbar-chk" checkbox in index.html right after filename checkbox', async () => {
