@@ -135,23 +135,23 @@
   --popup-shadow:
     0 8px 24px rgba(0, 0, 0, 0.16),
     0 2px 6px rgba(0, 0, 0, 0.10);
-  --bg-color: #f0f0f0;
-  --bg-rgb: 240, 240, 240;
-  --panel-bg: #e2e8eb;
-  --panel-rgb: 226, 232, 235;
+  --bg-color: #f3f8fb;
+  --bg-rgb: 243, 248, 251;
+  --panel-bg: #e4eff6;
+  --panel-rgb: 228, 239, 246;
   --top-bar-bg: #ffffff;
   --bookmark-bar-bg: #ffffff;
   --tab-inactive-bg: #5db4fb;
-  --border-color: #b8dce8;
-  --border-color-light: #cce7f0;
+  --border-color: #c5e1f0;
+  --border-color-light: #d8edf7;
   --text-color: #1e2930;
   --text-rgb: 30, 41, 48;
-  --accent-color: #008ba3;
-  --accent-rgb: 0, 139, 163;
-  --accent-hover: #00acc1;
-  --accent-hover-rgb: 0, 172, 193;
+  --accent-color: #0288d1;
+  --accent-rgb: 2, 136, 209;
+  --accent-hover: #039be5;
+  --accent-hover-rgb: 3, 155, 229;
   --modal-bg: #ffffff;
-  --modal-border: rgba(0, 139, 163, 0.16);
+  --modal-border: rgba(2, 136, 209, 0.16);
   --danger-red: #c42b1c;
   --danger-rgb: 196, 43, 28;
   --accent-hover-translucent: rgba(var(--accent-hover-rgb), 0.16);

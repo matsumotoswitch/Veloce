@@ -102,14 +102,14 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
 
     it('should define light theme overrides block in variables.css with Win8.1 Chrome tokens', () => {
       expect(variablesContent).toContain(':root[data-theme="light"]');
-      expect(variablesContent).toContain('--bg-color: #f0f0f0;');
-      expect(variablesContent).toContain('--panel-bg: #e2e8eb;');
+      expect(variablesContent).toContain('--bg-color: #f3f8fb;');
+      expect(variablesContent).toContain('--panel-bg: #e4eff6;');
       expect(variablesContent).toContain('--top-bar-bg: #ffffff;');
       expect(variablesContent).toContain('--bookmark-bar-bg: #ffffff;');
       expect(variablesContent).toContain('--tab-inactive-bg: #5db4fb;');
       expect(variablesContent).toContain('--titlebar-bg: #63b4fb;');
       expect(variablesContent).toContain('--text-color: #1e2930;');
-      expect(variablesContent).toContain('--accent-color: #008ba3;');
+      expect(variablesContent).toContain('--accent-color: #0288d1;');
     });
 
     it('should configure light theme pane hierarchy and unified header/resizer rules in layout.css', () => {
@@ -129,7 +129,8 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(layoutContent).toContain(':root[data-theme="light"] .smart-folder-item.selected');
       expect(layoutContent).toContain(':root[data-theme="light"] .bookmark-item.selected');
       expect(layoutContent).toContain(':root[data-theme="light"] #search-container');
-      expect(layoutContent).toContain(':root[data-theme="light"] #bookmark-bar');
+      expect(layoutContent).toContain(':root[data-theme="light"] .custom-select');
+      expect(layoutContent).toContain('#bookmark-bar');
     });
 
     it('should define titlebar-theme-toggle rules in layout.css for CSS-driven icon switching', () => {
@@ -150,12 +151,16 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(variablesContent).toContain('--titlebar-divider-color: rgba(0, 0, 0, 0.25);');
     });
 
-    it('should align light theme search-container border-radius and background with dropdowns (var(--panel-bg))', () => {
+    it('should align light theme search-container and custom-select background (#f5f6f8) with matching radius', () => {
       const lightSearchMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#search-container\s*\{([^}]+)\}/);
       expect(lightSearchMatch).not.toBeNull();
-      expect(lightSearchMatch[1]).toContain('background: var(--panel-bg);');
+      expect(lightSearchMatch[1]).toContain('background: #f5f6f8;');
       expect(lightSearchMatch[1]).toContain('border-radius: var(--radius-sm);');
       expect(lightSearchMatch[1]).not.toContain('border-radius: 14px;');
+
+      const lightSelectMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.custom-select\s*\{([^}]+)\}/);
+      expect(lightSelectMatch).not.toBeNull();
+      expect(lightSelectMatch[1]).toContain('background-color: #f5f6f8;');
     });
   });
 
