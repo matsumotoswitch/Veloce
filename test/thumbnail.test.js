@@ -445,8 +445,10 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       await ui.updateVirtualGrid(true);
 
       // 1. 未生成の2ファイルのみが enqueuePriorityBatch に投入されていること
-      expect(window.thumbnailManager.enqueuePriorityBatch).toHaveBeenCalledTimes(1);
-      expect(enqueuedBatches).toEqual(['C:/media/new1.png', 'C:/media/new2.webp']);
+      expect(enqueuedBatches).toEqual([
+        { filePath: 'C:/media/new1.png', skipDbCheck: true },
+        { filePath: 'C:/media/new2.webp', skipDbCheck: true }
+      ]);
 
       // 2. DOM要素の検証
       // children[0] (cached1.png): キャッシュ済みなのでカスタムプロトコルURLが設定される

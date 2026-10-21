@@ -97,12 +97,13 @@ describe('Thumbnail Viewport Start Priority (User Experience Optimization)', () 
 
     // 最重要検証: enqueuedBatches の最初のアイテムは、画面外の上部(img_010.png)ではなく、
     // 現在画面に表示されている先頭ファイル (img_050.png) からスタートしていること！
-    const firstEnqueued = enqueuedBatches[0];
+    const firstEnqueued = typeof enqueuedBatches[0] === 'string' ? enqueuedBatches[0] : enqueuedBatches[0]?.filePath;
     expect(firstEnqueued).toBe('C:/images/img_050.png');
 
     // 画面内アイテム (img_050 〜) が上部バッファ (img_010 〜 img_049) よりも先に積まれていること
-    const indexOfImg50 = enqueuedBatches.indexOf('C:/images/img_050.png');
-    const indexOfImg10 = enqueuedBatches.indexOf('C:/images/img_010.png');
+    const paths = enqueuedBatches.map(item => (typeof item === 'string' ? item : item.filePath));
+    const indexOfImg50 = paths.indexOf('C:/images/img_050.png');
+    const indexOfImg10 = paths.indexOf('C:/images/img_010.png');
     expect(indexOfImg50).toBe(0);
     expect(indexOfImg10).toBeGreaterThan(indexOfImg50);
 
@@ -347,11 +348,13 @@ describe('Thumbnail Viewport Start Priority (User Experience Optimization)', () 
     expect(ui.scrollDirection).toBe('up');
 
     // 画面内アイテム（img_020.png）が先頭にあること
-    expect(enqueuedBatches[0]).toBe('C:/images/img_020.png');
+    const firstEnqueued2 = typeof enqueuedBatches[0] === 'string' ? enqueuedBatches[0] : enqueuedBatches[0]?.filePath;
+    expect(firstEnqueued2).toBe('C:/images/img_020.png');
 
     // 上スクロール時のバッファ優先度: 上側バッファ（img_019.png 等）が下側バッファ（img_040.png 等）より前にあること！
-    const indexOfImg19 = enqueuedBatches.indexOf('C:/images/img_019.png'); // 上側バッファ直近
-    const indexOfImg40 = enqueuedBatches.indexOf('C:/images/img_040.png'); // 下側バッファ直近
+    const paths2 = enqueuedBatches.map(item => (typeof item === 'string' ? item : item.filePath));
+    const indexOfImg19 = paths2.indexOf('C:/images/img_019.png'); // 上側バッファ直近
+    const indexOfImg40 = paths2.indexOf('C:/images/img_040.png'); // 下側バッファ直近
 
     expect(indexOfImg19).toBeGreaterThan(-1);
     expect(indexOfImg40).toBeGreaterThan(-1);

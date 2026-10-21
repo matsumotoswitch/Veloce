@@ -2258,7 +2258,7 @@ class UIManager {
           img.onload = null;
           img.onerror = null;
           if (window.thumbnailManager) {
-            filesToEnqueue.push(file.path);
+            filesToEnqueue.push({ filePath: file.path, skipDbCheck: true });
           }
         }
       }

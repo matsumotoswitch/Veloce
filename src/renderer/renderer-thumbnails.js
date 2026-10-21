@@ -44,6 +44,13 @@ export function getThumbnailCanvasBg() {
   return '#1e1e1e';
 }
 
+/**
+ * サムネイル画像のエンコード品質 (0.0 〜 1.0)
+ * 384x384ピクセルのサムネイル用途において、目視上の画質劣化を招くことなく
+ * WebP/JPEG ソフトウェアエンコード時間とCPU負荷を最適化する。
+ */
+export const THUMBNAIL_ENCODE_QUALITY = 0.85;
+
 export function resetThumbnailCanvasBg() {
   cachedThumbnailCanvasBg = null;
 }
@@ -391,7 +398,7 @@ class ThumbnailWorkerPool {
             if (typeof canvas.convertToBlob === 'function') {
               if (supportsAlpha) {
                 try {
-                  outBlob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.90 });
+                  outBlob = await canvas.convertToBlob({ type: 'image/webp', quality: THUMBNAIL_ENCODE_QUALITY });
                   if (!outBlob) {
                     outBlob = await canvas.convertToBlob({ type: 'image/png' });
                   }
@@ -399,7 +406,7 @@ class ThumbnailWorkerPool {
                   outBlob = await canvas.convertToBlob({ type: 'image/png' });
                 }
               } else {
-                outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.90 });
+                outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: THUMBNAIL_ENCODE_QUALITY });
               }
             }
           } catch (offErr) {
@@ -426,13 +433,13 @@ class ThumbnailWorkerPool {
                 domCanvas.toBlob((b) => {
                   if (b) res(b);
                   else domCanvas.toBlob(res, 'image/png');
-                }, 'image/webp', 0.90);
+                }, 'image/webp', THUMBNAIL_ENCODE_QUALITY);
               });
             } catch (webpErr) {
               outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/png'));
             }
           } else {
-            outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/jpeg', 0.90));
+            outBlob = await new Promise((res) => domCanvas.toBlob(res, 'image/jpeg', THUMBNAIL_ENCODE_QUALITY));
           }
         }
 
@@ -834,7 +841,7 @@ export class ThumbnailQueueManager {
   remove(filePath) {
     this.priorityQueue = this.priorityQueue.filter(req => req.filePath !== filePath);
     this.priorityQueueSet.delete(filePath);
-    this.preloadQueue = this.preloadQueue.filter(p => p !== filePath);
+    this.preloadQueue = this.preloadQueue.filter(p => (typeof p === 'string' ? p : p.filePath) !== filePath);
     if (this._trackedPaths && this._trackedPaths.has(filePath)) {
       this._trackedPaths.delete(filePath);
       if (this.totalEnqueued > 0) {
@@ -937,7 +944,10 @@ export class ThumbnailQueueManager {
                   if (this._preloadFetchId !== currentFetchId) return;
                   if (items && items.length > 0) {
                     appState.preloadCursor = fetchOffset + items.length;
-                    this.preloadQueue.push(...items.map(f => f.path));
+                    this.preloadQueue.push(...items.map(f => ({
+                      filePath: f.path,
+                      skipDbCheck: !f.hasThumbnailCache
+                    })));
                   } else {
                     appState.preloadCursor = fetchOffset + fetchLimit;
                   }
@@ -975,7 +985,9 @@ export class ThumbnailQueueManager {
           appState.isPreloadRunning = true;
           let found = false;
           for (let i = 0; i < this.preloadQueue.length; i++) {
-            const p = this.preloadQueue[i];
+            const item = this.preloadQueue[i];
+            const p = typeof item === 'string' ? item : item.filePath;
+            const skip = typeof item === 'object' && item.skipDbCheck !== undefined ? item.skipDbCheck : false;
             if (appState.thumbnailUrls.has(p)) {
               this.preloadQueue.splice(i, 1);
               i--;
@@ -987,7 +999,9 @@ export class ThumbnailQueueManager {
               if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(p);
             } else if (!this.activeTasks.has(p)) {
               if (!isVideoFile(p) || isVideoSlotAvailable) {
-                targetFile = this.preloadQueue.splice(i, 1)[0];
+                targetFile = p;
+                targetSkipDbCheck = skip;
+                this.preloadQueue.splice(i, 1);
                 found = true;
                 break;
               }

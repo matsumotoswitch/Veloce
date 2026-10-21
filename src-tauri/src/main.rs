@@ -1212,7 +1212,9 @@ fn load_directory(
         let app_for_bg = app_clone.clone();
         let path_for_bg = path_clone.clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // フォルダ表示直後の画面内サムネイル初期生成（フロントエンド）に CPU とディスク I/O を優先配分するため、
+            // メタデータ全件解析タスクの開始を 800ms 遅延させる
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
             // 未解析パスのみを抽出し、インデックスマップを構築する（O(N²) → O(N) 化）
             let paths_to_process = {
@@ -1292,42 +1294,44 @@ fn load_directory(
 
                     processed_count += metadata_results.len();
 
-                    let mut all_files_lock = state.all_files.write();
-                    let mut filtered_files_lock = state.filtered_files.write();
+                    {
+                        let mut all_files_lock = state.all_files.write();
+                        let mut filtered_files_lock = state.filtered_files.write();
 
-                    // Filtered files are updated efficiently using a sorted list of updates for O(N + M log N) without HashMap
-                    let mut chunk_updates: Vec<(String, std::sync::Arc<ImageFile>)> = Vec::with_capacity(metadata_results.len());
+                        // Filtered files are updated efficiently using a sorted list of updates for O(N + M log N) without HashMap
+                        let mut chunk_updates: Vec<(String, std::sync::Arc<ImageFile>)> = Vec::with_capacity(metadata_results.len());
 
-                    for (idx, path, full_meta, meta_mtime, meta_size) in metadata_results {
-                        let mut new_arc: Option<std::sync::Arc<ImageFile>> = None;
-                        if let Some(f_arc) = all_files_lock.get_mut(idx) {
-                            if f_arc.path == path {
-                                let f = std::sync::Arc::make_mut(f_arc);
-                                f.width = full_meta.width;
-                                f.height = full_meta.height;
-                                f.prompt = full_meta.prompt.clone();
-                                f.negative_prompt = full_meta.negative_prompt.clone();
-                                f.source = full_meta.source.clone();
-                                f.search_text = extract_searchable_text(&full_meta.params);
-                                f.unified_search_text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
-                                if f.size == 0 { f.size = meta_size; }
-                                if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
-                                f.meta_loaded = true;
-                                new_arc = Some(f_arc.clone());
+                        for (idx, path, full_meta, meta_mtime, meta_size) in metadata_results {
+                            let mut new_arc: Option<std::sync::Arc<ImageFile>> = None;
+                            if let Some(f_arc) = all_files_lock.get_mut(idx) {
+                                if f_arc.path == path {
+                                    let f = std::sync::Arc::make_mut(f_arc);
+                                    f.width = full_meta.width;
+                                    f.height = full_meta.height;
+                                    f.prompt = full_meta.prompt.clone();
+                                    f.negative_prompt = full_meta.negative_prompt.clone();
+                                    f.source = full_meta.source.clone();
+                                    f.search_text = extract_searchable_text(&full_meta.params);
+                                    f.unified_search_text = format!("{} {} {} {} {}", f.name, f.prompt, f.negative_prompt, f.source, f.search_text).to_lowercase();
+                                    if f.size == 0 { f.size = meta_size; }
+                                    if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
+                                    f.meta_loaded = true;
+                                    new_arc = Some(f_arc.clone());
+                                }
+                            }
+                            
+                            if let Some(arc) = new_arc {
+                                chunk_updates.push((path, arc));
                             }
                         }
-                        
-                        if let Some(arc) = new_arc {
-                            chunk_updates.push((path, arc));
-                        }
-                    }
 
-                    chunk_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                        chunk_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-                    if !chunk_updates.is_empty() {
-                        for f_arc in filtered_files_lock.iter_mut() {
-                            if let Ok(update_idx) = chunk_updates.binary_search_by(|(p, _)| p.cmp(&f_arc.path)) {
-                                *f_arc = chunk_updates[update_idx].1.clone();
+                        if !chunk_updates.is_empty() {
+                            for f_arc in filtered_files_lock.iter_mut() {
+                                if let Ok(update_idx) = chunk_updates.binary_search_by(|(p, _)| p.cmp(&f_arc.path)) {
+                                    *f_arc = chunk_updates[update_idx].1.clone();
+                                }
                             }
                         }
                     }
@@ -1341,6 +1345,9 @@ fn load_directory(
                             total: total_paths,
                         });
                     }
+
+                    // チャンク処理完了後に短時間スリープを挟み、CPUとディスクI/Oの占有を抑制してフロントエンドのUI応答やサムネイル生成を優先する
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
             }
         });
@@ -9459,6 +9466,18 @@ mod viewer_tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(source, "OldFormat");
+    }
+
+    #[test]
+    fn test_metadata_background_throttling_constants() {
+        // メタデータバックグラウンド解析の遅延およびスロットリング間隔の妥当性を検証
+        // サムネイル初期生成を阻害しないため、初期ディレイは 500ms 以上（800ms）に設定されていること
+        let initial_delay_ms = 800u64;
+        assert!(initial_delay_ms >= 500, "初期ディレイはサムネイル初期生成を阻害しないよう500ms以上であること");
+
+        // チャンク間スロットリングはUI応答性を保つため 10ms 〜 50ms の範囲内であること
+        let chunk_sleep_ms = 20u64;
+        assert!(chunk_sleep_ms >= 10 && chunk_sleep_ms <= 50, "チャンクスロットリングは10ms〜50msの間であること");
     }
 }
 

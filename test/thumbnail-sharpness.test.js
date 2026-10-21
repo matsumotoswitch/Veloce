@@ -105,7 +105,7 @@ describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mas
       expect(code).toContain("ctx.imageSmoothingQuality = 'high'");
       const generateMethod = code.match(/async generate\([\s\S]*?\n  \}/)?.[0] || '';
       expect(generateMethod).not.toContain('applySharpenFilter');
-      expect(code).toContain("type: 'image/jpeg', quality: 0.90");
+      expect(code).toContain("type: 'image/jpeg', quality: THUMBNAIL_ENCODE_QUALITY");
     });
 
     it('does not enforce -webkit-optimize-contrast on .thumbnail-img in CSS to avoid jagged scaling artifacts', () => {
