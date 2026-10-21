@@ -30,6 +30,7 @@
   --panel-bg: #182529;
   --panel-rgb: 24, 37, 41;
   --top-bar-bg: #22343a;
+  --bookmark-bar-bg: var(--top-bar-bg);
   --tab-inactive-bg: #080d0f;
   --border-color: #3b5057;
   --border-color-light: #4a656d;
@@ -138,8 +139,9 @@
   --bg-rgb: 240, 240, 240;
   --panel-bg: #e2e8eb;
   --panel-rgb: 226, 232, 235;
-  --top-bar-bg: #eaf4f8;
-  --tab-inactive-bg: #bee2ee;
+  --top-bar-bg: #ffffff;
+  --bookmark-bar-bg: #ffffff;
+  --tab-inactive-bg: #5db4fb;
   --border-color: #b8dce8;
   --border-color-light: #cce7f0;
   --text-color: #1e2930;
@@ -165,7 +167,7 @@
   --color-tag-char-ref: #d56e0c;
   --color-tag-img2img: #188038;
   --modal-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
-  --titlebar-bg: #cdeaf4;
+  --titlebar-bg: #63b4fb;
   --input-bg: #ffffff;
   --prompt-bg: #ffffff;
   --dialog-bg: #ffffff;
@@ -175,7 +177,7 @@
   --checkerboard-dark: #d5e0e3;
   --checkerboard-light: #f0f5f7;
   --palette-default: #5f6368;
-  --titlebar-divider-color: rgba(0, 139, 163, 0.25);
+  --titlebar-divider-color: rgba(0, 0, 0, 0.25);
   --drive-icon-color: #5f6368;
   --overlay-rgb: 0, 0, 0;
   --sunken-bg: rgba(0, 0, 0, 0.035);

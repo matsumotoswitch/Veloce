@@ -100,13 +100,14 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
     const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
     const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
 
-    it('should define light theme overrides block in variables.css', () => {
+    it('should define light theme overrides block in variables.css with Win8.1 Chrome tokens', () => {
       expect(variablesContent).toContain(':root[data-theme="light"]');
       expect(variablesContent).toContain('--bg-color: #f0f0f0;');
       expect(variablesContent).toContain('--panel-bg: #e2e8eb;');
-      expect(variablesContent).toContain('--top-bar-bg: #eaf4f8;');
-      expect(variablesContent).toContain('--tab-inactive-bg: #bee2ee;');
-      expect(variablesContent).toContain('--titlebar-bg: #cdeaf4;');
+      expect(variablesContent).toContain('--top-bar-bg: #ffffff;');
+      expect(variablesContent).toContain('--bookmark-bar-bg: #ffffff;');
+      expect(variablesContent).toContain('--tab-inactive-bg: #5db4fb;');
+      expect(variablesContent).toContain('--titlebar-bg: #63b4fb;');
       expect(variablesContent).toContain('--text-color: #1e2930;');
       expect(variablesContent).toContain('--accent-color: #008ba3;');
     });
@@ -136,6 +137,26 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(layoutContent).toContain(':root[data-theme="light"] #titlebar-theme-toggle .theme-icon-to-light');
       expect(layoutContent).toContain(':root[data-theme="light"] #titlebar-theme-toggle .theme-icon-to-dark');
     });
+
+    it('should configure Win8.1 Chrome styled tab-bar and bookmark-bar rules in layout.css', () => {
+      expect(layoutContent).toContain(':root[data-theme="light"] #bookmark-bar');
+      expect(layoutContent).toContain('background-color: var(--bookmark-bar-bg);');
+      expect(layoutContent).toContain(':root[data-theme="light"] #tab-container .tab-item.active::after');
+      expect(layoutContent).toContain(':root[data-theme="light"] .bookmark-item:hover:not(.selected)');
+      expect(layoutContent).toContain('background-color: rgba(0, 0, 0, 0.06) !important;');
+      expect(layoutContent).toContain(':root[data-theme="light"] .titlebar #new-tab-btn');
+      expect(layoutContent).toContain('opacity: 1 !important;');
+      expect(layoutContent).toContain('border-left: 1px solid rgba(0, 0, 0, 0.08) !important;');
+      expect(variablesContent).toContain('--titlebar-divider-color: rgba(0, 0, 0, 0.25);');
+    });
+
+    it('should align light theme search-container border-radius and background with dropdowns (var(--panel-bg))', () => {
+      const lightSearchMatch = layoutContent.match(/:root\[data-theme="light"\]\s+#search-container\s*\{([^}]+)\}/);
+      expect(lightSearchMatch).not.toBeNull();
+      expect(lightSearchMatch[1]).toContain('background: var(--panel-bg);');
+      expect(lightSearchMatch[1]).toContain('border-radius: var(--radius-sm);');
+      expect(lightSearchMatch[1]).not.toContain('border-radius: 14px;');
+    });
   });
 
   describe('Dark Mode Core Token Integrity (Non-Regression)', () => {
@@ -146,6 +167,7 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(variablesContent).toContain('--bg-color: #080d0f;');
       expect(variablesContent).toContain('--panel-bg: #182529;');
       expect(variablesContent).toContain('--top-bar-bg: #22343a;');
+      expect(variablesContent).toContain('--bookmark-bar-bg: var(--top-bar-bg);');
       expect(variablesContent).toContain('--text-color: #cddbe0;');
       expect(variablesContent).toContain('--prompt-bg: #000000;');
       expect(variablesContent).toContain('--border-color: #3b5057;');
