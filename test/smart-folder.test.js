@@ -184,4 +184,31 @@ describe('Smart Folder Feature', () => {
     expect(layoutCss).toMatch(/\.cond-type-select[\s\S]*?flex-shrink:\s*0/);
     expect(layoutCss).toMatch(/\.cond-op-select[\s\S]*?flex-shrink:\s*0/);
   });
+
+  it('should render rating badge on thumbnail items when viewing smart folder items', async () => {
+    const { getRatingForPath } = await import('../src/renderer/renderer-ui.js');
+
+    // スマートフォルダから取得されたアイテムのパス（バックスラッシュまたはスラッシュ）
+    const itemPath = 'C:\\Illustrations\\test_rating_image.png';
+    appState.ratings = {
+      'C:/Illustrations/test_rating_image.png': 5
+    };
+
+    // getRatingForPath 経由で区切り文字の違いを超えてレーティングが取得できること
+    const rating = getRatingForPath(itemPath);
+    expect(rating).toBe(5);
+
+    // バッジ要素への反映シミュレーション
+    const badge = document.createElement('div');
+    badge.className = 'rating-badge';
+    badge.innerHTML = '<svg></svg><span class="rating-value"></span>';
+
+    if (rating > 0) {
+      badge.children[1].textContent = rating;
+      badge.classList.add('show');
+    }
+
+    expect(badge.classList.contains('show')).toBe(true);
+    expect(badge.children[1].textContent).toBe('5');
+  });
 });

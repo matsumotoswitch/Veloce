@@ -238,6 +238,15 @@ async function refreshFileList(showToast = false) {
     if (window.veloceAPI && window.veloceAPI.setViewParams) {
       await appState.setViewParams();
     }
+    // スマートフォルダ読み込み時にメモリ上の ratings が空の場合は念のため最新を再取得
+    if (appState.currentDirectory.startsWith('smart://') && (!appState.ratings || Object.keys(appState.ratings).length === 0)) {
+      if (window.veloceAPI && window.veloceAPI.getAllRatings) {
+        try {
+          const dbRatings = await window.veloceAPI.getAllRatings();
+          if (dbRatings) appState.ratings = dbRatings;
+        } catch (_) {}
+      }
+    }
     await window.veloceAPI.loadDirectory(appState.currentDirectory);
   } catch (error) {
     console.error('Failed to start loading directory:', error);
@@ -2325,6 +2334,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.veloceAPI.onSmartFolderPurged(() => {
       if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
         window.debouncedUpdateSmartFolderCounts();
+      }
+    });
+  }
+
+  if (window.veloceAPI.onRatingsLoaded) {
+    window.veloceAPI.onRatingsLoaded((ratings) => {
+      if (ratings) {
+        appState.ratings = ratings;
+        uiManager.renderAll();
       }
     });
   }

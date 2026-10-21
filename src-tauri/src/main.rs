@@ -607,7 +607,7 @@ fn query_smart_folder_image_files(
             let has_thumbnail: bool = row.get(6)?;
             let hash_key: CompactString = row.get::<_, String>(7).map(CompactString::from).unwrap_or_default();
 
-            let clean_path = normalize_unc_path(&raw_path).into_owned();
+            let clean_path = normalize_unc_path(&raw_path).replace('/', "\\");
 
             // 高速なファイル名・拡張子抽出（Path::new パースを回避）
             let (file_name, ext) = {
@@ -1461,7 +1461,31 @@ fn sync_ratings(
 
 #[tauri::command]
 fn get_all_ratings(state: tauri::State<'_, AppState>) -> std::collections::HashMap<String, u8> {
-    state.ratings.read().clone()
+    {
+        let memory_ratings = state.ratings.read();
+        if !memory_ratings.is_empty() {
+            return memory_ratings.clone();
+        }
+    }
+
+    // メモリキャッシュが未ロードの場合は DB から即座に同期読み出ししてキャッシュを更新
+    if let Ok(conn) = state.db_conn.get() {
+        if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
+            }) {
+                let mut map = std::collections::HashMap::new();
+                for r in rows.flatten() {
+                    let clean = crate::utils::normalize_unc_path(&r.0).replace('/', "\\");
+                    map.insert(clean, r.1);
+                }
+                *state.ratings.write() = map.clone();
+                return map;
+            }
+        }
+    }
+
+    std::collections::HashMap::new()
 }
 
 #[tauri::command]
@@ -1544,26 +1568,28 @@ fn set_rating(
     path: String,
     rating: u8,
 ) -> usize {
+    let clean_path = crate::utils::normalize_unc_path(&path).replace('/', "\\");
+
     if let Ok(conn) = state.db_conn.get() {
         if rating == 0 {
-            let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&path]);
+            let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&clean_path]);
         } else {
-            let _ = conn.execute("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![&path, rating]);
+            let _ = conn.execute("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![&clean_path, rating]);
         }
     }
 
     {
         let mut lock = state.ratings.write();
         if rating == 0 {
-            lock.remove(&path);
+            lock.remove(&clean_path);
         } else {
-            lock.insert(path.clone(), rating);
+            lock.insert(clean_path.clone(), rating);
         }
     }
     let _ = app.emit_all(
         "rating-changed",
         RatingPayload {
-            path: path.clone(),
+            path: clean_path,
             rating,
         },
     );
@@ -5067,20 +5093,26 @@ fn main() {
                 *slot = Some(app_handle.clone());
             }
 
-            // SQLite からレーティング情報を非同期でメモリにロード（起動高速化のため）
+            // SQLite からレーティング情報を非同期でメモリにロード（まだロードされていない場合）
             let app_handle_for_ratings = app_handle.clone();
             std::thread::spawn(move || {
-                // 初回のディレクトリロードI/Oを優先するため、少し遅延させる
-                std::thread::sleep(std::time::Duration::from_secs(3));
                 let state = app_handle_for_ratings.state::<AppState>();
-                if let Ok(conn) = state.db_conn.get() {
-                    if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
-                        if let Ok(rows) = stmt.query_map([], |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
-                        }) {
-                            let mut lock = state.ratings.write();
-                            for r in rows.flatten() {
-                                lock.insert(r.0, r.1);
+                let is_loaded = !state.ratings.read().is_empty();
+                if !is_loaded {
+                    if let Ok(conn) = state.db_conn.get() {
+                        if let Ok(mut stmt) = conn.prepare("SELECT path, rating FROM ratings") {
+                            if let Ok(rows) = stmt.query_map([], |row| {
+                                Ok((row.get::<_, String>(0)?, row.get::<_, u8>(1)?))
+                            }) {
+                                let mut lock = state.ratings.write();
+                                let mut map = std::collections::HashMap::new();
+                                for r in rows.flatten() {
+                                    let clean = crate::utils::normalize_unc_path(&r.0).replace('/', "\\");
+                                    lock.insert(clean.clone(), r.1);
+                                    map.insert(clean, r.1);
+                                }
+                                drop(lock);
+                                let _ = app_handle_for_ratings.emit_all("ratings-loaded", map);
                             }
                         }
                     }

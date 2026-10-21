@@ -37,6 +37,21 @@ let dragCache = { element: null, midX: 0 };
  */
 function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
+export function getRatingForPath(path) {
+  if (!path || !appState || !appState.ratings) return 0;
+  const direct = appState.ratings[path];
+  if (direct !== undefined) return direct;
+  // Windows/UNCのスラッシュ・バックスラッシュ表記の差異を安全に吸収
+  if (path.indexOf('/') !== -1) {
+    const back = path.replace(/\//g, '\\');
+    if (appState.ratings[back] !== undefined) return appState.ratings[back];
+  } else if (path.indexOf('\\') !== -1) {
+    const fwd = path.replace(/\\/g, '/');
+    if (appState.ratings[fwd] !== undefined) return appState.ratings[fwd];
+  }
+  return 0;
+}
+
 export function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return '-';
   return bytes.toLocaleString();
@@ -1818,7 +1833,7 @@ class UIManager {
       if (tds[6].textContent !== newMtime) tds[6].textContent = newMtime;
 
       // レーティングの同期（_cachedRating による O(1) キャッシュ判定で毎フレームの innerHTML シリアライズを排除）
-      const rating = appState.ratings[file.path] || 0;
+      const rating = getRatingForPath(file.path);
       if (tds[7]._cachedRating !== rating) {
         tds[7]._cachedRating = rating;
         if (rating > 0) {
@@ -2105,7 +2120,7 @@ class UIManager {
 
       // レーティングの同期（パスやインデックスが変わらなくてもショートカット操作に追従させる）
       // _cachedRating を用いることで O(1) かつ変更時のみの DOM アクセスに限定
-      const rating = appState.ratings[file.path] || 0;
+      const rating = getRatingForPath(file.path);
       if (wrapper._cachedRating !== rating) {
         wrapper._cachedRating = rating;
         const badge = wrapper.children[2];

@@ -96,6 +96,7 @@ window.veloceAPI = {
    */
   onDirectoryLoaded: (callback) => listen('directory-loaded', (event) => callback(event.payload)),
   onSmartFolderPurged: (callback) => listen('smart-folder-purged', () => callback()),
+  onRatingsLoaded: (callback) => listen('ratings-loaded', (event) => callback(event.payload)),
   onMetadataBatchUpdated: (callback) => listen('metadata-batch-updated', (event) => callback(event.payload)),
   /**
    * Rust側でソート・検索を実行し、フィルタリング後の件数とパス一覧を返す

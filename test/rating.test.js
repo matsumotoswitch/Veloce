@@ -221,5 +221,26 @@ describe('Rating Feature', () => {
     expect(td.textContent).toBe('-');
     expect(td.children.length).toBe(0);
   });
+
+  it('should resolve ratings correctly regardless of forward slash or backslash with getRatingForPath', async () => {
+    const { getRatingForPath } = await import('../src/renderer/renderer-ui.js');
+
+    // Windows バックスラッシュ形式で登録されている場合
+    appState.ratings = {
+      'C:\\Photos\\image1.png': 5,
+      'D:/Photos/image2.png': 4,
+    };
+
+    // スラッシュ形式で問い合わせてもバックスラッシュの登録値が取得できること
+    expect(getRatingForPath('C:/Photos/image1.png')).toBe(5);
+    expect(getRatingForPath('C:\\Photos\\image1.png')).toBe(5);
+
+    // バックスラッシュ形式で問い合わせてもスラッシュの登録値が取得できること
+    expect(getRatingForPath('D:\\Photos\\image2.png')).toBe(4);
+    expect(getRatingForPath('D:/Photos/image2.png')).toBe(4);
+
+    // 未登録パスは 0 を返すこと
+    expect(getRatingForPath('C:/Photos/unknown.png')).toBe(0);
+  });
 });
 
