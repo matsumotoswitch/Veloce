@@ -141,7 +141,7 @@
   --panel-rgb: 228, 239, 246;
   --top-bar-bg: #ffffff;
   --bookmark-bar-bg: #ffffff;
-  --tab-inactive-bg: #5db4fb;
+  --tab-inactive-bg: #a8d8fc;
   --border-color: #c5e1f0;
   --border-color-light: #d8edf7;
   --text-color: #1e2930;
@@ -167,7 +167,7 @@
   --color-tag-char-ref: #d56e0c;
   --color-tag-img2img: #188038;
   --modal-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
-  --titlebar-bg: #63b4fb;
+  --titlebar-bg: #b6e0fd;
   --input-bg: #ffffff;
   --prompt-bg: #ffffff;
   --dialog-bg: #ffffff;

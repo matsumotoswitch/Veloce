@@ -106,8 +106,8 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(variablesContent).toContain('--panel-bg: #e4eff6;');
       expect(variablesContent).toContain('--top-bar-bg: #ffffff;');
       expect(variablesContent).toContain('--bookmark-bar-bg: #ffffff;');
-      expect(variablesContent).toContain('--tab-inactive-bg: #5db4fb;');
-      expect(variablesContent).toContain('--titlebar-bg: #63b4fb;');
+      expect(variablesContent).toContain('--tab-inactive-bg: #a8d8fc;');
+      expect(variablesContent).toContain('--titlebar-bg: #b6e0fd;');
       expect(variablesContent).toContain('--text-color: #1e2930;');
       expect(variablesContent).toContain('--accent-color: #0288d1;');
     });
@@ -150,6 +150,8 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
     it('should configure Win8.1 Chrome styled tab-bar and bookmark-bar rules in layout.css', () => {
       expect(layoutContent).toContain(':root[data-theme="light"] #bookmark-bar');
       expect(layoutContent).toContain('background-color: var(--bookmark-bar-bg);');
+      expect(layoutContent).toContain(':root[data-theme="light"] #tab-container .tab-item');
+      expect(layoutContent).toContain('color: #000000 !important;');
       expect(layoutContent).toContain(':root[data-theme="light"] #tab-container .tab-item.active::after');
       expect(layoutContent).toContain(':root[data-theme="light"] .bookmark-item:hover:not(.selected)');
       expect(layoutContent).toContain('background-color: rgba(0, 0, 0, 0.06) !important;');
