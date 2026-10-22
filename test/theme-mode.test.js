@@ -123,6 +123,14 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(layoutContent).toContain(':root[data-theme="light"] #tab-container .tab-item');
     });
 
+    it('should configure light theme resizer and resizer-toggle hover/active highlight rules in layout.css', () => {
+      expect(layoutContent).toContain(':root[data-theme="light"] .resizer:hover');
+      expect(layoutContent).toContain(':root[data-theme="light"] .resizer-h:hover');
+      expect(layoutContent).toContain(':root[data-theme="light"] .resizer-toggle:hover');
+      expect(layoutContent).toContain('background: var(--accent-color) !important;');
+      expect(layoutContent).toContain('color: var(--text-on-accent) !important;');
+    });
+
     it('should define modern selection style rules (light tint background + crisp cyan indicator line) in layout.css', () => {
       expect(layoutContent).toContain(':root[data-theme="light"] #file-table tr.selected');
       expect(layoutContent).toContain(':root[data-theme="light"] #dir-tree .tree-item.selected');

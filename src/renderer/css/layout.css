@@ -150,6 +150,26 @@
   background: var(--panel-bg) !important;
 }
 
+/* ペイン境界スライダーおよびトグルスイッチのホバー・アクティブ・リサイズ時の背景色ハイライト */
+:root[data-theme="light"] .resizer:hover:not(:has(.resizer-toggle:hover)),
+:root[data-theme="light"] .resizer:active,
+:root[data-theme="light"] .resizer.resizing,
+:root[data-theme="light"] .resizer-h:hover:not(:has(.resizer-toggle:hover)),
+:root[data-theme="light"] .resizer-h:active,
+:root[data-theme="light"] .resizer-h.resizing {
+  background: var(--accent-color) !important;
+}
+
+:root[data-theme="light"] .resizer-toggle:hover {
+  background: var(--accent-color) !important;
+  border-color: var(--accent-color) !important;
+  color: var(--text-on-accent) !important;
+}
+
+:root[data-theme="light"] .resizer-toggle:hover svg {
+  stroke: var(--text-on-accent) !important;
+}
+
 :root[data-theme="light"] #file-table tbody {
   background: #ffffff;
 }
