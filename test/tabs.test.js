@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { initTabHandlers } from '../src/renderer/renderer-tabs.js';
@@ -420,6 +422,29 @@ describe('Tabs Functionality', () => {
       // 108 - tabRect.left (50) = 58
       // container.scrollLeft = 300 - 58 = 242 にスクロールされること
       expect(container.scrollLeft).toBe(242);
+    });
+  });
+
+  describe('Tab Container Full Height & Centering Layout', () => {
+    const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+    const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+    it('should eliminate top margin/padding on #tab-container and fill full height', () => {
+      const tabContainerMatch = layoutContent.match(/#tab-container\s*\{([^}]+)\}/);
+      expect(tabContainerMatch).not.toBeNull();
+      expect(tabContainerMatch[1]).toContain('padding: 0 !important;');
+      expect(tabContainerMatch[1]).toContain('align-items: stretch;');
+    });
+
+    it('should configure tab-item height to 40px and vertically center tab-close-btn', () => {
+      const tabItemMatch = layoutContent.match(/(?:^|\n)#tab-container\s+\.tab-item\s*\{([^}]+)\}/);
+      expect(tabItemMatch).not.toBeNull();
+      expect(tabItemMatch[1]).toContain('height: 40px !important;');
+
+      const tabCloseBtnMatch = layoutContent.match(/(?:^|\n)\.tab-close-btn\s*\{([^}]+)\}/);
+      expect(tabCloseBtnMatch).not.toBeNull();
+      expect(tabCloseBtnMatch[1]).toContain('top: 50%;');
+      expect(tabCloseBtnMatch[1]).toContain('transform: translateY(-50%);');
     });
   });
 });
