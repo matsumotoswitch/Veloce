@@ -62,7 +62,7 @@ export function resetThumbnailCanvasBg() {
  * @param {number} maxBytes
  * @returns {Promise<ArrayBuffer>}
  */
-async function readBlobHeaderBuffer(blob, maxBytes = 512) {
+async function readBlobHeaderBuffer(blob, maxBytes = 65536) {
   if (!blob) return new ArrayBuffer(0);
   const slice = blob.slice ? blob.slice(0, maxBytes) : blob;
   if (typeof slice.arrayBuffer === 'function') {
@@ -103,7 +103,7 @@ async function readBlobHeaderBuffer(blob, maxBytes = 512) {
  */
 export async function getImageDimensionsFromBlob(blob) {
   try {
-    const buffer = await readBlobHeaderBuffer(blob, 512);
+    const buffer = await readBlobHeaderBuffer(blob, 65536);
     if (!buffer || buffer.byteLength === 0) return null;
     const view = new DataView(buffer);
     const len = buffer.byteLength;
@@ -317,7 +317,8 @@ class ThumbnailWorkerPool {
                   sourceElement = await decodeRace(createImageBitmap(blob, {
                     resizeWidth: targetWidth,
                     resizeHeight: targetHeight,
-                    resizeQuality: 'high'
+                    resizeQuality: 'high',
+                    imageOrientation: 'from-image'
                   }));
                 } catch (e) {
                   sourceElement = await decodeRace(createImageBitmap(blob));
@@ -682,6 +683,7 @@ export class ThumbnailQueueManager {
 
   enqueuePriorityBatch(filePaths, skipDbCheck = false) {
     let added = false;
+    let newEnqueued = false;
     for (const item of filePaths) {
       const filePath = typeof item === 'string' ? item : item.filePath;
       const skip = typeof item === 'object' && item.skipDbCheck !== undefined ? item.skipDbCheck : skipDbCheck;
@@ -689,6 +691,7 @@ export class ThumbnailQueueManager {
         if (!this.priorityQueueSet.has(filePath)) {
           this.priorityQueueSet.add(filePath);
           this.priorityQueue.push({ filePath, skipDbCheck: skip });
+          newEnqueued = true;
           if (!this._trackedPaths.has(filePath)) {
             this._trackedPaths.add(filePath);
             this.totalEnqueued++;
@@ -705,6 +708,8 @@ export class ThumbnailQueueManager {
     }
     if (added) {
       this.updateProgressBar();
+    }
+    if (newEnqueued || added) {
       this.processNext();
     }
   }

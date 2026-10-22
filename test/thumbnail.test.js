@@ -579,6 +579,35 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(dims).toEqual({ width: 800, height: 600 });
     });
 
+    it('getImageDimensionsFromBlob should accurately parse JPEG with large EXIF APP1 segment (>512 bytes)', async () => {
+      const { getImageDimensionsFromBlob } = await import('../src/renderer/renderer-thumbnails.js');
+      // SOI + APP1 (Exif: 1024 bytes) + SOF0 (1920x1080)
+      const exifLength = 1024;
+      const totalLen = 2 + (2 + exifLength) + (2 + 17);
+      const data = new Uint8Array(totalLen);
+      let offset = 0;
+      // SOI
+      data[offset++] = 0xFF; data[offset++] = 0xD8;
+      // APP1 marker
+      data[offset++] = 0xFF; data[offset++] = 0xE1;
+      // APP1 length (exifLength + 2)
+      data[offset++] = ((exifLength + 2) >> 8) & 0xFF;
+      data[offset++] = (exifLength + 2) & 0xFF;
+      // Dummy Exif payload
+      offset += exifLength;
+      // SOF0 marker
+      data[offset++] = 0xFF; data[offset++] = 0xC0;
+      data[offset++] = 0x00; data[offset++] = 0x11; // segment length
+      data[offset++] = 0x08; // precision
+      data[offset++] = 0x04; data[offset++] = 0x38; // height: 1080 (0x0438)
+      data[offset++] = 0x07; data[offset++] = 0x80; // width: 1920 (0x0780)
+      data[offset++] = 0x03; data[offset++] = 0x01; data[offset++] = 0x11; data[offset++] = 0x00;
+
+      const blob = new Blob([data], { type: 'image/jpeg' });
+      const dims = await getImageDimensionsFromBlob(blob);
+      expect(dims).toEqual({ width: 1920, height: 1080 });
+    });
+
     it('getImageDimensionsFromBlob should safely return null for invalid or corrupted data', async () => {
       const { getImageDimensionsFromBlob } = await import('../src/renderer/renderer-thumbnails.js');
       const corrupted = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
