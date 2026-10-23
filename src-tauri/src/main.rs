@@ -3353,15 +3353,21 @@ async fn generate_thumbnail_batch(
 ) -> Result<Vec<ThumbnailResult>, String> {
     let db_conn = state.db_conn.clone();
     
-    // Fast path: O(1) path_to_mtime lookup (avoid O(N) HashMap rebuild and linear scan)
-    let mut files_to_process = Vec::new();
+    // Fast path: O(1) path_to_mtime lookup (なければディスクから取得)
+    let mut files_to_process = Vec::with_capacity(file_paths.len());
     {
         let mtime_lock = state.path_to_mtime.read();
         for file_path in &file_paths {
             let clean = file_path.replace("\\\\?\\", "");
-            if let Some(&mtime) = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)) {
-                files_to_process.push((file_path.clone(), mtime));
-            }
+            let mtime = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)).copied().unwrap_or_else(|| {
+                std::fs::metadata(file_path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH)
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+            });
+            files_to_process.push((file_path.clone(), mtime));
         }
     }
 
@@ -3382,6 +3388,12 @@ async fn generate_thumbnail_batch(
             ThumbnailResult { path: file_path, url }
         }).collect::<Vec<_>>()
     }).await.map_err(|e| e.to_string())?;
+
+    for item in &results {
+        if !item.url.is_empty() {
+            state.mark_thumbnail_cached(&item.path);
+        }
+    }
 
     Ok(results)
 }
@@ -3853,27 +3865,36 @@ fn generate_thumbnail_inner_with_hash(
         }
     }
     
-    // 動画ファイルのみRustバックエンドで同期生成する。
-    // 静止画像（PNG/WebP/JPEG等）のキャッシュミス時は空配列を返す。
-    // Rustソフトウェアデコード（image::open + Lanczos3リサイズ）は
-    // 大容量AIイラスト（2K～4K PNG）を処理する際に spawn_blocking スレッドを
-    // 数百ms単位でブロックするため、ブラウザの hardware-accelerated な
-    // createImageBitmap パイプライン（OffscreenCanvas）に委譲するのが適切。
+    // 静止画像または動画ファイルのサムネイルを同期生成する。
+    // キャッシュミス時、静止画像（JPEG/PNG/WebP等）は SIMD 最適化された zune-jpeg /
+    // 64KB バッファリング（open_image_buffered）により即座に高品質サムネイルを生成・保存する。
+    // 動画ファイルの場合は ffmpeg または OS シェル API により代表フレームを抽出・保存する。
     let lower_path = file_path.to_lowercase();
-    if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-        if let Some(bytes) = generate_video_thumbnail_sync(file_path) {
-            if let Ok(conn) = db_conn.get() {
-                let clean_path = normalize_unc_path(file_path).into_owned();
-                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                let _ = conn.execute(
-                    "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-                     ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-                    rusqlite::params![hash_key, bytes, clean_path, now],
-                );
-            }
-            return bytes;
+    let is_video = lower_path.ends_with(".mp4")
+        || lower_path.ends_with(".webm")
+        || lower_path.ends_with(".avi")
+        || lower_path.ends_with(".mkv");
+
+    let generated = if is_video {
+        generate_video_thumbnail_sync(file_path)
+    } else {
+        generate_image_thumbnail_sync(file_path)
+    };
+
+    if let Some(bytes) = generated {
+        if let Ok(conn) = db_conn.get() {
+            let clean_path = normalize_unc_path(file_path).into_owned();
+            let hash_key = direct_hash
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| crate::utils::hash_path_mtime_hex(&clean_path, mtime));
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let _ = conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+                rusqlite::params![hash_key, bytes, clean_path, now],
+            );
         }
+        return bytes;
     }
 
     Vec::new()
@@ -3954,47 +3975,40 @@ async fn precache_directory_recursively(
             .collect();
         
         let total = entries.len();
-        for (i, entry) in entries.iter().enumerate() {
-            let path = entry.path().to_string_lossy().to_string();
-            let metadata = entry.metadata().ok();
-            let mtime = metadata
-                .as_ref()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
+        use rayon::prelude::*;
 
-            let clean_path = path.replace("\\\\?\\", "");
-            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+        // 32件単位の並列チャンクでサムネイル生成・メタデータ抽出をマルチスレッド実行
+        for (chunk_idx, chunk) in entries.chunks(32).enumerate() {
+            chunk.par_iter().for_each(|entry| {
+                let path = entry.path().to_string_lossy().to_string();
+                let metadata = entry.metadata().ok();
+                let mtime = metadata
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
 
-            let mut has_both = false;
-            if let Ok(conn) = db_conn.get() {
-                if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND metadata IS NOT NULL AND metadata != ''") {
-                    if stmt.exists([&hash_key]).unwrap_or(false) {
-                        has_both = true;
+                let clean_path = path.replace("\\\\?\\", "");
+                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+
+                let mut has_both = false;
+                if let Ok(conn) = db_conn.get() {
+                    if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND metadata IS NOT NULL AND metadata != ''") {
+                        if stmt.exists([&hash_key]).unwrap_or(false) {
+                            has_both = true;
+                        }
                     }
                 }
-            }
 
-            if !has_both {
-                get_full_metadata_for_path(&path, &db_conn);
-                if let Some(thumb_bytes) = generate_image_thumbnail_sync(&path) {
-                    if let Ok(conn) = db_conn.get() {
-                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                        let _ = conn.execute(
-                            "INSERT INTO cache (hash_key, path, thumbnail, last_accessed) VALUES (?, ?, ?, ?)
-                             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, last_accessed = excluded.last_accessed",
-                            rusqlite::params![&hash_key, &path, &thumb_bytes, now],
-                        );
-                    }
-                } else {
-                    generate_thumbnail_inner(&path, mtime, &db_conn);
+                if !has_both {
+                    get_full_metadata_for_path(&path, &db_conn);
+                    let _ = generate_thumbnail_inner(&path, mtime, &db_conn);
                 }
-            }
-            
-            if i % 10 == 0 || i == total - 1 {
-                let _ = window.emit("precache-progress", (i + 1, total));
-            }
+            });
+
+            let processed = std::cmp::min((chunk_idx + 1) * 32, total);
+            let _ = window.emit("precache-progress", (processed, total));
         }
         Ok(())
     })
@@ -4659,31 +4673,39 @@ where
     }
     
     // サムネイル生成は重い処理（CPUバウンド・デコード・エンコード）のため、
-    // DBのWrite Lock（トランザクション）を解放した後に1件ずつ実行し、UIのブロックを防ぐ
-    for (i, (hash_key, path_str, needs_update)) in missing_thumbnails.into_iter().enumerate() {
-        if i % 10 == 0 {
-            // サムネイル生成中でも定期的に進捗を報告
-            on_progress(total_records, total_records, deleted, fixed);
-        }
-        
-        let lower_path = path_str.to_lowercase();
-        let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-            generate_video_thumbnail_sync(&path_str)
-        } else {
-            generate_image_thumbnail_sync(&path_str)
-        };
-        
-        if let Some(bytes) = generated {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-            if let Err(e) = conn.execute(
-                "UPDATE cache SET thumbnail=?, last_accessed=? WHERE hash_key=?",
-                rusqlite::params![&bytes, now, &hash_key]
-            ) {
-                println!("[Veloce: ERROR] update thumbnail failed: {}", e);
-            } else if !needs_update {
-                fixed += 1;
+    // DBのWrite Lock（トランザクション）を解放した後に rayon 並列チャンクで実行する
+    use rayon::prelude::*;
+    for chunk in missing_thumbnails.chunks(32) {
+        let generated_chunk: Vec<_> = chunk.par_iter().filter_map(|(hash_key, path_str, needs_update)| {
+            let lower_path = path_str.to_lowercase();
+            let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
+                generate_video_thumbnail_sync(path_str)
+            } else {
+                generate_image_thumbnail_sync(path_str)
+            };
+            generated.map(|bytes| (hash_key.clone(), bytes, *needs_update))
+        }).collect();
+
+        if !generated_chunk.is_empty() {
+            if let Ok(tx) = conn.transaction() {
+                {
+                    if let Ok(mut stmt) = tx.prepare_cached(
+                        "UPDATE cache SET thumbnail=?, last_accessed=? WHERE hash_key=?"
+                    ) {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                        for (hash_key, bytes, needs_update) in &generated_chunk {
+                            if stmt.execute(rusqlite::params![bytes, now, hash_key]).is_ok() {
+                                if !needs_update {
+                                    fixed += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                let _ = tx.commit();
             }
         }
+        on_progress(total_records, total_records, deleted, fixed);
     }
     
     Ok((deleted, fixed))
@@ -9797,5 +9819,151 @@ mod viewer_tests {
         let empty_path = temp_dir.path().join("empty.png");
         std::fs::write(&empty_path, b"").unwrap();
         assert!(open_image_buffered(empty_path.to_str().unwrap()).is_none());
+    }
+
+    #[test]
+    fn test_generate_thumbnail_inner_static_image_on_demand() {
+        use image::{RgbImage, Rgb};
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        // 1. 実在する 800x600 JPEG 画像を作成
+        let mut img = RgbImage::new(800, 600);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([120, 80, 40]);
+        }
+        let temp_dir = tempfile::tempdir().unwrap();
+        let jpeg_path = temp_dir.path().join("on_demand_test.jpg");
+        let jpeg_path_str = jpeg_path.to_str().unwrap();
+        img.save_with_format(&jpeg_path, image::ImageFormat::Jpeg).unwrap();
+
+        let mtime = 12345678u64;
+
+        // 2. 初回呼び出し: キャッシュミスから Rust 側で即座にサムネイル生成 & DB 保存されること
+        let thumb_bytes = super::generate_thumbnail_inner(jpeg_path_str, mtime, &pool);
+        assert!(!thumb_bytes.is_empty(), "未キャッシュ静止画像に対して即座にサムネイルが生成されること");
+        assert_eq!(&thumb_bytes[0..2], b"\xFF\xD8", "JPEG シグネチャであること");
+
+        let decoded = image::load_from_memory(&thumb_bytes).unwrap();
+        assert_eq!(decoded.width(), 384, "384px にリサイズされること");
+        assert_eq!(decoded.height(), 288, "アスペクト比 4:3 が維持されること");
+
+        // 3. DB に該当サムネイルが永続化されていることを検証
+        let clean_path = normalize_unc_path(jpeg_path_str).into_owned();
+        let expected_hash = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+        {
+            let conn = pool.get().unwrap();
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL",
+                [&expected_hash],
+                |r| r.get(0),
+            ).unwrap();
+            assert_eq!(count, 1, "DBにサムネイルレコードが正しく保存されていること");
+        }
+
+        // 4. 2回目の呼び出し: DB キャッシュから即時ヒットすること
+        let cached_bytes = super::generate_thumbnail_inner(jpeg_path_str, mtime, &pool);
+        assert_eq!(cached_bytes, thumb_bytes, "DB キャッシュから同一のサムネイルが返却されること");
+
+        // 5. 存在しないダミーパスに対しては安全に空配列が返ること
+        let empty_res = super::generate_thumbnail_inner("C:\\non_existent_pic.jpg", mtime, &pool);
+        assert!(empty_res.is_empty(), "実ファイルが存在しない場合は空配列を返すこと");
+    }
+
+    #[test]
+    fn test_generate_thumbnail_batch_parallel_generation() {
+        use image::{RgbImage, Rgb};
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut file_paths = Vec::new();
+        for i in 1..=4 {
+            let mut img = RgbImage::new(400, 300);
+            for pixel in img.pixels_mut() {
+                *pixel = Rgb([10 * i, 20 * i, 30 * i]);
+            }
+            let path = temp_dir.path().join(format!("batch_{}.jpg", i));
+            img.save_with_format(&path, image::ImageFormat::Jpeg).unwrap();
+            file_paths.push(path.to_string_lossy().to_string());
+        }
+
+        let (db_tx, _db_rx) = tokio::sync::mpsc::channel(100);
+        let app_state = std::sync::Arc::new(AppState::new(
+            pool.clone(),
+            pool.clone(),
+            false,
+            db_tx,
+            8080,
+        ));
+
+        // tauri::State でラップして generate_thumbnail_batch をテスト
+        // （直接 spawn_blocking 内のロジックをシミュレート）
+        let video_port = app_state.video_server_port;
+        let db_conn = app_state.db_conn.clone();
+        let files_to_process: Vec<(String, u64)> = file_paths.iter().map(|p| {
+            let mtime = std::fs::metadata(p).and_then(|m| m.modified()).unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            (p.clone(), mtime)
+        }).collect();
+
+        use rayon::prelude::*;
+        let results: Vec<ThumbnailResult> = files_to_process.into_par_iter().map(|(file_path, mtime)| {
+            let bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
+            let url = if bytes.is_empty() {
+                String::new()
+            } else {
+                format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
+            };
+            ThumbnailResult { path: file_path, url }
+        }).collect();
+
+        assert_eq!(results.len(), 4, "4件すべてのサムネイルが返却されること");
+        for r in &results {
+            assert!(!r.url.is_empty(), "各サムネイルのURLが空でないこと");
+            assert!(r.url.contains("thumb=1"), "サムネイル配信URLパラメータが付与されていること");
+        }
+
+        // DBに4件すべてが永続化されていることを確認
+        let conn = pool.get().unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM cache WHERE thumbnail IS NOT NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 4, "DBに4件のサムネイルが正しく保存されていること");
     }
 }

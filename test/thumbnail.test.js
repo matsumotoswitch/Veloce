@@ -1199,5 +1199,113 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       }
     });
   });
+
+  describe('Phase 4: Rust Native Parallel Batch Generation (ThumbnailQueueManager)', () => {
+    let manager;
+    let testAppState;
+
+    beforeEach(async () => {
+      vi.useRealTimers();
+      const { appState } = await import('../src/renderer/renderer-state.js');
+      testAppState = appState;
+      testAppState.thumbnailUrls.clear();
+      testAppState.viewportPathSet = new Set();
+      testAppState.visiblePathSet = new Set();
+
+      const { ThumbnailQueueManager } = await import('../src/renderer/renderer-thumbnails.js');
+      manager = new ThumbnailQueueManager(4);
+
+      window.veloceAPI = {
+        convertFileSrc: vi.fn(path => `asset://${path}`),
+        getThumbnail: vi.fn(async (path) => `http://127.0.0.1:12345/?path=${encodeURIComponent(path)}&thumb=1`),
+        generateThumbnailBatch: vi.fn(async (paths) => {
+          return paths.map(p => ({
+            path: p,
+            url: `http://127.0.0.1:12345/?path=${encodeURIComponent(p)}&thumb=1`
+          }));
+        })
+      };
+      document.body.innerHTML = `
+        <div id="thumbnail-progress-bar" style="width: 0%; opacity: 0;"></div>
+        <div class="virtual-content">
+          <div data-filepath="C:/test/batch1.jpg"><img class="thumbnail-img loading" /></div>
+          <div data-filepath="C:/test/batch2.png"><img class="thumbnail-img loading" /></div>
+          <div data-filepath="C:/test/batch3.webp"><img class="thumbnail-img loading" /></div>
+          <div data-filepath="C:/test/video.mp4"><img class="thumbnail-img loading" /></div>
+        </div>
+      `;
+    });
+
+    afterEach(() => {
+      if (manager) manager.clear();
+      vi.restoreAllMocks();
+      vi.useFakeTimers();
+    });
+
+    it('should batch static image requests and delegate to generateThumbnailBatch', async () => {
+      const paths = ['C:/test/batch1.jpg', 'C:/test/batch2.png', 'C:/test/batch3.webp'];
+      manager.enqueuePriorityBatch(paths, true);
+
+      // processNext がバッチを起動し完了するのを待つ
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledWith(paths);
+      for (const p of paths) {
+        expect(testAppState.thumbnailUrls.has(p)).toBe(true);
+        expect(testAppState.thumbnailUrls.get(p)).toContain('thumb=1');
+      }
+      expect(manager.completedCount).toBe(paths.length);
+    });
+
+    it('should exclude video files from batch and process them via individual tasks', async () => {
+      const items = ['C:/test/batch1.jpg', 'C:/test/video.mp4'];
+      const runTaskSpy = vi.spyOn(manager, 'runTask');
+
+      manager.enqueuePriorityBatch(items, true);
+      await new Promise(r => setTimeout(r, 50));
+
+      // バッチには静止画像のみが含まれる
+      expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledWith(['C:/test/batch1.jpg']);
+      // 動画ファイルは個別の runTask に回される
+      expect(runTaskSpy).toHaveBeenCalledWith('C:/test/video.mp4', true);
+    });
+
+    it('should fallback failed items from batch to individual runTask', async () => {
+      window.veloceAPI.generateThumbnailBatch = vi.fn().mockResolvedValue([
+        { path: 'C:/test/batch1.jpg', url: 'http://127.0.0.1:12345/batch1.jpg' },
+        { path: 'C:/test/batch2.png', url: '' } // 失敗
+      ]);
+      const runTaskSpy = vi.spyOn(manager, 'runTask');
+
+      manager.enqueuePriorityBatch(['C:/test/batch1.jpg', 'C:/test/batch2.png'], true);
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(testAppState.thumbnailUrls.get('C:/test/batch1.jpg')).toBe('http://127.0.0.1:12345/batch1.jpg');
+      // 失敗した batch2.png のみ runTask にフォールバック
+      expect(runTaskSpy).toHaveBeenCalledWith('C:/test/batch2.png', false);
+    });
+
+    it('should fallback all items if generateThumbnailBatch rejects', async () => {
+      window.veloceAPI.generateThumbnailBatch = vi.fn().mockRejectedValue(new Error('IPC batch error'));
+      const runTaskSpy = vi.spyOn(manager, 'runTask');
+
+      manager.enqueuePriorityBatch(['C:/test/batch1.jpg', 'C:/test/batch2.png'], true);
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(runTaskSpy).toHaveBeenCalledWith('C:/test/batch1.jpg', false);
+      expect(runTaskSpy).toHaveBeenCalledWith('C:/test/batch2.png', false);
+    });
+
+    it('processNext should delegate un-cached items (skipDbCheck=true) to generateThumbnailBatch instead of Canvas Worker', async () => {
+      const paths = ['C:/test/batch1.jpg', 'C:/test/batch2.png'];
+      // skipDbCheck: true で渡されても、Worker ではなく Rust 側の generateThumbnailBatch へ一括委譲されること
+      manager.enqueuePriorityBatch(paths, true);
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledWith(paths);
+      expect(testAppState.thumbnailUrls.get('C:/test/batch1.jpg')).toContain('thumb=1');
+      expect(testAppState.thumbnailUrls.get('C:/test/batch2.png')).toContain('thumb=1');
+    });
+  });
 });
 

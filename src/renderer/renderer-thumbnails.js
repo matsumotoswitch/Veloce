@@ -657,6 +657,10 @@ export class ThumbnailQueueManager {
     this._preloadFetchId = 0;
     this.activeVideoTasks = new Set();
     this.maxVideoConcurrency = Math.max(1, Math.min(2, Math.floor((concurrency || 4) / 3)));
+    this.activeBatchPaths = new Set();
+    this.activeBatchCount = 0;
+    this.maxBatchConcurrency = 1;
+    this.batchSize = 32;
   }
 
   enqueuePriority(filePath, skipDbCheck = false) {
@@ -777,6 +781,8 @@ export class ThumbnailQueueManager {
     
     this.activeTasks.clear();
     if (this.activeVideoTasks) this.activeVideoTasks.clear();
+    if (this.activeBatchPaths) this.activeBatchPaths.clear();
+    this.activeBatchCount = 0;
     if (this._dirtyTasks) this._dirtyTasks.clear();
     if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
       window.debouncedUpdateSmartFolderCounts();
@@ -865,6 +871,9 @@ export class ThumbnailQueueManager {
       if (!this._dirtyTasks) this._dirtyTasks = new Set();
       this._dirtyTasks.add(filePath);
     }
+    if (this.activeBatchPaths) {
+      this.activeBatchPaths.delete(filePath);
+    }
   }
 
   async processNext() {
@@ -876,7 +885,91 @@ export class ThumbnailQueueManager {
       const viewportPaths = appState.viewportPathSet || new Set();
       const visiblePaths = appState.visiblePathSet || new Set();
 
-      while (this.activeTasks.size < this.concurrency) {
+      // Phase 4: Rust 側高速並列バッチ生成 (generateThumbnailBatch) ファストパス
+      if (window.veloceAPI && typeof window.veloceAPI.generateThumbnailBatch === 'function' && this.activeBatchCount < this.maxBatchConcurrency) {
+        const batchItems = [];
+        const remainingPriority = [];
+
+        const getPriorityScore = (fp) => {
+          if (viewportPaths.has(fp)) return 0;
+          if (visiblePaths.has(fp)) return 1;
+          return 2;
+        };
+
+        const staticCandidates = [];
+        for (let i = 0; i < this.priorityQueue.length; i++) {
+          const req = this.priorityQueue[i];
+          if (!isVideoFile(req.filePath)) {
+            this.priorityQueueSet.delete(req.filePath);
+            if (appState.thumbnailUrls.has(req.filePath)) {
+              if (this._trackedPaths && this._trackedPaths.has(req.filePath)) {
+                this._trackedPaths.delete(req.filePath);
+                this.completedCount++;
+                this.updateProgressBar();
+              }
+              if (typeof window.markThumbnailCompleted === 'function') {
+                window.markThumbnailCompleted(req.filePath);
+              }
+            } else if (!this.activeTasks.has(req.filePath)) {
+              staticCandidates.push({ req, score: getPriorityScore(req.filePath), originalIndex: i });
+            }
+          } else {
+            remainingPriority.push(req);
+          }
+        }
+
+        if (staticCandidates.length > 0) {
+          staticCandidates.sort((a, b) => a.score - b.score || a.originalIndex - b.originalIndex);
+          const chosen = staticCandidates.slice(0, this.batchSize);
+          const unchosen = staticCandidates.slice(this.batchSize);
+
+          for (const c of chosen) {
+            batchItems.push(c.req);
+            this.activeTasks.add(c.req.filePath);
+            if (this.activeBatchPaths) this.activeBatchPaths.add(c.req.filePath);
+          }
+          for (const c of unchosen) {
+            remainingPriority.push(c.req);
+            this.priorityQueueSet.add(c.req.filePath);
+          }
+          remainingPriority.sort((a, b) => getPriorityScore(a.filePath) - getPriorityScore(b.filePath));
+        }
+        this.priorityQueue = remainingPriority;
+
+        if (batchItems.length < this.batchSize && this.preloadQueue.length > 0) {
+          const remainingPreload = [];
+          for (let i = 0; i < this.preloadQueue.length; i++) {
+            const item = this.preloadQueue[i];
+            const p = typeof item === 'string' ? item : item.filePath;
+            if (!isVideoFile(p) && batchItems.length < this.batchSize) {
+              if (appState.thumbnailUrls.has(p)) {
+                if (this._trackedPaths && this._trackedPaths.has(p)) {
+                  this._trackedPaths.delete(p);
+                  this.completedCount++;
+                  this.updateProgressBar();
+                }
+                if (typeof window.markThumbnailCompleted === 'function') {
+                  window.markThumbnailCompleted(p);
+                }
+              } else if (!this.activeTasks.has(p)) {
+                batchItems.push({ filePath: p, skipDbCheck: false });
+                this.activeTasks.add(p);
+                if (this.activeBatchPaths) this.activeBatchPaths.add(p);
+              }
+            } else {
+              remainingPreload.push(item);
+            }
+          }
+          this.preloadQueue = remainingPreload;
+        }
+
+        if (batchItems.length > 0) {
+          this.activeBatchCount++;
+          this.runBatchTask(batchItems);
+        }
+      }
+
+      while ((this.activeTasks.size - (this.activeBatchPaths ? this.activeBatchPaths.size : 0)) < this.concurrency) {
         let targetFile = null;
         let targetSkipDbCheck = false;
         const isVideoSlotAvailable = (this.activeVideoTasks ? this.activeVideoTasks.size : 0) < this.maxVideoConcurrency;
@@ -1052,6 +1145,88 @@ export class ThumbnailQueueManager {
       }
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  /**
+   * 複数の静止画像サムネイル生成を Rust 側 (generate_thumbnail_batch) に一括委譲する
+   * Rayon によるマルチコア並列デコード・リサイズ・一括SQLiteコミットにより、
+   * WebView2 の重い OffscreenCanvas 処理を完全にバイパスして超高速表示する
+   * @param {Array<{filePath: string, skipDbCheck: boolean}>} items
+   */
+  async runBatchTask(items) {
+    const signal = this.abortController.signal;
+    const paths = items.map(item => item.filePath);
+
+    try {
+      const results = await window.veloceAPI.generateThumbnailBatch(paths);
+      if (signal.aborted) return;
+
+      const resultMap = new Map();
+      if (Array.isArray(results)) {
+        for (const res of results) {
+          if (res && res.path && res.url) {
+            resultMap.set(res.path, res.url);
+          }
+        }
+      }
+
+      const failedItems = [];
+      for (const item of items) {
+        const filePath = item.filePath;
+        const url = resultMap.get(filePath);
+
+        if (url) {
+          this.activeTasks.delete(filePath);
+          if (this.activeBatchPaths) this.activeBatchPaths.delete(filePath);
+          appState.thumbnailUrls.set(filePath, url);
+          this.updateDOM(filePath, url);
+          if (this._trackedPaths && this._trackedPaths.has(filePath)) {
+            this._trackedPaths.delete(filePath);
+            this.completedCount++;
+          }
+          if (typeof window.markThumbnailCompleted === 'function') {
+            window.markThumbnailCompleted(filePath);
+          }
+        } else {
+          failedItems.push(item);
+        }
+      }
+
+      if (window.evictThumbnailCache) {
+        window.evictThumbnailCache();
+      }
+      this.updateProgressBar();
+
+      for (const item of failedItems) {
+        if (this.activeBatchPaths) this.activeBatchPaths.delete(item.filePath);
+        if (!signal.aborted) {
+          this.runTask(item.filePath, false);
+        } else {
+          this.activeTasks.delete(item.filePath);
+        }
+      }
+    } catch (err) {
+      if (signal.aborted) return;
+      console.warn('[Thumbnail] Batch generation error, falling back to individual tasks:', err);
+      for (const item of items) {
+        if (this.activeBatchPaths) this.activeBatchPaths.delete(item.filePath);
+        if (!signal.aborted) {
+          this.runTask(item.filePath, false);
+        } else {
+          this.activeTasks.delete(item.filePath);
+        }
+      }
+    } finally {
+      this.activeBatchCount = Math.max(0, this.activeBatchCount - 1);
+      if (this.activeBatchPaths) {
+        for (const item of items) {
+          this.activeBatchPaths.delete(item.filePath);
+        }
+      }
+      if (!signal.aborted) {
+        this.processNext();
+      }
     }
   }
 
