@@ -3478,82 +3478,147 @@ thread_local! {
         std::cell::RefCell::new(fast_image_resize::Resizer::new());
 }
 
+/// 生ピクセル配列を受け取り、Lanczos3 補間（スレッドローカルバッファ再利用）により
+/// 最大 384px にリサイズした高品質サムネイル（PNG または JPEG バイト列）を生成する。
+fn resize_and_encode_thumbnail(
+    raw_pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    pixel_type: fast_image_resize::PixelType,
+    has_alpha: bool,
+) -> Option<Vec<u8>> {
+    use std::num::NonZeroU32;
+    use fast_image_resize as fr;
+
+    let src_width = NonZeroU32::new(width)?;
+    let src_height = NonZeroU32::new(height)?;
+
+    let mut dst_width = width;
+    let mut dst_height = height;
+    if width > 384 || height > 384 {
+        let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
+        dst_width = (width as f32 * ratio).round() as u32;
+        dst_height = (height as f32 * ratio).round() as u32;
+    }
+
+    let dst_w_nz = NonZeroU32::new(dst_width)?;
+    let dst_h_nz = NonZeroU32::new(dst_height)?;
+
+    let src_image = fr::images::Image::from_vec_u8(
+        src_width.get(),
+        src_height.get(),
+        raw_pixels,
+        pixel_type,
+    ).ok()?;
+
+    let mut dst_image = fr::images::Image::new(
+        dst_w_nz.get(),
+        dst_h_nz.get(),
+        pixel_type,
+    );
+
+    // Lanczos3 高品質補間により縮小時のディテール損失を最小化
+    let options = fr::ResizeOptions::new().resize_alg(
+        fr::ResizeAlg::Interpolation(fr::FilterType::Lanczos3)
+    );
+
+    let resize_ok = THUMB_RESIZER.with(|resizer| {
+        resizer.borrow_mut().resize(&src_image, &mut dst_image, Some(&options)).is_ok()
+    });
+
+    if !resize_ok {
+        return None;
+    }
+
+    let buffer = dst_image.into_vec();
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut bytes);
+
+    use image::ImageEncoder;
+    let encode_ok = if has_alpha {
+        use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+        let encoder = PngEncoder::new_with_quality(
+            &mut cursor,
+            CompressionType::Fast,
+            FilterType::Adaptive,
+        );
+        encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgba8).is_ok()
+    } else {
+        use image::codecs::jpeg::JpegEncoder;
+        let encoder = JpegEncoder::new_with_quality(&mut cursor, 80);
+        encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgb8).is_ok()
+    };
+
+    if encode_ok {
+        Some(bytes)
+    } else {
+        None
+    }
+}
+
+/// 画像ファイルからサムネイル（最大384px）を同期生成する。
+/// JPEG 画像の場合は SIMD 最適化された zune-jpeg による生 RGB 高速展開ルートを優先し、
+/// 中間オブジェクトの複製・アロケーションを排除して fast_image_resize へ直結する。
+/// 失敗時またはその他の形式（PNG/WebP/BMP/GIF）は image::open へ安全にフォールバックする。
 fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
-    if let Ok(img) = image::open(path_str) {
-        let has_alpha = img.color().has_alpha();
-        let width = img.width();
-        let height = img.height();
-        
-        let mut dst_width = width;
-        let mut dst_height = height;
-        if width > 384 || height > 384 {
-            let ratio = f32::min(384.0 / width as f32, 384.0 / height as f32);
-            dst_width = (width as f32 * ratio).round() as u32;
-            dst_height = (height as f32 * ratio).round() as u32;
-        }
+    let path = std::path::Path::new(path_str);
+    let is_jpeg = path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|s| s.eq_ignore_ascii_case("jpg") || s.eq_ignore_ascii_case("jpeg"))
+        .unwrap_or(false);
 
-        use std::num::NonZeroU32;
-        use fast_image_resize as fr;
+    if is_jpeg {
+        if let Ok(file_bytes) = std::fs::read(path_str) {
+            let mut decoder = zune_jpeg::JpegDecoder::new(&file_bytes);
+            if let Ok(raw_pixels) = decoder.decode() {
+                if let Some((width, height)) = decoder.dimensions() {
+                    let colorspace = decoder.get_output_colorspace();
+                    use fast_image_resize as fr;
+                    let (pixel_type, has_alpha) = match colorspace {
+                        Some(zune_core::colorspace::ColorSpace::RGB) => (fr::PixelType::U8x3, false),
+                        Some(zune_core::colorspace::ColorSpace::RGBA) => (fr::PixelType::U8x4, true),
+                        _ => (fr::PixelType::U8x3, false),
+                    };
 
-        if let (Some(src_width), Some(src_height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
-            // into_rgba8 / into_rgb8 を使用して DynamicImage 内部バッファの不要な原寸複製を完全に排除
-            let (pixel_type, raw_pixels) = if has_alpha {
-                let rgba = img.into_rgba8();
-                (fr::PixelType::U8x4, rgba.into_raw())
-            } else {
-                let rgb = img.into_rgb8();
-                (fr::PixelType::U8x3, rgb.into_raw())
-            };
-
-            if let Ok(src_image) = fr::images::Image::from_vec_u8(
-                src_width.get(),
-                src_height.get(),
-                raw_pixels,
-                pixel_type,
-            ) {
-                if let (Some(dst_w_nz), Some(dst_h_nz)) = (NonZeroU32::new(dst_width), NonZeroU32::new(dst_height)) {
-                    let mut dst_image = fr::images::Image::new(
-                        dst_w_nz.get(),
-                        dst_h_nz.get(),
+                    if let Some(thumb) = resize_and_encode_thumbnail(
+                        raw_pixels,
+                        width as u32,
+                        height as u32,
                         pixel_type,
-                    );
-                    // Lanczos3 高品質補間により縮小時のディテール損失を最小化
-                    let options = fr::ResizeOptions::new().resize_alg(
-                        fr::ResizeAlg::Interpolation(fr::FilterType::Lanczos3)
-                    );
-                    let resize_ok = THUMB_RESIZER.with(|resizer| {
-                        resizer.borrow_mut().resize(&src_image, &mut dst_image, Some(&options)).is_ok()
-                    });
-
-                    if resize_ok {
-                        let buffer = dst_image.into_vec();
-
-                        let mut bytes: Vec<u8> = Vec::new();
-                        let mut cursor = std::io::Cursor::new(&mut bytes);
-                        
-                        use image::ImageEncoder;
-                        let encode_ok = if has_alpha {
-                            use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-                            let encoder = PngEncoder::new_with_quality(
-                                &mut cursor,
-                                CompressionType::Fast,
-                                FilterType::Adaptive,
-                            );
-                            encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgba8).is_ok()
-                        } else {
-                            use image::codecs::jpeg::JpegEncoder;
-                            let encoder = JpegEncoder::new_with_quality(&mut cursor, 80);
-                            encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgb8).is_ok()
-                        };
-
-                        if encode_ok {
-                            return Some(bytes);
-                        }
+                        has_alpha,
+                    ) {
+                        return Some(thumb);
                     }
                 }
             }
         }
+        // zune-jpeg でデコードできなかった場合は安全に image::open へフォールバック
     }
+
+    if let Ok(img) = image::open(path_str) {
+        let has_alpha = img.color().has_alpha();
+        let width = img.width();
+        let height = img.height();
+
+        use fast_image_resize as fr;
+        // into_rgba8 / into_rgb8 を使用して DynamicImage 内部バッファの不要な原寸複製を完全に排除
+        let (pixel_type, raw_pixels) = if has_alpha {
+            let rgba = img.into_rgba8();
+            (fr::PixelType::U8x4, rgba.into_raw())
+        } else {
+            let rgb = img.into_rgb8();
+            (fr::PixelType::U8x3, rgb.into_raw())
+        };
+
+        return resize_and_encode_thumbnail(
+            raw_pixels,
+            width,
+            height,
+            pixel_type,
+            has_alpha,
+        );
+    }
+
     None
 }
 
@@ -9635,5 +9700,48 @@ mod viewer_tests {
 
         let total_after_single: i64 = conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get(0)).unwrap();
         assert_eq!(total_after_single, 6);
+    }
+
+    #[test]
+    fn test_generate_image_thumbnail_zune_jpeg_fast_path() {
+        use image::{RgbImage, Rgb};
+
+        // 1. 1200x800 のアルファなし JPEG 画像を作成（長辺1200px -> 384px、短辺800px -> 256px にリサイズされる）
+        let mut img = RgbImage::new(1200, 800);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([50, 100, 200]); // 青系カラー
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("zune_test.jpeg");
+        let path_str = path.to_str().unwrap();
+        img.save_with_format(&path, image::ImageFormat::Jpeg).unwrap();
+
+        // 2. generate_image_thumbnail_sync（zune-jpeg 高速ルート）の実行検証
+        let thumb_opt = generate_image_thumbnail_sync(path_str);
+        assert!(thumb_opt.is_some(), "zune-jpeg 高速ルートでサムネイルが正常に生成されること");
+
+        let thumb_bytes = thumb_opt.unwrap();
+        // JPEG シグネチャ検証 (\xFF\xD8)
+        assert_eq!(&thumb_bytes[0..2], b"\xFF\xD8", "出力がJPEG形式であること");
+
+        // 3. デコード結果の解像度・アスペクト比検証
+        let decoded = image::load_from_memory(&thumb_bytes).unwrap();
+        assert_eq!(decoded.width(), 384, "長辺が384pxにリサイズされること");
+        assert_eq!(decoded.height(), 256, "アスペクト比(3:2)が維持されること (800 * 384 / 1200 = 256)");
+        assert!(!decoded.color().has_alpha(), "アルファチャンネルがないこと");
+
+        // 代表ピクセルが元画像の近似値であることを確認（JPEG圧縮による微小差分を許容）
+        let rgb = decoded.to_rgb8();
+        let p = rgb.get_pixel(192, 128);
+        assert!((p[0] as i16 - 50).abs() <= 5, "赤成分が近似していること");
+        assert!((p[1] as i16 - 100).abs() <= 5, "緑成分が近似していること");
+        assert!((p[2] as i16 - 200).abs() <= 5, "青成分が近似していること");
+
+        // 4. 不正なバイト列の JPEG に対する安全性検証（パニックせず None を返すこと）
+        let corrupt_path = temp_dir.path().join("corrupt.jpg");
+        std::fs::write(&corrupt_path, b"not a real jpeg content").unwrap();
+        let corrupt_opt = generate_image_thumbnail_sync(corrupt_path.to_str().unwrap());
+        assert!(corrupt_opt.is_none(), "壊れたJPEGファイルに対して安全に None を返すこと");
     }
 }
