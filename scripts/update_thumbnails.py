@@ -1,3 +1,21 @@
+"""
+Veloce - Standalone Database Maintenance & Migration Tool
+=========================================================
+
+[注意 / アーキテクチャ境界]
+本スクリプトは、開発時やデータベース移行・メンテナンスを目的としたスタンドアロンの補助ツールです。
+Veloce 本体のランタイム（Tauri / Rust / WebView）からは一切呼び出されません。
+
+Veloce の本番サムネイル生成・キャッシュ管理は、以下のようにすべて Rust ネイティブおよび
+Web Worker / Canvas パイプライン内で完結して実行されます：
+- オンデマンド生成: Web Worker (createImageBitmap / OffscreenCanvas) -> Rust DB Worker
+- 事前一括生成 (precache): Rust (jwalk + fast_image_resize / zune-jpeg)
+- 整合性検査・修復 (audit_cache): Rust (rusqlite + xxh3_64)
+
+本スクリプトは、外部スクリプトから既存 SQLite データベース（veloce_cache.db）の
+サムネイルを一括リフレッシュ・VACUUM する必要がある場合にのみ手動で実行してください。
+"""
+
 import sqlite3
 import sys
 import os

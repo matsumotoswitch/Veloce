@@ -139,4 +139,21 @@ describe('AGENTS.md & PLAN.md Compliance and Regression Guard', () => {
       }
     });
   });
+
+  describe('5. Native Runtime Architecture Boundary (AGENTS.md Sec 1 & 3)', () => {
+    it('should document update_thumbnails.py as a standalone tool not invoked by runtime', () => {
+      const scriptPath = path.resolve(__dirname, '../scripts/update_thumbnails.py');
+      expect(fs.existsSync(scriptPath)).toBe(true);
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('Veloce 本体のランタイム（Tauri / Rust / WebView）からは一切呼び出されません');
+    });
+
+    it('should not invoke python scripts from src/ runtime JavaScript', () => {
+      // ランタイムのJSコードから Python スクリプトの実行や直接参照がないことを保証
+      for (const file of jsFiles) {
+        expect(file.content).not.toMatch(/update_thumbnails\.py/);
+        expect(file.content).not.toMatch(/python\s+.*\.py/i);
+      }
+    });
+  });
 });
