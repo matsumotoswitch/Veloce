@@ -3556,10 +3556,22 @@ fn resize_and_encode_thumbnail(
     }
 }
 
+/// 64KB の大容量バッファを備えた BufReader を介して画像ファイルをオープン・デコードする。
+/// 小さなシーク・リードの頻発によるシステムコールおよびディスク I/O オーバーヘッドを削減する。
+fn open_image_buffered(path_str: &str) -> Option<image::DynamicImage> {
+    let file = std::fs::File::open(path_str).ok()?;
+    let reader = std::io::BufReader::with_capacity(65536, file);
+    image::ImageReader::new(reader)
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()
+}
+
 /// 画像ファイルからサムネイル（最大384px）を同期生成する。
 /// JPEG 画像の場合は SIMD 最適化された zune-jpeg による生 RGB 高速展開ルートを優先し、
 /// 中間オブジェクトの複製・アロケーションを排除して fast_image_resize へ直結する。
-/// 失敗時またはその他の形式（PNG/WebP/BMP/GIF）は image::open へ安全にフォールバックする。
+/// 失敗時またはその他の形式（PNG/WebP/BMP/GIF）は 64KB バッファリングを備えた open_image_buffered へ安全にフォールバックする。
 fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
     let path = std::path::Path::new(path_str);
     let is_jpeg = path.extension()
@@ -3592,10 +3604,10 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
                 }
             }
         }
-        // zune-jpeg でデコードできなかった場合は安全に image::open へフォールバック
+        // zune-jpeg でデコードできなかった場合は安全に open_image_buffered へフォールバック
     }
 
-    if let Ok(img) = image::open(path_str) {
+    if let Some(img) = open_image_buffered(path_str) {
         let has_alpha = img.color().has_alpha();
         let width = img.width();
         let height = img.height();
@@ -9743,5 +9755,47 @@ mod viewer_tests {
         std::fs::write(&corrupt_path, b"not a real jpeg content").unwrap();
         let corrupt_opt = generate_image_thumbnail_sync(corrupt_path.to_str().unwrap());
         assert!(corrupt_opt.is_none(), "壊れたJPEGファイルに対して安全に None を返すこと");
+    }
+
+    #[test]
+    fn test_open_image_buffered_and_thumbnail() {
+        use image::{RgbaImage, Rgba};
+
+        // 1. 800x600 の PNG 画像を作成（64KB BufReader 経由での読み込み対象）
+        let mut img = RgbaImage::new(800, 600);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgba([30, 60, 90, 200]);
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let png_path = temp_dir.path().join("buffered_test.png");
+        let png_path_str = png_path.to_str().unwrap();
+        img.save_with_format(&png_path, image::ImageFormat::Png).unwrap();
+
+        // 2. open_image_buffered の単体検証（64KB バッファリングでのデコード）
+        let loaded = open_image_buffered(png_path_str);
+        assert!(loaded.is_some(), "open_image_buffered で画像が正常に読み込めること");
+        let loaded_img = loaded.unwrap();
+        assert_eq!(loaded_img.width(), 800);
+        assert_eq!(loaded_img.height(), 600);
+        assert!(loaded_img.color().has_alpha());
+
+        // 3. generate_image_thumbnail_sync 連携検証
+        let thumb_opt = generate_image_thumbnail_sync(png_path_str);
+        assert!(thumb_opt.is_some(), "PNG 画像のサムネイルが正常に生成されること");
+        let thumb_bytes = thumb_opt.unwrap();
+        assert_eq!(&thumb_bytes[0..8], b"\x89PNG\r\n\x1a\n", "PNG シグネチャであること");
+
+        let decoded_thumb = image::load_from_memory(&thumb_bytes).unwrap();
+        assert_eq!(decoded_thumb.width(), 384);
+        assert_eq!(decoded_thumb.height(), 288);
+        assert!(decoded_thumb.color().has_alpha());
+
+        // 4. 不正なパスおよび空ファイルに対する安全性検証
+        assert!(open_image_buffered("C:\\non_existent_file_98765.png").is_none());
+
+        let empty_path = temp_dir.path().join("empty.png");
+        std::fs::write(&empty_path, b"").unwrap();
+        assert!(open_image_buffered(empty_path.to_str().unwrap()).is_none());
     }
 }
