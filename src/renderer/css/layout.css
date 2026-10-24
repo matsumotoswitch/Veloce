@@ -5,7 +5,7 @@
 /* --- Titlebar & Inline Toolbar --- */
 .titlebar {
   position: relative;
-  height: 40px;
+  height: 32px;
   background: var(--titlebar-bg) !important;
   /* 強制的に真っ黒にする */
   user-select: none;
@@ -1061,8 +1061,8 @@ table#file-table {
   overflow: hidden;
   -webkit-app-region: no-drag;
   background-color: transparent !important;
-  height: 40px;
-  max-height: 40px;
+  height: 32px;
+  max-height: 32px;
 }
 
 #tab-container {
@@ -1073,8 +1073,8 @@ table#file-table {
   gap: 2px !important;
   border-bottom: none !important;
   /* 個別の下線を消去 */
-  height: 40px;
-  max-height: 40px;
+  height: 32px;
+  max-height: 32px;
   /* 高さを微調整 */
   align-items: stretch;
   overflow-x: auto;
@@ -1165,7 +1165,7 @@ table#file-table {
   padding: 0 25px 0 17px !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
   transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
-  height: 40px !important;
+  height: 32px !important;
 }
 
 #tab-container .tab-item .tab-icon {
@@ -1224,7 +1224,7 @@ table#file-table {
   z-index: 10 !important;
   /* 最前面に浮かせる */
   padding: 0 24px 0 16px !important;
-  height: 40px !important;
+  height: 32px !important;
   opacity: 1;
   margin-bottom: 0 !important;
 }

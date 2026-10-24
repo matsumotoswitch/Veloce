@@ -436,10 +436,10 @@ describe('Tabs Functionality', () => {
       expect(tabContainerMatch[1]).toContain('align-items: stretch;');
     });
 
-    it('should configure tab-item height to 40px and vertically center tab-close-btn', () => {
+    it('should configure tab-item height to 32px and vertically center tab-close-btn', () => {
       const tabItemMatch = layoutContent.match(/(?:^|\n)#tab-container\s+\.tab-item\s*\{([^}]+)\}/);
       expect(tabItemMatch).not.toBeNull();
-      expect(tabItemMatch[1]).toContain('height: 40px !important;');
+      expect(tabItemMatch[1]).toContain('height: 32px !important;');
 
       const tabCloseBtnMatch = layoutContent.match(/(?:^|\n)\.tab-close-btn\s*\{([^}]+)\}/);
       expect(tabCloseBtnMatch).not.toBeNull();
