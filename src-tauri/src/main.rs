@@ -2110,7 +2110,12 @@ fn get_full_metadata_for_path_with_stat_inner(
                             cached_meta.metadata_source.as_str(),
                             "PNG Chunks" | "Alpha Channel" | "WebP EXIF" | "JPEG EXIF" | "None"
                         );
-                        if is_valid_source {
+                        let lower_path = file_path.to_lowercase();
+                        let can_have_alpha_stealth = lower_path.ends_with(".png") || lower_path.ends_with(".webp");
+                        // 過去の解析でアルファチャンネルからの抽出に失敗し "None" かつプロンプト空でキャッシュされた場合、
+                        // 最新のデコード仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
+                        let needs_stealth_retry = cached_meta.metadata_source == "None" && cached_meta.prompt.is_empty() && can_have_alpha_stealth;
+                        if is_valid_source && !needs_stealth_retry {
                             return (cached_meta, mtime_millis, file_size, None);
                         }
                     }
@@ -2236,10 +2241,14 @@ fn get_full_metadata_for_path_with_stat_inner(
         (desc, comment, String::new(), src, w, h)
     };
 
-    // EXIF等でプロンプトが見つからなかった場合、Stealthメタデータを試行
+    // EXIF等でプロンプトが見つからなかった場合、またはWebP等のEXIFに単なるソフトウェア名等（非JSONテキスト）しか含まれず
+    // プロンプトが未取得の場合、Stealthメタデータ（アルファチャンネル）を試行
     // PNGの場合、アルファチャンネルを持たないカラータイプ（RGB=2, Grayscale=0, Palette=3等）は
     // アルファ最下位ビットを使用するStealth PNGInfoが存在し得ないため、フルデコードを完全スキップ
-    if raw_comment.trim().is_empty() && raw_description.trim().is_empty() {
+    let needs_stealth = (raw_comment.trim().is_empty() && raw_description.trim().is_empty())
+        || (!raw_comment.contains('{') && !raw_description.contains('{') && !raw_parameters.contains('{'));
+
+    if needs_stealth {
         let can_have_stealth = if is_png {
             png_color_type == 6 || png_color_type == 4
         } else {
@@ -2922,59 +2931,94 @@ fn extract_stealth_pnginfo_with_type(path: &str) -> Option<(String, &'static str
         return None;
     }
 
-    // 2. ペイロード長を取得し、必要なピクセル数のみを走査
+    // 2. ペイロード長を取得し、必要なビット数のみを走査
     let len_bytes: [u8; 4] = header_bytes[15..19].try_into().ok()?;
-    let length = u32::from_be_bytes(len_bytes) as usize;
-    let total_needed_bytes = 19 + length;
-    let total_needed_bits = total_needed_bytes.checked_mul(8)?;
+    let raw_length = u32::from_be_bytes(len_bytes) as usize;
 
-    if total_pixels < total_needed_bits {
-        return None;
-    }
+    // ヘルパー: 指定されたペイロードビット長に基づきLSBを走査してデコードを試行
+    // （末尾の画像画素ビット混入を排除し、厳密なバイト数で切り出して解凍/UTF-8デコード）
+    let try_extract = |payload_bits: usize| -> Option<String> {
+        if payload_bits == 0 {
+            return None;
+        }
+        let total_needed_bits = 152 + payload_bits;
+        if total_pixels < total_needed_bits {
+            return None;
+        }
 
-    let mut payload_bytes = Vec::with_capacity(total_needed_bytes);
-    payload_bytes.extend_from_slice(&header_bytes);
+        let target_payload_bytes = (payload_bits + 7) / 8;
+        let mut payload_bytes = Vec::with_capacity(target_payload_bytes);
 
-    let mut current_byte = 0u8;
-    let mut current_bit_count = 0;
-    let mut current_bit_idx = 0;
+        let mut current_byte = 0u8;
+        let mut current_bit_count = 0;
+        let mut current_bit_idx = 0;
 
-    'payload_loop: for x in 0..width {
-        for y in 0..height {
-            if current_bit_idx < 152 {
-                current_bit_idx += 1;
-                continue;
-            }
-            let idx = (y * width + x) * 4 + 3;
-            let bit = raw[idx] & 1;
-            current_byte |= bit << (7 - current_bit_count);
-            current_bit_count += 1;
-            if current_bit_count == 8 {
-                payload_bytes.push(current_byte);
-                current_byte = 0;
-                current_bit_count = 0;
-                if payload_bytes.len() >= total_needed_bytes {
+        'payload_loop: for x in 0..width {
+            for y in 0..height {
+                if current_bit_idx < 152 {
+                    current_bit_idx += 1;
+                    continue;
+                }
+                if current_bit_idx >= total_needed_bits {
                     break 'payload_loop;
+                }
+                let idx = (y * width + x) * 4 + 3;
+                let bit = raw[idx] & 1;
+                current_byte |= bit << (7 - current_bit_count);
+                current_bit_count += 1;
+                current_bit_idx += 1;
+
+                if current_bit_count == 8 {
+                    payload_bytes.push(current_byte);
+                    current_byte = 0;
+                    current_bit_count = 0;
                 }
             }
         }
-    }
 
-    if payload_bytes.len() < total_needed_bytes {
-        return None;
-    }
-
-    let payload = &payload_bytes[19..total_needed_bytes];
-
-    if is_comp {
-        let mut decoder = GzDecoder::new(payload);
-        let mut decompressed = String::new();
-        if decoder.read_to_string(&mut decompressed).is_ok() {
-            return Some((decompressed, "Stealth PNGInfo (Compressed)"));
+        if current_bit_count > 0 && payload_bytes.len() < target_payload_bytes {
+            payload_bytes.push(current_byte);
         }
-    } else if is_raw {
-        if let Ok(text) = String::from_utf8(payload.to_vec()) {
-            return Some((text, "Stealth PNGInfo (Raw)"));
+
+        if payload_bytes.len() < target_payload_bytes {
+            return None;
+        }
+
+        if is_comp {
+            let mut decoder = GzDecoder::new(&payload_bytes[..]);
+            let mut decompressed = String::new();
+            if decoder.read_to_string(&mut decompressed).is_ok() {
+                return Some(decompressed);
+            }
+        } else if is_raw {
+            if let Ok(text) = String::from_utf8(payload_bytes) {
+                return Some(text);
+            }
+        }
+        None
+    };
+
+    // 案A: Stealth PNGInfo 標準仕様（ヘッダーの長さフィールドはペイロードの「ビット数（bits）」）
+    if let Some(text) = try_extract(raw_length) {
+        let type_name = if is_comp {
+            "Stealth PNGInfo (Compressed)"
+        } else {
+            "Stealth PNGInfo (Raw)"
+        };
+        return Some((text, type_name));
+    }
+
+    // 案B: 互換性フォールバック（ヘッダーの長さフィールドが「バイト数」で格納されている場合）
+    if let Some(bits_from_bytes) = raw_length.checked_mul(8) {
+        if bits_from_bytes != raw_length {
+            if let Some(text) = try_extract(bits_from_bytes) {
+                let type_name = if is_comp {
+                    "Stealth PNGInfo (Compressed)"
+                } else {
+                    "Stealth PNGInfo (Raw)"
+                };
+                return Some((text, type_name));
+            }
         }
     }
 
@@ -8463,6 +8507,182 @@ mod viewer_tests {
         let _ = std::fs::remove_file(&test_file);
 
         assert_eq!(result.as_deref(), Some(sample_prompt), "Stealth PNGInfo からプロンプトが正確に解凍・抽出されること");
+    }
+
+    #[test]
+    fn test_stealth_pnginfo_bit_length_header_decompression() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let sample_prompt = "1girl, solo, glowing_eyes, silver_hair, novelai stealth prompt";
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(sample_prompt.as_bytes()).unwrap();
+        let compressed_payload = encoder.finish().unwrap();
+
+        // NovelAI / SD-WebUI 標準仕様: ヘッダー長フィールドはビット数 (payload.len() * 8)
+        let payload_bits = (compressed_payload.len() * 8) as u32;
+
+        let mut payload_bytes = Vec::new();
+        payload_bytes.extend_from_slice(b"stealth_pngcomp");
+        payload_bytes.extend_from_slice(&payload_bits.to_be_bytes());
+        payload_bytes.extend_from_slice(&compressed_payload);
+
+        let mut bits = Vec::new();
+        for b in payload_bytes {
+            for i in 0..8 {
+                bits.push((b >> (7 - i)) & 1);
+            }
+        }
+
+        let width = 60u32;
+        let height = 60u32;
+        let mut img = image::RgbaImage::new(width, height);
+
+        let mut bit_idx = 0;
+        for x in 0..width {
+            for y in 0..height {
+                let bit = if bit_idx < bits.len() { bits[bit_idx] } else { 0 };
+                bit_idx += 1;
+                img.put_pixel(x, y, image::Rgba([128, 128, 128, 254 | bit]));
+            }
+        }
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_stealth_bit_length.png");
+        img.save(&test_file).unwrap();
+
+        let result = extract_stealth_pnginfo(&test_file.to_string_lossy());
+        let _ = std::fs::remove_file(&test_file);
+
+        assert_eq!(
+            result.as_deref(),
+            Some(sample_prompt),
+            "NovelAI標準のビット長ヘッダー形式からプロンプトが正確に解凍・抽出されること"
+        );
+    }
+
+    #[test]
+    fn test_stealth_pnginfo_raw_text_bit_length() {
+        let sample_prompt = "masterpiece, highly detailed, raw stealth info";
+        let payload_bits = (sample_prompt.len() * 8) as u32;
+
+        let mut payload_bytes = Vec::new();
+        payload_bytes.extend_from_slice(b"stealth_pnginfo");
+        payload_bytes.extend_from_slice(&payload_bits.to_be_bytes());
+        payload_bytes.extend_from_slice(sample_prompt.as_bytes());
+
+        let mut bits = Vec::new();
+        for b in payload_bytes {
+            for i in 0..8 {
+                bits.push((b >> (7 - i)) & 1);
+            }
+        }
+
+        let width = 50u32;
+        let height = 50u32;
+        let mut img = image::RgbaImage::new(width, height);
+
+        let mut bit_idx = 0;
+        for x in 0..width {
+            for y in 0..height {
+                let bit = if bit_idx < bits.len() { bits[bit_idx] } else { 0 };
+                bit_idx += 1;
+                img.put_pixel(x, y, image::Rgba([200, 200, 200, 254 | bit]));
+            }
+        }
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_stealth_raw_bit_length.png");
+        img.save(&test_file).unwrap();
+
+        let (extracted_text, detected_type) = extract_stealth_pnginfo_with_type(&test_file.to_string_lossy())
+            .expect("非圧縮Raw形式のStealth PNGInfoが正常に抽出できること");
+        let _ = std::fs::remove_file(&test_file);
+
+        assert_eq!(extracted_text, sample_prompt);
+        assert_eq!(detected_type, "Stealth PNGInfo (Raw)");
+    }
+
+    #[test]
+    fn test_alpha_channel_tags_filtering() {
+        // アルファチャンネルから抽出されたプロンプトやタグが unified_search_text に格納され、
+        // フィルタリング処理で正しくヒットすることを検証
+        let alpha_prompt = "1girl, solo, silver_hair, glowing_eyes, fantasy";
+        let mut params_map = serde_json::Map::new();
+        params_map.insert("steps".to_string(), serde_json::json!(28));
+        params_map.insert("scale".to_string(), serde_json::json!(7.0));
+
+        let full_meta = FullMetadata {
+            path: "C:\\images\\alpha_test.png".to_string(),
+            prompt: alpha_prompt.to_string(),
+            negative_prompt: "lowres, bad anatomy".to_string(),
+            width: 1024,
+            height: 1024,
+            params: serde_json::Value::Object(params_map),
+            source: "NovelAI".to_string(),
+            metadata_source: "Alpha Channel".to_string(),
+        };
+
+        let search_text = crate::utils::extract_searchable_text(&full_meta.params);
+        let img_file = ImageFile {
+            name: "alpha_test.png".to_string(),
+            ext: format_compact!(".png"),
+            path: "C:\\images\\alpha_test.png".to_string(),
+            size: 102400,
+            mtime: 1700000000,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: full_meta.width,
+            height: full_meta.height,
+            prompt: full_meta.prompt.clone(),
+            negative_prompt: full_meta.negative_prompt.clone(),
+            source: full_meta.source.clone(),
+            meta_loaded: true,
+            search_text: search_text.clone(),
+            unified_search_text: format!(
+                "{} {} {} {} {}",
+                "alpha_test.png",
+                full_meta.prompt,
+                full_meta.negative_prompt,
+                full_meta.source,
+                search_text
+            ).to_lowercase(),
+            hash_key: CompactString::default(),
+        };
+
+        // 検索タグの検証
+        assert!(
+            img_file.unified_search_text.contains("silver_hair"),
+            "アルファチャンネルから取得したタグ 'silver_hair' が unified_search_text に含まれていること"
+        );
+        assert!(
+            img_file.unified_search_text.contains("glowing_eyes"),
+            "アルファチャンネルから取得したタグ 'glowing_eyes' が unified_search_text に含まれていること"
+        );
+
+        // 検索クエリでの絞り込みシミュレーション（apply_filters_and_sort と同等）
+        let search_query = "silver_hair, glowing_eyes";
+        let terms: Vec<String> = search_query
+            .to_lowercase()
+            .split(',')
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        let is_matched = terms.iter().all(|term| img_file.unified_search_text.contains(term));
+        assert!(is_matched, "アルファチャンネル由来の複数タグで正しくフィルタマッチすること");
+
+        let unmatched_query = "silver_hair, golden_hair";
+        let unmatched_terms: Vec<String> = unmatched_query
+            .to_lowercase()
+            .split(',')
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let is_unmatched = unmatched_terms.iter().all(|term| img_file.unified_search_text.contains(term));
+        assert!(!is_unmatched, "含まれないタグではマッチしないこと");
     }
 
     #[test]
