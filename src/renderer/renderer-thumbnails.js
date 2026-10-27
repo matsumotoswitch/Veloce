@@ -688,6 +688,9 @@ export class ThumbnailQueueManager {
   enqueuePriorityBatch(filePaths, skipDbCheck = false) {
     let added = false;
     let newEnqueued = false;
+    const viewportPaths = appState.viewportPathSet || new Set();
+    const visiblePaths = appState.visiblePathSet || new Set();
+
     for (const item of filePaths) {
       const filePath = typeof item === 'string' ? item : item.filePath;
       const skip = typeof item === 'object' && item.skipDbCheck !== undefined ? item.skipDbCheck : skipDbCheck;
@@ -710,6 +713,18 @@ export class ThumbnailQueueManager {
         }
       }
     }
+
+    // 画面内アイテム（viewportPaths）を最優先にするため、スコア順に安定ソート
+    // (0: 画面内ビューポート, 1: バッファ領域, 2: 画面外)
+    if (newEnqueued && this.priorityQueue.length > 1) {
+      const getScore = (fp) => {
+        if (viewportPaths.has(fp)) return 0;
+        if (visiblePaths.has(fp)) return 1;
+        return 2;
+      };
+      this.priorityQueue.sort((a, b) => getScore(a.filePath) - getScore(b.filePath));
+    }
+
     if (added) {
       this.updateProgressBar();
     }
@@ -920,8 +935,25 @@ export class ThumbnailQueueManager {
 
         if (staticCandidates.length > 0) {
           staticCandidates.sort((a, b) => a.score - b.score || a.originalIndex - b.originalIndex);
-          const chosen = staticCandidates.slice(0, this.batchSize);
-          const unchosen = staticCandidates.slice(this.batchSize);
+
+          // 画面内アイテム（score === 0）の有無を判定
+          const viewportCandidates = staticCandidates.filter(c => c.score === 0);
+          let chosen = [];
+          let unchosen = [];
+
+          if (viewportCandidates.length > 0) {
+            // 画面内アイテムが存在する場合:
+            // 画面外のアイテムを一切混ぜず、画面内アイテムのみを最優先バッチとして切り出す。
+            // これにより、画面外アイテムの生成完了待ちによる画面内アイテムの表示遅延を完全に根絶する。
+            chosen = viewportCandidates.slice(0, this.batchSize);
+            const chosenSet = new Set(chosen.map(c => c.req.filePath));
+            unchosen = staticCandidates.filter(c => !chosenSet.has(c.req.filePath));
+          } else {
+            // 画面内アイテムがキューにない場合（バッファ領域やバックグラウンド）:
+            // 最大 batchSize まで組み、画面外プレロードからも補充可能とする
+            chosen = staticCandidates.slice(0, this.batchSize);
+            unchosen = staticCandidates.slice(this.batchSize);
+          }
 
           for (const c of chosen) {
             batchItems.push(c.req);
@@ -936,7 +968,9 @@ export class ThumbnailQueueManager {
         }
         this.priorityQueue = remainingPriority;
 
-        if (batchItems.length < this.batchSize && this.preloadQueue.length > 0) {
+        // preloadQueue からの補充は、画面内アイテム（score 0）のバッチではない場合のみ許可
+        const hasViewportInBatch = batchItems.some(item => viewportPaths.has(item.filePath));
+        if (!hasViewportInBatch && batchItems.length < this.batchSize && this.preloadQueue.length > 0) {
           const remainingPreload = [];
           for (let i = 0; i < this.preloadQueue.length; i++) {
             const item = this.preloadQueue[i];
@@ -977,11 +1011,11 @@ export class ThumbnailQueueManager {
         // 1. Priority Queue
         if (this.priorityQueue.length > 0) {
           appState.isPreloadRunning = false;
+
           // 最優先: 現在画面内に表示されているアイテム（始点: 画面先頭ファイル）かつ動画枠上限に達していないもの
           let targetIndex = this.priorityQueue.findIndex(req => 
             viewportPaths.has(req.filePath) && (!isVideoFile(req.filePath) || isVideoSlotAvailable)
           );
-          let isVisible = true;
           
           // 画面内に無ければ、バッファ領域（visiblePaths）かつ動画枠上限に達していないものを探す
           if (targetIndex === -1) {
@@ -995,7 +1029,6 @@ export class ThumbnailQueueManager {
             targetIndex = this.priorityQueue.findIndex(req => 
               !isVideoFile(req.filePath) || isVideoSlotAvailable
             );
-            isVisible = false;
           }
 
           // 優先キュー内の残タスクがすべて動画であり、動画並行枠の上限に達している場合は待機
@@ -1003,10 +1036,18 @@ export class ThumbnailQueueManager {
             break;
           }
 
-          // 表示中ではないアイテム（スクロールで通り過ぎたアイテム等）の処理時は、
+          // キュー内に未着手の画面内アイテムが存在する場合、画面外（バッファ含む）のアイテムは起動せず
+          // 画面内アイテムに全スロットを集中配分する
+          const hasPendingViewport = this.priorityQueue.some(req => viewportPaths.has(req.filePath));
+          if (hasPendingViewport && !viewportPaths.has(this.priorityQueue[targetIndex].filePath)) {
+            break;
+          }
+
+          // 表示中（画面内ビューポート）ではないアイテム（バッファ領域やスクロールで通り過ぎたアイテム等）の処理時は、
           // バックグラウンド枠（全体-4枠）を超えないように制限し、常に表示中アイテムのために即応枠を確保する
+          const isViewport = viewportPaths.has(this.priorityQueue[targetIndex].filePath);
           const bgLimit = Math.max(2, this.concurrency - 4);
-          if (!isVisible && this.activeTasks.size >= bgLimit) {
+          if (!isViewport && this.activeTasks.size >= bgLimit) {
             break;
           }
 

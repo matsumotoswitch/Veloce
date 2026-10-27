@@ -1306,6 +1306,71 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(testAppState.thumbnailUrls.get('C:/test/batch1.jpg')).toContain('thumb=1');
       expect(testAppState.thumbnailUrls.get('C:/test/batch2.png')).toContain('thumb=1');
     });
+
+    it('should sort viewport items to the front when enqueuing priority batch', () => {
+      testAppState.viewportPathSet = new Set(['C:/test/view1.jpg', 'C:/test/view2.jpg']);
+      testAppState.visiblePathSet = new Set(['C:/test/buf1.jpg', 'C:/test/buf2.jpg', 'C:/test/view1.jpg', 'C:/test/view2.jpg']);
+
+      // processNext をスパイしてキューの整列状態を検証
+      vi.spyOn(manager, 'processNext').mockImplementation(() => {});
+
+      // 画面外バッファが先、画面内が後の順序で渡された場合でもキュー内では画面内が先頭に整列すること
+      const inputItems = [
+        'C:/test/buf1.jpg',
+        'C:/test/view1.jpg',
+        'C:/test/buf2.jpg',
+        'C:/test/view2.jpg'
+      ];
+      manager.enqueuePriorityBatch(inputItems, true);
+
+      expect(manager.priorityQueue[0].filePath).toBe('C:/test/view1.jpg');
+      expect(manager.priorityQueue[1].filePath).toBe('C:/test/view2.jpg');
+      expect(manager.priorityQueue[2].filePath).toBe('C:/test/buf1.jpg');
+      expect(manager.priorityQueue[3].filePath).toBe('C:/test/buf2.jpg');
+    });
+
+    it('should not mix preloadQueue items into batch when viewport items exist in queue', async () => {
+      testAppState.viewportPathSet = new Set(['C:/test/view1.jpg', 'C:/test/view2.jpg']);
+      testAppState.visiblePathSet = new Set(['C:/test/view1.jpg', 'C:/test/view2.jpg']);
+
+      // プリロードキューに画面外アイテムが存在する状態
+      manager.preloadQueue = [
+        { filePath: 'C:/test/preload1.jpg', skipDbCheck: false },
+        { filePath: 'C:/test/preload2.jpg', skipDbCheck: false }
+      ];
+
+      // 画面内アイテムを優先キューに追加
+      manager.enqueuePriorityBatch(['C:/test/view1.jpg', 'C:/test/view2.jpg'], true);
+      await new Promise(r => setTimeout(r, 50));
+
+      // 画面内アイテムが存在するため、初回のバッチには画面内アイテムのみが含まれ、preloadQueue のアイテムは巻き込まれないこと
+      expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenNthCalledWith(1, ['C:/test/view1.jpg', 'C:/test/view2.jpg']);
+    });
+
+    it('should reserve worker slots for viewport items and not dispatch buffer items while viewport items are pending', () => {
+      testAppState.viewportPathSet = new Set(['C:/test/viewport.mp4']);
+      testAppState.visiblePathSet = new Set(['C:/test/viewport.mp4', 'C:/test/buffer.mp4']);
+
+      // 動画ファイル（Worker/個別タスクで処理）を投入
+      manager.priorityQueue = [
+        { filePath: 'C:/test/viewport.mp4', skipDbCheck: true },
+        { filePath: 'C:/test/buffer.mp4', skipDbCheck: true }
+      ];
+      manager.priorityQueueSet = new Set(['C:/test/viewport.mp4', 'C:/test/buffer.mp4']);
+
+      // 動画スロット上限を1にして1枠のみ実行できるようにする
+      manager.maxVideoConcurrency = 1;
+      const runTaskSpy = vi.spyOn(manager, 'runTask').mockImplementation(() => {});
+
+      manager.processNext();
+
+      // 画面内（viewport.mp4）のみが実行され、未着手画面内がある間は画面外バッファ（buffer.mp4）は実行されないこと
+      expect(runTaskSpy).toHaveBeenCalledWith('C:/test/viewport.mp4', true);
+      expect(runTaskSpy).not.toHaveBeenCalledWith('C:/test/buffer.mp4', true);
+      expect(manager.priorityQueue.length).toBe(1);
+      expect(manager.priorityQueue[0].filePath).toBe('C:/test/buffer.mp4');
+    });
   });
 });
+
 

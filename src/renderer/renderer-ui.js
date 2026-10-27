@@ -2022,6 +2022,22 @@ class UIManager {
       return;
     }
 
+    // viewportPathSet: 現在画面（ビューポート）内に実際に表示されているアイテムのパス集合（描写優先度の最上位）
+    // 後続のDOM同期やサムネイルキューイング処理で最新の画面位置を即座に参照できるよう、items取得直後に即時確定する
+    let viewportSet = (typeof appState !== 'undefined' && appState.viewportPathSet instanceof Set)
+      ? appState.viewportPathSet
+      : new Set();
+    viewportSet.clear();
+    for (let i = visibleStartIndex; i <= visibleEndIndex; i++) {
+      if (i >= startIndex && i <= endIndex) {
+        const f = items[i - startIndex];
+        if (f && f.path) viewportSet.add(f.path);
+      }
+    }
+    if (typeof appState !== 'undefined') {
+      appState.viewportPathSet = viewportSet;
+    }
+
     // コンテンツ領域をスクロール位置に合わせて移動 (DOM更新の直前に行うことで、破棄時の表示崩れを防ぐ)
     const offsetY = (safeStartRow * rowHeight) + padding;
     const newTransform = `translate3d(0, ${offsetY}px, 0)`;
@@ -2300,20 +2316,7 @@ class UIManager {
       void content.offsetHeight;
     }
 
-    // viewportPathSet: 現在画面（ビューポート）内に実際に表示されているアイテムのパス集合（描写優先度の最上位）
-    let viewportSet = (typeof appState !== 'undefined' && appState.viewportPathSet instanceof Set)
-      ? appState.viewportPathSet
-      : new Set();
-    viewportSet.clear();
-    for (let i = visibleStartIndex; i <= visibleEndIndex; i++) {
-      if (i >= startIndex && i <= endIndex) {
-        const f = items[i - startIndex];
-        if (f && f.path) viewportSet.add(f.path);
-      }
-    }
-    if (typeof appState !== 'undefined') {
-      appState.viewportPathSet = viewportSet;
-    }
+
 
     // visiblePathSet を _domByPath から構築（既存Setを再利用してスクロール毎フレームのGC圧を根絶）
     let visibleSet = (typeof appState !== 'undefined' && appState.visiblePathSet instanceof Set)
