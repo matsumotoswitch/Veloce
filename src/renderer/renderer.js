@@ -897,6 +897,9 @@ const menuRebuildFolderCache = createMenuItem('フォルダ全体のキャッシ
       uiManager.showToast("エラー: APIが見つかりません", 5000, 'error');
     }
 
+    if (typeof uiManager.invalidateItemWindowCache === 'function') {
+      uiManager.invalidateItemWindowCache();
+    }
     if (typeof uiManager.updateVirtualGrid === 'function') {
       uiManager.updateVirtualGrid(true);
     }
@@ -2316,6 +2319,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (['width', 'height', 'ratio'].includes(appState.sortConfig.key) || appState.searchQuery.trim() !== '') {
           scheduleRefresh();
         } else {
+          if (typeof uiManager.invalidateItemWindowCache === 'function') {
+            uiManager.invalidateItemWindowCache();
+          }
           if (typeof uiManager.updateVirtualList === 'function') {
             uiManager.updateVirtualList(true);
           }

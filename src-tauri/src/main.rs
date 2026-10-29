@@ -3422,15 +3422,41 @@ async fn generate_thumbnail_batch(
     let video_port = state.video_server_port;
     let results = tokio::task::spawn_blocking(move || {
         use rayon::prelude::*;
-        files_to_process.into_par_iter().map(|(file_path, mtime)| {
-            let bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
-            let url = if bytes.is_empty() {
-                String::new()
-            } else {
-                format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
-            };
-            ThumbnailResult { path: file_path, url }
-        }).collect::<Vec<_>>()
+        let computed: Vec<(ThumbnailResult, Option<PendingThumbnailWrite>)> = files_to_process
+            .into_par_iter()
+            .map(|(file_path, mtime)| {
+                let clean_path = normalize_unc_path(&file_path).into_owned();
+                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+                let (bytes, pending) = generate_thumbnail_compute_only(&file_path, mtime, Some(&hash_key), &db_conn);
+                let url = if bytes.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
+                        video_port,
+                        urlencoding::encode(&file_path),
+                        mtime,
+                        hash_key
+                    )
+                };
+                (ThumbnailResult { path: file_path, url }, pending)
+            })
+            .collect();
+
+        let mut results = Vec::with_capacity(computed.len());
+        let mut pending_writes = Vec::new();
+        for (res, pending_opt) in computed {
+            results.push(res);
+            if let Some(p) = pending_opt {
+                pending_writes.push(p);
+            }
+        }
+
+        if !pending_writes.is_empty() {
+            let _ = commit_pending_thumbnails_batch(&db_conn, &pending_writes);
+        }
+
+        results
     }).await.map_err(|e| e.to_string())?;
 
     for item in &results {
@@ -3481,7 +3507,7 @@ async fn get_cached_thumbnail_batch(
                 ) {
                     if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
                         if !bytes.is_empty() {
-                            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime);
+                            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}", video_port, urlencoding::encode(&file_path), mtime, hash_key);
                             return Some(ThumbnailResult { path: file_path, url });
                         }
                     }
@@ -3532,6 +3558,17 @@ thread_local! {
     /// サムネイル生成用の fast_image_resize::Resizer インスタンス（内部作業バッファをスレッドローカルで再利用）
     static THUMB_RESIZER: std::cell::RefCell<fast_image_resize::Resizer> =
         std::cell::RefCell::new(fast_image_resize::Resizer::new());
+}
+
+/// RGBA8 ピクセルバッファが実質的に不透明（すべてのピクセルで alpha >= 254）であるかを判定する。
+/// NovelAI 等の PNG 画像は視覚的に不透明であっても RGBA8 で出力されたり、Stealth PNGInfo の格納により
+/// アルファチャンネル最下位ビットのみが 254〜255 に変調されているケースが多い。
+/// これらを判別して JPEG エンコードへ誘導することで、サムネイルのデータサイズとエンコード時間を削減する。
+fn is_effectively_opaque_rgba(rgba_bytes: &[u8]) -> bool {
+    if rgba_bytes.is_empty() || rgba_bytes.len() % 4 != 0 {
+        return false;
+    }
+    rgba_bytes.chunks_exact(4).all(|px| px[3] >= 254)
 }
 
 /// 生ピクセル配列を受け取り、Lanczos3 補間（スレッドローカルバッファ再利用）により
@@ -3592,13 +3629,25 @@ fn resize_and_encode_thumbnail(
 
     use image::ImageEncoder;
     let encode_ok = if has_alpha {
-        use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-        let encoder = PngEncoder::new_with_quality(
-            &mut cursor,
-            CompressionType::Fast,
-            FilterType::Adaptive,
-        );
-        encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgba8).is_ok()
+        if is_effectively_opaque_rgba(&buffer) {
+            let mut rgb_buffer = Vec::with_capacity((dst_width as usize) * (dst_height as usize) * 3);
+            for px in buffer.chunks_exact(4) {
+                rgb_buffer.push(px[0]);
+                rgb_buffer.push(px[1]);
+                rgb_buffer.push(px[2]);
+            }
+            use image::codecs::jpeg::JpegEncoder;
+            let encoder = JpegEncoder::new_with_quality(&mut cursor, 85);
+            encoder.write_image(&rgb_buffer, dst_width, dst_height, image::ExtendedColorType::Rgb8).is_ok()
+        } else {
+            use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+            let encoder = PngEncoder::new_with_quality(
+                &mut cursor,
+                CompressionType::Fast,
+                FilterType::Adaptive,
+            );
+            encoder.write_image(&buffer, dst_width, dst_height, image::ExtendedColorType::Rgba8).is_ok()
+        }
     } else {
         use image::codecs::jpeg::JpegEncoder;
         let encoder = JpegEncoder::new_with_quality(&mut cursor, 80);
@@ -3849,10 +3898,136 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// 新規生成されたサムネイルのDB一括保存用エントリ
+struct PendingThumbnailWrite {
+    hash_key: String,
+    clean_path: String,
+    mtime: u64,
+    bytes: Vec<u8>,
+    now: i64,
+}
+
+/// 複数の新規生成サムネイルを単一のSQLiteトランザクションで一括保存する。
+/// 並列生成スレッドからの個別オートコミットによるWriterロック競合を排除する。
+fn commit_pending_thumbnails_batch(
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    pending_writes: &[PendingThumbnailWrite],
+) -> Result<usize, rusqlite::Error> {
+    if pending_writes.is_empty() {
+        return Ok(0);
+    }
+    let mut conn = db_conn.get().map_err(|_| rusqlite::Error::InvalidQuery)?;
+    if pending_writes.len() == 1 {
+        let p = &pending_writes[0];
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+            rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.now],
+        )?;
+        let _ = p.mtime;
+        return Ok(1);
+    }
+
+    let tx = conn.transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
+        )?;
+        for p in pending_writes {
+            stmt.execute(rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.now])?;
+        }
+    }
+    tx.commit()?;
+    Ok(pending_writes.len())
+}
+
+/// キャッシュ済みサムネイルをDBから検索し、キャッシュミス時は同期生成してバイト列と未コミット書き込み情報を返す。
+/// バッチ生成時には呼び出し元で一括トランザクションコミットを行うため、この関数内ではDB書き込みを行わない。
+fn generate_thumbnail_compute_only(
+    file_path: &str,
+    mtime: u64,
+    direct_hash: Option<&str>,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) -> (Vec<u8>, Option<PendingThumbnailWrite>) {
+    if let Ok(conn) = db_conn.get() {
+        // 1. direct_hash が指定されていれば最優先で直撃取得
+        if let Some(hash) = direct_hash {
+            if !hash.is_empty() {
+                if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+                    if let Ok(thumb) = stmt.query_row([hash], |row| row.get::<_, Vec<u8>>(0)) {
+                        if !thumb.is_empty() {
+                            return (thumb, None);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. UNC 正規化パス・プレフィックス除去パスなど複数候補ハッシュキーで検索
+        if !file_path.is_empty() {
+            let norm_unc = normalize_unc_path(file_path).into_owned();
+            let stripped = if file_path.starts_with(r"\\?\") { &file_path[4..] } else { file_path };
+            let hash_norm = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
+            let hash_strip = crate::utils::hash_path_mtime_hex(stripped, mtime);
+            let hash_raw = crate::utils::hash_path_mtime_hex(file_path, mtime);
+
+            if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
+                if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {
+                    if !thumb.is_empty() {
+                        return (thumb, None);
+                    }
+                }
+            }
+
+            // 3. フォールバック: パス一致で検索
+            let norm_back = norm_unc.replace('/', "\\");
+            let norm_fwd = norm_unc.replace('\\', "/");
+            if let Ok(mut stmt) = conn.prepare_cached(
+                "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
+            ) {
+                if let Ok(thumb) = stmt.query_row([file_path, &norm_unc, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
+                    if !thumb.is_empty() {
+                        return (thumb, None);
+                    }
+                }
+            }
+        }
+    }
+
+    let lower_path = file_path.to_lowercase();
+    let is_video = lower_path.ends_with(".mp4")
+        || lower_path.ends_with(".webm")
+        || lower_path.ends_with(".avi")
+        || lower_path.ends_with(".mkv");
+
+    let generated = if is_video {
+        generate_video_thumbnail_sync(file_path)
+    } else {
+        generate_image_thumbnail_sync(file_path)
+    };
+
+    if let Some(bytes) = generated {
+        let clean_path = normalize_unc_path(file_path).into_owned();
+        let hash_key = direct_hash
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| crate::utils::hash_path_mtime_hex(&clean_path, mtime));
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        let pending = PendingThumbnailWrite {
+            hash_key,
+            clean_path,
+            mtime,
+            bytes: bytes.clone(),
+            now,
+        };
+        return (bytes, Some(pending));
+    }
+
+    (Vec::new(), None)
+}
+
 /// キャッシュ済みサムネイル（または即時抽出可能な動画サムネイル）をDBから取得する。
-/// ※静止画像の同期デコード・生成はプロトコルハンドラやUIスレッドをブロックし、
-/// 全体のサムネイル表示を停滞させるため、キャッシュミス時は空配列を返し、
-/// フロントエンドの Web Worker プール（OffscreenCanvas）に委譲する。
 fn generate_thumbnail_inner(
     file_path: &str,
     mtime: u64,
@@ -3870,78 +4045,11 @@ fn generate_thumbnail_inner_with_hash(
     direct_hash: Option<&str>,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) -> Vec<u8> {
-    if let Ok(conn) = db_conn.get() {
-        // 1. direct_hash が指定されていれば最優先で直撃取得
-        if let Some(hash) = direct_hash {
-            if !hash.is_empty() {
-                if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-                    if let Ok(thumb) = stmt.query_row([hash], |row| row.get::<_, Vec<u8>>(0)) {
-                        return thumb;
-                    }
-                }
-            }
-        }
-
-        // 2. UNC 正規化パス・プレフィックス除去パスなど複数候補ハッシュキーで検索
-        if !file_path.is_empty() {
-            let norm_unc = normalize_unc_path(file_path).into_owned();
-            let stripped = if file_path.starts_with(r"\\?\") { &file_path[4..] } else { file_path };
-            let hash_norm = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
-            let hash_strip = crate::utils::hash_path_mtime_hex(stripped, mtime);
-            let hash_raw = crate::utils::hash_path_mtime_hex(file_path, mtime);
-
-            if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
-                if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {
-                    return thumb;
-                }
-            }
-
-            // 3. フォールバック: パス一致で検索
-            let norm_back = norm_unc.replace('/', "\\");
-            let norm_fwd = norm_unc.replace('\\', "/");
-            if let Ok(mut stmt) = conn.prepare_cached(
-                "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
-            ) {
-                if let Ok(thumb) = stmt.query_row([file_path, &norm_unc, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
-                    return thumb;
-                }
-            }
-        }
+    let (bytes, pending_opt) = generate_thumbnail_compute_only(file_path, mtime, direct_hash, db_conn);
+    if let Some(pending) = pending_opt {
+        let _ = commit_pending_thumbnails_batch(db_conn, &[pending]);
     }
-    
-    // 静止画像または動画ファイルのサムネイルを同期生成する。
-    // キャッシュミス時、静止画像（JPEG/PNG/WebP等）は SIMD 最適化された zune-jpeg /
-    // 64KB バッファリング（open_image_buffered）により即座に高品質サムネイルを生成・保存する。
-    // 動画ファイルの場合は ffmpeg または OS シェル API により代表フレームを抽出・保存する。
-    let lower_path = file_path.to_lowercase();
-    let is_video = lower_path.ends_with(".mp4")
-        || lower_path.ends_with(".webm")
-        || lower_path.ends_with(".avi")
-        || lower_path.ends_with(".mkv");
-
-    let generated = if is_video {
-        generate_video_thumbnail_sync(file_path)
-    } else {
-        generate_image_thumbnail_sync(file_path)
-    };
-
-    if let Some(bytes) = generated {
-        if let Ok(conn) = db_conn.get() {
-            let clean_path = normalize_unc_path(file_path).into_owned();
-            let hash_key = direct_hash
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| crate::utils::hash_path_mtime_hex(&clean_path, mtime));
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-            let _ = conn.execute(
-                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-                 ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-                rusqlite::params![hash_key, bytes, clean_path, now],
-            );
-        }
-        return bytes;
-    }
-
-    Vec::new()
+    bytes
 }
 
 
@@ -3969,6 +4077,7 @@ async fn save_thumbnail(
 
     let clean_path = file_path.replace("\\\\?\\", "");
     let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+    let hash_key_for_url = hash_key.clone();
 
     // b64_data is expected to be "data:image/jpeg;base64,..."
     let b64 = if let Some(idx) = b64_data.find(',') {
@@ -3995,8 +4104,8 @@ async fn save_thumbnail(
     // インメモリのファイル一覧にもサムネイルキャッシュ保持フラグを O(1) 即時反映
     state.mark_thumbnail_cached(&file_path);
 
-    // 保存完了と同時にローカルHTTP配信用URLを返却し、フロントエンド側での再取得IPC呼び出しを不要化
-    let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path_clone), mtime);
+    // 保存完了と同時にローカルHTTP配信用URL（hash_key直撃パラメータ付き）を返却し、フロントエンド側での再取得IPC呼び出しを不要化
+    let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}", video_port, urlencoding::encode(&file_path_clone), mtime, hash_key_for_url);
     Ok(url)
 }
 
@@ -10165,25 +10274,99 @@ mod viewer_tests {
         }).collect();
 
         use rayon::prelude::*;
-        let results: Vec<ThumbnailResult> = files_to_process.into_par_iter().map(|(file_path, mtime)| {
-            let bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
-            let url = if bytes.is_empty() {
-                String::new()
-            } else {
-                format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
-            };
-            ThumbnailResult { path: file_path, url }
-        }).collect();
+        let computed: Vec<(ThumbnailResult, Option<PendingThumbnailWrite>)> = files_to_process
+            .into_par_iter()
+            .map(|(file_path, mtime)| {
+                let clean_path = normalize_unc_path(&file_path).into_owned();
+                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+                let (bytes, pending) = generate_thumbnail_compute_only(&file_path, mtime, Some(&hash_key), &db_conn);
+                let url = if bytes.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
+                        video_port,
+                        urlencoding::encode(&file_path),
+                        mtime,
+                        hash_key
+                    )
+                };
+                (ThumbnailResult { path: file_path, url }, pending)
+            })
+            .collect();
+
+        let mut results = Vec::with_capacity(computed.len());
+        let mut pending_writes = Vec::new();
+        for (res, pending_opt) in computed {
+            results.push(res);
+            if let Some(p) = pending_opt {
+                pending_writes.push(p);
+            }
+        }
+        let committed = commit_pending_thumbnails_batch(&db_conn, &pending_writes).unwrap();
+        assert_eq!(committed, 4, "4件の新規生成サムネイルが単一トランザクションで一括コミットされること");
 
         assert_eq!(results.len(), 4, "4件すべてのサムネイルが返却されること");
         for r in &results {
             assert!(!r.url.is_empty(), "各サムネイルのURLが空でないこと");
             assert!(r.url.contains("thumb=1"), "サムネイル配信URLパラメータが付与されていること");
+            assert!(r.url.contains("&hash="), "PRIMARY KEY直撃用のhashパラメータが付与されていること");
         }
 
         // DBに4件すべてが永続化されていることを確認
         let conn = pool.get().unwrap();
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM cache WHERE thumbnail IS NOT NULL", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 4, "DBに4件のサムネイルが正しく保存されていること");
+
+        // 2回目の呼び出し時は全件キャッシュヒットし、pending_writes が 0 件になることを検証
+        let second_path = &file_paths[0];
+        let second_mtime = std::fs::metadata(second_path).and_then(|m| m.modified()).unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let second_clean = normalize_unc_path(second_path).into_owned();
+        let second_hash = crate::utils::hash_path_mtime_hex(&second_clean, second_mtime);
+        let (cached_bytes, pending_second) = generate_thumbnail_compute_only(second_path, second_mtime, Some(&second_hash), &db_conn);
+        assert!(!cached_bytes.is_empty(), "キャッシュからバイト列が取得できること");
+        assert!(pending_second.is_none(), "キャッシュヒット時は未コミット書き込みが発生しないこと");
+    }
+
+    #[test]
+    fn test_opaque_and_stealth_rgba_png_encodes_as_jpeg_thumbnail() {
+        use image::{RgbaImage, Rgba};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1. 全ピクセル alpha=255 の不透明 RGBA PNG -> JPEG サムネイルとして出力されること
+        let mut opaque_rgba = RgbaImage::new(512, 512);
+        for pixel in opaque_rgba.pixels_mut() {
+            *pixel = Rgba([100, 150, 200, 255]);
+        }
+        let opaque_path = temp_dir.path().join("opaque_rgba.png");
+        opaque_rgba.save_with_format(&opaque_path, image::ImageFormat::Png).unwrap();
+
+        let opaque_thumb = generate_image_thumbnail_sync(opaque_path.to_str().unwrap()).unwrap();
+        assert_eq!(&opaque_thumb[0..2], b"\xFF\xD8", "不透明RGBA画像はJPEGサムネイルとしてエンコードされること");
+
+        // 2. Stealth PNGInfo 相当 (alpha=254 または 255) の RGBA PNG -> JPEG サムネイルとして出力されること
+        let mut stealth_rgba = RgbaImage::new(512, 512);
+        for (idx, pixel) in stealth_rgba.pixels_mut().enumerate() {
+            let alpha = if idx % 2 == 0 { 254 } else { 255 };
+            *pixel = Rgba([180, 120, 90, alpha]);
+        }
+        let stealth_path = temp_dir.path().join("stealth_rgba.png");
+        stealth_rgba.save_with_format(&stealth_path, image::ImageFormat::Png).unwrap();
+
+        let stealth_thumb = generate_image_thumbnail_sync(stealth_path.to_str().unwrap()).unwrap();
+        assert_eq!(&stealth_thumb[0..2], b"\xFF\xD8", "Stealth PNGInfo相当(alpha>=254)のRGBA画像はJPEGとしてエンコードされること");
+
+        // 3. 透過ピクセル (alpha < 254) を含む RGBA PNG -> 従来通り PNG サムネイルとして出力されること
+        let mut trans_rgba = RgbaImage::new(512, 512);
+        for (idx, pixel) in trans_rgba.pixels_mut().enumerate() {
+            let alpha = if idx == 0 { 0 } else { 255 };
+            *pixel = Rgba([180, 120, 90, alpha]);
+        }
+        let trans_path = temp_dir.path().join("trans_rgba.png");
+        trans_rgba.save_with_format(&trans_path, image::ImageFormat::Png).unwrap();
+
+        let trans_thumb = generate_image_thumbnail_sync(trans_path.to_str().unwrap()).unwrap();
+        assert_eq!(&trans_thumb[0..8], b"\x89PNG\r\n\x1a\n", "透過ピクセルを含むRGBA画像はPNG形式が維持されること");
     }
 }

@@ -206,6 +206,10 @@ class UIManager {
     // スクロール方向の追跡（Phase 2: UX-2）
     this._lastScrollTop = 0;
     this.scrollDirection = 'down';
+
+    // 仮想スクロール用スライディングウィンドウ・キャッシュ（スクロール毎の非同期IPC呼び出しを排除）
+    this._itemWindowCache = { start: -1, items: [], totalCount: 0 };
+    this._lastInitialChunkRef = null;
   }
 
   initWheelControl() {
@@ -1579,6 +1583,96 @@ class UIManager {
   }
 
   /**
+   * 仮想スクロール用のスライディングウィンドウ・キャッシュを無効化する。
+   * ソート順変更・フィルタ変更・ファイル追加削除時などに呼び出してバックエンドとの整合性を保証する。
+   */
+  invalidateItemWindowCache() {
+    this._itemWindowCache = { start: -1, items: [], totalCount: 0 };
+    this._lastInitialChunkRef = null;
+  }
+
+  /**
+   * 指定範囲のアイテム配列でスライディングウィンドウ・キャッシュを初期化する。
+   * @param {number} start - 開始インデックス
+   * @param {Array<Object>} items - キャッシュするアイテム配列
+   * @param {number} [totalCount] - 現在の総件数
+   */
+  seedItemWindowCache(start, items, totalCount) {
+    const arr = Array.isArray(items) ? items.slice() : [];
+    const total = typeof totalCount === 'number' ? totalCount : (appState ? appState.totalCount : arr.length);
+    this._itemWindowCache = {
+      start,
+      items: arr,
+      totalCount: total
+    };
+  }
+
+  /**
+   * スライディングウィンドウ・キャッシュ内に要求範囲が完全に含まれている場合、同期的にスライスを返す。
+   * キャッシュミスの場合は null を返し、呼び出し元で _fetchWindowItems にフォールバックさせる。
+   * @param {number} startIndex - 取得開始インデックス
+   * @param {number} count - 取得件数
+   * @returns {Array<Object>|null}
+   */
+  _getCachedWindowItems(startIndex, count) {
+    if (Array.isArray(appState.initialChunk) && appState.initialChunk.length > 0 && this._lastInitialChunkRef !== appState.initialChunk) {
+      this._lastInitialChunkRef = appState.initialChunk;
+      this.seedItemWindowCache(0, appState.initialChunk, appState.totalCount);
+    }
+
+    const cache = this._itemWindowCache;
+    if (!cache || cache.start < 0 || cache.items.length === 0 || cache.totalCount !== appState.totalCount) {
+      return null;
+    }
+
+    if (startIndex < cache.start) {
+      return null;
+    }
+
+    const relStart = startIndex - cache.start;
+    const relEnd = relStart + count;
+    const cacheCoversEnd = relEnd <= cache.items.length || (cache.start + cache.items.length >= appState.totalCount && relStart < cache.items.length);
+    if (!cacheCoversEnd) {
+      return null;
+    }
+
+    return cache.items.slice(relStart, relEnd);
+  }
+
+  /**
+   * バックエンドから要求範囲を含むスライディングウィンドウ（最大400件）を一括取得してキャッシュを更新し、
+   * 要求されたスライスを返す。
+   * @param {number} startIndex - 取得開始インデックス
+   * @param {number} count - 取得件数
+   * @returns {Promise<Array<Object>>}
+   */
+  async _fetchWindowItems(startIndex, count) {
+    const WINDOW_SIZE = 400;
+    const PRE_BUFFER = 60;
+    const fetchStart = startIndex <= PRE_BUFFER ? 0 : startIndex - PRE_BUFFER;
+    const total = appState.totalCount > 0 ? appState.totalCount : (startIndex + count);
+    const desiredCount = Math.max(count + (startIndex - fetchStart), WINDOW_SIZE);
+    const fetchCount = Math.max(count, Math.min(desiredCount, Math.max(count, total - fetchStart)));
+
+    const fetched = await window.veloceAPI.getItems(fetchStart, fetchCount);
+    if (!Array.isArray(fetched) || fetched.length === 0) {
+      return [];
+    }
+
+    this._itemWindowCache = {
+      start: fetchStart,
+      items: fetched,
+      totalCount: appState.totalCount
+    };
+
+    const relStart = startIndex - fetchStart;
+    if (relStart >= 0 && fetched.length > relStart) {
+      return fetched.slice(relStart, relStart + count);
+    }
+    return fetched.slice(0, count);
+  }
+
+  /**
    * ファイルリストとサムネイルグリッドの描画を非同期で行います。
    */
   async renderAll(resetScroll = false) {
@@ -1616,6 +1710,13 @@ class UIManager {
       }
     }
 
+    if (Array.isArray(appState.initialChunk) && appState.initialChunk.length > 0) {
+      this._lastInitialChunkRef = appState.initialChunk;
+      this.seedItemWindowCache(0, appState.initialChunk, appState.totalCount);
+    } else {
+      this.invalidateItemWindowCache();
+    }
+
     if (typeof this.updateVirtualGrid === 'function') {
       this.updateVirtualGrid(true);
     }
@@ -1640,6 +1741,7 @@ class UIManager {
     return this._runWithUpdateLock('list', async () => {
       if (!this.elements.fileListBody) return;
     const container = document.getElementById('center-top');
+    if (!container) return;
     const tbody = this.elements.fileListBody;
 
     if (!this._listScrollAttached && container) {
@@ -1760,12 +1862,10 @@ class UIManager {
       bottomSpacer.style.height = `${bottomSpacerHeight}px`;
     }
 
-    let items;
-    if (appState.initialChunk && safeStartRow === 0) {
-      const needed = endRow - safeStartRow + 1;
-      items = appState.initialChunk.slice(0, needed);
-    } else {
-      items = await window.veloceAPI.getItems(safeStartRow, endRow - safeStartRow + 1);
+    const neededListCount = endRow - safeStartRow + 1;
+    let items = this._getCachedWindowItems(safeStartRow, neededListCount);
+    if (!items) {
+      items = await this._fetchWindowItems(safeStartRow, neededListCount);
     }
 
     // 非同期呼び出し完了時に最新スクロール位置との不整合を検知した場合は描画を破棄し、表示の同期整合性を維持する
@@ -2005,12 +2105,10 @@ class UIManager {
     this.lastGridStartIndex = startIndex;
     this.lastGridEndIndex = endIndex;
 
-    let items;
-    if (appState.initialChunk && startIndex === 0) {
-      const needed = endIndex - startIndex + 1;
-      items = appState.initialChunk.slice(0, needed);
-    } else {
-      items = await window.veloceAPI.getItems(startIndex, endIndex - startIndex + 1);
+    const neededGridCount = endIndex - startIndex + 1;
+    let items = this._getCachedWindowItems(startIndex, neededGridCount);
+    if (!items) {
+      items = await this._fetchWindowItems(startIndex, neededGridCount);
     }
 
     // 非同期呼び出し中にスクロールが遷移した場合は古い結果を破棄し、同期外れによるちらつきと表示崩れを防止する
@@ -2385,13 +2483,20 @@ class UIManager {
   updateFileDimensions(filePath, width, height) {
     if (!width || !height) return;
 
-    // 1. appState.initialChunk や現在の選択中アイテムなど、JS側のメモリキャッシュを更新
+    // 1. appState.initialChunk およびスライディングウィンドウ・キャッシュ内の該当アイテムを更新
     const state = (typeof window !== 'undefined' && window.appState) ? window.appState : appState;
     if (state && state.initialChunk) {
       const cached = state.initialChunk.find(f => f.path === filePath);
       if (cached) {
         cached.width = width;
         cached.height = height;
+      }
+    }
+    if (this._itemWindowCache && Array.isArray(this._itemWindowCache.items)) {
+      const winCached = this._itemWindowCache.items.find(f => f && f.path === filePath);
+      if (winCached) {
+        winCached.width = width;
+        winCached.height = height;
       }
     }
 

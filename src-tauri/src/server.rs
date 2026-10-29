@@ -19,13 +19,21 @@ pub fn start_local_video_server(
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind local video server");
     let port = listener.local_addr().unwrap().port();
 
+    // 高速スクロール時のキャッシュ済みサムネイル配信や動画チャンク配信で、
+    // リクエストごとのOSスレッド生成・破棄オーバーヘッドを排除するための専用ワーカースレッドプール
+    let http_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .thread_name(|i| format!("veloce-http-{}", i))
+        .build()
+        .expect("Failed to build local HTTP server thread pool");
+
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {
                 let db_tx = db_tx.clone();
                 let app_handle_slot = app_handle_slot.clone();
                 let db_conn = db_conn.clone();
-                std::thread::spawn(move || {
+                http_pool.spawn(move || {
                     let mut reader = BufReader::new(&mut stream);
                     let mut request_line = String::new();
                     if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
@@ -121,6 +129,7 @@ pub fn start_local_video_server(
 
                         let clean_path = path_str.replace("\\\\?\\", "");
                         let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+                        let hash_key_for_url = hash_key.clone();
 
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
                         let _ = db_tx.blocking_send(DbMsg::SaveThumbnail {
@@ -140,7 +149,13 @@ pub fn start_local_video_server(
                             }
                         }
 
-                        let saved_url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", port, urlencoding::encode(&path_str), mtime);
+                        let saved_url = format!(
+                            "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
+                            port,
+                            urlencoding::encode(&path_str),
+                            mtime,
+                            hash_key_for_url
+                        );
                         let mut resp = String::new();
                         resp.push_str("HTTP/1.1 200 OK\r\n");
                         resp.push_str("Content-Type: text/plain; charset=utf-8\r\n");

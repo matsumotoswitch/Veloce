@@ -320,3 +320,139 @@ describe('Virtual Scroll Reflow Optimization', () => {
   });
 });
 
+describe('Sliding-Window Item Cache & Thumbnail Pipeline Optimizations', () => {
+  it('resolves items synchronously from _itemWindowCache across multiple row scrolls without redundant getItems IPC calls', async () => {
+    const totalCount = 300;
+    const files = Array.from({ length: totalCount }, (_, i) => ({
+      path: `C:/files/win_file_${i}.png`,
+      name: `win_file_${i}.png`,
+      ext: '.png',
+      size: 2048,
+      mtime: 2000,
+      hasThumbnailCache: true
+    }));
+
+    appState.totalCount = totalCount;
+    appState.selection = new Set();
+    appState.thumbnailUrls = new Map();
+    appState.ratings = {};
+    appState.dragState = { isAppDragging: false };
+    appState.initialChunk = null;
+    appState.savedScrollTopGrid = 0;
+
+    const getItemsMock = vi.fn().mockImplementation((offset, limit) => {
+      return Promise.resolve(files.slice(offset, offset + limit));
+    });
+    window.veloceAPI = { getItems: getItemsMock };
+
+    const ui = new UIManager(appState);
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    Object.defineProperty(container, 'clientWidth', { value: 648, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 384, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    ui.elements.thumbnailGrid = container;
+    ui.elements.thumbnailSizeSlider = { value: '120' };
+
+    // 初回描画: キャッシュミスのため 1 回だけ getItems が呼ばれ、ウィンドウキャッシュが構築される
+    await ui.updateVirtualGrid(true);
+    expect(getItemsMock).toHaveBeenCalledTimes(1);
+
+    // 連続スクロール（行が変化する複数の scrollTop 遷移）: 全てキャッシュ範囲内のため getItems は追加呼び出しされない
+    container.scrollTop = 256;
+    await ui.updateVirtualGrid(false);
+    container.scrollTop = 512;
+    await ui.updateVirtualGrid(false);
+    container.scrollTop = 1024;
+    await ui.updateVirtualGrid(false);
+
+    expect(getItemsMock).toHaveBeenCalledTimes(1);
+
+    // invalidateItemWindowCache 呼び出し後は次回描画で再取得されること
+    ui.invalidateItemWindowCache();
+    await ui.updateVirtualGrid(true);
+    expect(getItemsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('seeds _itemWindowCache from appState.initialChunk in renderAll and updates dimensions in cache', async () => {
+    const chunkFiles = Array.from({ length: 150 }, (_, i) => ({
+      path: `C:/files/seed_${i}.png`,
+      name: `seed_${i}.png`,
+      ext: '.png',
+      width: 0,
+      height: 0,
+      size: 1024,
+      mtime: 1000,
+      hasThumbnailCache: true
+    }));
+
+    appState.totalCount = 150;
+    appState.selection = new Set();
+    appState.thumbnailUrls = new Map();
+    appState.ratings = {};
+    appState.dragState = { isAppDragging: false };
+    appState.initialChunk = chunkFiles;
+
+    const getItemsMock = vi.fn().mockResolvedValue([]);
+    window.veloceAPI = { getItems: getItemsMock };
+
+    const ui = new UIManager(appState);
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    Object.defineProperty(container, 'clientWidth', { value: 648, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 384, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    const listContainer = document.createElement('div');
+    listContainer.id = 'center-top';
+    Object.defineProperty(listContainer, 'clientHeight', { value: 300, configurable: true });
+    Object.defineProperty(listContainer, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    const tbody = document.createElement('tbody');
+    tbody.id = 'file-list-body';
+    listContainer.appendChild(tbody);
+    document.body.appendChild(listContainer);
+
+    ui.elements.thumbnailGrid = container;
+    ui.elements.fileListBody = tbody;
+    ui.elements.thumbnailSizeSlider = { value: '120' };
+
+    try {
+      await ui.renderAll(true);
+
+      // initialChunk は renderAll 完了後に null クリアされるが、_itemWindowCache には保持される
+      expect(appState.initialChunk).toBeNull();
+      expect(getItemsMock).not.toHaveBeenCalled();
+
+      // 後続のスクロールでも initialChunk 由来のウィンドウキャッシュから同期解決され IPC が発生しないこと
+      container.scrollTop = 1280;
+      await ui.updateVirtualGrid(false);
+      expect(getItemsMock).not.toHaveBeenCalled();
+
+      // updateFileDimensions がウィンドウキャッシュ内のアイテム寸法も更新すること
+      ui.updateFileDimensions('C:/files/seed_10.png', 1024, 1536);
+      const cachedItem = ui._itemWindowCache.items.find(f => f.path === 'C:/files/seed_10.png');
+      expect(cachedItem.width).toBe(1024);
+      expect(cachedItem.height).toBe(1536);
+    } finally {
+      listContainer.remove();
+    }
+  });
+
+  it('excludes invisible img.thumbnail-img.loading from CSS shimmer animation and uses a thread pool in server.rs', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const thumbCss = fs.readFileSync(path.resolve(__dirname, '../src/renderer/css/thumbnail.css'), 'utf-8');
+    expect(thumbCss).not.toMatch(/\.thumbnail-item\.loading,\s*img\.thumbnail-img\.loading/);
+    expect(thumbCss).toMatch(/\.thumbnail-item\.loading\s*\{[\s\S]*?animation:\s*shimmer/);
+
+    const serverRs = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/server.rs'), 'utf-8');
+    expect(serverRs).toContain('rayon::ThreadPoolBuilder::new()');
+    expect(serverRs).toContain('http_pool.spawn');
+    expect(serverRs).toContain('&thumb=1&hash=');
+  });
+});
+
+
