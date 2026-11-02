@@ -65,6 +65,8 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 * **windows-rs** (https://github.com/microsoft/windows-rs)
 * **parking_lot** (https://github.com/Amanieu/parking_lot)
 * **smallvec** (https://github.com/servo/rust-smallvec)
+* **zune-jpeg** (https://github.com/etemesi254/zune-image)
+* **zune-core** (https://github.com/etemesi254/zune-image)
 
 ## 2. MIT License
 以下のソフトウェアおよび多くのフロントエンド・パッケージ（Vite等）は、MIT License の下で提供されています。
