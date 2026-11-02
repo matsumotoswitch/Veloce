@@ -13,6 +13,7 @@
 
 import { appState, SmartFolderStore } from './renderer-state.js';
 import { createFavoriteEditorUI, uiManager } from './renderer-ui.js';
+import { setSetting } from '../common/settings-store.js';
 
 let sfModalDelegated = false;
 
@@ -373,7 +374,7 @@ export function showEditFavoriteModal(fav, options = {}) {
     fav.color = data.color;
     fav.name = document.getElementById('fav-name-input').value;
     fav.path = document.getElementById('fav-path-input').value;
-    localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+    setSetting('favorites', JSON.stringify(appState.favorites));
     if (renderFavorites) renderFavorites();
 
     let tabUpdated = false;

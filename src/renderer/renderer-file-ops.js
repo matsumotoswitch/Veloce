@@ -9,6 +9,7 @@ import { appState, fileOpsState } from './renderer-state.js';
 import { uiManager } from './renderer-ui.js';
 import { validateFilename } from '../common/path-utils.js';
 import { resetThumbnailPreloader } from './renderer-thumbnails.js';
+import { setSetting } from '../common/settings-store.js';
 
 export { fileOpsState };
 
@@ -82,7 +83,7 @@ export async function renameSelectedFolder(callbacks = fileOpsCallbacks) {
       callbacks.showNotification?.(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (appState.currentDirectory.startsWith(oldPath)) {
         appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
+        setSetting('currentDirectory', appState.currentDirectory);
       }
       if (callbacks.refreshTree) await callbacks.refreshTree();
     } else {
@@ -120,7 +121,7 @@ export async function deleteSelectedFolder(callbacks = fileOpsCallbacks) {
         let parentDir = parts.join(sep);
         if (!parentDir.includes(sep)) parentDir += sep;
         appState.currentDirectory = parentDir;
-        localStorage.setItem('currentDirectory', appState.currentDirectory);
+        setSetting('currentDirectory', appState.currentDirectory);
         if (callbacks.refreshFileList) await callbacks.refreshFileList();
       }
       if (callbacks.refreshTree) await callbacks.refreshTree();
@@ -312,7 +313,7 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
         uiManager.showToast('フォルダ名の変更を元に戻しました', 3000, 'undo', 'success');
         if (appState.currentDirectory.startsWith(action.newPath)) {
           appState.currentDirectory = appState.currentDirectory.replace(action.newPath, action.oldPath);
-          localStorage.setItem('currentDirectory', appState.currentDirectory);
+          setSetting('currentDirectory', appState.currentDirectory);
         }
         if (callbacks.refreshTree) await callbacks.refreshTree();
       }

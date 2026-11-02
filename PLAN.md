@@ -38,7 +38,7 @@
       * `path-utils.js`: パス正規化、親ディレクトリ取得、ファイル名/フォルダ名バリデーションの一元管理（`validateFilename`）
       * `metadata-format.js`: AIメタデータ解析（PNG/WebP）、プロンプトハイライト
       * `dialog-base.js`: 共通ダイアログ基盤、キーボード/オーバーレイハンドラー
-      * `settings-store.js`: SQLite (`veloce_settings.db`) を Single Source of Truth とするアプリケーション設定ストア。起動時に4条件調停（localStorage/DBの有無の組み合わせ）で設定を最新化し、メモリ内キャッシュによるO(1)同期取得・100msデバウンスでのSQLiteバッチ書き込み。タブ状態、ペインレイアウト、フォルダ別ソート設定等の永続化を一元管理
+      * `settings-store.js`: SQLite (`veloce_settings.db`) を Single Source of Truth とするアプリケーション設定ストア。起動時に4条件調停（localStorage/DBの有無の組み合わせ）で設定を最新化し、メモリ内キャッシュによるO(1)同期取得・100msデバウンスでのSQLiteバッチ書き込み。タブ状態、ペインレイアウト、スマートフォルダ定義、フォルダ別ソート設定等の永続化を一元管理
     * **メインウィンドウ (`src/renderer/`):**
       * `renderer.js`: アプリ全体のライフサイクル管理、グローバルショートカット、初期化統括
       * `renderer-state.js`: アプリケーション状態管理、4つのサブドメイン状態オブジェクト（`dndState`, `fileOpsState`, `layoutState`, `thumbnailState`）とファサード（`appState`）
@@ -150,11 +150,16 @@
 
 ## 5. スマートフォルダ & 高度なフィルタ
 
-### 5.1 評価（レーティング）システム
+### 5.1 スマートフォルダの定義と永続化アーキテクチャ
+* **設定ストア（SQLite）による一元永続化:** ユーザーが新規作成・編集・削除したスマートフォルダの定義（ルール、アイコン、カラー、マッチ条件）は、SQLite設定DB (`veloce_settings.db`) の `app_settings` テーブル（キー: `'smartFolders'`）を Single Source of Truth として一元管理される。
+* **即時コミットと同期:** ダイアログでの編集完了（`upsertFolder`）時および削除（`deleteFolder`）時、即座に `SettingsStore.setItem` および `SettingsStore.flush()` が実行され、SQLiteへ即時コミットされると同時に、バックエンド側の `update_smart_folders` IPC コマンドを通じて Rust 側状態（`AppState`）とも完全同期。
+* **起動時復元:** アプリ起動時（`DOMContentLoaded`）、`SettingsStore.init()` の完了直後に `SmartFolderStore.load(true)` が呼び出され、DB から最新のスマートフォルダ一覧を同期展開。再起動やビルドによって自作フォルダが消える事態を物理的に防止する。
+
+### 5.2 評価（レーティング）システム
 * SQLite上の独立した `ratings` テーブルで管理され、ファイルパスを主キーとして1〜5の数値を保存（0はレコード削除）。
 * レーティングの変更は即座にフロントエンドのグリッド上のバッジ、およびリストビューの行にリアクティブに反映。仮想スクロールのバッファ領域内にキャッシュされているDOM要素に対しても、`_domByPath` による O(1) アクセスと `_cachedRating` のチェックを経て再描画（Reflow）を誘発することなく即座に書き換えが行われ、ユーザーがスクロールせずとも状態が常に同期される設計となっている。
 
-### 5.2 スマートフォルダの検索条件・演算子仕様
+### 5.3 スマートフォルダの検索条件・演算子仕様
 ユーザーがUI上で自由に組み合わせ可能な条件ルール（`SmartFolderRule`）は、バックエンド側で動的SQLクエリに変換され、インデックスおよびFTS5仮想テーブルを活用して高速にフィルタリングを実行。
 
 | 条件タイプ (`type`) | 対応演算子 (`operator`) | 処理・計算ロジック |

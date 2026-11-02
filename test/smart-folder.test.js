@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { appState } from '../src/renderer/renderer-state.js';
+import { appState, SmartFolderStore } from '../src/renderer/renderer-state.js';
 
 describe('Smart Folder Feature', () => {
   beforeEach(() => {
@@ -211,4 +211,98 @@ describe('Smart Folder Feature', () => {
     expect(badge.classList.contains('show')).toBe(true);
     expect(badge.children[1].textContent).toBe('5');
   });
+  describe('SmartFolderStore SQLite Persistence and Re-initialization', () => {
+    let mockSettings;
+    let mockFlush;
+
+    beforeEach(() => {
+      mockSettings = new Map();
+      mockFlush = vi.fn().mockResolvedValue();
+
+      window.SettingsStore = {
+        getItem: vi.fn((key) => mockSettings.get(key) || null),
+        setItem: vi.fn((key, val) => mockSettings.set(key, String(val))),
+        flush: mockFlush,
+      };
+
+      SmartFolderStore._cache = null;
+    });
+
+    afterEach(() => {
+      delete window.SettingsStore;
+      SmartFolderStore._cache = null;
+    });
+
+    it('should load default smart folders and persist to SettingsStore if empty', () => {
+      const folders = SmartFolderStore.load(true);
+      expect(folders.length).toBeGreaterThanOrEqual(2);
+      expect(window.SettingsStore.setItem).toHaveBeenCalledWith('smartFolders', expect.any(String));
+    });
+
+    it('should load custom smart folders from SettingsStore when available', () => {
+      const customFolders = [
+        { id: 'custom_1', name: 'My Custom Folder', matchType: 'all', conditions: [] }
+      ];
+      mockSettings.set('smartFolders', JSON.stringify(customFolders));
+
+      const folders = SmartFolderStore.load(true);
+      expect(folders).toHaveLength(1);
+      expect(folders[0].id).toBe('custom_1');
+      expect(folders[0].name).toBe('My Custom Folder');
+    });
+
+    it('should persist new folder to SettingsStore and call flush on upsertFolder', async () => {
+      const newFolder = {
+        id: 'user_created',
+        name: 'User Created',
+        icon: 'FAV_STAR',
+        color: 'red',
+        matchType: 'all',
+        conditions: [{ type: 'rating', operator: '==', value: '3' }]
+      };
+
+      const updated = await SmartFolderStore.upsertFolder(newFolder);
+      expect(updated.some(f => f.id === 'user_created')).toBe(true);
+
+      expect(window.SettingsStore.setItem).toHaveBeenCalledWith(
+        'smartFolders',
+        expect.stringContaining('user_created')
+      );
+      expect(mockFlush).toHaveBeenCalled();
+      expect(window.veloceAPI.updateSmartFolders).toHaveBeenCalledWith(updated);
+    });
+
+    it('should persist deleted folder to SettingsStore and call flush on deleteFolder', async () => {
+      const initial = [
+        { id: 'folder_a', name: 'Folder A', matchType: 'all', conditions: [] },
+        { id: 'folder_b', name: 'Folder B', matchType: 'all', conditions: [] }
+      ];
+      mockSettings.set('smartFolders', JSON.stringify(initial));
+
+      const updated = await SmartFolderStore.deleteFolder('folder_a');
+      expect(updated.some(f => f.id === 'folder_a')).toBe(false);
+      expect(updated.some(f => f.id === 'folder_b')).toBe(true);
+
+      expect(window.SettingsStore.setItem).toHaveBeenCalledWith(
+        'smartFolders',
+        expect.not.stringContaining('folder_a')
+      );
+      expect(mockFlush).toHaveBeenCalled();
+      expect(window.veloceAPI.updateSmartFolders).toHaveBeenCalledWith(updated);
+    });
+
+    it('should preserve custom smart folders across application re-initialization (no reset on reboot)', async () => {
+      // ユーザーがカスタムフォルダを作成
+      const custom = { id: 'preserved_folder', name: 'Preserved', matchType: 'all', conditions: [] };
+      await SmartFolderStore.upsertFolder(custom);
+
+      // アプリ再起動をシミュレート: メモリ内キャッシュを消去し、SettingsStoreから再ロード
+      SmartFolderStore._cache = null;
+      const reloaded = SmartFolderStore.load(true);
+
+      expect(reloaded.some(f => f.id === 'preserved_folder')).toBe(true);
+      expect(reloaded.find(f => f.id === 'preserved_folder').name).toBe('Preserved');
+    });
+  });
+
 });

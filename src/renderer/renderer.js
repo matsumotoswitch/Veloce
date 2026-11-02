@@ -2155,6 +2155,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (window.SettingsStore) {
     try {
       await window.SettingsStore.init(window.veloceAPI);
+      // DBから読み込まれた真実の設定データでスマートフォルダおよびお気に入りを同期更新
+      appState.smartFolders = SmartFolderStore.load(true);
+      const savedFavs = getSetting('favorites');
+      if (savedFavs) {
+        try {
+          appState.favorites = JSON.parse(savedFavs);
+        } catch (_) {}
+      }
     } catch (e) {
       console.warn('[SettingsStore] Failed to initialize settings store:', e);
     }

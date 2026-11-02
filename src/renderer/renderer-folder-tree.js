@@ -8,6 +8,7 @@
 
 import { appState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
+import { setSetting } from '../common/settings-store.js';
 
 let treeCallbacks = {
   refreshFileList: () => {},
@@ -336,7 +337,7 @@ export async function handleTreeNavigation(key, callbacks = treeCallbacks) {
         activeTab.name = typeof callbacks.getTabNameForPath === 'function' ? callbacks.getTabNameForPath(path) : path.split(/[\\/]/).pop();
         activeTab.scrollTop = 0;
         appState.currentDirectory = path;
-        localStorage.setItem('currentDirectory', path);
+        setSetting('currentDirectory', path);
         uiManager.renderTabs();
         if (typeof callbacks.saveTabsState === 'function') callbacks.saveTabsState();
         if (typeof callbacks.refreshFileList === 'function') callbacks.refreshFileList(true);

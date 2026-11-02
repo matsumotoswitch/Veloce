@@ -26,24 +26,51 @@ export const SmartFolderStore = {
   _cache: null,
   _storageKey: 'smartFolders',
 
-  load() {
-    if (this._cache) return this._cache;
+  /**
+   * スマートフォルダ一覧を取得する（SettingsStore優先、フォールバックとしてlocalStorage）
+   * @param {boolean} [forceReload=false] - キャッシュを破棄して最新設定を強制再読み込みするか
+   * @returns {Array<any>}
+   */
+  load(forceReload = false) {
+    if (this._cache && !forceReload) return this._cache;
     try {
-      const raw = localStorage.getItem(this._storageKey);
+      let raw = null;
+      if (typeof window !== 'undefined' && window.SettingsStore) {
+        raw = window.SettingsStore.getItem(this._storageKey);
+      }
+      if (!raw && typeof localStorage !== 'undefined') {
+        raw = localStorage.getItem(this._storageKey);
+      }
       this._cache = raw ? JSON.parse(raw) : DEFAULT_SMART_FOLDERS;
     } catch (e) {
       console.error("Smart Folder Parse Error:", e);
       this._cache = DEFAULT_SMART_FOLDERS;
     }
-    if (!localStorage.getItem(this._storageKey)) {
+    if (typeof window !== 'undefined' && window.SettingsStore) {
+      if (!window.SettingsStore.getItem(this._storageKey)) {
+        window.SettingsStore.setItem(this._storageKey, JSON.stringify(this._cache));
+      }
+    } else if (typeof localStorage !== 'undefined' && !localStorage.getItem(this._storageKey)) {
       localStorage.setItem(this._storageKey, JSON.stringify(this._cache));
     }
     return this._cache;
   },
 
+  /**
+   * スマートフォルダ一覧をSettingsStore（SQLite DB）へ永続化し、Rust側状態とも同期
+   * @param {Array<any>} foldersArray
+   */
   async save(foldersArray) {
     this._cache = foldersArray;
-    localStorage.setItem(this._storageKey, JSON.stringify(foldersArray));
+    const strVal = JSON.stringify(foldersArray);
+    if (typeof window !== 'undefined' && window.SettingsStore) {
+      window.SettingsStore.setItem(this._storageKey, strVal);
+      if (typeof window.SettingsStore.flush === 'function') {
+        await window.SettingsStore.flush();
+      }
+    } else if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(this._storageKey, strVal);
+    }
     try {
       if (window.veloceAPI && window.veloceAPI.updateSmartFolders) {
         await window.veloceAPI.updateSmartFolders(foldersArray);
@@ -107,17 +134,39 @@ export const fileOpsState = {
 };
 
 /**
+ * SettingsStore（SQLite）を優先し、フォールバックとしてlocalStorageから安全に設定を取得する
+ * @param {string} key
+ * @param {string} defaultValue
+ * @returns {string}
+ */
+function getSafeSetting(key, defaultValue) {
+  if (typeof window !== 'undefined' && typeof window.getSetting === 'function') {
+    const val = window.getSetting(key, defaultValue);
+    if (val !== null && val !== undefined) return String(val);
+  }
+  if (typeof window !== 'undefined' && window.SettingsStore && typeof window.SettingsStore.getItem === 'function') {
+    const val = window.SettingsStore.getItem(key, defaultValue);
+    if (val !== null && val !== undefined) return String(val);
+  }
+  if (typeof localStorage !== 'undefined') {
+    const val = localStorage.getItem(key);
+    if (val !== null && val !== undefined) return String(val);
+  }
+  return defaultValue;
+}
+
+/**
  * ウィンドウペイン分割およびレイアウト設定の局所状態
  */
 export const layoutState = {
-  leftWidth: parseInt(localStorage.getItem('leftWidth') || '200', 10),             // 左ペインの幅(px)
-  rightWidth: parseInt(localStorage.getItem('rightWidth') || '300', 10),            // 右ペインの幅(px)
-  leftVisible: localStorage.getItem('leftVisible') !== 'false',          // 左ペインの表示状態
-  rightVisible: localStorage.getItem('rightVisible') !== 'false',         // 右ペインの表示状態
-  leftTopHeight: parseInt(localStorage.getItem('leftTopHeight') || '150', 10),
-  leftTopVisible: localStorage.getItem('leftTopVisible') !== 'false',
-  rightTopHeight: parseInt(localStorage.getItem('rightTopHeight') || '200', 10),
-  rightTopVisible: localStorage.getItem('rightTopVisible') !== 'false'
+  leftWidth: parseInt(getSafeSetting('leftWidth', '200'), 10),             // 左ペインの幅(px)
+  rightWidth: parseInt(getSafeSetting('rightWidth', '300'), 10),            // 右ペインの幅(px)
+  leftVisible: getSafeSetting('leftVisible', 'true') !== 'false',          // 左ペインの表示状態
+  rightVisible: getSafeSetting('rightVisible', 'true') !== 'false',         // 右ペインの表示状態
+  leftTopHeight: parseInt(getSafeSetting('leftTopHeight', '150'), 10),
+  leftTopVisible: getSafeSetting('leftTopVisible', 'true') !== 'false',
+  rightTopHeight: parseInt(getSafeSetting('rightTopHeight', '200'), 10),
+  rightTopVisible: getSafeSetting('rightTopVisible', 'true') !== 'false'
 };
 
 /**
@@ -176,7 +225,7 @@ class AppState {
     /** @type {string} 現在表示中のディレクトリパス */
     this.currentDirectory = '';
     /** @type {Array<{id: string, name: string, path: string, icon: string}>} お気に入りリスト */
-    this.favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+    this.favorites = JSON.parse(getSafeSetting('favorites', '[]'));
 
     /** @type {Array<{id: string, name: string, icon: string, color: string, matchType: string, conditions: Array<any>}>} スマートフォルダリスト */
     this.smartFolders = SmartFolderStore.load();

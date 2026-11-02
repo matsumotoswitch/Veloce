@@ -14,6 +14,7 @@
 
 import { appState, dndState, fileOpsState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
+import { setSetting } from '../common/settings-store.js';
 
 export { dndState };
 
@@ -510,7 +511,7 @@ export function initFavoritesDnd(favListElement, callbacks = {}) {
 
           const newFav = { id: Date.now().toString(), name: folder.name, path: folder.path, icon: 'star', color: 'default' };
           appState.favorites.splice(insertIndex, 0, newFav);
-          localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+          setSetting('favorites', JSON.stringify(appState.favorites));
           if (renderFavorites) renderFavorites();
           if (showNotification) {
             showNotification(`「${folder.name}」をお気に入りに追加しました`, 'success');
@@ -542,7 +543,7 @@ export function initFavoritesDnd(favListElement, callbacks = {}) {
       }
 
       appState.favorites.splice(newIndex, 0, movedItem);
-      localStorage.setItem('favorites', JSON.stringify(appState.favorites));
+      setSetting('favorites', JSON.stringify(appState.favorites));
       if (renderFavorites) renderFavorites();
     }
   });
