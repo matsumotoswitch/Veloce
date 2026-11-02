@@ -89,6 +89,11 @@ export function initTabHandlers(ctx) {
 
     updateCurrentTabState(appState, uiManager);
 
+    // タブ切り替え直前に、前タブで実行中だったサムネイル生成・Worker・バッチ処理を即座に全破棄し、新タブの描画に影響を与えない
+    if (window.thumbnailManager && typeof window.thumbnailManager.clear === 'function') {
+      window.thumbnailManager.clear();
+    }
+
     appState.activeTabIndex = index;
     uiManager.renderTabs();
     if (uiManager && typeof uiManager.scrollTabIntoView === 'function') {

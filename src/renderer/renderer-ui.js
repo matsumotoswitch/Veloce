@@ -2211,9 +2211,16 @@ class UIManager {
         wrapper.dataset.filepath = file.path;
         wrapper.dataset.index = i;
 
-        // 再利用直後は古い画像の残像を即座に隠蔽し、スケルトンローディング状態にする
-        wrapper.classList.add('loading');
-        img.classList.add('loading');
+        // 画面上に表示されているアイテム（visibleStartIndex 〜 visibleEndIndex）のみスケルトンローディング状態（エフェクト）にする
+        // 画面外バッファ領域にはローディングエフェクトを出さず、現在画面の表示優先度と視認性を明確にする
+        const isItemInViewport = i >= visibleStartIndex && i <= visibleEndIndex;
+        if (isItemInViewport) {
+          wrapper.classList.add('loading');
+          img.classList.add('loading');
+        } else {
+          wrapper.classList.remove('loading');
+          img.classList.remove('loading');
+        }
 
         if (file.name) {
           label.textContent = file.name;

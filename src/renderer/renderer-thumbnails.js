@@ -226,6 +226,20 @@ export function applySharpenFilter(ctx, width, height, amount = 0.15) {
 class ThumbnailWorkerPool {
   constructor() {
     this.initialized = true;
+    this.activeControllers = new Set();
+  }
+
+  /**
+   * 実行中のすべての画像サムネイル生成タスク（OffscreenCanvas / Fetch）を即刻打ち切る。
+   * タブ切り替えやフォルダ移動時に前のタブのCPU・Worker・I/O負荷をゼロにする。
+   */
+  abortAll() {
+    for (const controller of this.activeControllers) {
+      try {
+        controller.abort();
+      } catch (_) {}
+    }
+    this.activeControllers.clear();
   }
 
   /**
@@ -239,6 +253,7 @@ class ThumbnailWorkerPool {
     return new Promise(async (resolve, reject) => {
       // 5秒間の絶対タイムアウト制御
       const controller = new AbortController();
+      this.activeControllers.add(controller);
       const timeoutId = setTimeout(() => {
         controller.abort();
         reject(new Error("Thumbnail generation timed out (5s)"));
@@ -481,6 +496,7 @@ class ThumbnailWorkerPool {
       } catch (err) {
         reject(err);
       } finally {
+        this.activeControllers.delete(controller);
         if (abortSignal) abortSignal.removeEventListener('abort', onGlobalAbort);
       }
     });
@@ -659,8 +675,16 @@ export class ThumbnailQueueManager {
     this.maxVideoConcurrency = Math.max(1, Math.min(2, Math.floor((concurrency || 4) / 3)));
     this.activeBatchPaths = new Set();
     this.activeBatchCount = 0;
-    this.maxBatchConcurrency = 1;
-    this.batchSize = 32;
+    // Rust 側バッチ (generate_thumbnail_batch) は全件の処理完了後に結果を一括返却するため、
+    // 1バッチの件数が大きいほど、画面内サムネイルの表示が「バッチ内で最も遅い1枚」の完了まで遅延する。
+    // 画面内アイテムは viewportBatchSize 件の小さなチャンクに分割して最大 maxBatchConcurrency 本を並行投入し、
+    // 完了したチャンクから順次表示する。画面外（バッファ・プリロード）用バッチは同時に1本までとし、
+    // 画面内アイテムの未着手・処理中がいずれも存在しない場合に限り投入する（Rayon スレッドプールの優先配分）。
+    this.maxBatchConcurrency = 4;
+    this.viewportBatchSize = 4;
+    this.batchSize = 8;
+    this.activeViewportBatchCount = 0;
+    this.activeBackgroundBatchCount = 0;
   }
 
   enqueuePriority(filePath, skipDbCheck = false) {
@@ -793,11 +817,16 @@ export class ThumbnailQueueManager {
     // 現在実行中のタスクを強制キャンセルし、新しいコンテキストを開始する
     this.abortController.abort();
     this.abortController = new AbortController();
+    if (thumbnailWorkerPool && typeof thumbnailWorkerPool.abortAll === 'function') {
+      thumbnailWorkerPool.abortAll();
+    }
     
     this.activeTasks.clear();
     if (this.activeVideoTasks) this.activeVideoTasks.clear();
     if (this.activeBatchPaths) this.activeBatchPaths.clear();
     this.activeBatchCount = 0;
+    this.activeViewportBatchCount = 0;
+    this.activeBackgroundBatchCount = 0;
     if (this._dirtyTasks) this._dirtyTasks.clear();
     if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
       window.debouncedUpdateSmartFolderCounts();
@@ -900,9 +929,12 @@ export class ThumbnailQueueManager {
       const viewportPaths = appState.viewportPathSet || new Set();
       const visiblePaths = appState.visiblePathSet || new Set();
 
-      // Phase 4: Rust 側高速並列バッチ生成 (generateThumbnailBatch) ファストパス
+      // Phase 4: Rust 側並列バッチ生成 (generateThumbnailBatch) ファストパス
+      // - 画面内アイテム (score 0): viewportBatchSize 件ごとのチャンクに分割し、画面上の並び順を保ったまま
+      //   maxBatchConcurrency 本まで並行投入する。チャンク単位で結果が返るため、画面先頭から順次表示される。
+      // - 画面外アイテム (score 1, 2) およびプリロード: 画面内アイテムの未着手・処理中がいずれも無い場合に限り、
+      //   batchSize 件のバッチを1本だけ投入する。
       if (window.veloceAPI && typeof window.veloceAPI.generateThumbnailBatch === 'function' && this.activeBatchCount < this.maxBatchConcurrency) {
-        const batchItems = [];
         const remainingPriority = [];
 
         const getPriorityScore = (fp) => {
@@ -933,73 +965,96 @@ export class ThumbnailQueueManager {
           }
         }
 
-        if (staticCandidates.length > 0) {
-          staticCandidates.sort((a, b) => a.score - b.score || a.originalIndex - b.originalIndex);
+        // スコア順（同スコア内はキュー投入順 = 画面上の並び順）に安定ソートして画面内/画面外に振り分ける
+        staticCandidates.sort((a, b) => a.score - b.score || a.originalIndex - b.originalIndex);
+        const viewportCandidates = [];
+        const otherCandidates = [];
+        for (let i = 0; i < staticCandidates.length; i++) {
+          const c = staticCandidates[i];
+          if (c.score === 0) viewportCandidates.push(c.req);
+          else otherCandidates.push(c.req);
+        }
 
-          // 画面内アイテム（score === 0）の有無を判定
-          const viewportCandidates = staticCandidates.filter(c => c.score === 0);
-          let chosen = [];
-          let unchosen = [];
+        const batchesToRun = [];
 
-          if (viewportCandidates.length > 0) {
-            // 画面内アイテムが存在する場合:
-            // 画面外のアイテムを一切混ぜず、画面内アイテムのみを最優先バッチとして切り出す。
-            // これにより、画面外アイテムの生成完了待ちによる画面内アイテムの表示遅延を完全に根絶する。
-            chosen = viewportCandidates.slice(0, this.batchSize);
-            const chosenSet = new Set(chosen.map(c => c.req.filePath));
-            unchosen = staticCandidates.filter(c => !chosenSet.has(c.req.filePath));
-          } else {
-            // 画面内アイテムがキューにない場合（バッファ領域やバックグラウンド）:
-            // 最大 batchSize まで組み、画面外プレロードからも補充可能とする
-            chosen = staticCandidates.slice(0, this.batchSize);
-            unchosen = staticCandidates.slice(this.batchSize);
+        // 画面内アイテム: 小チャンクに分割して空きバッチ枠の分だけ並行投入
+        let viewportCursor = 0;
+        while (viewportCursor < viewportCandidates.length && this.activeBatchCount + batchesToRun.length < this.maxBatchConcurrency) {
+          batchesToRun.push({
+            items: viewportCandidates.slice(viewportCursor, viewportCursor + this.viewportBatchSize),
+            isViewport: true
+          });
+          viewportCursor += this.viewportBatchSize;
+        }
+        const leftoverViewport = viewportCandidates.slice(viewportCursor);
+
+        // 画面外アイテム: 画面内アイテムが未着手・処理中ともに無い場合のみ1本投入し、プリロードから補充する
+        let leftoverOther = otherCandidates;
+        const canRunBackground = viewportCandidates.length === 0 &&
+          this.activeViewportBatchCount === 0 &&
+          this.activeBackgroundBatchCount === 0 &&
+          this.activeBatchCount + batchesToRun.length < this.maxBatchConcurrency;
+        if (canRunBackground) {
+          const bgItems = otherCandidates.slice(0, this.batchSize);
+          leftoverOther = otherCandidates.slice(this.batchSize);
+
+          if (bgItems.length < this.batchSize && this.preloadQueue.length > 0) {
+            const bgPathSet = new Set();
+            for (let i = 0; i < bgItems.length; i++) bgPathSet.add(bgItems[i].filePath);
+            const remainingPreload = [];
+            for (let i = 0; i < this.preloadQueue.length; i++) {
+              const item = this.preloadQueue[i];
+              const p = typeof item === 'string' ? item : item.filePath;
+              if (!isVideoFile(p) && bgItems.length < this.batchSize) {
+                if (appState.thumbnailUrls.has(p)) {
+                  if (this._trackedPaths && this._trackedPaths.has(p)) {
+                    this._trackedPaths.delete(p);
+                    this.completedCount++;
+                    this.updateProgressBar();
+                  }
+                  if (typeof window.markThumbnailCompleted === 'function') {
+                    window.markThumbnailCompleted(p);
+                  }
+                } else if (!this.activeTasks.has(p) && !bgPathSet.has(p)) {
+                  bgItems.push({ filePath: p, skipDbCheck: false });
+                  bgPathSet.add(p);
+                }
+              } else {
+                remainingPreload.push(item);
+              }
+            }
+            this.preloadQueue = remainingPreload;
           }
 
-          for (const c of chosen) {
-            batchItems.push(c.req);
-            this.activeTasks.add(c.req.filePath);
-            if (this.activeBatchPaths) this.activeBatchPaths.add(c.req.filePath);
+          if (bgItems.length > 0) {
+            batchesToRun.push({ items: bgItems, isViewport: false });
           }
-          for (const c of unchosen) {
-            remainingPriority.push(c.req);
-            this.priorityQueueSet.add(c.req.filePath);
-          }
+        }
+
+        for (let i = 0; i < leftoverViewport.length; i++) {
+          remainingPriority.push(leftoverViewport[i]);
+          this.priorityQueueSet.add(leftoverViewport[i].filePath);
+        }
+        for (let i = 0; i < leftoverOther.length; i++) {
+          remainingPriority.push(leftoverOther[i]);
+          this.priorityQueueSet.add(leftoverOther[i].filePath);
+        }
+        if (remainingPriority.length > 1) {
           remainingPriority.sort((a, b) => getPriorityScore(a.filePath) - getPriorityScore(b.filePath));
         }
         this.priorityQueue = remainingPriority;
 
-        // preloadQueue からの補充は、画面内アイテム（score 0）のバッチではない場合のみ許可
-        const hasViewportInBatch = batchItems.some(item => viewportPaths.has(item.filePath));
-        if (!hasViewportInBatch && batchItems.length < this.batchSize && this.preloadQueue.length > 0) {
-          const remainingPreload = [];
-          for (let i = 0; i < this.preloadQueue.length; i++) {
-            const item = this.preloadQueue[i];
-            const p = typeof item === 'string' ? item : item.filePath;
-            if (!isVideoFile(p) && batchItems.length < this.batchSize) {
-              if (appState.thumbnailUrls.has(p)) {
-                if (this._trackedPaths && this._trackedPaths.has(p)) {
-                  this._trackedPaths.delete(p);
-                  this.completedCount++;
-                  this.updateProgressBar();
-                }
-                if (typeof window.markThumbnailCompleted === 'function') {
-                  window.markThumbnailCompleted(p);
-                }
-              } else if (!this.activeTasks.has(p)) {
-                batchItems.push({ filePath: p, skipDbCheck: false });
-                this.activeTasks.add(p);
-                if (this.activeBatchPaths) this.activeBatchPaths.add(p);
-              }
-            } else {
-              remainingPreload.push(item);
-            }
+        for (let b = 0; b < batchesToRun.length; b++) {
+          const batch = batchesToRun[b];
+          for (let i = 0; i < batch.items.length; i++) {
+            const fp = batch.items[i].filePath;
+            this.activeTasks.add(fp);
+            if (this.activeBatchPaths) this.activeBatchPaths.add(fp);
           }
-          this.preloadQueue = remainingPreload;
-        }
-
-        if (batchItems.length > 0) {
           this.activeBatchCount++;
-          this.runBatchTask(batchItems);
+          if (batch.isViewport) this.activeViewportBatchCount++;
+          else this.activeBackgroundBatchCount++;
+          this.runBatchTask(batch.items, batch.isViewport);
         }
       }
 
@@ -1193,9 +1248,12 @@ export class ThumbnailQueueManager {
    * 複数の静止画像サムネイル生成を Rust 側 (generate_thumbnail_batch) に一括委譲する
    * Rayon によるマルチコア並列デコード・リサイズ・一括SQLiteコミットにより、
    * WebView2 の重い OffscreenCanvas 処理を完全にバイパスして超高速表示する
+   * Rust 側でフォルダ切り替え（世代更新）により処理が打ち切られたアイテム（cancelled: true）は、
+   * 現在のコンテキストが有効な場合に限り優先キューへ再投入する。
    * @param {Array<{filePath: string, skipDbCheck: boolean}>} items
+   * @param {boolean} [isViewport=false] - 画面内アイテム用チャンクであるか（並行バッチ枠の集計に使用）
    */
-  async runBatchTask(items) {
+  async runBatchTask(items, isViewport = false) {
     const signal = this.abortController.signal;
     const paths = items.map(item => item.filePath);
 
@@ -1204,18 +1262,36 @@ export class ThumbnailQueueManager {
       if (signal.aborted) return;
 
       const resultMap = new Map();
+      const cancelledSet = new Set();
       if (Array.isArray(results)) {
         for (const res of results) {
-          if (res && res.path && res.url) {
+          if (!res || !res.path) continue;
+          if (res.cancelled) {
+            cancelledSet.add(res.path);
+          } else if (res.url) {
             resultMap.set(res.path, res.url);
           }
         }
       }
 
       const failedItems = [];
+      let requeued = false;
       for (const item of items) {
         const filePath = item.filePath;
         const url = resultMap.get(filePath);
+
+        if (!url && cancelledSet.has(filePath)) {
+          // Rust 側で旧世代として生成を打ち切られたアイテム: 生成処理は行われていないため、
+          // Worker フォールバックではなく優先キューへ戻して再スケジュールする
+          this.activeTasks.delete(filePath);
+          if (this.activeBatchPaths) this.activeBatchPaths.delete(filePath);
+          if (!appState.thumbnailUrls.has(filePath) && !this.priorityQueueSet.has(filePath)) {
+            this.priorityQueueSet.add(filePath);
+            this.priorityQueue.push({ filePath, skipDbCheck: true });
+            requeued = true;
+          }
+          continue;
+        }
 
         if (url) {
           this.activeTasks.delete(filePath);
@@ -1239,6 +1315,13 @@ export class ThumbnailQueueManager {
       }
       this.updateProgressBar();
 
+      if (requeued && this.priorityQueue.length > 1) {
+        const viewportPaths = appState.viewportPathSet || new Set();
+        const visiblePaths = appState.visiblePathSet || new Set();
+        const getScore = (fp) => (viewportPaths.has(fp) ? 0 : (visiblePaths.has(fp) ? 1 : 2));
+        this.priorityQueue.sort((a, b) => getScore(a.filePath) - getScore(b.filePath));
+      }
+
       for (const item of failedItems) {
         if (this.activeBatchPaths) this.activeBatchPaths.delete(item.filePath);
         if (!signal.aborted) {
@@ -1259,13 +1342,20 @@ export class ThumbnailQueueManager {
         }
       }
     } finally {
-      this.activeBatchCount = Math.max(0, this.activeBatchCount - 1);
-      if (this.activeBatchPaths) {
-        for (const item of items) {
-          this.activeBatchPaths.delete(item.filePath);
-        }
-      }
+      // clear() によりコンテキストが切り替わった後に旧バッチが完了した場合、
+      // 新コンテキストのバッチ枠カウンタを誤って減算しないよう、有効なコンテキストでのみ集計を戻す
       if (!signal.aborted) {
+        this.activeBatchCount = Math.max(0, this.activeBatchCount - 1);
+        if (isViewport) {
+          this.activeViewportBatchCount = Math.max(0, this.activeViewportBatchCount - 1);
+        } else {
+          this.activeBackgroundBatchCount = Math.max(0, this.activeBackgroundBatchCount - 1);
+        }
+        if (this.activeBatchPaths) {
+          for (const item of items) {
+            this.activeBatchPaths.delete(item.filePath);
+          }
+        }
         this.processNext();
       }
     }

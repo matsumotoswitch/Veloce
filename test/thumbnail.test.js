@@ -1370,6 +1370,141 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(manager.priorityQueue.length).toBe(1);
       expect(manager.priorityQueue[0].filePath).toBe('C:/test/buffer.mp4');
     });
+
+    describe('Viewport chunked batching and generation cancellation', () => {
+      let resolvers;
+
+      const makeResults = (paths) => paths.map(p => ({
+        path: p,
+        url: `http://127.0.0.1:12345/?path=${encodeURIComponent(p)}&thumb=1`,
+        cancelled: false
+      }));
+
+      beforeEach(() => {
+        resolvers = [];
+        // 応答を手動で解決できる保留型モック（バッチ処理中の状態を検証するため）
+        window.veloceAPI.generateThumbnailBatch = vi.fn((paths) => new Promise(resolve => {
+          resolvers.push({ paths, resolve });
+        }));
+      });
+
+      const flush = () => new Promise(r => setTimeout(r, 0));
+
+      it('should split viewport items into small chunks in screen order and dispatch them concurrently', () => {
+        const viewport = [];
+        for (let i = 0; i < 10; i++) viewport.push(`C:/test/v${i}.jpg`);
+        testAppState.viewportPathSet = new Set(viewport);
+        testAppState.visiblePathSet = new Set(viewport);
+        vi.spyOn(manager, 'runTask').mockImplementation(() => {});
+
+        manager.enqueuePriorityBatch(viewport, true);
+
+        // 10件の画面内アイテムが 4/4/2 件のチャンクに分割され、画面上の並び順のまま並行投入されること
+        const api = window.veloceAPI.generateThumbnailBatch;
+        expect(api).toHaveBeenCalledTimes(3);
+        expect(api).toHaveBeenNthCalledWith(1, ['C:/test/v0.jpg', 'C:/test/v1.jpg', 'C:/test/v2.jpg', 'C:/test/v3.jpg']);
+        expect(api).toHaveBeenNthCalledWith(2, ['C:/test/v4.jpg', 'C:/test/v5.jpg', 'C:/test/v6.jpg', 'C:/test/v7.jpg']);
+        expect(api).toHaveBeenNthCalledWith(3, ['C:/test/v8.jpg', 'C:/test/v9.jpg']);
+        expect(manager.activeBatchCount).toBe(3);
+        expect(manager.activeViewportBatchCount).toBe(3);
+      });
+
+      it('should display the first chunk as soon as it completes without waiting for other chunks', async () => {
+        const viewport = [];
+        for (let i = 0; i < 8; i++) viewport.push(`C:/test/v${i}.jpg`);
+        testAppState.viewportPathSet = new Set(viewport);
+        testAppState.visiblePathSet = new Set(viewport);
+        vi.spyOn(manager, 'runTask').mockImplementation(() => {});
+
+        manager.enqueuePriorityBatch(viewport, true);
+        expect(resolvers.length).toBe(2);
+
+        // 先頭チャンクのみ完了
+        resolvers[0].resolve(makeResults(resolvers[0].paths));
+        await flush();
+
+        expect(testAppState.thumbnailUrls.has('C:/test/v0.jpg')).toBe(true);
+        expect(testAppState.thumbnailUrls.has('C:/test/v3.jpg')).toBe(true);
+        // 2番目のチャンクは未完了のため未反映であること
+        expect(testAppState.thumbnailUrls.has('C:/test/v4.jpg')).toBe(false);
+      });
+
+      it('should not dispatch off-screen batch while viewport batches are pending, then dispatch it afterwards', async () => {
+        testAppState.viewportPathSet = new Set(['C:/test/view1.jpg', 'C:/test/view2.jpg']);
+        testAppState.visiblePathSet = new Set(['C:/test/view1.jpg', 'C:/test/view2.jpg', 'C:/test/buf1.jpg', 'C:/test/buf2.jpg']);
+        vi.spyOn(manager, 'runTask').mockImplementation(() => {});
+
+        manager.enqueuePriorityBatch(['C:/test/view1.jpg', 'C:/test/view2.jpg', 'C:/test/buf1.jpg', 'C:/test/buf2.jpg'], true);
+
+        // 画面内バッチの処理中は画面外バッチを投入しないこと
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledTimes(1);
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenNthCalledWith(1, ['C:/test/view1.jpg', 'C:/test/view2.jpg']);
+        expect(manager.activeBackgroundBatchCount).toBe(0);
+
+        resolvers[0].resolve(makeResults(resolvers[0].paths));
+        await flush();
+
+        // 画面内バッチ完了後に画面外バッチが投入されること
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledTimes(2);
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenNthCalledWith(2, ['C:/test/buf1.jpg', 'C:/test/buf2.jpg']);
+        expect(manager.activeBackgroundBatchCount).toBe(1);
+      });
+
+      it('should re-queue items cancelled by Rust generation epoch instead of falling back to Worker', async () => {
+        testAppState.viewportPathSet = new Set(['C:/test/a.jpg', 'C:/test/b.jpg']);
+        testAppState.visiblePathSet = new Set(['C:/test/a.jpg', 'C:/test/b.jpg']);
+        const runTaskSpy = vi.spyOn(manager, 'runTask').mockImplementation(() => {});
+
+        manager.enqueuePriorityBatch(['C:/test/a.jpg', 'C:/test/b.jpg'], true);
+        expect(resolvers.length).toBe(1);
+
+        resolvers[0].resolve([
+          { path: 'C:/test/a.jpg', url: 'http://127.0.0.1:12345/a.jpg', cancelled: false },
+          { path: 'C:/test/b.jpg', url: '', cancelled: true }
+        ]);
+        await flush();
+
+        expect(testAppState.thumbnailUrls.get('C:/test/a.jpg')).toBe('http://127.0.0.1:12345/a.jpg');
+        // 打ち切られた b.jpg は Worker（runTask）にフォールバックせず、再度バッチに投入されること
+        expect(runTaskSpy).not.toHaveBeenCalledWith('C:/test/b.jpg', expect.anything());
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledTimes(2);
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenNthCalledWith(2, ['C:/test/b.jpg']);
+      });
+
+      it('should not decrement batch counters of the new context when a stale batch completes after clear()', async () => {
+        testAppState.viewportPathSet = new Set(['C:/test/old.jpg']);
+        testAppState.visiblePathSet = new Set(['C:/test/old.jpg']);
+        vi.spyOn(manager, 'runTask').mockImplementation(() => {});
+
+        manager.enqueuePriorityBatch(['C:/test/old.jpg'], true);
+        expect(resolvers.length).toBe(1);
+
+        // フォルダ切り替え相当
+        manager.clear();
+        testAppState.viewportPathSet = new Set(['C:/test/new.jpg']);
+        testAppState.visiblePathSet = new Set(['C:/test/new.jpg']);
+        manager.enqueuePriorityBatch(['C:/test/new.jpg'], true);
+        expect(manager.activeBatchCount).toBe(1);
+        expect(manager.activeViewportBatchCount).toBe(1);
+
+        // 旧コンテキストのバッチが遅れて完了しても、新コンテキストのカウンタは減算されず、結果も反映されないこと
+        resolvers[0].resolve(makeResults(['C:/test/old.jpg']));
+        await flush();
+
+        expect(manager.activeBatchCount).toBe(1);
+        expect(manager.activeViewportBatchCount).toBe(1);
+        expect(testAppState.thumbnailUrls.has('C:/test/old.jpg')).toBe(false);
+      });
+
+      it('should abort all running worker generation tasks and clear activeControllers on clear()', async () => {
+        const { thumbnailWorkerPool } = await import('../src/renderer/renderer-thumbnails.js');
+        const abortSpy = vi.spyOn(thumbnailWorkerPool, 'abortAll');
+
+        manager.clear();
+
+        expect(abortSpy).toHaveBeenCalled();
+      });
+    });
   });
 });
 

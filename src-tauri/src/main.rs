@@ -782,6 +782,9 @@ fn load_directory(
     let smart_folders_clone = state.smart_folders.read().clone();
     let current_sort = state.sort_config.read().clone();
 
+    // 旧フォルダ向けに実行中のサムネイル一括生成へ打ち切りを通知する
+    advance_thumbnail_batch_epoch();
+
     // ディレクトリ変更時にRust側の状態をリセット
     state.all_files.write().clear();
     state.filtered_files.write().clear();
@@ -983,20 +986,29 @@ fn load_directory(
                     let app_handle_for_purge = app_clone.clone();
                     let head_missing_to_purge = head_missing;
                     let remaining_paths = all_paths_for_bg_purge;
+                    let purge_start_epoch = current_thumbnail_batch_epoch();
 
                     tauri::async_runtime::spawn(async move {
                         let mut missing_for_db = head_missing_to_purge;
 
                         if !remaining_paths.is_empty() {
-                            use rayon::prelude::*;
-                            let tail_missing: Vec<String> = remaining_paths
-                                .into_par_iter()
-                                .filter(|path| {
-                                    let clean = strip_unc_prefix(path).unwrap_or(path);
-                                    !std::path::Path::new(clean).is_file()
-                                })
-                                .collect();
-                            missing_for_db.extend(tail_missing);
+                            // 200件ごとのチャンクで走査し、タブ切り替え・フォルダ移動（世代更新）を検知した時点で
+                            // 即刻ループを打ち切って Rayon スレッドプールとI/Oを新タブに完全解放する
+                            for chunk in remaining_paths.chunks(200) {
+                                if current_thumbnail_batch_epoch() != purge_start_epoch {
+                                    return;
+                                }
+                                use rayon::prelude::*;
+                                let chunk_missing: Vec<String> = chunk
+                                    .into_par_iter()
+                                    .filter(|path| {
+                                        let clean = strip_unc_prefix(path).unwrap_or(path);
+                                        !std::path::Path::new(clean).is_file()
+                                    })
+                                    .cloned()
+                                    .collect();
+                                missing_for_db.extend(chunk_missing);
+                            }
                         }
 
                         if !missing_for_db.is_empty() {
@@ -1034,14 +1046,23 @@ fn load_directory(
 
             let (files, missing_paths): (Vec<std::sync::Arc<ImageFile>>, Vec<String>) = if path_for_spawn.starts_with("smart://") {
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
-                let (valid_items, missing_items): (Vec<_>, Vec<_>) = smart_items
-                    .into_par_iter()
-                    .partition(|item| {
+                // 大規模スマートフォルダ（3万件以上等）でも30秒以上の同期ブロックが発生しないよう、
+                // 初期画面に必要な先頭200件のみ同期検証し、残りは即時有効ファイルとして返却する
+                let check_len = std::cmp::min(smart_items.len(), 200);
+                let mut valid_files = Vec::with_capacity(smart_items.len());
+                let mut missing = Vec::new();
+                for (idx, item) in smart_items.into_iter().enumerate() {
+                    if idx < check_len {
                         let clean = strip_unc_prefix(&item.path).unwrap_or(&item.path);
-                        std::path::Path::new(clean).is_file()
-                    });
-                let missing: Vec<String> = missing_items.into_iter().map(|i| i.path).collect();
-                let valid_files = valid_items.into_par_iter().map(|i| std::sync::Arc::new(create_image_file_from_smart_item(i))).collect();
+                        if std::path::Path::new(clean).is_file() {
+                            valid_files.push(std::sync::Arc::new(create_image_file_from_smart_item(item)));
+                        } else {
+                            missing.push(item.path);
+                        }
+                    } else {
+                        valid_files.push(std::sync::Arc::new(create_image_file_from_smart_item(item)));
+                    }
+                }
                 (valid_files, missing)
             } else {
                 let target_entries: Vec<_> = jwalk::WalkDir::new(&path_for_spawn)
@@ -3388,6 +3409,78 @@ async fn generate_thumbnail(
 struct ThumbnailResult {
     path: String,
     url: String,
+    /// フォルダ切り替え（世代更新）により生成を打ち切ったアイテムであるか。
+    /// フロントエンドはこのフラグが立ったアイテムを生成失敗として扱わず、優先キューへ再投入する。
+    cancelled: bool,
+}
+
+/// サムネイル一括生成の世代カウンタ。
+/// `load_directory` の呼び出しごとにインクリメントされる。実行中の `generate_thumbnail_batch` は
+/// 各アイテムの生成前に開始時の世代と照合し、世代が進んでいれば未着手アイテムの生成を打ち切る。
+/// これにより、旧フォルダのバッチが Rayon スレッドプールを占有し、新フォルダの画面内サムネイル生成が
+/// 待たされる状態を防ぐ（処理中のアイテムは完了まで実行され、生成済みデータは通常通り保存される）。
+static THUMBNAIL_BATCH_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// 現在のサムネイル一括生成の世代番号を返す。
+fn current_thumbnail_batch_epoch() -> u64 {
+    THUMBNAIL_BATCH_EPOCH.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// サムネイル一括生成の世代を進め、実行中の旧世代バッチに打ち切りを通知する。
+fn advance_thumbnail_batch_epoch() -> u64 {
+    THUMBNAIL_BATCH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1
+}
+
+/// 複数ファイルのサムネイルを Rayon で並列生成し、新規生成分を単一トランザクションで一括保存する。
+///
+/// - `is_cancelled` が `true` を返したアイテムは生成を行わず、`cancelled: true` の結果として返す。
+/// - キャッシュヒット時は DB への書き込みを行わない。
+/// - 返却 URL には PRIMARY KEY 直接参照用の `hash` パラメータが付与される。
+fn compute_thumbnail_batch(
+    files_to_process: Vec<(String, u64)>,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    video_port: u16,
+    is_cancelled: &(dyn Fn() -> bool + Sync),
+) -> Vec<ThumbnailResult> {
+    use rayon::prelude::*;
+    let computed: Vec<(ThumbnailResult, Option<PendingThumbnailWrite>)> = files_to_process
+        .into_par_iter()
+        .map(|(file_path, mtime)| {
+            if is_cancelled() {
+                return (ThumbnailResult { path: file_path, url: String::new(), cancelled: true }, None);
+            }
+            let clean_path = normalize_unc_path(&file_path).into_owned();
+            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+            let (bytes, pending) = generate_thumbnail_compute_only(&file_path, mtime, Some(&hash_key), db_conn);
+            let url = if bytes.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
+                    video_port,
+                    urlencoding::encode(&file_path),
+                    mtime,
+                    hash_key
+                )
+            };
+            (ThumbnailResult { path: file_path, url, cancelled: false }, pending)
+        })
+        .collect();
+
+    let mut results = Vec::with_capacity(computed.len());
+    let mut pending_writes = Vec::new();
+    for (res, pending_opt) in computed {
+        results.push(res);
+        if let Some(p) = pending_opt {
+            pending_writes.push(p);
+        }
+    }
+
+    if !pending_writes.is_empty() {
+        let _ = commit_pending_thumbnails_batch(db_conn, &pending_writes);
+    }
+
+    results
 }
 
 #[tauri::command]
@@ -3420,43 +3513,11 @@ async fn generate_thumbnail_batch(
     }
 
     let video_port = state.video_server_port;
+    // 呼び出し時点の世代を記録し、フォルダ切り替え後は未着手アイテムの生成を打ち切る
+    let start_epoch = current_thumbnail_batch_epoch();
     let results = tokio::task::spawn_blocking(move || {
-        use rayon::prelude::*;
-        let computed: Vec<(ThumbnailResult, Option<PendingThumbnailWrite>)> = files_to_process
-            .into_par_iter()
-            .map(|(file_path, mtime)| {
-                let clean_path = normalize_unc_path(&file_path).into_owned();
-                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
-                let (bytes, pending) = generate_thumbnail_compute_only(&file_path, mtime, Some(&hash_key), &db_conn);
-                let url = if bytes.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
-                        video_port,
-                        urlencoding::encode(&file_path),
-                        mtime,
-                        hash_key
-                    )
-                };
-                (ThumbnailResult { path: file_path, url }, pending)
-            })
-            .collect();
-
-        let mut results = Vec::with_capacity(computed.len());
-        let mut pending_writes = Vec::new();
-        for (res, pending_opt) in computed {
-            results.push(res);
-            if let Some(p) = pending_opt {
-                pending_writes.push(p);
-            }
-        }
-
-        if !pending_writes.is_empty() {
-            let _ = commit_pending_thumbnails_batch(&db_conn, &pending_writes);
-        }
-
-        results
+        let is_cancelled = move || current_thumbnail_batch_epoch() != start_epoch;
+        compute_thumbnail_batch(files_to_process, &db_conn, video_port, &is_cancelled)
     }).await.map_err(|e| e.to_string())?;
 
     for item in &results {
@@ -3508,7 +3569,7 @@ async fn get_cached_thumbnail_batch(
                     if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
                         if !bytes.is_empty() {
                             let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}", video_port, urlencoding::encode(&file_path), mtime, hash_key);
-                            return Some(ThumbnailResult { path: file_path, url });
+                            return Some(ThumbnailResult { path: file_path, url, cancelled: false });
                         }
                     }
                 }
@@ -10264,8 +10325,7 @@ mod viewer_tests {
             8080,
         ));
 
-        // tauri::State でラップして generate_thumbnail_batch をテスト
-        // （直接 spawn_blocking 内のロジックをシミュレート）
+        // generate_thumbnail_batch の spawn_blocking 内で使用する compute_thumbnail_batch を直接検証する
         let video_port = app_state.video_server_port;
         let db_conn = app_state.db_conn.clone();
         let files_to_process: Vec<(String, u64)> = file_paths.iter().map(|p| {
@@ -10273,41 +10333,12 @@ mod viewer_tests {
             (p.clone(), mtime)
         }).collect();
 
-        use rayon::prelude::*;
-        let computed: Vec<(ThumbnailResult, Option<PendingThumbnailWrite>)> = files_to_process
-            .into_par_iter()
-            .map(|(file_path, mtime)| {
-                let clean_path = normalize_unc_path(&file_path).into_owned();
-                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
-                let (bytes, pending) = generate_thumbnail_compute_only(&file_path, mtime, Some(&hash_key), &db_conn);
-                let url = if bytes.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
-                        video_port,
-                        urlencoding::encode(&file_path),
-                        mtime,
-                        hash_key
-                    )
-                };
-                (ThumbnailResult { path: file_path, url }, pending)
-            })
-            .collect();
-
-        let mut results = Vec::with_capacity(computed.len());
-        let mut pending_writes = Vec::new();
-        for (res, pending_opt) in computed {
-            results.push(res);
-            if let Some(p) = pending_opt {
-                pending_writes.push(p);
-            }
-        }
-        let committed = commit_pending_thumbnails_batch(&db_conn, &pending_writes).unwrap();
-        assert_eq!(committed, 4, "4件の新規生成サムネイルが単一トランザクションで一括コミットされること");
+        let never_cancelled = || false;
+        let results = compute_thumbnail_batch(files_to_process, &db_conn, video_port, &never_cancelled);
 
         assert_eq!(results.len(), 4, "4件すべてのサムネイルが返却されること");
         for r in &results {
+            assert!(!r.cancelled, "打ち切り指示が無い場合は cancelled が false であること");
             assert!(!r.url.is_empty(), "各サムネイルのURLが空でないこと");
             assert!(r.url.contains("thumb=1"), "サムネイル配信URLパラメータが付与されていること");
             assert!(r.url.contains("&hash="), "PRIMARY KEY直撃用のhashパラメータが付与されていること");
@@ -10368,5 +10399,87 @@ mod viewer_tests {
 
         let trans_thumb = generate_image_thumbnail_sync(trans_path.to_str().unwrap()).unwrap();
         assert_eq!(&trans_thumb[0..8], b"\x89PNG\r\n\x1a\n", "透過ピクセルを含むRGBA画像はPNG形式が維持されること");
+    }
+
+    #[test]
+    fn test_compute_thumbnail_batch_skips_generation_when_cancelled() {
+        use image::{RgbImage, Rgb};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("cancel_test.db");
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path);
+        let pool = r2d2::Pool::builder().max_size(4).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS cache (hash_key TEXT PRIMARY KEY, thumbnail BLOB, path TEXT, last_accessed INTEGER);"
+            ).unwrap();
+        }
+
+        let mut files_to_process = Vec::new();
+        for i in 0..3 {
+            let mut img = RgbImage::new(64, 64);
+            for p in img.pixels_mut() {
+                *p = Rgb([10 * i as u8, 20, 30]);
+            }
+            let path = temp_dir.path().join(format!("cancel_{}.png", i));
+            img.save(&path).unwrap();
+            let mtime = std::fs::metadata(&path).unwrap().modified().unwrap()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            files_to_process.push((path.to_string_lossy().to_string(), mtime));
+        }
+
+        // 打ち切り指示がある場合: 生成を行わず、全件 cancelled: true かつ URL 空で返り、DB にも保存されないこと
+        let always_cancelled = || true;
+        let results = compute_thumbnail_batch(files_to_process.clone(), &pool, 8080, &always_cancelled);
+        assert_eq!(results.len(), 3, "打ち切り時も入力件数分の結果が返ること");
+        for r in &results {
+            assert!(r.cancelled, "打ち切られたアイテムは cancelled が true であること");
+            assert!(r.url.is_empty(), "打ち切られたアイテムは URL が空であること");
+        }
+        let conn = pool.get().unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0, "打ち切られたアイテムはサムネイルが生成・保存されないこと");
+        drop(conn);
+
+        // 打ち切り指示が無い場合: 全件生成されること
+        let never_cancelled = || false;
+        let results = compute_thumbnail_batch(files_to_process, &pool, 8080, &never_cancelled);
+        assert!(results.iter().all(|r| !r.cancelled && !r.url.is_empty()), "通常時は全件生成されること");
+    }
+
+    #[test]
+    fn test_thumbnail_batch_epoch_advance_marks_previous_batch_cancelled() {
+        // generate_thumbnail_batch と同じ判定式: 開始時の世代から進んでいれば打ち切り
+        let start_epoch = current_thumbnail_batch_epoch();
+        let is_cancelled = move || current_thumbnail_batch_epoch() != start_epoch;
+        let advanced = advance_thumbnail_batch_epoch();
+        assert!(advanced > start_epoch, "世代番号は単調増加すること");
+        assert!(is_cancelled(), "load_directory による世代更新後は旧世代のバッチが打ち切り対象となること");
+
+        let new_epoch = current_thumbnail_batch_epoch();
+        let is_cancelled_new = move || current_thumbnail_batch_epoch() != new_epoch;
+        assert!(!is_cancelled_new(), "現在世代で開始したバッチは打ち切り対象とならないこと");
+    }
+
+    #[test]
+    fn test_background_purge_loop_terminates_early_on_epoch_advance() {
+        let start_epoch = current_thumbnail_batch_epoch();
+        let dummy_paths: Vec<String> = (0..1000).map(|i| format!("C:\\test\\missing_{}.png", i)).collect();
+
+        let mut processed_chunks = 0;
+        for chunk in dummy_paths.chunks(200) {
+            if current_thumbnail_batch_epoch() != start_epoch {
+                break;
+            }
+            let _ = chunk;
+            processed_chunks += 1;
+            // 1回目のチャンク処理後に他タブへの切り替え（世代更新）をシミュレート
+            if processed_chunks == 1 {
+                advance_thumbnail_batch_epoch();
+            }
+        }
+
+        assert_eq!(processed_chunks, 1, "世代更新により残りのチャンク走査が直ちに打ち切られること");
     }
 }

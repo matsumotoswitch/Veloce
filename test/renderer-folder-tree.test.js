@@ -210,4 +210,38 @@ describe('Renderer Folder Tree Controller (renderer-folder-tree.js)', () => {
       expect(item1.classList.contains('selected')).toBe(true);
     });
   });
+
+  describe('refreshTree', () => {
+    it('should rebuild tree and exclude deleted nested folder', async () => {
+      let subFolders = [
+        { name: 'sub1', path: 'C:\\folder1\\sub1' },
+        { name: 'sub2', path: 'C:\\folder1\\sub2' }
+      ];
+      window.veloceAPI.getDrives = vi.fn().mockResolvedValue(['C:\\']);
+      window.veloceAPI.getFolders = vi.fn().mockImplementation(async (path) => {
+        if (path === 'C:\\') return [{ name: 'folder1', path: 'C:\\folder1' }];
+        if (path === 'C:\\folder1') return subFolders;
+        return [];
+      });
+
+      // 初回ツリー構築
+      await refreshTree();
+      const dirTree = document.getElementById('dir-tree');
+      expect(dirTree.querySelector('.tree-item[data-path="C:\\\\folder1"]')).not.toBeNull();
+
+      // folder1 を展開する
+      const folder1Div = dirTree.querySelector('.tree-item[data-path="C:\\\\folder1"]');
+      await folder1Div.expandNode();
+
+      expect(dirTree.querySelector('.tree-item[data-path="C:\\\\folder1\\\\sub1"]')).not.toBeNull();
+      expect(dirTree.querySelector('.tree-item[data-path="C:\\\\folder1\\\\sub2"]')).not.toBeNull();
+
+      // sub2 を削除
+      subFolders = [{ name: 'sub1', path: 'C:\\folder1\\sub1' }];
+      await refreshTree();
+
+      expect(dirTree.querySelector('.tree-item[data-path="C:\\\\folder1\\\\sub1"]')).not.toBeNull();
+      expect(dirTree.querySelector('.tree-item[data-path="C:\\\\folder1\\\\sub2"]')).toBeNull();
+    });
+  });
 });

@@ -453,6 +453,52 @@ describe('Sliding-Window Item Cache & Thumbnail Pipeline Optimizations', () => {
     expect(serverRs).toContain('http_pool.spawn');
     expect(serverRs).toContain('&thumb=1&hash=');
   });
+
+  it('updateVirtualGrid applies loading effect only to viewport items and skips buffer items', async () => {
+    appState.totalCount = 60;
+    appState.selection = new Set();
+    appState.ratings = {};
+    appState.dragState = { isAppDragging: false };
+    appState.thumbnailUrls = new Map();
+    appState.rebuiltPaths = new Set();
+
+    const mockItems = Array.from({ length: 60 }, (_, i) => ({
+      path: `C:/test/img_${i}.png`,
+      name: `img_${i}.png`,
+      hasThumbnailCache: false,
+      mtime: 1000
+    }));
+
+    window.veloceAPI = {
+      getItems: vi.fn().mockResolvedValue(mockItems)
+    };
+
+    const ui = new UIManager(appState);
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    // 横幅648px、行高128px、5列。高さ384px（約3行 = 15アイテムが画面内ビューポート）
+    Object.defineProperty(container, 'clientWidth', { value: 648, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 384, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true });
+
+    ui.elements.thumbnailGrid = container;
+    ui.elements.thumbnailSizeSlider = { value: '120' };
+
+    await ui.updateVirtualGrid(true);
+
+    const content = container.querySelector('.virtual-content');
+    expect(content).not.toBeNull();
+    const children = Array.from(content.children);
+    expect(children.length).toBeGreaterThan(15);
+
+    // 画面内アイテム（先頭15件程度）には loading クラスが付与される
+    const firstItem = children[0];
+    expect(firstItem.classList.contains('loading')).toBe(true);
+
+    // 画面外バッファ領域（後方のアイテム）には loading クラスが付与されないこと
+    const lastBufferItem = children[children.length - 1];
+    expect(lastBufferItem.classList.contains('loading')).toBe(false);
+  });
 });
 
 
