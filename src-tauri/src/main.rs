@@ -3773,6 +3773,42 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
         // zune-jpeg でデコードできなかった場合は安全に open_image_buffered へフォールバック
     }
 
+    let is_png = path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|s| s.eq_ignore_ascii_case("png"))
+        .unwrap_or(false);
+
+    if is_png {
+        if let Ok(file_bytes) = std::fs::read(path_str) {
+            let options = zune_core::options::DecoderOptions::default().png_set_strip_to_8bit(true);
+            let mut decoder = zune_png::PngDecoder::new_with_options(&file_bytes, options);
+            if let Ok(raw_pixels) = decoder.decode_raw() {
+                if let Some((width, height)) = decoder.get_dimensions() {
+                    let colorspace = decoder.get_colorspace();
+                    use fast_image_resize as fr;
+                    let color_info = match colorspace {
+                        Some(zune_core::colorspace::ColorSpace::RGB) => Some((fr::PixelType::U8x3, false)),
+                        Some(zune_core::colorspace::ColorSpace::RGBA) => Some((fr::PixelType::U8x4, true)),
+                        _ => None,
+                    };
+
+                    if let Some((pixel_type, has_alpha)) = color_info {
+                        if let Some(thumb) = resize_and_encode_thumbnail(
+                            raw_pixels,
+                            width as u32,
+                            height as u32,
+                            pixel_type,
+                            has_alpha,
+                        ) {
+                            return Some(thumb);
+                        }
+                    }
+                }
+            }
+        }
+        // zune-png でデコードできなかった場合は安全に open_image_buffered へフォールバック
+    }
+
     if let Some(img) = open_image_buffered(path_str) {
         let has_alpha = img.color().has_alpha();
         let width = img.width();
@@ -10481,5 +10517,45 @@ mod viewer_tests {
         }
 
         assert_eq!(processed_chunks, 1, "世代更新により残りのチャンク走査が直ちに打ち切られること");
+    }
+    #[test]
+    fn test_zune_png_fastpath_rgb_and_rgba() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1. RGB8 PNG
+        let rgb_path = temp_dir.path().join("test_zune_rgb.png");
+        let mut img_rgb = image::RgbImage::new(400, 300);
+        for pixel in img_rgb.pixels_mut() {
+            *pixel = image::Rgb([220, 100, 50]);
+        }
+        img_rgb.save(&rgb_path).unwrap();
+
+        let thumb_rgb = generate_image_thumbnail_sync(rgb_path.to_str().unwrap());
+        assert!(thumb_rgb.is_some(), "RGB PNGのサムネイル生成が成功すること");
+        let thumb_bytes = thumb_rgb.unwrap();
+        assert!(!thumb_bytes.is_empty(), "サムネイルバイナリが空でないこと");
+
+        // 2. RGBA8 PNG (透過あり)
+        let rgba_path = temp_dir.path().join("test_zune_rgba.png");
+        let mut img_rgba = image::RgbaImage::new(500, 500);
+        for (x, _y, pixel) in img_rgba.enumerate_pixels_mut() {
+            if x < 250 {
+                *pixel = image::Rgba([100, 200, 255, 128]); // 半透明
+            } else {
+                *pixel = image::Rgba([100, 200, 255, 255]); // 不透明
+            }
+        }
+        img_rgba.save(&rgba_path).unwrap();
+
+        let thumb_rgba = generate_image_thumbnail_sync(rgba_path.to_str().unwrap());
+        assert!(thumb_rgba.is_some(), "RGBA PNGのサムネイル生成が成功すること");
+        let thumb_rgba_bytes = thumb_rgba.unwrap();
+        assert!(!thumb_rgba_bytes.is_empty(), "RGBAサムネイルバイナリが空でないこと");
+
+        // 3. 破損ファイルに対する安全なフォールバック
+        let corrupted_path = temp_dir.path().join("corrupted.png");
+        std::fs::write(&corrupted_path, b"\x89PNG\r\n\x1a\ncorrupted_data_here").unwrap();
+        let thumb_corrupted = generate_image_thumbnail_sync(corrupted_path.to_str().unwrap());
+        assert!(thumb_corrupted.is_none(), "破損PNGに対してパニックせず安全にNoneを返却すること");
     }
 }
