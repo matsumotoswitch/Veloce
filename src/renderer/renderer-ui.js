@@ -1999,11 +1999,22 @@ class UIManager {
         }
       }, { passive: true });
 
-      this._gridResizeObserver = new ResizeObserver(() => {
-        if (this._gridResizeRaf) cancelAnimationFrame(this._gridResizeRaf);
-        this._gridResizeRaf = requestAnimationFrame(() => this.updateVirtualGrid(true));
+      if (typeof ResizeObserver !== 'undefined') {
+        this._gridResizeObserver = new ResizeObserver(() => {
+          if (this._gridResizeRaf) cancelAnimationFrame(this._gridResizeRaf);
+          this._gridResizeRaf = requestAnimationFrame(() => this.updateVirtualGrid(true));
+        });
+        if (this._gridResizeObserver && typeof this._gridResizeObserver.observe === 'function') {
+          this._gridResizeObserver.observe(container);
+        }
+      }
+
+      container.addEventListener('click', (e) => {
+        const clearBtn = e.target.closest('.empty-state-clear-btn');
+        if (clearBtn && this.elements.searchClearBtn) {
+          this.elements.searchClearBtn.click();
+        }
       });
-      this._gridResizeObserver.observe(container);
     }
 
     if (appState.totalCount === 0) {
@@ -2020,11 +2031,12 @@ class UIManager {
       const emptyContainer = container.querySelector('.empty-state-container');
       if (emptyContainer) {
         emptyContainer.style.display = 'flex';
-        const targetMode = appState.searchQuery ? 'search' : 'folder';
+        const isSearchOrFilter = !!(appState.searchQuery || (appState.ratingFilterVal && appState.ratingFilterVal !== 0));
+        const targetMode = isSearchOrFilter ? 'search' : 'folder';
         if (emptyContainer.dataset.mode !== targetMode) {
           emptyContainer.dataset.mode = targetMode;
           emptyContainer.innerHTML = targetMode === 'search'
-            ? `<svg class="empty-state-icon" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><div class="empty-state-text">検索結果が見つかりません</div>`
+            ? `<svg class="empty-state-icon" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><div class="empty-state-text">検索結果が見つかりません</div><button class="empty-state-clear-btn" type="button">検索条件をクリア</button><div class="empty-state-hint">または Escape キーでクリア</div>`
             : `<svg class="empty-state-icon" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div class="empty-state-text">このフォルダには画像がありません</div>`;
         }
       }

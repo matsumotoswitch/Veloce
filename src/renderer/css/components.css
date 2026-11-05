@@ -302,9 +302,47 @@ input[type="range"]:focus {
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  opacity: 0.5;
   pointer-events: none;
   color: var(--text-color);
+}
+
+.empty-state-container .empty-state-icon,
+.empty-state-container .empty-state-text {
+  opacity: 0.55;
+}
+
+.empty-state-clear-btn {
+  margin-top: 18px;
+  padding: 8px 18px;
+  font-size: var(--font-size-sm);
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.empty-state-clear-btn:hover {
+  background-color: var(--accent-hover-tint);
+  border-color: var(--border-color-light);
+  color: var(--text-white);
+}
+
+.empty-state-clear-btn:active {
+  transform: scale(0.97);
+}
+
+.empty-state-hint {
+  margin-top: 8px;
+  font-size: var(--font-size-xs);
+  opacity: 0.45;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
 }
 
 .thumbnail-item {
