@@ -206,6 +206,8 @@ class UIManager {
     // スクロール方向の追跡（Phase 2: UX-2）
     this._lastScrollTop = 0;
     this.scrollDirection = 'down';
+    this._lastListScrollTop = 0;
+    this.listScrollDirection = 'down';
 
     // 仮想スクロール用スライディングウィンドウ・キャッシュ（スクロール毎の非同期IPC呼び出しを排除）
     this._itemWindowCache = { start: -1, items: [], totalCount: 0 };
@@ -1691,6 +1693,8 @@ class UIManager {
     if (resetScroll) {
       this._lastScrollTop = 0;
       this.scrollDirection = 'down';
+      this._lastListScrollTop = 0;
+      this.listScrollDirection = 'down';
       if (this.elements.fileListBody) this.elements.fileListBody.replaceChildren();
       
       // フォルダ選択時と同様に、タブ切り替え時等も以前のサムネイル表示を確実にクリアする
@@ -1800,10 +1804,23 @@ class UIManager {
       }
     }
 
+    // スクロール進行方向に応じた適応型バッファ配分（合計20行を維持）
+    if (typeof this._lastListScrollTop === 'number') {
+      if (scrollTop < this._lastListScrollTop) {
+        this.listScrollDirection = 'up';
+      } else if (scrollTop > this._lastListScrollTop) {
+        this.listScrollDirection = 'down';
+      }
+    }
+    this._lastListScrollTop = scrollTop;
+
+    const listBufferBefore = this.listScrollDirection === 'up' ? 15 : 5;
+    const listBufferAfter = this.listScrollDirection === 'up' ? 5 : 15;
+
     const maxStartRow = Math.max(0, totalRows - 1);
     const startRow = Math.min(maxStartRow, Math.floor(Math.max(0, scrollTop) / rowHeight));
-    const safeStartRow = Math.max(0, startRow - 10);
-    const endRow = Math.min(totalRows - 1, startRow + Math.ceil(containerHeight / rowHeight) + 10);
+    const safeStartRow = Math.max(0, startRow - listBufferBefore);
+    const endRow = Math.min(totalRows - 1, startRow + Math.ceil(containerHeight / rowHeight) + listBufferAfter);
 
     if (!force && this.lastListStartIndex === safeStartRow && this.lastListEndIndex === endRow) {
       return;
@@ -2082,6 +2099,7 @@ class UIManager {
     }
     const scrollTop = Math.min(container.scrollTop, maxScrollTop);
 
+    // スクロール進行方向に応じた適応型バッファ配分（合計16行を維持）
     if (typeof this._lastScrollTop === 'number') {
       if (scrollTop < this._lastScrollTop) {
         this.scrollDirection = 'up';
@@ -2091,13 +2109,16 @@ class UIManager {
     }
     this._lastScrollTop = scrollTop;
 
-    // 表示すべき行の計算 (上下に8行ずつのバッファ)
+    const bufferBefore = this.scrollDirection === 'up' ? 12 : 4;
+    const bufferAfter = this.scrollDirection === 'up' ? 4 : 12;
+
+    // 表示すべき行の計算（進行方向側を厚く、通過側を薄く動的配分）
     const maxStartRow = Math.max(0, rows - 1);
     const startRow = Math.min(maxStartRow, Math.floor(Math.max(0, scrollTop - padding) / rowHeight));
-    const safeStartRow = Math.max(0, startRow - 8);
+    const safeStartRow = Math.max(0, startRow - bufferBefore);
     const visibleRowCount = Math.ceil(containerHeight / rowHeight);
     const visibleEndRow = Math.min(rows - 1, startRow + visibleRowCount);
-    const endRow = Math.min(rows - 1, startRow + visibleRowCount + 8);
+    const endRow = Math.min(rows - 1, startRow + visibleRowCount + bufferAfter);
 
     const startIndex = Math.min(Math.max(0, appState.totalCount - 1), safeStartRow * cols);
     const endIndex = Math.max(startIndex, Math.min(appState.totalCount - 1, ((endRow + 1) * cols) - 1));
@@ -2126,7 +2147,7 @@ class UIManager {
     // 非同期呼び出し中にスクロールが遷移した場合は古い結果を破棄し、同期外れによるちらつきと表示崩れを防止する
     const currentScrollTop = Math.min(container.scrollTop, maxScrollTop);
     const currentStartRow = Math.min(maxStartRow, Math.floor(Math.max(0, currentScrollTop - padding) / rowHeight));
-    const currentSafeStartRow = Math.max(0, currentStartRow - 8);
+    const currentSafeStartRow = Math.max(0, currentStartRow - bufferBefore);
     const currentStartIndex = Math.min(Math.max(0, appState.totalCount - 1), currentSafeStartRow * cols);
     if (!force && currentStartIndex !== startIndex) {
       return;
