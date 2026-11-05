@@ -1654,8 +1654,9 @@ initDirTreeDnd(uiManager.elements.dirTree, {
 
 initResizers();
 
-function updateThumbnailSize() {
-  const slider = uiManager.elements.thumbnailSizeSlider;
+export function updateThumbnailSize() {
+  const slider = uiManager?.elements?.thumbnailSizeSlider;
+  if (!slider) return;
   const size = parseFloat(slider.value) || 120;
   document.body.style.setProperty('--thumbnail-size', `${size}px`);
 
@@ -1666,20 +1667,87 @@ function updateThumbnailSize() {
     const percent = (size - min) / (max - min);
     const thumbWidth = 12;
     // thumb is offset by percent across the track width
-    const offset = percent * (slider.offsetWidth - thumbWidth) + (thumbWidth / 2);
+    const offset = percent * ((slider.offsetWidth || 100) - thumbWidth) + (thumbWidth / 2);
     tooltip.textContent = `${Math.round(size)}px`;
     tooltip.style.left = `${offset}px`;
   }
 }
 
-uiManager.elements.thumbnailSizeSlider.addEventListener('input', () => {
-  updateThumbnailSize();
-  if (typeof uiManager.updateVirtualGrid === 'function') uiManager.updateVirtualGrid(true);
-});
+/**
+ * サムネイルサイズ変更スライダーのイベントリスナーを設定します。
+ * スライダーのドラッグ中、CSS変数更新とツールチップ追従は即座に同期的反映しつつ、
+ * 仮想グリッド全体の再計算（updateVirtualGrid）を requestAnimationFrame でスロットリングし、
+ * 連続ドラッグ時の描画負荷スパイクとカクつきを防止します。
+ * @param {HTMLInputElement} slider - スライダー要素
+ * @param {Object} [options={}] - コールバックおよび設定オプション
+ * @returns {{ cleanup: () => void, triggerPendingUpdate: () => void }}
+ */
+export function setupThumbnailSliderEvents(slider, options = {}) {
+  if (!slider || typeof slider.addEventListener !== 'function') {
+    return { cleanup: () => {}, triggerPendingUpdate: () => {} };
+  }
 
-uiManager.elements.thumbnailSizeSlider.addEventListener('change', (e) => {
-  setSetting('thumbnailScale', e.target.value);
-});
+  const onUpdateSize = options.onUpdateSize || updateThumbnailSize;
+  const onUpdateGrid = options.onUpdateGrid || (() => {
+    if (typeof uiManager?.updateVirtualGrid === 'function') {
+      uiManager.updateVirtualGrid(true);
+    }
+  });
+  const onSaveSetting = options.onSaveSetting || ((val) => {
+    setSetting('thumbnailScale', val);
+  });
+
+  let sliderRafId = null;
+
+  const onInput = () => {
+    // 1. CSS変数およびツールチップ位置の更新は即座に同期実行（追従性確保）
+    onUpdateSize();
+
+    // 2. 仮想グリッド全体の再計算は rAF でスロットリング（1フレーム1回）
+    if (sliderRafId === null) {
+      sliderRafId = requestAnimationFrame(() => {
+        sliderRafId = null;
+        onUpdateGrid();
+      });
+    }
+  };
+
+  const onChange = (e) => {
+    // ドラッグ完了時、未処理の rAF があればキャンセルして即時確定
+    if (sliderRafId !== null) {
+      cancelAnimationFrame(sliderRafId);
+      sliderRafId = null;
+      onUpdateGrid();
+    }
+    const val = (e && e.target && e.target.value !== undefined) ? e.target.value : slider.value;
+    onSaveSetting(val);
+  };
+
+  slider.addEventListener('input', onInput);
+  slider.addEventListener('change', onChange);
+
+  return {
+    cleanup: () => {
+      if (sliderRafId !== null) {
+        cancelAnimationFrame(sliderRafId);
+        sliderRafId = null;
+      }
+      slider.removeEventListener('input', onInput);
+      slider.removeEventListener('change', onChange);
+    },
+    triggerPendingUpdate: () => {
+      if (sliderRafId !== null) {
+        cancelAnimationFrame(sliderRafId);
+        sliderRafId = null;
+        onUpdateGrid();
+      }
+    }
+  };
+}
+
+if (uiManager?.elements?.thumbnailSizeSlider && typeof uiManager.elements.thumbnailSizeSlider.addEventListener === 'function') {
+  setupThumbnailSliderEvents(uiManager.elements.thumbnailSizeSlider);
+}
 
 // リサイズイベント発生時にディレイなしで枠線の表示・非表示を切り替える
 window.addEventListener('resize', () => {
