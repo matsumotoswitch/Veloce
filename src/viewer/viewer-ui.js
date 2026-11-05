@@ -88,6 +88,39 @@ class ViewerUI {
   applyGlowEffect(el) {
     glowElement(el);
   }
+
+  /**
+   * ループ境界（先頭または末尾への折り返し）到達時の視覚的フィードバックを発火します。
+   * 画面両端・外周に微弱なアクセント発光（viewer-edge-glow）を適用し、軽量なトースト通知を表示します。
+   * @param {'start'|'end'} boundary - 'start' (末尾から先頭へループ) または 'end' (先頭から末尾へループ)
+   */
+  triggerLoopFeedback(boundary) {
+    const body = document.body;
+    if (body) {
+      if (this._edgeGlowTimer) {
+        clearTimeout(this._edgeGlowTimer);
+        body.classList.remove('viewer-edge-glow');
+        void body.offsetWidth; // リフローを強制してアニメーションを再トリガー
+      }
+      body.classList.add('viewer-edge-glow');
+      this._edgeGlowTimer = setTimeout(() => {
+        body.classList.remove('viewer-edge-glow');
+        this._edgeGlowTimer = null;
+      }, 400);
+    }
+
+    const message = boundary === 'start' ? '先頭に戻りました' : '末尾に戻りました';
+    const toastFn = (typeof showToast === 'function') 
+      ? showToast 
+      : (typeof window !== 'undefined' && typeof window.showToast === 'function')
+        ? window.showToast
+        : (typeof globalThis !== 'undefined' && typeof globalThis.showToast === 'function')
+          ? globalThis.showToast
+          : null;
+    if (typeof toastFn === 'function') {
+      toastFn(message, 1500, 'info');
+    }
+  }
 }
 
 export { ViewerUI };

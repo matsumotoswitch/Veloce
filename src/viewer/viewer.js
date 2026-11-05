@@ -1297,11 +1297,16 @@ function swapImageElement(newImg, sequenceId) {
       }, { once: true });
     }
   } else {
-    newImg.decode().then(() => {
+    const decodePromise = (typeof newImg.decode === 'function') ? newImg.decode() : null;
+    if (decodePromise && typeof decodePromise.then === 'function') {
+      decodePromise.then(() => {
+        makeVisible();
+      }).catch((e) => {
+        makeVisible();
+      });
+    } else {
       makeVisible();
-    }).catch((e) => {
-      makeVisible();
-    });
+    }
   }
 
   if (newImg.tagName === 'VIDEO') {
@@ -1472,10 +1477,14 @@ async function preloadAdjacentImages() {
 /**
  * 次の画像を表示する (Next)
  */
-function showNext() {
+export function showNext() {
   if (viewerState.totalImages > 0) {
     viewerState.lastDirection = 1;
+    const isLooping = viewerState.totalImages > 1 && viewerState.currentIndex === viewerState.totalImages - 1;
     viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
+    if (isLooping && viewerUI && typeof viewerUI.triggerLoopFeedback === 'function') {
+      viewerUI.triggerLoopFeedback('start');
+    }
     loadImage();
   }
 }
@@ -1483,10 +1492,14 @@ function showNext() {
 /**
  * 前の画像を表示する (Prev)
  */
-function showPrev() {
+export function showPrev() {
   if (viewerState.totalImages > 0) {
     viewerState.lastDirection = -1;
+    const isLooping = viewerState.totalImages > 1 && viewerState.currentIndex === 0;
     viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
+    if (isLooping && viewerUI && typeof viewerUI.triggerLoopFeedback === 'function') {
+      viewerUI.triggerLoopFeedback('end');
+    }
     loadImage();
   }
 }
@@ -2281,6 +2294,8 @@ if (typeof window !== 'undefined') {
   window.ensureVideoSeekBarContainer = ensureVideoSeekBarContainer;
   window.setVideoSeekBarVisibility = setVideoSeekBarVisibility;
   window.toggleVideoSeekBar = toggleVideoSeekBar;
+  window.showNext = showNext;
+  window.showPrev = showPrev;
 }
 
 window.addEventListener('beforeunload', () => {
