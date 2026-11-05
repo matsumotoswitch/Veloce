@@ -2146,6 +2146,78 @@ document.addEventListener('contextmenu', (e) => {
 
 // (handleTreeNavigation is modularized into renderer-folder-tree.js)
 
+/**
+ * 検索バーのイベントリスナーを設定します。
+ * 日本語IME入力（全角/漢字変換）中の未確定文字列による不要な検索トリガーを保留し、
+ * 変換確定時（compositionend）または非IME入力のデバウンス完了時にスマートに検索を実行します。
+ * @param {HTMLInputElement} searchBar - 検索入力要素
+ * @param {Object} [options={}] - コールバックおよび設定オプション
+ * @returns {{ isComposing: () => boolean, cleanup: () => void }}
+ */
+export function setupSearchBarEvents(searchBar, options = {}) {
+  if (!searchBar) return { isComposing: () => false, cleanup: () => {} };
+
+  const searchDelay = typeof options.searchDelay === 'number' ? options.searchDelay : (CONFIG.SEARCH_DELAY || 300);
+  const onSearch = options.onSearch || ((query) => {
+    appState.searchQuery = query;
+    scheduleRefresh(true);
+  });
+  const updateIndicator = options.updateIndicator || (() => {});
+  const clearBtn = options.clearBtn || (uiManager?.elements?.searchClearBtn);
+
+  let isComposing = false;
+
+  const onCompositionStart = () => {
+    isComposing = true;
+  };
+
+  const onCompositionEnd = (e) => {
+    isComposing = false;
+    updateIndicator();
+    const query = (e.target && typeof e.target.value === 'string') ? e.target.value : searchBar.value;
+    onSearch(query);
+  };
+
+  const onInputImmediate = () => {
+    updateIndicator();
+  };
+
+  const debouncedSearch = debounce((e) => {
+    // IME変換確定前（未確定のかな入力や変換候補選択中）は検索を保留
+    if (isComposing) return;
+    const query = (e.target && typeof e.target.value === 'string') ? e.target.value : searchBar.value;
+    onSearch(query);
+  }, searchDelay);
+
+  const onKeydown = (e) => {
+    if (e.key === 'Escape' || e.keyCode === 27) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (clearBtn) {
+        clearBtn.click();
+      }
+      searchBar.blur();
+    }
+  };
+
+  searchBar.addEventListener('compositionstart', onCompositionStart);
+  searchBar.addEventListener('compositionend', onCompositionEnd);
+  searchBar.addEventListener('input', onInputImmediate);
+  searchBar.addEventListener('input', debouncedSearch);
+  searchBar.addEventListener('keydown', onKeydown);
+
+  return {
+    isComposing: () => isComposing,
+    cleanup: () => {
+      searchBar.removeEventListener('compositionstart', onCompositionStart);
+      searchBar.removeEventListener('compositionend', onCompositionEnd);
+      searchBar.removeEventListener('input', onInputImmediate);
+      searchBar.removeEventListener('input', debouncedSearch);
+      searchBar.removeEventListener('keydown', onKeydown);
+    }
+  };
+}
+
 // ============================================================================
 // 5. Application Initialization
 // ============================================================================
@@ -2747,22 +2819,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   };
 
   if (uiManager.elements.searchBar) {
-    uiManager.elements.searchBar.addEventListener('input', (e) => {
-      updateFilterIndicator();
-    });
-    uiManager.elements.searchBar.addEventListener('input', debounce((e) => {
-      appState.searchQuery = e.target.value;
-      scheduleRefresh(true);
-    }, CONFIG.SEARCH_DELAY));
-    uiManager.elements.searchBar.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' || e.keyCode === 27) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (uiManager.elements.searchClearBtn) {
-          uiManager.elements.searchClearBtn.click();
-        }
-        uiManager.elements.searchBar.blur();
-      }
+    setupSearchBarEvents(uiManager.elements.searchBar, {
+      searchDelay: CONFIG.SEARCH_DELAY,
+      onSearch: (query) => {
+        appState.searchQuery = query;
+        scheduleRefresh(true);
+      },
+      updateIndicator: updateFilterIndicator,
+      clearBtn: uiManager.elements.searchClearBtn
     });
   }
 
