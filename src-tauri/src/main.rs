@@ -1277,39 +1277,15 @@ fn load_directory(
                         }).collect();
 
                         // チャンク内の新規パース結果を1つのSQLiteトランザクションでまとめてコミット（ロック競合排除）
-                        if let Ok(mut conn) = db_conn_clone.get() {
-                            if let Ok(tx) = conn.transaction() {
-                                {
-                                    if let Ok(mut stmt) = tx.prepare_cached(
-                                        "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                         ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source"
-                                    ) {
-                                        for (_, _, _, _, _, ref opt_row) in &results {
-                                            if let Some(row) = opt_row {
-                                                let _ = stmt.execute(rusqlite::params![
-                                                    &row.hash_key,
-                                                    &row.json_str,
-                                                    row.width,
-                                                    row.height,
-                                                    &row.path,
-                                                    row.file_size,
-                                                    row.mtime,
-                                                    row.ctime,
-                                                    row.now,
-                                                    &row.sp,
-                                                    &row.snp,
-                                                    &row.ss,
-                                                    &row.metadata_source,
-                                                ]);
-                                            }
-                                        }
-                                    }
-                                }
-                                let _ = tx.commit();
+                        let mut pending_rows = Vec::new();
+                        let mut res = Vec::with_capacity(results.len());
+                        for (idx, p, meta, fm, fs, opt_row) in results {
+                            if let Some(row) = opt_row {
+                                pending_rows.push(row);
                             }
+                            res.push((idx, p, meta, fm, fs));
                         }
-
-                        let res: Vec<_> = results.into_iter().map(|(idx, p, meta, fm, fs, _)| (idx, p, meta, fm, fs)).collect();
+                        let _ = commit_pending_metadata_batch(&db_conn_clone, &pending_rows);
                         res
                     }).await.unwrap_or_default();
 
@@ -1971,10 +1947,20 @@ async fn get_full_metadata_batch(
     let db_conn_clone = state.db_conn.clone();
     Ok(tokio::task::spawn_blocking(move || {
         use rayon::prelude::*;
-        file_paths
+        let results: Vec<(FullMetadata, Option<MetadataCacheRow>)> = file_paths
             .into_par_iter()
-            .map(|path| get_full_metadata_for_path(&path, &db_conn_clone).0)
-            .collect()
+            .map(|path| get_full_metadata_for_path_compute_only(&path, &db_conn_clone))
+            .collect();
+        let mut pending_rows = Vec::new();
+        let mut metas = Vec::with_capacity(results.len());
+        for (meta, opt_row) in results {
+            if let Some(row) = opt_row {
+                pending_rows.push(row);
+            }
+            metas.push(meta);
+        }
+        let _ = commit_pending_metadata_batch(&db_conn_clone, &pending_rows);
+        metas
     })
     .await
     .unwrap_or_default())
@@ -2097,6 +2083,92 @@ fn get_full_metadata_for_path_with_stat(
 ) -> (FullMetadata, u64, u64) {
     let (meta, mt, sz, _) = get_full_metadata_for_path_with_stat_inner(file_path, mtime_millis, ctime_millis, file_size, db_conn, true);
     (meta, mt, sz)
+}
+
+/// DB書き込みを行わずにメタデータ解析結果と未コミット行（MetadataCacheRow）を返す並列バッチ向けヘルパー
+fn get_full_metadata_for_path_compute_only(
+    file_path: &str,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) -> (FullMetadata, Option<MetadataCacheRow>) {
+    let (mtime_millis, ctime_millis, file_size) = std::fs::metadata(file_path)
+        .map(|m| {
+            let mt = m.modified().unwrap_or(std::time::UNIX_EPOCH).duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            let ct = m.created().unwrap_or(std::time::UNIX_EPOCH).duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            let s = m.len();
+            (mt, ct, s)
+        })
+        .unwrap_or((0, 0, 0));
+    let (meta, _, _, row) = get_full_metadata_for_path_with_stat_inner(
+        file_path,
+        mtime_millis,
+        ctime_millis,
+        file_size,
+        db_conn,
+        false,
+    );
+    (meta, row)
+}
+
+/// 複数の新規解析メタデータ行を単一のSQLiteトランザクションで一括保存する。
+/// 並列解析スレッドからの個別オートコミットによるWriterロック競合を排除する。
+fn commit_pending_metadata_batch(
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    pending_rows: &[MetadataCacheRow],
+) -> Result<usize, rusqlite::Error> {
+    if pending_rows.is_empty() {
+        return Ok(0);
+    }
+    let mut conn = db_conn.get().map_err(|_| rusqlite::Error::InvalidQuery)?;
+    if pending_rows.len() == 1 {
+        let r = &pending_rows[0];
+        conn.execute(
+            "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source",
+            rusqlite::params![
+                &r.hash_key,
+                &r.json_str,
+                r.width,
+                r.height,
+                &r.path,
+                r.file_size,
+                r.mtime,
+                r.ctime,
+                r.now,
+                &r.sp,
+                &r.snp,
+                &r.ss,
+                &r.metadata_source,
+            ],
+        )?;
+        return Ok(1);
+    }
+
+    let tx = conn.transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source",
+        )?;
+        for r in pending_rows {
+            stmt.execute(rusqlite::params![
+                &r.hash_key,
+                &r.json_str,
+                r.width,
+                r.height,
+                &r.path,
+                r.file_size,
+                r.mtime,
+                r.ctime,
+                r.now,
+                &r.sp,
+                &r.snp,
+                &r.ss,
+                &r.metadata_source,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(pending_rows.len())
 }
 
 fn get_full_metadata_for_path_with_stat_inner(
@@ -4206,6 +4278,77 @@ async fn save_thumbnail(
     Ok(url)
 }
 
+/// 指定されたファイル群（パス, mtime, ctime, size）に対して、未キャッシュのメタデータ解析および
+/// サムネイル生成を rayon で並列実行し、完了後に単一トランザクションでSQLiteへ一括コミットする。
+/// 戻り値として (新規保存されたメタデータ件数, 新規保存されたサムネイル件数) を返す。
+fn precache_entries_chunk(
+    items: &[(String, u64, u64, u64)],
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) -> (usize, usize) {
+    use rayon::prelude::*;
+
+    let computed: Vec<(Option<MetadataCacheRow>, Option<PendingThumbnailWrite>)> = items
+        .par_iter()
+        .map(|(path, mtime, ctime, size)| {
+            let clean_path = path.replace("\\\\?\\", "");
+            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, *mtime);
+
+            let (mut has_thumb, mut has_meta) = (false, false);
+            if let Ok(conn) = db_conn.get() {
+                if let Ok(mut stmt) = conn.prepare_cached(
+                    "SELECT (thumbnail IS NOT NULL), (metadata IS NOT NULL AND metadata != '') FROM cache WHERE hash_key = ?"
+                ) {
+                    if let Ok((t, m)) = stmt.query_row([&hash_key], |row| {
+                        Ok((
+                            row.get::<_, bool>(0).unwrap_or(false),
+                            row.get::<_, bool>(1).unwrap_or(false),
+                        ))
+                    }) {
+                        has_thumb = t;
+                        has_meta = m;
+                    }
+                }
+            }
+
+            let pending_meta = if !has_meta {
+                get_full_metadata_for_path_with_stat_inner(
+                    path,
+                    *mtime,
+                    *ctime,
+                    *size,
+                    db_conn,
+                    false,
+                ).3
+            } else {
+                None
+            };
+
+            let pending_thumb = if !has_thumb {
+                generate_thumbnail_compute_only(path, *mtime, Some(&hash_key), db_conn).1
+            } else {
+                None
+            };
+
+            (pending_meta, pending_thumb)
+        })
+        .collect();
+
+    let mut pending_meta_rows = Vec::new();
+    let mut pending_thumb_writes = Vec::new();
+    for (m_opt, t_opt) in computed {
+        if let Some(m) = m_opt {
+            pending_meta_rows.push(m);
+        }
+        if let Some(t) = t_opt {
+            pending_thumb_writes.push(t);
+        }
+    }
+
+    let meta_committed = commit_pending_metadata_batch(db_conn, &pending_meta_rows).unwrap_or(0);
+    let thumb_committed = commit_pending_thumbnails_batch(db_conn, &pending_thumb_writes).unwrap_or(0);
+    (meta_committed, thumb_committed)
+}
+
 #[tauri::command]
 async fn precache_directory_recursively(
     window: tauri::Window,
@@ -4214,7 +4357,7 @@ async fn precache_directory_recursively(
 ) -> Result<(), String> {
     let db_conn = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
-        let entries: Vec<_> = jwalk::WalkDir::new(&target_path)
+        let entries: Vec<(String, u64, u64, u64)> = jwalk::WalkDir::new(&target_path)
             .skip_hidden(false)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -4222,14 +4365,7 @@ async fn precache_directory_recursively(
                 let path = e.path().to_string_lossy().to_lowercase();
                 path.ends_with(".png") || path.ends_with(".jpg") || path.ends_with(".jpeg") || path.ends_with(".webp")
             })
-            .collect();
-        
-        let total = entries.len();
-        use rayon::prelude::*;
-
-        // 32件単位の並列チャンクでサムネイル生成・メタデータ抽出をマルチスレッド実行
-        for (chunk_idx, chunk) in entries.chunks(32).enumerate() {
-            chunk.par_iter().for_each(|entry| {
+            .map(|entry| {
                 let path = entry.path().to_string_lossy().to_string();
                 let metadata = entry.metadata().ok();
                 let mtime = metadata
@@ -4238,25 +4374,22 @@ async fn precache_directory_recursively(
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
+                let ctime = metadata
+                    .as_ref()
+                    .and_then(|m| m.created().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                (path, mtime, ctime, size)
+            })
+            .collect();
 
-                let clean_path = path.replace("\\\\?\\", "");
-                let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+        let total = entries.len();
 
-                let mut has_both = false;
-                if let Ok(conn) = db_conn.get() {
-                    if let Ok(mut stmt) = conn.prepare_cached("SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND metadata IS NOT NULL AND metadata != ''") {
-                        if stmt.exists([&hash_key]).unwrap_or(false) {
-                            has_both = true;
-                        }
-                    }
-                }
-
-                if !has_both {
-                    get_full_metadata_for_path(&path, &db_conn);
-                    let _ = generate_thumbnail_inner(&path, mtime, &db_conn);
-                }
-            });
-
+        // 32件単位の並列チャンクでサムネイル生成・メタデータ抽出をマルチスレッド計算し、チャンクごとに一括トランザクション保存
+        for (chunk_idx, chunk) in entries.chunks(32).enumerate() {
+            let _ = precache_entries_chunk(chunk, &db_conn);
             let processed = std::cmp::min((chunk_idx + 1) * 32, total);
             let _ = window.emit("precache-progress", (processed, total));
         }
@@ -10557,5 +10690,81 @@ mod viewer_tests {
         std::fs::write(&corrupted_path, b"\x89PNG\r\n\x1a\ncorrupted_data_here").unwrap();
         let thumb_corrupted = generate_image_thumbnail_sync(corrupted_path.to_str().unwrap());
         assert!(thumb_corrupted.is_none(), "破損PNGに対してパニックせず安全にNoneを返却すること");
+    }
+
+    #[test]
+    fn test_commit_pending_metadata_batch_and_precache_chunk() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_precache_batch.db");
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path);
+        let pool = r2d2::Pool::builder().max_size(4).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 CREATE TABLE cache (
+                     hash_key TEXT PRIMARY KEY,
+                     thumbnail BLOB,
+                     metadata TEXT,
+                     width INTEGER DEFAULT 0,
+                     height INTEGER DEFAULT 0,
+                     path TEXT DEFAULT '',
+                     size INTEGER DEFAULT 0,
+                     mtime INTEGER DEFAULT 0,
+                     ctime INTEGER DEFAULT 0,
+                     last_accessed INTEGER,
+                     searchable_prompt TEXT DEFAULT '',
+                     searchable_negative_prompt TEXT DEFAULT '',
+                     searchable_source TEXT DEFAULT '',
+                     metadata_source TEXT DEFAULT ''
+                 );
+                 CREATE VIRTUAL TABLE cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source);
+                 CREATE TRIGGER cache_ai AFTER INSERT ON cache BEGIN
+                     INSERT INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+                     VALUES (new.rowid, new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
+                 END;
+                 CREATE TRIGGER cache_au AFTER UPDATE OF hash_key, searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN
+                     UPDATE cache_fts SET
+                         hash_key = new.hash_key,
+                         searchable_prompt = new.searchable_prompt,
+                         searchable_negative_prompt = new.searchable_negative_prompt,
+                         searchable_source = new.searchable_source
+                     WHERE rowid = old.rowid;
+                 END;"
+            ).unwrap();
+        }
+
+        let mut items = Vec::new();
+        for i in 0..4 {
+            let img_path = temp_dir.path().join(format!("sample_{}.png", i));
+            let mut img = image::RgbImage::new(320, 240);
+            for pixel in img.pixels_mut() {
+                *pixel = image::Rgb([40 * i as u8, 120, 200]);
+            }
+            img.save(&img_path).unwrap();
+            let meta = std::fs::metadata(&img_path).unwrap();
+            let mtime = meta.modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            let ctime = meta.created().unwrap_or(std::time::UNIX_EPOCH).duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            items.push((img_path.to_string_lossy().to_string(), mtime, ctime, meta.len()));
+        }
+
+        // 1回目: 4件すべてのメタデータとサムネイルが一括コミットされること
+        let (meta_count_1, thumb_count_1) = precache_entries_chunk(&items, &pool);
+        assert_eq!(meta_count_1, 4, "初回実行時は4件のメタデータが一括保存されること");
+        assert_eq!(thumb_count_1, 4, "初回実行時は4件のサムネイルが一括保存されること");
+
+        // DB内に4件ともサムネイルとメタデータが両方格納されていることを検証
+        let conn = pool.get().unwrap();
+        let complete_rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cache WHERE thumbnail IS NOT NULL AND metadata IS NOT NULL AND metadata != '' AND width = 320 AND height = 240",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(complete_rows, 4, "4件すべてにメタデータ（解像度含む）とサムネイルが格納されていること");
+
+        // 2回目: すでに両方キャッシュ済みのため、再生成・再コミットが0件であること
+        let (meta_count_2, thumb_count_2) = precache_entries_chunk(&items, &pool);
+        assert_eq!(meta_count_2, 0, "キャッシュ済み再実行時はメタデータ再保存が0件であること");
+        assert_eq!(thumb_count_2, 0, "キャッシュ済み再実行時はサムネイル再保存が0件であること");
     }
 }
