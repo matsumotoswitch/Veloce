@@ -72,14 +72,14 @@ describe('Titlebar and Window Control Buttons Consistency', () => {
   it('should maintain transparent background on viewer control buttons and info container to prevent obtrusiveness', () => {
     // コントロールボタンは常時視認化（目立つ背景色）を避け、通常時 transparent であること
     expect(cssContent).toMatch(/\.window-ctrl-btn\s*\{[^}]*background-color:\s*transparent;/);
-    // アイコン輪郭の自然な視認性確保のため、ボタン矩形ではなくSVGアイコンにのみドロップシャドウを適用
-    expect(cssContent).toMatch(/\.window-ctrl-btn svg\s*\{[^}]*filter:\s*drop-shadow\(/);
+    // アイコン輪郭の自然な視認性確保のため、ボタン矩形ではなくSVGアイコンにのみドロップシャドウ（トークン）を適用
+    expect(cssContent).toMatch(/\.window-ctrl-btn svg\s*\{[^}]*filter:\s*var\(--viewer-icon-shadow\);/);
     // ホバー時はボタン矩形・アイコンともに不要な影を完全に排除すること
     expect(cssContent).toMatch(/\.window-ctrl-btn:hover\s*\{[^}]*filter:\s*none;/);
     expect(cssContent).toMatch(/\.window-ctrl-btn:hover svg\s*\{[^}]*filter:\s*none;/);
 
     // 情報コンテナのテキストシャドウ（背景色ボックスなしで輪郭を保護）
-    expect(cssContent).toMatch(/\.viewer-rating-display\s*\{[^}]*text-shadow:\s*0 1px 3px/);
-    expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*text-shadow:\s*0 1px 3px/);
+    expect(cssContent).toMatch(/\.viewer-rating-display\s*\{[^}]*text-shadow:\s*var\(--viewer-info-shadow\);/);
+    expect(cssContent).toMatch(/\.window-scale-display\s*\{[^}]*text-shadow:\s*var\(--viewer-info-shadow\);/);
   });
 });

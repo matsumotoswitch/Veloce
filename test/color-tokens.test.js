@@ -218,7 +218,7 @@ describe('Design Token and Color Consistency (AGENTS.md Sec 2)', () => {
 
   it('should define unsharp-svg and viewer info-container gradient styles in style.css and eliminate inline styles in viewer.js', () => {
     expect(cssContent).toMatch(/\.unsharp-svg\s*\{[^}]*position:\s*absolute;/);
-    expect(cssContent).toMatch(/\.viewer-body #window-controls:not\(\.has-gradient\)\s+\.window-info-container\s*\{[^}]*background-color:\s*rgba\(0,\s*0,\s*0,\s*0\.4\);/);
+    expect(cssContent).toMatch(/\.viewer-body #window-controls:not\(\.has-gradient\)\s+\.window-info-container\s*\{[^}]*background-color:\s*var\(--viewer-controls-bg\);/);
     const viewerJs = fs.readFileSync(path.resolve(__dirname, '../src/viewer/viewer.js'), 'utf-8');
     expect(viewerJs).not.toContain("svgElement.style.position = 'absolute'");
     expect(viewerJs).not.toContain("infoContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.4)'");

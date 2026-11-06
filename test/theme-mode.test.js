@@ -287,4 +287,42 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(selectMatch[1]).toMatch(/background-color:\s*var\(--panel-bg\);/);
     });
   });
+
+  describe('Standalone Viewer Theme Tokens Integration', () => {
+    const variablesCssPath = path.resolve(__dirname, '../src/common/css/variables.css');
+    const variablesContent = fs.readFileSync(variablesCssPath, 'utf-8');
+    const viewerCssPath = path.resolve(__dirname, '../src/viewer/viewer.css');
+    const viewerContent = fs.readFileSync(viewerCssPath, 'utf-8');
+
+    it('should define standalone viewer overlay and control tokens in variables.css for both dark and light themes', () => {
+      // Dark theme tokens
+      expect(variablesContent).toContain('--viewer-header-gradient:');
+      expect(variablesContent).toContain('--viewer-title-shadow:');
+      expect(variablesContent).toContain('--viewer-info-shadow:');
+      expect(variablesContent).toContain('--viewer-icon-shadow:');
+      expect(variablesContent).toContain('--viewer-controls-bg:');
+      expect(variablesContent).toContain('--viewer-controls-color:');
+
+      // Light theme tokens
+      const lightThemeMatch = variablesContent.match(/:root\[data-theme="light"\]\s*\{([^}]+)\}/);
+      expect(lightThemeMatch).not.toBeNull();
+      const lightRules = lightThemeMatch[1];
+      expect(lightRules).toContain('--viewer-header-gradient:');
+      expect(lightRules).toContain('--viewer-title-shadow:');
+      expect(lightRules).toContain('--viewer-info-shadow:');
+      expect(lightRules).toContain('--viewer-icon-shadow:');
+      expect(lightRules).toContain('--viewer-controls-bg:');
+      expect(lightRules).toContain('--viewer-controls-color:');
+    });
+
+    it('should use tokens in viewer.css and eliminate all :root[data-theme="light"] overrides', () => {
+      expect(viewerContent).toContain('var(--viewer-header-gradient)');
+      expect(viewerContent).toContain('var(--viewer-title-shadow)');
+      expect(viewerContent).toContain('var(--viewer-info-shadow)');
+      expect(viewerContent).toContain('var(--viewer-icon-shadow)');
+      expect(viewerContent).toContain('var(--viewer-controls-bg)');
+      expect(viewerContent).toContain('var(--viewer-controls-color)');
+      expect(viewerContent).not.toContain(':root[data-theme="light"]');
+    });
+  });
 });
