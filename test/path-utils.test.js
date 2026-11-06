@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { validateFilename, checkPathExists } from '../src/common/path-utils.js';
+import { validateFilename, checkPathExists, getParentDirectory } from '../src/common/path-utils.js';
 
 describe('Path Utils', () => {
   afterEach(() => {
@@ -80,6 +80,43 @@ describe('Path Utils', () => {
       expect(await checkPathExists('C:\\error_folder')).toBe(true);
       expect(spy).toHaveBeenCalled();
       spy.mockRestore();
+    });
+  });
+
+  describe('getParentDirectory', () => {
+    it('should return null for falsy, PC, or smart folder paths', () => {
+      expect(getParentDirectory(null)).toBeNull();
+      expect(getParentDirectory(undefined)).toBeNull();
+      expect(getParentDirectory('')).toBeNull();
+      expect(getParentDirectory('   ')).toBeNull();
+      expect(getParentDirectory('PC')).toBeNull();
+      expect(getParentDirectory('smart://12345')).toBeNull();
+    });
+
+    it('should handle Windows drive roots and subdirectories', () => {
+      expect(getParentDirectory('C:\\')).toBeNull();
+      expect(getParentDirectory('C:')).toBeNull();
+      expect(getParentDirectory('C:/')).toBeNull();
+      expect(getParentDirectory('C:\\Users')).toBe('C:\\');
+      expect(getParentDirectory('C:\\Users\\')).toBe('C:\\');
+      expect(getParentDirectory('C:\\Users\\Photos')).toBe('C:\\Users');
+      expect(getParentDirectory('D:/Work/Images/2026')).toBe('D:\\Work\\Images');
+    });
+
+    it('should handle UNC share roots and subdirectories', () => {
+      expect(getParentDirectory('\\\\server')).toBeNull();
+      expect(getParentDirectory('\\\\server\\share')).toBeNull();
+      expect(getParentDirectory('\\\\server\\share\\')).toBeNull();
+      expect(getParentDirectory('\\\\server\\share\\Photos')).toBe('\\\\server\\share');
+      expect(getParentDirectory('\\\\server\\share\\Photos\\2026')).toBe('\\\\server\\share\\Photos');
+    });
+
+    it('should handle POSIX roots and subdirectories', () => {
+      expect(getParentDirectory('/')).toBeNull();
+      expect(getParentDirectory('///')).toBeNull();
+      expect(getParentDirectory('/Users')).toBe('/');
+      expect(getParentDirectory('/Users/Photos')).toBe('/Users');
+      expect(getParentDirectory('/Users/Photos/')).toBe('/Users');
     });
   });
 });

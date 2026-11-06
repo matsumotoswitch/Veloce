@@ -205,6 +205,7 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>現在のフォルダ内のすべての画像を選択</td></tr>
         <tr><td><kbd>Ctrl</kbd> / <kbd>Shift</kbd> + クリック</td><td>画像の複数選択</td></tr>
         <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>フォルダ移動履歴の「戻る」 / 「進む」</td></tr>
+        <tr><td><kbd>Alt</kbd> + <kbd>↑</kbd></td><td>ひとつ上のフォルダへ移動</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>PageDown</kbd></td><td>次のタブへ切り替え</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>PageUp</kbd></td><td>前のタブへ切り替え</td></tr>
       </table>

@@ -16,7 +16,7 @@ import { appState, SmartFolderStore } from './renderer-state.js';
 import { UIManager, uiManager, formatSize, formatBytesHuman, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
 import { ThumbnailQueueManager, thumbnailWorkerPool, evictThumbnailCache, cleanupContext, resetThumbnailPreloader } from './renderer-thumbnails.js';
 import { debounce, blockDevtoolsShortcuts, getStreamUrl } from '../common/utils.js';
-import { validateFilename } from '../common/path-utils.js';
+import { validateFilename, getParentDirectory } from '../common/path-utils.js';
 import { extractMetadataFields, highlightSearchTerms, buildInspectorSections, createSearchTermsRegex } from '../common/metadata-format.js';
 import { resolvePathDisplay } from './favorite-icons.js';
 import {
@@ -137,10 +137,15 @@ document.body.appendChild(tabListMenu);
 // 2. Tauri API & Backend Communication
 // ============================================================================
 
-function updateNavButtons() {
+export function updateNavButtons() {
   const backBtn = document.getElementById('nav-back-btn');
   const forwardBtn = document.getElementById('nav-forward-btn');
+  const upBtn = document.getElementById('nav-up-btn');
   const tab = appState.tabs[appState.activeTabIndex];
+  const currentDir = appState.currentDirectory || (tab && tab.path) || '';
+  if (upBtn) {
+    upBtn.disabled = !getParentDirectory(currentDir);
+  }
   if (!tab || !tab.history) {
     if (backBtn) backBtn.disabled = true;
     if (forwardBtn) forwardBtn.disabled = true;
@@ -148,6 +153,37 @@ function updateNavButtons() {
   }
   if (backBtn) backBtn.disabled = tab.historyIndex <= 0;
   if (forwardBtn) forwardBtn.disabled = tab.historyIndex >= tab.history.length - 1;
+}
+
+/**
+ * 現在表示中のフォルダから1階層上の親フォルダへ移動する。
+ * ルートディレクトリ・PC・スマートフォルダ等の親が存在しない状態では何もしない。
+ */
+export async function navigateUp() {
+  const activeTab = appState.tabs && appState.tabs[appState.activeTabIndex];
+  const currentDir = appState.currentDirectory || (activeTab && activeTab.path) || '';
+  const parentPath = getParentDirectory(currentDir);
+  if (!parentPath) return;
+
+  appState.selection.clear();
+  appState.selectedIndex = -1;
+  uiManager.updateSelectionUI();
+
+  if (activeTab) {
+    activeTab.path = parentPath;
+    activeTab.name = getTabNameForPath(parentPath);
+    activeTab.scrollTop = 0;
+  }
+  appState.savedScrollTopGrid = 0;
+  appState.savedScrollTopList = 0;
+  appState.currentDirectory = parentPath;
+  setSetting('currentDirectory', parentPath);
+  uiManager.renderTabs();
+  saveTabsState();
+
+  await refreshFileList(true);
+  await expandTreeToPath(parentPath);
+  updateNavButtons();
 }
 
 async function navigateHistory(offset) {
@@ -1827,7 +1863,7 @@ export const globalKeydownHandler = async (e) => {
 
   const activeTagName = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
 
-  // 1. ナビゲーション履歴の進む / 戻る (Alt + ArrowLeft / ArrowRight)
+  // 1. ナビゲーション履歴の進む / 戻る / 上のフォルダへ移動 (Alt + ArrowLeft / ArrowRight / ArrowUp)
   if (e.altKey && e.key === 'ArrowLeft') {
     e.preventDefault();
     navigateHistory(-1);
@@ -1836,6 +1872,13 @@ export const globalKeydownHandler = async (e) => {
   if (e.altKey && e.key === 'ArrowRight') {
     e.preventDefault();
     navigateHistory(1);
+    return;
+  }
+  if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key === 'ArrowUp') {
+    if (isModalOrOverlayOpen()) return;
+    if (activeTagName === 'input' || activeTagName === 'textarea') return;
+    e.preventDefault();
+    await navigateUp();
     return;
   }
 
@@ -2286,6 +2329,22 @@ export function setupSearchBarEvents(searchBar, options = {}) {
   };
 }
 
+/**
+ * 「上のフォルダへ」ボタン (#nav-up-btn) のツールチップおよびクリックハンドラを初期化する。
+ * @param {HTMLButtonElement|null} upBtn
+ */
+export function initNavUpButton(upBtn) {
+  if (!upBtn) return;
+  uiManager.bindTooltip(upBtn, '上のフォルダへ', {
+    isDisabled: () => upBtn.disabled
+  });
+  upBtn.addEventListener('click', async () => {
+    if (upBtn.disabled) return;
+    uiManager.hideCustomTooltip();
+    await navigateUp();
+  });
+}
+
 // ============================================================================
 // 5. Application Initialization
 // ============================================================================
@@ -2438,6 +2497,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   setupNavButtonEvents('nav-back-btn', -1, '戻る');
   setupNavButtonEvents('nav-forward-btn', 1, '進む');
+  initNavUpButton(document.getElementById('nav-up-btn'));
 
   const reloadBtn = document.getElementById('nav-reload-btn');
   if (reloadBtn) {
