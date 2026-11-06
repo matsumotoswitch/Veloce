@@ -227,6 +227,21 @@ describe('Theme Architecture (Dual Theme: Dark & Light Mode Architecture)', () =
       expect(itemRules).toMatch(/max-height:\s*22px;/);
       expect(itemRules).toMatch(/box-sizing:\s*border-box;/);
     });
+
+    it('should align light theme bookmark-item geometry (padding and border-radius) with dark theme', () => {
+      const layoutCssPath = path.resolve(__dirname, '../src/renderer/css/layout.css');
+      const layoutContent = fs.readFileSync(layoutCssPath, 'utf-8');
+
+      const lightItemMatch = layoutContent.match(/:root\[data-theme="light"\]\s+\.bookmark-item\s*\{([^}]+)\}/);
+      expect(lightItemMatch).not.toBeNull();
+      const lightRules = lightItemMatch[1];
+
+      // ダークテーマと一致する角丸と横パディング (4px/8px) を設定し、カプセル形状(11px)や横伸長(10px)を排除
+      expect(lightRules).toMatch(/border-radius:\s*var\(--radius-xs\);/);
+      expect(lightRules).toMatch(/padding:\s*0 8px;/);
+      expect(lightRules).not.toContain('border-radius: 11px;');
+      expect(lightRules).not.toContain('padding: 0 10px;');
+    });
   });
 
   describe('Visual Style Unification across Components', () => {

@@ -216,22 +216,20 @@
 
 :root[data-theme="light"] .bookmark-item {
   color: var(--text-color);
-  border-radius: 11px;
-  padding: 0 10px;
-  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  border-radius: var(--radius-xs);
+  padding: 0 8px;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 :root[data-theme="light"] .bookmark-item:hover:not(.selected) {
   background-color: rgba(0, 0, 0, 0.06) !important;
   color: var(--accent-color) !important;
-  box-shadow: 0 1px 3px rgba(0, 100, 130, 0.08);
 }
 
 :root[data-theme="light"] .bookmark-item.selected {
   background-color: #d0ebf8 !important;
   color: #0277bd !important;
   box-shadow: inset 0 0 0 1px rgba(2, 136, 209, 0.35) !important;
-  font-weight: 500;
 }
 
 :root[data-theme="light"] #tab-container .tab-item.active {
