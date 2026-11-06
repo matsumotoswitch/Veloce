@@ -610,16 +610,6 @@ function fetchThumbnailWithTimeout(filePath, timeoutMs = 10000) {
  * @returns {Promise<string|null>} 保存完了後の即時参照用URL（またはnull）
  */
 export async function saveThumbnailBinary(filePath, blob, base64Promise) {
-  let b64Promise = base64Promise;
-  if (!b64Promise && blob && typeof FileReader !== 'undefined') {
-    b64Promise = new Promise((resolveB64, rejectB64) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolveB64(reader.result);
-      reader.onerror = () => rejectB64(new Error("FileReader failed"));
-      reader.readAsDataURL(blob);
-    });
-  }
-
   const port = window.videoServerPort;
   if (port && typeof fetch === 'function' && blob) {
     try {
@@ -640,7 +630,17 @@ export async function saveThumbnailBinary(filePath, blob, base64Promise) {
     }
   }
 
-  // フォールバック: 従来の Base64 + Tauri IPC
+  // フォールバック: HTTP サーバーが未設定または送信失敗時のみ Base64 変換と Tauri IPC を実行
+  let b64Promise = base64Promise;
+  if (!b64Promise && blob && typeof FileReader !== 'undefined') {
+    b64Promise = new Promise((resolveB64, rejectB64) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolveB64(reader.result);
+      reader.onerror = () => rejectB64(new Error("FileReader failed"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
   if (b64Promise && typeof b64Promise.then === 'function') {
     try {
       const b64 = await b64Promise;
@@ -1400,6 +1400,11 @@ export class ThumbnailQueueManager {
 
         if (genResult) {
           const { url: blobUrl, blob: outBlob, base64Promise, width, height } = genResult;
+          const revokeTempBlobUrl = (targetUrl) => {
+            if (targetUrl && typeof targetUrl === 'string' && targetUrl.startsWith('blob:') && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+              URL.revokeObjectURL(targetUrl);
+            }
+          };
           
           // 生成完了後のバイナリ直接送信（またはフォールバック保存）は、フォルダ移動（signal.aborted）にかかわらず確実にコミットする
           saveThumbnailBinary(filePath, outBlob, base64Promise).then((savedUrl) => {
@@ -1407,11 +1412,22 @@ export class ThumbnailQueueManager {
             const lightUrl = savedUrl || blobUrl;
             if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
               appState.thumbnailUrls.set(filePath, lightUrl);
+              const uiMgr = window.uiManager || uiManager;
+              const wrapper = (uiMgr && uiMgr._domByPath) ? uiMgr._domByPath.get(filePath) : null;
+              const img = wrapper && wrapper.children ? wrapper.children[0] : null;
+              if (img && img.src === blobUrl && !img.complete) {
+                const cleanupBlob = () => revokeTempBlobUrl(blobUrl);
+                img.addEventListener('load', cleanupBlob, { once: true });
+                img.addEventListener('error', cleanupBlob, { once: true });
+              } else {
+                revokeTempBlobUrl(blobUrl);
+              }
               if (window.evictThumbnailCache) window.evictThumbnailCache();
             }
           }).catch(err => console.warn('Cache save error:', err));
 
           if (signal.aborted) {
+            revokeTempBlobUrl(blobUrl);
             if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
               appState.rebuiltPaths.delete(filePath);
             }

@@ -1003,6 +1003,75 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(savedUrl).toBe('http://127.0.0.1:54321/?path=C%3A%2Fimages%2Fpic.png&thumb=1');
     });
 
+    it('saveThumbnailBinary should not instantiate FileReader when HTTP POST succeeds even if base64Promise is null', async () => {
+      const { saveThumbnailBinary } = await import('../src/renderer/renderer-thumbnails.js');
+      window.videoServerPort = 54321;
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => 'http://127.0.0.1:54321/?path=C%3A%2Fimages%2Fno_b64.png&thumb=1'
+      });
+
+      let fileReaderConstructed = false;
+      const originalFileReader = global.FileReader;
+      global.FileReader = class MockFileReader {
+        constructor() {
+          fileReaderConstructed = true;
+        }
+        readAsDataURL() {}
+      };
+
+      try {
+        const dummyBlob = new Blob(['raw-bytes'], { type: 'image/jpeg' });
+        const savedUrl = await saveThumbnailBinary('C:/images/no_b64.png', dummyBlob, null);
+        expect(savedUrl).toBe('http://127.0.0.1:54321/?path=C%3A%2Fimages%2Fno_b64.png&thumb=1');
+        expect(fileReaderConstructed).toBe(false);
+      } finally {
+        global.FileReader = originalFileReader;
+      }
+    });
+
+    it('runTask should revoke temporary blobUrl once savedUrl replaces it in appState.thumbnailUrls or on abort', async () => {
+      const { appState } = await import('../src/renderer/renderer-state.js');
+      const { ThumbnailQueueManager, thumbnailWorkerPool } = await import('../src/renderer/renderer-thumbnails.js');
+      const manager = new ThumbnailQueueManager(2);
+      const filePath = 'C:/test/video_leak_check.mp4';
+      const tempBlobUrl = 'blob:http://localhost/temp-video-thumb-1';
+      const savedHttpUrl = 'http://127.0.0.1:54321/?path=C%3A%2Ftest%2Fvideo_leak_check.mp4&thumb=1';
+
+      window.videoServerPort = 54321;
+      window.veloceAPI.getThumbnail = vi.fn().mockResolvedValue(null);
+      window.veloceAPI.convertFileSrc = vi.fn((p) => `asset://${p}`);
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => savedHttpUrl
+      });
+
+      const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      vi.spyOn(thumbnailWorkerPool, 'generate').mockResolvedValueOnce({
+        url: tempBlobUrl,
+        blob: new Blob(['thumb'], { type: 'image/jpeg' }),
+        base64Promise: null,
+        width: 320,
+        height: 180
+      });
+
+      const wrapper = document.createElement('div');
+      wrapper.dataset.filepath = filePath;
+      const img = document.createElement('img');
+      Object.defineProperty(img, 'complete', { value: true, configurable: true });
+      wrapper.appendChild(img);
+      window.uiManager = { _domByPath: new Map([[filePath, wrapper]]), updateFileDimensions: vi.fn() };
+
+      await manager.runTask(filePath, true);
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+
+      expect(appState.thumbnailUrls.get(filePath)).toBe(savedHttpUrl);
+      expect(revokeSpy).toHaveBeenCalledWith(tempBlobUrl);
+      revokeSpy.mockRestore();
+    });
+
     it('saveThumbnailBinary should fallback to base64Promise and window.veloceAPI.saveThumbnail when videoServerPort is absent', async () => {
       const { saveThumbnailBinary } = await import('../src/renderer/renderer-thumbnails.js');
       delete window.videoServerPort;
