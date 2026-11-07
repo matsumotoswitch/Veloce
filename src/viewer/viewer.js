@@ -1744,9 +1744,9 @@ window.addEventListener('contextmenu', (e) => {
   showNext(); // 右クリックで次の画像へ
 });
 
-window.addEventListener('wheel', (e) => {
+export function handleWheel(e) {
   if (e.ctrlKey) {
-    e.preventDefault(); // ブラウザ標準のズームを無効化し、親ウィンドウへのイベント伝播を防ぐ
+    if (typeof e.preventDefault === 'function') e.preventDefault(); // ブラウザ標準のズームを無効化し、親ウィンドウへのイベント伝播を防ぐ
     viewerState.isImmersiveArranged = false; // 手動ズームで解除
 
     // ズーム状態への移行：初めてズームするときは現在の見た目のスケールを計算して引き継ぎ、二重拡大を防ぐ
@@ -1795,7 +1795,7 @@ window.addEventListener('wheel', (e) => {
     updateFullscreenStyles(); // マージンの再計算
     debouncedFocusWindow();   // フォーカスの維持
   } else {
-    e.preventDefault(); // 親ウィンドウのスクロールを防止
+    if (typeof e.preventDefault === 'function') e.preventDefault(); // 親ウィンドウのスクロールを防止
     
     // 一定時間ホイール操作がない場合は移動量の端数をリセットする
     clearTimeout(window._wheelResetTimeout);
@@ -1816,13 +1816,33 @@ window.addEventListener('wheel', (e) => {
       window._wheelDeltaAccumulator %= WHEEL_THRESHOLD;
     }
 
-    if (steps !== 0) {
-      viewerState.lastDirection = steps > 0 ? 1 : -1;
-      viewerState.currentIndex = (viewerState.currentIndex + steps % viewerState.totalImages + viewerState.totalImages) % viewerState.totalImages;
-      loadImage();
+    if (steps !== 0 && viewerState.totalImages > 0) {
+      if (steps > 0) {
+        for (let s = 0; s < steps; s++) {
+          const isLooping = viewerState.totalImages > 1 && viewerState.currentIndex === viewerState.totalImages - 1;
+          viewerState.currentIndex = (viewerState.currentIndex < viewerState.totalImages - 1) ? viewerState.currentIndex + 1 : 0;
+          if (isLooping && viewerUI && typeof viewerUI.triggerLoopFeedback === 'function') {
+            viewerUI.triggerLoopFeedback('start');
+          }
+        }
+        viewerState.lastDirection = 1;
+        loadImage();
+      } else if (steps < 0) {
+        for (let s = 0; s < Math.abs(steps); s++) {
+          const isLooping = viewerState.totalImages > 1 && viewerState.currentIndex === 0;
+          viewerState.currentIndex = (viewerState.currentIndex > 0) ? viewerState.currentIndex - 1 : viewerState.totalImages - 1;
+          if (isLooping && viewerUI && typeof viewerUI.triggerLoopFeedback === 'function') {
+            viewerUI.triggerLoopFeedback('end');
+          }
+        }
+        viewerState.lastDirection = -1;
+        loadImage();
+      }
     }
   }
-}, { passive: false });
+}
+
+window.addEventListener('wheel', handleWheel, { passive: false });
 
 window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
@@ -2148,29 +2168,6 @@ function ensureVideoSeekBarContainer() {
     }
   }, true);
 
-  let wheelTimeout;
-  let wheelDeltaAccumulator = 0;
-
-  document.addEventListener('wheel', (e) => {
-    if (viewerState.isZoomed || viewerState.isImmersiveArranged || document.querySelector('.immersive-container')) return;
-    if (e.ctrlKey) return;
-    
-    wheelDeltaAccumulator += Math.sign(e.deltaY);
-    
-    clearTimeout(wheelTimeout);
-    wheelTimeout = setTimeout(() => {
-      if (wheelDeltaAccumulator !== 0) {
-        let steps = Math.abs(wheelDeltaAccumulator);
-        if (wheelDeltaAccumulator > 0) {
-          viewerState.currentIndex = Math.min(viewerState.currentIndex + steps, viewerState.totalImages - 1);
-        } else {
-          viewerState.currentIndex = Math.max(viewerState.currentIndex - steps, 0);
-        }
-        loadImage();
-        wheelDeltaAccumulator = 0;
-      }
-    }, 100);
-  }, { passive: true });
 
   document.addEventListener('play', (e) => {
     const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
@@ -2296,6 +2293,7 @@ if (typeof window !== 'undefined') {
   window.toggleVideoSeekBar = toggleVideoSeekBar;
   window.showNext = showNext;
   window.showPrev = showPrev;
+  window.handleWheel = handleWheel;
 }
 
 window.addEventListener('beforeunload', () => {

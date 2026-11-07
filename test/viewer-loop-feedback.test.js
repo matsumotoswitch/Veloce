@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { viewerUI } from '../src/viewer/viewer-ui.js';
 import { viewerState } from '../src/viewer/viewer-state.js';
-import { showNext, showPrev } from '../src/viewer/viewer.js';
+import { showNext, showPrev, handleWheel } from '../src/viewer/viewer.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -31,6 +31,7 @@ describe('Viewer Loop Boundary Feedback (Phase 6)', () => {
 
     global.showToast = vi.fn();
     global.window.showToast = global.showToast;
+    global.window._wheelDeltaAccumulator = 0;
   });
 
   afterEach(() => {
@@ -137,6 +138,72 @@ describe('Viewer Loop Boundary Feedback (Phase 6)', () => {
       showPrev();
       expect(viewerState.currentIndex).toBe(0);
       expect(triggerSpy).not.toHaveBeenCalled();
+    });
+
+    it('マウスホイール下スクロールで末尾から先頭へループしたとき、インデックスが0になり（タイマー進行後も2番目に飛ばないこと）triggerLoopFeedback("start")が呼ばれること', () => {
+      const triggerSpy = vi.spyOn(viewerUI, 'triggerLoopFeedback');
+
+      viewerState.totalImages = 3;
+      viewerState.currentIndex = 2; // 末尾
+
+      handleWheel({ deltaY: 100 });
+
+      expect(viewerState.currentIndex).toBe(0);
+      expect(triggerSpy).toHaveBeenCalledWith('start');
+
+      // 以前の不具合で100ms後に再実行されインデックスが1（2番目）に飛ぶ問題が発生していたため、時間経過後も0が維持されることを検証
+      vi.advanceTimersByTime(300);
+      expect(viewerState.currentIndex).toBe(0);
+    });
+
+    it('マウスホイール上スクロールで先頭から末尾へループしたとき、インデックスが末尾になり（タイマー進行後も最後から2番目に飛ばないこと）triggerLoopFeedback("end")が呼ばれること', () => {
+      const triggerSpy = vi.spyOn(viewerUI, 'triggerLoopFeedback');
+
+      viewerState.totalImages = 3;
+      viewerState.currentIndex = 0; // 先頭
+
+      handleWheel({ deltaY: -100 });
+
+      expect(viewerState.currentIndex).toBe(2);
+      expect(triggerSpy).toHaveBeenCalledWith('end');
+
+      // 以前の不具合で100ms後に再実行されインデックスが1（最後から2番目）に飛ぶ問題が発生していたため、時間経過後も2が維持されることを検証
+      vi.advanceTimersByTime(300);
+      expect(viewerState.currentIndex).toBe(2);
+    });
+
+    it('マウスホイールの連続スクロールで 0 -> 1 -> 2 -> 0 と順次正しく遷移すること', () => {
+      viewerState.totalImages = 3;
+      viewerState.currentIndex = 0;
+
+      handleWheel({ deltaY: 100 });
+      expect(viewerState.currentIndex).toBe(1);
+      vi.advanceTimersByTime(200);
+
+      handleWheel({ deltaY: 100 });
+      expect(viewerState.currentIndex).toBe(2);
+      vi.advanceTimersByTime(200);
+
+      handleWheel({ deltaY: 100 });
+      expect(viewerState.currentIndex).toBe(0);
+      vi.advanceTimersByTime(200);
+    });
+
+    it('マウスホイールの連続逆スクロールで 0 -> 2 -> 1 -> 0 と順次正しく遷移すること', () => {
+      viewerState.totalImages = 3;
+      viewerState.currentIndex = 0;
+
+      handleWheel({ deltaY: -100 });
+      expect(viewerState.currentIndex).toBe(2);
+      vi.advanceTimersByTime(200);
+
+      handleWheel({ deltaY: -100 });
+      expect(viewerState.currentIndex).toBe(1);
+      vi.advanceTimersByTime(200);
+
+      handleWheel({ deltaY: -100 });
+      expect(viewerState.currentIndex).toBe(0);
+      vi.advanceTimersByTime(200);
     });
   });
 
