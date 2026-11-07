@@ -379,7 +379,7 @@ html.viewer-html,
   gap: 15px;
   box-shadow: var(--popup-shadow);
   border: 1px solid var(--border-color);
-  z-index: 2000;
+  z-index: 10001;
   opacity: 0.35;
   transition: opacity 0.25s ease, background 0.25s ease;
 }

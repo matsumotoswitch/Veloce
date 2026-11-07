@@ -3425,6 +3425,76 @@ window.addEventListener('DOMContentLoaded', async () => {
     const openSelect = document.querySelector('.custom-select.open');
     if (openSelect) {
       openSelect.classList.remove('open', 'open-up');
+      openSelect.querySelectorAll('.custom-select-item').forEach(i => i.classList.remove('keyboard-focused'));
+    }
+  });
+
+  // ----------------------------------------------------------------------------
+  // .custom-select のキーボードアクセシビリティ対応 (Enter, Space, 矢印キー, Escape)
+  // ----------------------------------------------------------------------------
+  document.addEventListener('keydown', (e) => {
+    const customSelect = e.target && e.target.closest ? e.target.closest('.custom-select') : null;
+    if (!customSelect) return;
+
+    const isOpen = customSelect.classList.contains('open');
+
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isOpen) {
+        customSelect.click();
+      } else {
+        const highlighted = customSelect.querySelector('.custom-select-item.keyboard-focused') ||
+                            customSelect.querySelector('.custom-select-item.selected');
+        if (highlighted) {
+          highlighted.click();
+        } else {
+          customSelect.click();
+        }
+      }
+    } else if (e.key === 'ArrowDown' || e.key === 'Down') {
+      e.preventDefault();
+      e.stopPropagation();
+      const items = Array.from(customSelect.querySelectorAll('.custom-select-item'));
+      if (items.length === 0) return;
+
+      if (!isOpen) {
+        customSelect.click();
+      }
+      let currentIdx = items.findIndex(i => i.classList.contains('keyboard-focused') || (!customSelect.querySelector('.custom-select-item.keyboard-focused') && i.classList.contains('selected')));
+      let nextIdx = currentIdx + 1;
+      if (nextIdx >= items.length) nextIdx = 0;
+
+      items.forEach(i => i.classList.remove('keyboard-focused'));
+      items[nextIdx].classList.add('keyboard-focused');
+      if (typeof items[nextIdx].scrollIntoView === 'function') {
+        items[nextIdx].scrollIntoView({ block: 'nearest' });
+      }
+    } else if (e.key === 'ArrowUp' || e.key === 'Up') {
+      e.preventDefault();
+      e.stopPropagation();
+      const items = Array.from(customSelect.querySelectorAll('.custom-select-item'));
+      if (items.length === 0) return;
+
+      if (!isOpen) {
+        customSelect.click();
+      }
+      let currentIdx = items.findIndex(i => i.classList.contains('keyboard-focused') || (!customSelect.querySelector('.custom-select-item.keyboard-focused') && i.classList.contains('selected')));
+      let prevIdx = currentIdx - 1;
+      if (prevIdx < 0) prevIdx = items.length - 1;
+
+      items.forEach(i => i.classList.remove('keyboard-focused'));
+      items[prevIdx].classList.add('keyboard-focused');
+      if (typeof items[prevIdx].scrollIntoView === 'function') {
+        items[prevIdx].scrollIntoView({ block: 'nearest' });
+      }
+    } else if (e.key === 'Escape' || e.key === 'Esc') {
+      if (isOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        customSelect.classList.remove('open', 'open-up');
+        customSelect.querySelectorAll('.custom-select-item').forEach(i => i.classList.remove('keyboard-focused'));
+      }
     }
   });
   const initialFolderSort = getFolderSort(currentTab.path);

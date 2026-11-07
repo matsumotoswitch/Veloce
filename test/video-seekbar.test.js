@@ -216,4 +216,11 @@ describe('Video Seek Bar', () => {
     expect(container.style.display).toBe('none');
     expect(localStorage.getItem('showViewerSeekBar')).toBe('false');
   });
+
+  it('should have z-index: 10001 for video controls container to guarantee frontmost interaction layer (Phase 3)', () => {
+    const cssContent = getFullCssContent();
+    const match = cssContent.match(/#video-controls-container\s*\{([^}]+)\}/);
+    expect(match).not.toBeNull();
+    expect(match[1]).toMatch(/z-index:\s*10001;/);
+  });
 });

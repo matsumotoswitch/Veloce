@@ -996,6 +996,10 @@ kbd {
   background-color: var(--accent-hover-tint);
 }
 
+.custom-select-item.keyboard-focused {
+  background-color: var(--accent-hover-tint);
+}
+
 .custom-select-item.selected {
   color: var(--accent-color);
   background-color: var(--accent-subtle);

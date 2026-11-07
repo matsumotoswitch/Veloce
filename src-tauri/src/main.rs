@@ -1076,10 +1076,13 @@ fn load_directory(
                     .into_par_iter()
                     .filter_map(|entry| {
                         let p = entry.path();
-                        if p.is_file() {
-                            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                                let ext_lower = ext.to_lowercase();
-                                if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4") {
+                        // 1. 拡張子を先に判定して非対象ファイルを即時除外（不要な stat システムコールをゼロに抑制）
+                        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                            let ext_lower = ext.to_lowercase();
+                            if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4") {
+                                // 2. jwalk がディレクトリスキャン時に取得済みの file_type を使用（ディスク追加 stat を回避）
+                                if entry.file_type.is_file() || (entry.file_type.is_symlink() && p.is_file()) {
+                                    // 3. 対象画像ファイルに対してのみメタデータ（サイズ・日時）を1回だけ取得
                                     if let Ok(metadata) = entry.metadata() {
                                         let size = metadata.len();
                                         let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
@@ -7212,6 +7215,22 @@ mod viewer_tests {
         
         let count_files = target_entries.iter().filter(|e| e.path().is_file()).count();
         assert_eq!(count_files, 2);
+
+        // entry.file_type.is_file() によるシステムコール削減ロジックの検証
+        let optimized_files: Vec<_> = target_entries
+            .iter()
+            .filter(|e| {
+                let p = e.path();
+                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png") {
+                        return e.file_type.is_file();
+                    }
+                }
+                false
+            })
+            .collect();
+        assert_eq!(optimized_files.len(), 2, "追加statなしで対象画像2件が正確に検出されること");
     }
 
     #[test]

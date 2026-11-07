@@ -81,6 +81,68 @@ describe('Sort Select Dropdown', () => {
     updateSortSelectDropdown();
   }
 
+  function setupCustomSelectKeyboard(doc) {
+    doc.addEventListener('keydown', (e) => {
+      const customSelect = e.target && e.target.closest ? e.target.closest('.custom-select') : null;
+      if (!customSelect) return;
+
+      const isOpen = customSelect.classList.contains('open');
+
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isOpen) {
+          customSelect.click();
+        } else {
+          const highlighted = customSelect.querySelector('.custom-select-item.keyboard-focused') ||
+                              customSelect.querySelector('.custom-select-item.selected');
+          if (highlighted) {
+            highlighted.click();
+          } else {
+            customSelect.click();
+          }
+        }
+      } else if (e.key === 'ArrowDown' || e.key === 'Down') {
+        e.preventDefault();
+        e.stopPropagation();
+        const items = Array.from(customSelect.querySelectorAll('.custom-select-item'));
+        if (items.length === 0) return;
+
+        if (!isOpen) {
+          customSelect.click();
+        }
+        let currentIdx = items.findIndex(i => i.classList.contains('keyboard-focused') || (!customSelect.querySelector('.custom-select-item.keyboard-focused') && i.classList.contains('selected')));
+        let nextIdx = currentIdx + 1;
+        if (nextIdx >= items.length) nextIdx = 0;
+
+        items.forEach(i => i.classList.remove('keyboard-focused'));
+        items[nextIdx].classList.add('keyboard-focused');
+      } else if (e.key === 'ArrowUp' || e.key === 'Up') {
+        e.preventDefault();
+        e.stopPropagation();
+        const items = Array.from(customSelect.querySelectorAll('.custom-select-item'));
+        if (items.length === 0) return;
+
+        if (!isOpen) {
+          customSelect.click();
+        }
+        let currentIdx = items.findIndex(i => i.classList.contains('keyboard-focused') || (!customSelect.querySelector('.custom-select-item.keyboard-focused') && i.classList.contains('selected')));
+        let prevIdx = currentIdx - 1;
+        if (prevIdx < 0) prevIdx = items.length - 1;
+
+        items.forEach(i => i.classList.remove('keyboard-focused'));
+        items[prevIdx].classList.add('keyboard-focused');
+      } else if (e.key === 'Escape' || e.key === 'Esc') {
+        if (isOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          customSelect.classList.remove('open', 'open-up');
+          customSelect.querySelectorAll('.custom-select-item').forEach(i => i.classList.remove('keyboard-focused'));
+        }
+      }
+    });
+  }
+
   beforeEach(() => {
     dom = new JSDOM(buildHTML(), { url: 'http://localhost' });
     global.window = dom.window;
@@ -145,5 +207,67 @@ describe('Sort Select Dropdown', () => {
     expect(selected[0].dataset.sortKey).toBe('rating');
     expect(selected[0].dataset.sortAsc).toBe('false');
     expect(document.getElementById('sort-select-label').textContent).toBe('レーティング (高い順)');
+  });
+
+  describe('Keyboard Accessibility for custom-select (Phase 2)', () => {
+    it('EnterキーまたはSpaceキーでドロップダウンが開閉する', () => {
+      setupSortSelect();
+      setupCustomSelectKeyboard(document);
+      const container = document.getElementById('sort-select-container');
+      expect(container.classList.contains('open')).toBe(false);
+
+      // Enterで開く
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(container.classList.contains('open')).toBe(true);
+
+      // もう一度Enterで閉じる（項目選択）
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(container.classList.contains('open')).toBe(false);
+
+      // Spaceで開く
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      expect(container.classList.contains('open')).toBe(true);
+    });
+
+    it('ArrowDownとArrowUpで項目を移動し、Enterキーで確定選択できる', () => {
+      setupSortSelect();
+      setupCustomSelectKeyboard(document);
+      const container = document.getElementById('sort-select-container');
+
+      // 閉じた状態でArrowDownを押すと開き、次の項目（名前 降順）にフォーカスが当たる
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      expect(container.classList.contains('open')).toBe(true);
+
+      const items = Array.from(container.querySelectorAll('.custom-select-item'));
+      const highlighted1 = container.querySelector('.custom-select-item.keyboard-focused');
+      expect(highlighted1).toBe(items[1]); // 名前 (降順)
+
+      // 再度ArrowDownで items[2]（拡張子 昇順）へ移動
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      const highlighted2 = container.querySelector('.custom-select-item.keyboard-focused');
+      expect(highlighted2).toBe(items[2]); // 拡張子 (昇順)
+
+      // Enterで確定
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(container.classList.contains('open')).toBe(false);
+      expect(appState.sortConfig.key).toBe('ext');
+      expect(appState.sortConfig.asc).toBe(true);
+      expect(document.getElementById('sort-select-label').textContent).toBe('拡張子 (昇順)');
+    });
+
+    it('Escapeキーで選択を変更せずにドロップダウンが閉じる', () => {
+      setupSortSelect();
+      setupCustomSelectKeyboard(document);
+      const container = document.getElementById('sort-select-container');
+
+      // 開く
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(container.classList.contains('open')).toBe(true);
+
+      // Escapeで閉じる
+      container.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(container.classList.contains('open')).toBe(false);
+      expect(appState.sortConfig.key).toBe('name'); // 変更なし
+    });
   });
 });
