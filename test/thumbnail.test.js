@@ -979,6 +979,7 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
     afterEach(() => {
       global.fetch = originalFetch;
       window.videoServerPort = originalVideoServerPort;
+      delete window.videoServerToken;
     });
 
     it('saveThumbnailBinary should POST raw Blob directly to local video server when videoServerPort is available', async () => {
@@ -1001,6 +1002,26 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(options.method).toBe('POST');
       expect(options.body).toBe(dummyBlob);
       expect(savedUrl).toBe('http://127.0.0.1:54321/?path=C%3A%2Fimages%2Fpic.png&thumb=1');
+    });
+
+    it('saveThumbnailBinary should include token in query parameters when videoServerToken is set', async () => {
+      const { saveThumbnailBinary } = await import('../src/renderer/renderer-thumbnails.js');
+      window.videoServerPort = 54321;
+      window.videoServerToken = 'test_token_abc';
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => 'http://127.0.0.1:54321/?path=C%3A%2Fimages%2Fpic.png&thumb=1&token=test_token_abc'
+      });
+      global.fetch = mockFetch;
+
+      const dummyBlob = new Blob(['mock-binary-jpeg-data'], { type: 'image/jpeg' });
+      const savedUrl = await saveThumbnailBinary('C:/images/pic.png', dummyBlob, null);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('token=test_token_abc');
+      delete window.videoServerToken;
     });
 
     it('saveThumbnailBinary should not instantiate FileReader when HTTP POST succeeds even if base64Promise is null', async () => {

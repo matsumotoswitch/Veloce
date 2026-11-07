@@ -63,6 +63,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<{path: string, fileCount: number, totalSizeBytes: number}>} getCacheInfo
  * @property {() => Promise<void>} openInExplorer
  * @property {() => Promise<number>} getVideoServerPort
+ * @property {() => Promise<string>} getVideoServerToken
  * @property {(filePath: string) => Promise<{data_url: string, width: number, height: number, header_bytes: number, payload_bytes: number, total_bytes: number, total_pixels: number, image_total_pixels: number, coverage_percent: number, occupied_columns: number}|null>} getAlphaOverlayImage
  */
 /**
@@ -109,6 +110,7 @@ window.veloceAPI = {
   getSmartFolderCounts: (rules) => invoke('get_smart_folder_counts', { rules }),
   migrateRatings: (ratings) => invoke('migrate_ratings', { ratings }),
   getVideoServerPort: () => invoke('get_video_server_port'),
+  getVideoServerToken: () => invoke('get_video_server_token'),
   setRating: (path, rating) => invoke('set_rating', { path, rating }),
   initSettings: (entriesFromLocalstorage) => invoke('init_settings', { entriesFromLocalstorage }),
   getSetting: (key) => invoke('get_setting', { key }),

@@ -72,7 +72,8 @@ export function blockDevtoolsShortcuts() {
 export function getStreamUrl(filePath, baseSrc) {
   if (filePath.toLowerCase().endsWith('.mp4')) {
     if (window.videoServerPort) {
-      return `http://localhost:${window.videoServerPort}/?path=` + encodeURIComponent(filePath);
+      const tokenParam = window.videoServerToken ? `&token=${encodeURIComponent(window.videoServerToken)}` : '';
+      return `http://localhost:${window.videoServerPort}/?path=` + encodeURIComponent(filePath) + tokenParam;
     }
     console.warn("videoServerPort is missing! Falling back for", filePath);
     try {

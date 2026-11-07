@@ -7,10 +7,16 @@ pub fn get_video_server_port(state: tauri::State<'_, AppState>) -> u16 {
     state.video_server_port
 }
 
+#[tauri::command]
+pub fn get_video_server_token(state: tauri::State<'_, AppState>) -> String {
+    state.video_server_token.clone()
+}
+
 pub fn start_local_video_server(
     db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>>,
     db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    token: String,
 ) -> u16 {
     use std::net::TcpListener;
     use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -27,12 +33,15 @@ pub fn start_local_video_server(
         .build()
         .expect("Failed to build local HTTP server thread pool");
 
+    let token = std::sync::Arc::new(token);
+
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {
                 let db_tx = db_tx.clone();
                 let app_handle_slot = app_handle_slot.clone();
                 let db_conn = db_conn.clone();
+                let token = token.clone();
                 http_pool.spawn(move || {
                     let mut reader = BufReader::new(&mut stream);
                     let mut request_line = String::new();
@@ -63,6 +72,23 @@ pub fn start_local_video_server(
                         let _ = stream.write_all(headers.as_bytes());
                         let _ = stream.flush();
                         return;
+                    }
+
+                    // トークン認証: 外部Webサイトや他プロセスからの不正リクエストを即座に遮断する
+                    if !token.is_empty() {
+                        let mut req_token = "";
+                        if let Some(query) = uri.split('?').nth(1) {
+                            for pair in query.split('&') {
+                                if pair.starts_with("token=") {
+                                    req_token = &pair[6..];
+                                }
+                            }
+                        }
+                        if req_token != token.as_str() {
+                            let resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nForbidden";
+                            let _ = stream.write_all(resp.as_bytes());
+                            return;
+                        }
                     }
 
                     // POST /save-thumbnail?path=...[&mtime=...]
@@ -149,12 +175,14 @@ pub fn start_local_video_server(
                             }
                         }
 
+                        let token_param = if token.is_empty() { String::new() } else { format!("&token={}", *token) };
                         let saved_url = format!(
-                            "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
+                            "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}",
                             port,
                             urlencoding::encode(&path_str),
                             mtime,
-                            hash_key_for_url
+                            hash_key_for_url,
+                            token_param
                         );
                         let mut resp = String::new();
                         resp.push_str("HTTP/1.1 200 OK\r\n");
@@ -166,6 +194,8 @@ pub fn start_local_video_server(
                         let _ = stream.write_all(resp.as_bytes());
                         return;
                     }
+
+
 
                     let mut path_str = String::new();
                     let mut is_thumb = false;
@@ -189,6 +219,8 @@ pub fn start_local_video_server(
                         let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
                         return;
                     }
+
+
 
                     if is_thumb {
                         let mut cache_bytes = Vec::new();

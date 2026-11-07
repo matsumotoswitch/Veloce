@@ -3446,6 +3446,7 @@ async fn generate_thumbnail(
     let mem_mtime = state.get_mtime(&file_path);
 
     let video_port = state.video_server_port;
+    let video_token = state.video_server_token.clone();
     let url = tokio::task::spawn_blocking(move || {
         #[cfg(debug_assertions)]
         let t_start = std::time::Instant::now();
@@ -3463,7 +3464,8 @@ async fn generate_thumbnail(
         let url = if cache_bytes.is_empty() {
             String::new()
         } else {
-            format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1", video_port, urlencoding::encode(&file_path), mtime)
+            let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
+            format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1{}", video_port, urlencoding::encode(&file_path), mtime, token_param)
         };
         
         #[cfg(debug_assertions)]
@@ -3515,6 +3517,7 @@ fn compute_thumbnail_batch(
     files_to_process: Vec<(String, u64)>,
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     video_port: u16,
+    video_token: &str,
     is_cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Vec<ThumbnailResult> {
     use rayon::prelude::*;
@@ -3530,12 +3533,14 @@ fn compute_thumbnail_batch(
             let url = if bytes.is_empty() {
                 String::new()
             } else {
+                let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
                 format!(
-                    "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}",
+                    "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}",
                     video_port,
                     urlencoding::encode(&file_path),
                     mtime,
-                    hash_key
+                    hash_key,
+                    token_param
                 )
             };
             (ThumbnailResult { path: file_path, url, cancelled: false }, pending)
@@ -3588,11 +3593,12 @@ async fn generate_thumbnail_batch(
     }
 
     let video_port = state.video_server_port;
+    let video_token = state.video_server_token.clone();
     // 呼び出し時点の世代を記録し、フォルダ切り替え後は未着手アイテムの生成を打ち切る
     let start_epoch = current_thumbnail_batch_epoch();
     let results = tokio::task::spawn_blocking(move || {
         let is_cancelled = move || current_thumbnail_batch_epoch() != start_epoch;
-        compute_thumbnail_batch(files_to_process, &db_conn, video_port, &is_cancelled)
+        compute_thumbnail_batch(files_to_process, &db_conn, video_port, &video_token, &is_cancelled)
     }).await.map_err(|e| e.to_string())?;
 
     for item in &results {
@@ -3630,10 +3636,11 @@ async fn get_cached_thumbnail_batch(
     }
 
     let video_port = state.video_server_port;
+    let video_token = state.video_server_token.clone();
     let results = tokio::task::spawn_blocking(move || {
         use rayon::prelude::*;
         files_with_mtime.into_par_iter().filter_map(|(file_path, mtime)| {
-            let clean_path = file_path.replace("\\\\?\\", "");
+            let clean_path = file_path.replace(r"\\?\", "");
             let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
 
             // DB のみを参照（生成しない）
@@ -3643,7 +3650,8 @@ async fn get_cached_thumbnail_batch(
                 ) {
                     if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
                         if !bytes.is_empty() {
-                            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}", video_port, urlencoding::encode(&file_path), mtime, hash_key);
+                            let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
+                            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}", video_port, urlencoding::encode(&file_path), mtime, hash_key, token_param);
                             return Some(ThumbnailResult { path: file_path, url, cancelled: false });
                         }
                     }
@@ -4262,6 +4270,7 @@ async fn save_thumbnail(
     let bytes = general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
 
     let video_port = state.video_server_port;
+    let video_token = state.video_server_token.clone();
     let file_path_clone = file_path.clone();
     
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
@@ -4277,7 +4286,8 @@ async fn save_thumbnail(
     state.mark_thumbnail_cached(&file_path);
 
     // 保存完了と同時にローカルHTTP配信用URL（hash_key直撃パラメータ付き）を返却し、フロントエンド側での再取得IPC呼び出しを不要化
-    let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}", video_port, urlencoding::encode(&file_path_clone), mtime, hash_key_for_url);
+    let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
+    let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}", video_port, urlencoding::encode(&file_path_clone), mtime, hash_key_for_url, token_param);
     Ok(url)
 }
 
@@ -5434,7 +5444,9 @@ fn main() {
 
     let app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
-    let video_port = start_local_video_server(db_tx.clone(), app_handle_slot.clone(), db_conn.clone());
+    let seed = format!("{}:{}:{:p}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(), std::process::id(), &db_tx);
+    let video_token = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(seed.as_bytes()));
+    let video_port = start_local_video_server(db_tx.clone(), app_handle_slot.clone(), db_conn.clone(), video_token.clone());
 
     let mut context = tauri::generate_context!();
 
@@ -5618,6 +5630,7 @@ fn main() {
             smart_folders: parking_lot::RwLock::new(Vec::new()),
             db_tx,
             video_server_port: video_port,
+            video_server_token: video_token,
         })
         .setup(move |app| {
             let app_handle = app.handle();
@@ -6125,6 +6138,7 @@ fn main() {
             get_file_by_index,
             update_metadata_in_state,
             get_video_server_port,
+            get_video_server_token,
             update_file_dimensions,
             notify_file_changed,
             update_smart_folders,
@@ -6197,6 +6211,7 @@ pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState
         smart_folders: parking_lot::RwLock::new(Vec::new()),
         db_tx: tokio::sync::mpsc::channel(1).0,
         video_server_port: 0,
+        video_server_token: String::new(),
     }
 }
 
@@ -8455,9 +8470,10 @@ mod viewer_tests {
         let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
         let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
         let db_conn = super::init_db().unwrap();
-        let port = start_local_video_server(db_tx, app_handle_slot, db_conn.clone());
+        let test_token = "secure_token_abc123";
+        let port = start_local_video_server(db_tx, app_handle_slot, db_conn.clone(), test_token.to_string());
 
-        // 1. OPTIONS プリフライトの検証
+        // 1. OPTIONS プリフライトの検証（トークンなしでも200 OK）
         {
             let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
             let options_req = format!(
@@ -8472,14 +8488,44 @@ mod viewer_tests {
             assert!(resp.contains("POST"), "CORS ヘッダーで POST が許可されていること");
         }
 
-        // 2. POST /save-thumbnail による生のバイナリ直接送信の検証
+        // 2. トークン認証エラーの検証（不正なトークンまたはトークンなしは 403 Forbidden で即座に拒否）
         let test_path = "C:\\test\\sample_image.png";
         let dummy_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
         {
+            // トークンなし POST -> 403
             let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            let post_req_header = format!(
+            let no_token_req = format!(
                 "POST /save-thumbnail?path={}&mtime=998877 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 urlencoding::encode(test_path),
+                port,
+                dummy_jpeg.len()
+            );
+            stream.write_all(no_token_req.as_bytes()).unwrap();
+            stream.write_all(&dummy_jpeg).unwrap();
+            let mut resp = String::new();
+            stream.read_to_string(&mut resp).unwrap();
+            assert!(resp.starts_with("HTTP/1.1 403 Forbidden"), "トークンなしのリクエストは 403 Forbidden となること");
+
+            // 不正トークン GET -> 403
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let invalid_token_req = format!(
+                "GET /?path={}&mtime=12345&thumb=1&token=bad_token HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                urlencoding::encode(test_path),
+                port
+            );
+            stream.write_all(invalid_token_req.as_bytes()).unwrap();
+            let mut resp = String::new();
+            stream.read_to_string(&mut resp).unwrap();
+            assert!(resp.starts_with("HTTP/1.1 403 Forbidden"), "不正なトークンのリクエストは 403 Forbidden となること");
+        }
+
+        // 3. 正当なトークンを付与した POST /save-thumbnail による生のバイナリ直接送信の検証
+        {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let post_req_header = format!(
+                "POST /save-thumbnail?path={}&mtime=998877&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                urlencoding::encode(test_path),
+                test_token,
                 port,
                 dummy_jpeg.len()
             );
@@ -8489,8 +8535,9 @@ mod viewer_tests {
 
             let mut resp = String::new();
             stream.read_to_string(&mut resp).unwrap();
-            assert!(resp.starts_with("HTTP/1.1 200 OK"), "POST が 200 OK を返すこと");
+            assert!(resp.starts_with("HTTP/1.1 200 OK"), "正当なトークン付き POST が 200 OK を返すこと");
             assert!(resp.contains("mtime=998877"), "レスポンスURLにmtimeが含まれていること");
+            assert!(resp.contains(&format!("token={}", test_token)), "レスポンスURLにトークンが含まれていること");
 
             // db_rx に DbMsg::SaveThumbnail が正しく送信されているか検証
             let msg = db_rx.try_recv().expect("db_tx に DbMsg::SaveThumbnail が投入されていること");
@@ -8506,12 +8553,13 @@ mod viewer_tests {
             }
         }
 
-        // 3. 未キャッシュのサムネイルに対するリクエストが即時 404 Not Found を返すこと（同期生成で固まらない）
+        // 4. 正当なトークン付きで未キャッシュのサムネイルに対するリクエストが即時 404 Not Found を返すこと（同期生成で固まらない）
         {
             let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
             let get_miss_req = format!(
-                "GET /?path={}&mtime=12345&thumb=1 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                "GET /?path={}&mtime=12345&thumb=1&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
                 urlencoding::encode("C:\\test\\uncached.png"),
+                test_token,
                 port
             );
             stream.write_all(get_miss_req.as_bytes()).unwrap();
@@ -8521,7 +8569,7 @@ mod viewer_tests {
             assert!(resp.starts_with("HTTP/1.1 404 Not Found"), "未キャッシュ画像のリクエストは同期生成を行わず即座に 404 を返すこと");
         }
 
-        // 4. DBにキャッシュが存在する場合は 200 OK でバイナリが返ること
+        // 5. 正当なトークン付きでDBにキャッシュが存在する場合は 200 OK でバイナリが返ること
         {
             let cached_path = "C:\\test\\cached_thumb.png";
             let mtime = 55555u64;
@@ -8538,9 +8586,10 @@ mod viewer_tests {
 
             let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
             let get_hit_req = format!(
-                "GET /?path={}&mtime={}&thumb=1 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                "GET /?path={}&mtime={}&thumb=1&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
                 urlencoding::encode(cached_path),
                 mtime,
+                test_token,
                 port
             );
             stream.write_all(get_hit_req.as_bytes()).unwrap();
@@ -9647,7 +9696,7 @@ mod viewer_tests {
         assert!(std::fs::metadata(&settings_wal_path).unwrap().len() > 0, "settings WAL should have non-zero size before checkpoint");
 
         let (db_tx, _) = tokio::sync::mpsc::channel(1);
-        let app_state = AppState::new(cache_pool, settings_pool, true, db_tx, 0);
+        let app_state = AppState::new(cache_pool, settings_pool, true, db_tx, 0, "test_token".to_string());
 
         // シャットダウン時のチェックポイントを実行
         perform_shutdown_checkpoints(&app_state);
@@ -10511,10 +10560,12 @@ mod viewer_tests {
             false,
             db_tx,
             8080,
+            "test_token".to_string(),
         ));
 
         // generate_thumbnail_batch の spawn_blocking 内で使用する compute_thumbnail_batch を直接検証する
         let video_port = app_state.video_server_port;
+        let video_token = app_state.video_server_token.clone();
         let db_conn = app_state.db_conn.clone();
         let files_to_process: Vec<(String, u64)> = file_paths.iter().map(|p| {
             let mtime = std::fs::metadata(p).and_then(|m| m.modified()).unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
@@ -10522,7 +10573,7 @@ mod viewer_tests {
         }).collect();
 
         let never_cancelled = || false;
-        let results = compute_thumbnail_batch(files_to_process, &db_conn, video_port, &never_cancelled);
+        let results = compute_thumbnail_batch(files_to_process, &db_conn, video_port, &video_token, &never_cancelled);
 
         assert_eq!(results.len(), 4, "4件すべてのサムネイルが返却されること");
         for r in &results {
@@ -10619,7 +10670,7 @@ mod viewer_tests {
 
         // 打ち切り指示がある場合: 生成を行わず、全件 cancelled: true かつ URL 空で返り、DB にも保存されないこと
         let always_cancelled = || true;
-        let results = compute_thumbnail_batch(files_to_process.clone(), &pool, 8080, &always_cancelled);
+        let results = compute_thumbnail_batch(files_to_process.clone(), &pool, 8080, "test_token", &always_cancelled);
         assert_eq!(results.len(), 3, "打ち切り時も入力件数分の結果が返ること");
         for r in &results {
             assert!(r.cancelled, "打ち切られたアイテムは cancelled が true であること");
@@ -10632,7 +10683,7 @@ mod viewer_tests {
 
         // 打ち切り指示が無い場合: 全件生成されること
         let never_cancelled = || false;
-        let results = compute_thumbnail_batch(files_to_process, &pool, 8080, &never_cancelled);
+        let results = compute_thumbnail_batch(files_to_process, &pool, 8080, "test_token", &never_cancelled);
         assert!(results.iter().all(|r| !r.cancelled && !r.url.is_empty()), "通常時は全件生成されること");
     }
 

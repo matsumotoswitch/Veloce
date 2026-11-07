@@ -122,12 +122,20 @@ describe('Utils', () => {
   describe('getStreamUrl', () => {
     afterEach(() => {
       delete window.videoServerPort;
+      delete window.videoServerToken;
     });
 
-    it('should return localhost url if videoServerPort is defined for mp4', () => {
+    it('should return localhost url without token if videoServerToken is missing', () => {
       window.videoServerPort = '8080';
       const result = getStreamUrl('C:\\videos\\test.mp4', 'asset://localhost/C:/videos/test.mp4');
       expect(result).toBe('http://localhost:8080/?path=C%3A%5Cvideos%5Ctest.mp4');
+    });
+
+    it('should include token in url if videoServerToken is defined', () => {
+      window.videoServerPort = '8080';
+      window.videoServerToken = 'sec_token_999';
+      const result = getStreamUrl('C:\\videos\\test.mp4', 'asset://localhost/C:/videos/test.mp4');
+      expect(result).toBe('http://localhost:8080/?path=C%3A%5Cvideos%5Ctest.mp4&token=sec_token_999');
     });
 
     it('should return fallback url if videoServerPort is missing for mp4', () => {

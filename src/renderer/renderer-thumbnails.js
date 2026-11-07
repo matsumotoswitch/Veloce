@@ -613,7 +613,8 @@ export async function saveThumbnailBinary(filePath, blob, base64Promise) {
   const port = window.videoServerPort;
   if (port && typeof fetch === 'function' && blob) {
     try {
-      const targetUrl = `http://127.0.0.1:${port}/save-thumbnail?path=${encodeURIComponent(filePath)}`;
+      const tokenParam = window.videoServerToken ? `&token=${encodeURIComponent(window.videoServerToken)}` : '';
+      const targetUrl = `http://127.0.0.1:${port}/save-thumbnail?path=${encodeURIComponent(filePath)}${tokenParam}`;
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {

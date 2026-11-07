@@ -35,6 +35,7 @@ pub struct AppState {
     pub smart_folders: RwLock<Vec<SmartFolderRule>>,
     pub db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     pub video_server_port: u16,
+    pub video_server_token: String,
 }
 
 impl AppState {
@@ -44,6 +45,7 @@ impl AppState {
         settings_db_existed: bool,
         db_tx: tokio::sync::mpsc::Sender<DbMsg>,
         video_server_port: u16,
+        video_server_token: String,
     ) -> Self {
         Self {
             image_paths: RwLock::new(Arc::new(Vec::new())),
@@ -69,6 +71,7 @@ impl AppState {
             smart_folders: RwLock::new(Vec::new()),
             db_tx,
             video_server_port,
+            video_server_token,
         }
     }
 
@@ -234,7 +237,7 @@ mod tests {
             .max_size(1)
             .build(r2d2_sqlite::SqliteConnectionManager::memory())
             .unwrap();
-        let state = AppState::new(pool.clone(), pool, false, tx, 0);
+        let state = AppState::new(pool.clone(), pool, false, tx, 0, "test_token".to_string());
 
         let files = vec![
             create_test_file(r"C:\test\img1.png", 100),
@@ -261,7 +264,7 @@ mod tests {
             .max_size(1)
             .build(r2d2_sqlite::SqliteConnectionManager::memory())
             .unwrap();
-        let state = Arc::new(AppState::new(pool.clone(), pool, false, tx, 0));
+        let state = Arc::new(AppState::new(pool.clone(), pool, false, tx, 0, "test_token".to_string()));
 
         let initial_files: Vec<Arc<ImageFile>> = (0..100)
             .map(|i| create_test_file(&format!(r"C:\test\img_{}.png", i), 1000 + i as u64))
@@ -320,7 +323,7 @@ mod tests {
             .max_size(1)
             .build(r2d2_sqlite::SqliteConnectionManager::memory())
             .unwrap();
-        let state = Arc::new(AppState::new(pool.clone(), pool, false, tx, 0));
+        let state = Arc::new(AppState::new(pool.clone(), pool, false, tx, 0, "test_token".to_string()));
 
         let files: Vec<Arc<ImageFile>> = (0..50)
             .map(|i| create_test_file(&format!(r"C:\test\img_{}.png", i), 1000))
@@ -356,7 +359,7 @@ mod tests {
             .max_size(1)
             .build(r2d2_sqlite::SqliteConnectionManager::memory())
             .unwrap();
-        let state = AppState::new(pool.clone(), pool, false, tx, 0);
+        let state = AppState::new(pool.clone(), pool, false, tx, 0, "test_token".to_string());
 
         let files = vec![
             create_test_file(r"C:\images\standard.png", 1001),

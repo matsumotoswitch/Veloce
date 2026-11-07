@@ -2384,8 +2384,9 @@ class UIManager {
           if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
         } else if (file.hasThumbnailCache && !(appState.rebuiltPaths && appState.rebuiltPaths.has(file.path))) {
           const hashParam = file.hashKey ? `&hash=${encodeURIComponent(file.hashKey)}` : '';
+          const tokenParam = window.videoServerToken ? `&token=${encodeURIComponent(window.videoServerToken)}` : '';
           const url = window.videoServerPort
-            ? `http://127.0.0.1:${window.videoServerPort}/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}&thumb=1${hashParam}`
+            ? `http://127.0.0.1:${window.videoServerPort}/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}&thumb=1${hashParam}${tokenParam}`
             : `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}${hashParam}`;
           appState.thumbnailUrls.set(file.path, url);
           if (window.evictThumbnailCache) window.evictThumbnailCache();

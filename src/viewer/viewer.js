@@ -686,6 +686,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
       if (window.veloceAPI && window.veloceAPI.getVideoServerPort) {
         window.videoServerPort = await window.veloceAPI.getVideoServerPort();
+        if (window.veloceAPI.getVideoServerToken) {
+          window.videoServerToken = await window.veloceAPI.getVideoServerToken();
+        }
       }
     } catch (e) {
       console.warn("Failed to get video server port", e);
