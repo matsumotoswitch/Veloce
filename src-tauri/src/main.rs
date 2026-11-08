@@ -337,6 +337,19 @@ fn build_safe_fts_query(input: &str) -> String {
     fts_parts.join(" AND ")
 }
 
+/// スマートフォルダ条件の比較演算子を SQL 用の安全な演算子文字列に正規化する
+fn normalize_comparison_operator(op: &str) -> &'static str {
+    match op.trim() {
+        ">=" => ">=",
+        "<=" => "<=",
+        ">" => ">",
+        "<" => "<",
+        "!=" | "<>" => "!=",
+        "==" | "=" => "=",
+        _ => "=",
+    }
+}
+
 /// スマートフォルダの検索条件（パス、拡張子、レーティング、サイズ、プロンプト全文検索等）から、
 /// SQLite 用の実行クエリ（SELECT / COUNT）およびバインドパラメータを動的に生成する（ソート条件・リミット指定対応）
 fn build_smart_folder_query_with_sort(
@@ -360,8 +373,9 @@ fn build_smart_folder_query_with_sort(
         is_inner_join = rule.conditions.iter().any(|c| {
             if c.r#type == "rating" {
                 let rating_val: i64 = c.value.parse().unwrap_or(0);
-                match c.operator.as_str() {
-                    ">=" | ">" | "==" => rating_val > 0,
+                let op = normalize_comparison_operator(&c.operator);
+                match op {
+                    ">=" | ">" | "=" => rating_val > 0,
                     _ => false,
                 }
             } else {
@@ -485,9 +499,7 @@ fn build_smart_folder_query_with_sort(
             }
             "rating" => {
                 let rating_val: i64 = cond.value.parse().unwrap_or(0);
-                let op = match cond.operator.as_str() {
-                    ">=" => ">=", "<=" => "<=", "==" => "=", "!=" => "!=", _ => "=",
-                };
+                let op = normalize_comparison_operator(&cond.operator);
                 if is_inner_join && rating_val > 0 && (op == ">=" || op == ">" || op == "=") {
                     clause = format!("r.rating {} ?", op);
                 } else {
@@ -505,17 +517,13 @@ fn build_smart_folder_query_with_sort(
             }
             "width" => {
                 let w_val: i64 = cond.value.parse().unwrap_or(0);
-                let op = match cond.operator.as_str() {
-                    ">=" => ">=", "<=" => "<=", "==" => "=", _ => "=",
-                };
+                let op = normalize_comparison_operator(&cond.operator);
                 clause = format!("c.width {} ?", op);
                 params.push(rusqlite::types::Value::Integer(w_val));
             }
             "height" => {
                 let h_val: i64 = cond.value.parse().unwrap_or(0);
-                let op = match cond.operator.as_str() {
-                    ">=" => ">=", "<=" => "<=", "==" => "=", _ => "=",
-                };
+                let op = normalize_comparison_operator(&cond.operator);
                 clause = format!("c.height {} ?", op);
                 params.push(rusqlite::types::Value::Integer(h_val));
             }
@@ -8086,6 +8094,48 @@ mod viewer_tests {
         assert!(q.contains("c.width >= ?"), "width 条件が含まれるべき: {}", q);
         assert!(q.contains("c.height <= ?"), "height 条件が含まれるべき: {}", q);
         assert_eq!(params.len(), 2);
+
+        // >, <, != 演算子が = にフォールバックせず正しく SQL に反映されることを検証
+        let rule_strict = SmartFolderRule {
+            id: "strict_cmp_test".to_string(),
+            name: "比較演算子網羅テスト".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![
+                SmartFolderCondition {
+                    r#type: "rating".to_string(),
+                    operator: ">".to_string(),
+                    value: "3".to_string(),
+                },
+                SmartFolderCondition {
+                    r#type: "width".to_string(),
+                    operator: "<".to_string(),
+                    value: "1200".to_string(),
+                },
+                SmartFolderCondition {
+                    r#type: "height".to_string(),
+                    operator: "!=".to_string(),
+                    value: "720".to_string(),
+                },
+            ],
+        };
+        let (q_strict, params_strict) = super::build_smart_folder_query(&rule_strict, false, false);
+        assert!(q_strict.contains("r.rating > ?"), "rating > ? が生成されること: {}", q_strict);
+        assert!(q_strict.contains("c.width < ?"), "c.width < ? が生成されること: {}", q_strict);
+        assert!(q_strict.contains("c.height != ?"), "c.height != ? が生成されること: {}", q_strict);
+        assert_eq!(params_strict.len(), 3);
+
+        let rule_rating_lt = SmartFolderRule {
+            id: "rating_lt_test".to_string(),
+            name: "レーティング未満テスト".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "rating".to_string(),
+                operator: "<".to_string(),
+                value: "2".to_string(),
+            }],
+        };
+        let (q_lt, _) = super::build_smart_folder_query(&rule_rating_lt, false, false);
+        assert!(q_lt.contains("coalesce(r.rating, 0) < ?"), "coalesce(r.rating, 0) < ? が生成されること: {}", q_lt);
     }
 
     /// 自然順ソート natural_cmp の高度なエッジケース（日本語、大文字小文字、ゼロ埋め、拡張子違い）
