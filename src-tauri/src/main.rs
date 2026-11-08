@@ -4102,6 +4102,56 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
     None
 }
 
+/// 子プロセスを起動して標準出力をパイプで読み取りつつ、指定したタイムアウト時間を超過した場合は
+/// プロセスを強制終了（kill）して `None` を返すヘルパー関数。
+/// パイプバッファ詰まりによるデッドロックを防ぐため、標準出力の読み取りは専用スレッドで並行実行する。
+pub fn run_command_with_timeout(
+    cmd: &mut std::process::Command,
+    timeout: std::time::Duration,
+) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let mut child = cmd.spawn().ok()?;
+    let stdout_pipe = child.stdout.take()?;
+    let reader_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.take(10 * 1024 * 1024).read_to_end(&mut buf);
+        buf
+    });
+
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_millis(20);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let out = reader_handle.join().ok()?;
+                if status.success() && !out.is_empty() {
+                    return Some(out);
+                }
+                return None;
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
 fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
     #[cfg(target_os = "windows")]
     {
@@ -4122,23 +4172,20 @@ fn generate_video_thumbnail_sync(path: &str) -> Option<Vec<u8>> {
             .unwrap_or_else(|| "ffmpeg".to_string());
 
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let output = Command::new(&ffmpeg_path)
-            .args(&[
-                "-v", "error",
-                "-ss", "1.0",
-                "-i", path,
-                "-vframes", "1",
-                "-f", "image2pipe",
-                "-vcodec", "mjpeg",
-                "-"
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+        let mut cmd = Command::new(&ffmpeg_path);
+        cmd.args(&[
+            "-v", "error",
+            "-ss", "1.0",
+            "-i", path,
+            "-vframes", "1",
+            "-f", "image2pipe",
+            "-vcodec", "mjpeg",
+            "-"
+        ])
+        .creation_flags(CREATE_NO_WINDOW);
 
-        if let Ok(out) = output {
-            if out.status.success() && !out.stdout.is_empty() {
-                return Some(out.stdout); // JPEG bytes
-            }
+        if let Some(stdout) = run_command_with_timeout(&mut cmd, std::time::Duration::from_secs(5)) {
+            return Some(stdout); // JPEG bytes
         }
 
         use windows::core::{HSTRING, PCWSTR, ComInterface};
@@ -11771,5 +11818,74 @@ mod viewer_tests {
             .unwrap();
         assert_eq!(c_renamed, 1);
         assert_eq!(c_sibling, 1);
+    }
+
+    /// [Phase 8] `run_command_with_timeout` のタイムアウト強制終了と、`save-thumbnail` の `try_send` ノンブロッキング応答テスト
+    #[test]
+    fn test_run_command_with_timeout_and_save_thumbnail_nonblocking() {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+        use std::process::Command;
+        use std::time::{Duration, Instant};
+
+        // 1. 短時間で完了するコマンドは標準出力を取得できること
+        let mut fast_cmd = Command::new("cmd");
+        fast_cmd.args(&["/C", "echo veloce_timeout_ok"]);
+        let out = run_command_with_timeout(&mut fast_cmd, Duration::from_secs(2))
+            .expect("短時間で完了するコマンドの出力が取得できること");
+        assert!(String::from_utf8_lossy(&out).contains("veloce_timeout_ok"));
+
+        // 2. タイムアウトを超過するコマンドは kill されて None を返し、スレッドが固まらないこと
+        let mut slow_cmd = Command::new("ping");
+        slow_cmd.args(&["-n", "6", "127.0.0.1"]);
+        let start = Instant::now();
+        let res = run_command_with_timeout(&mut slow_cmd, Duration::from_millis(120));
+        assert!(res.is_none(), "タイムアウト超過時は None を返すこと");
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "5秒の ping を待たずにタイムアウトで即座に終了すること"
+        );
+
+        // 3. db_tx チャネルが満杯（容量1で既に1件滞留）の状態でも POST /save-thumbnail がブロックせず応答すること
+        let (db_tx, _db_rx) = tokio::sync::mpsc::channel::<DbMsg>(1);
+        db_tx
+            .try_send(DbMsg::SaveThumbnail {
+                hash_key: "occupied".to_string(),
+                path: "C:\\occupied.png".to_string(),
+                mtime: 1,
+                bytes: vec![1, 2, 3],
+                now: 0,
+            })
+            .unwrap();
+
+        let state = create_test_app_state("C:\\");
+        let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let test_token = "nonblocking_token_123";
+        let port = start_local_video_server(
+            db_tx,
+            app_handle_slot,
+            state.db_conn.clone(),
+            test_token.to_string(),
+        );
+
+        let dummy_jpeg = vec![0xFF, 0xD8, 0xFF, 0xD9];
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let post_req = format!(
+            "POST /save-thumbnail?path={}&mtime=100&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            urlencoding::encode("C:\\test\\nonblocking.png"),
+            test_token,
+            port,
+            dummy_jpeg.len()
+        );
+        stream.write_all(post_req.as_bytes()).unwrap();
+        stream.write_all(&dummy_jpeg).unwrap();
+
+        let mut resp = String::new();
+        stream.read_to_string(&mut resp).unwrap();
+        assert!(
+            resp.starts_with("HTTP/1.1 200 OK"),
+            "db_tx チャネル飽和時でも try_send により HTTP ワーカースレッドがブロックせず 200 OK を返すこと"
+        );
     }
 }

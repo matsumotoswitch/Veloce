@@ -276,20 +276,23 @@ pub fn start_local_video_server(
                         let hash_key_for_url = hash_key.clone();
 
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                        let _ = db_tx.blocking_send(DbMsg::SaveThumbnail {
-                            hash_key,
-                            path: clean_path.clone(),
-                            mtime,
-                            bytes: body,
-                            now,
-                        });
-
-                        // AppState のメモリ上キャッシュフラグを即時反映
-                        use tauri::Manager;
-                        if let Ok(handle_guard) = app_handle_slot.lock() {
-                            if let Some(app_handle) = handle_guard.as_ref() {
-                                let state = app_handle.state::<AppState>();
-                                state.mark_thumbnail_cached(&path_str);
+                        if db_tx
+                            .try_send(DbMsg::SaveThumbnail {
+                                hash_key,
+                                path: clean_path.clone(),
+                                mtime,
+                                bytes: body,
+                                now,
+                            })
+                            .is_ok()
+                        {
+                            // AppState のメモリ上キャッシュフラグを即時反映（キューへの投入が成功した場合のみ）
+                            use tauri::Manager;
+                            if let Ok(handle_guard) = app_handle_slot.lock() {
+                                if let Some(app_handle) = handle_guard.as_ref() {
+                                    let state = app_handle.state::<AppState>();
+                                    state.mark_thumbnail_cached(&path_str);
+                                }
                             }
                         }
 
