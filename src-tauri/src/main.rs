@@ -40,7 +40,7 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     let mut db_path =
         get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
     if !db_path.exists() {
-        let _ = std::fs::create_dir_all(db_path.parent().unwrap());
+        let _ = std::fs::create_dir_all(&db_path);
     }
     db_path.push("veloce_cache.db");
 
@@ -350,6 +350,21 @@ fn normalize_comparison_operator(op: &str) -> &'static str {
     }
 }
 
+/// SQLite の `LIKE ... ESCAPE '\'` 句向けに、ワイルドカード文字（`\`, `%`, `_`）をエスケープする
+fn escape_sql_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 8);
+    for ch in input.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// スマートフォルダの検索条件（パス、拡張子、レーティング、サイズ、プロンプト全文検索等）から、
 /// SQLite 用の実行クエリ（SELECT / COUNT）およびバインドパラメータを動的に生成する（ソート条件・リミット指定対応）
 fn build_smart_folder_query_with_sort(
@@ -532,16 +547,17 @@ fn build_smart_folder_query_with_sort(
                 if !base_path.ends_with('\\') && !base_path.ends_with('/') {
                     base_path.push('\\');
                 }
+                let escaped_base = escape_sql_like(&base_path);
                 
                 if cond.operator == "under_folder" {
-                    clause = "c.path LIKE ?".to_string();
-                    params.push(rusqlite::types::Value::Text(format!("{}%", base_path)));
+                    clause = "c.path LIKE ? ESCAPE '\\'".to_string();
+                    params.push(rusqlite::types::Value::Text(format!("{}%", escaped_base)));
                 } else if cond.operator == "in_folder" {
-                    let base_like = format!("{}%", base_path);
-                    let not_like_slash = format!("{}%/%", base_path);
-                    let not_like_bslash = format!("{}%\\%", base_path);
+                    let base_like = format!("{}%", escaped_base);
+                    let not_like_slash = format!("{}%/%", escaped_base);
+                    let not_like_bslash = format!("{}%\\\\%", escaped_base);
                     
-                    clause = "(c.path LIKE ? AND c.path NOT LIKE ? AND c.path NOT LIKE ?)".to_string();
+                    clause = "(c.path LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\')".to_string();
                     params.push(rusqlite::types::Value::Text(base_like));
                     params.push(rusqlite::types::Value::Text(not_like_slash));
                     params.push(rusqlite::types::Value::Text(not_like_bslash));
@@ -2058,30 +2074,41 @@ fn parse_mp4_dimensions(path: &str) -> Option<(u32, u32)> {
     let file_len = file.metadata().ok()?.len();
     
     let mut pos = 0u64;
-    while pos < file_len && pos < 10 * 1024 * 1024 { // Search only first 10MB
+    const MAX_MP4_BOX_STEPS: usize = 4096;
+    for _ in 0..MAX_MP4_BOX_STEPS {
+        if pos + 8 > file_len {
+            break;
+        }
         if file.seek(SeekFrom::Start(pos)).is_err() { break; }
         if file.read_exact(&mut buffer).is_err() { break; }
-        let size = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as u64;
-        let box_type = &buffer[4..8];
-        
-        if size < 8 {
-            if size == 1 { 
-                let mut large_size_buf = [0u8; 8];
-                if file.read_exact(&mut large_size_buf).is_err() { break; }
-                let large_size = u64::from_be_bytes(large_size_buf);
-                if box_type == b"mdat" { pos += large_size; continue; }
-            }
-            break; 
-        }
-        
-        if box_type == b"moov" || box_type == b"trak" {
-            pos += 8;
+        let size32 = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as u64;
+        let box_type = [buffer[4], buffer[5], buffer[6], buffer[7]];
+
+        let (header_size, box_size) = if size32 == 1 {
+            let mut large_size_buf = [0u8; 8];
+            if file.read_exact(&mut large_size_buf).is_err() { break; }
+            let large_size = u64::from_be_bytes(large_size_buf);
+            if large_size < 16 { break; }
+            (16u64, large_size)
+        } else if size32 == 0 {
+            let remaining = file_len.saturating_sub(pos);
+            if remaining < 8 { break; }
+            (8u64, remaining)
+        } else if size32 >= 8 {
+            (8u64, size32)
+        } else {
+            break;
+        };
+
+        if &box_type == b"moov" || &box_type == b"trak" {
+            pos = pos.saturating_add(header_size);
             continue;
-        } else if box_type == b"tkhd" {
-            let content_size = size - 8;
+        } else if &box_type == b"tkhd" {
+            let content_pos = pos.saturating_add(header_size);
+            let content_size = box_size.saturating_sub(header_size);
             // 悪意ある巨大サイズ（最大4GB）によるOOMを防ぐため、解像度解析に必要な上限256バイトでバッファをクランプ。
             // またファイル末尾を超えて read_exact が失敗しないよう実残バイト数でもクランプする。
-            let remaining_file_bytes = file_len.saturating_sub(pos + 8);
+            let remaining_file_bytes = file_len.saturating_sub(content_pos);
             let target_read = std::cmp::min(content_size, remaining_file_bytes);
             let read_len = std::cmp::min(target_read, 256) as usize;
             let mut tkhd_data = vec![0u8; read_len];
@@ -2098,9 +2125,9 @@ fn parse_mp4_dimensions(path: &str) -> Option<(u32, u32)> {
                     }
                 }
             }
-            pos += size;
+            pos = pos.saturating_add(box_size);
         } else {
-            pos += size;
+            pos = pos.saturating_add(box_size);
         }
     }
     None
@@ -2817,6 +2844,22 @@ fn parse_png_chunks_with_dimensions_and_types(
                             chunk_types.insert(keyword.clone(), "tEXt");
                             chunks.insert(keyword, text);
                         }
+                    } else if chunk_type == b"zTXt" {
+                        if let Some(null_idx) = data.iter().position(|&b| b == 0) {
+                            let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
+                            if null_idx + 2 <= data.len() && data[null_idx + 1] == 0 {
+                                use std::io::Read;
+                                let compressed_data = &data[null_idx + 2..];
+                                let decoder = flate2::read::ZlibDecoder::new(compressed_data);
+                                let mut limited = decoder.take(10 * 1024 * 1024);
+                                let mut decompressed = Vec::new();
+                                if limited.read_to_end(&mut decompressed).is_ok() && !decompressed.is_empty() {
+                                    let text = String::from_utf8_lossy(&decompressed).to_string();
+                                    chunk_types.insert(keyword.clone(), "zTXt");
+                                    chunks.insert(keyword, text);
+                                }
+                            }
+                        }
                     } else if chunk_type == b"iTXt" {
                         if let Some(null_idx) = data.iter().position(|&b| b == 0) {
                             let keyword = String::from_utf8_lossy(&data[..null_idx]).to_string();
@@ -3411,23 +3454,44 @@ fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
             let buffer = &mmap[..];
             if buffer.len() >= 2 && buffer[0] == 0xFF && buffer[1] == 0xD8 {
                 let mut offset = 2;
-                while offset + 4 <= buffer.len() {
+                while offset + 2 <= buffer.len() {
                     if buffer[offset] != 0xFF {
                         break;
                     }
-                    let marker = buffer[offset + 1];
-                    let length = u16::from_be_bytes(
-                        buffer[offset + 2..offset + 4]
-                            .try_into()
-                            .unwrap_or_default(),
-                    ) as usize;
-                    if marker == 0xE1 && offset + 2 + length <= buffer.len() {
-                        let app1_data = &buffer[offset + 4..offset + 2 + length];
+                    // 連続する 0xFF パディングバイトをスキップ
+                    while offset < buffer.len() && buffer[offset] == 0xFF {
+                        offset += 1;
+                    }
+                    if offset >= buffer.len() {
+                        break;
+                    }
+                    let marker = buffer[offset];
+                    offset += 1;
+
+                    // EOI (0xD9) または SOS (0xDA: Start of Scan) 到達時はヘッダセグメント走査を終了
+                    if marker == 0xD9 || marker == 0xDA {
+                        break;
+                    }
+                    // ペイロード長を持たないスタンドアロンマーカー (RST0-RST7, SOI, TEM, 0x00)
+                    if (0xD0..=0xD8).contains(&marker) || marker == 0x01 || marker == 0x00 {
+                        continue;
+                    }
+
+                    if offset + 2 > buffer.len() {
+                        break;
+                    }
+                    let length = u16::from_be_bytes([buffer[offset], buffer[offset + 1]]) as usize;
+                    // JPEG セグメント長は自身の2バイトを含むため、2未満は不正データとして即座に打ち切る（スライス逆転 panic 防止）
+                    if length < 2 || offset + length > buffer.len() {
+                        break;
+                    }
+                    if marker == 0xE1 {
+                        let app1_data = &buffer[offset + 2..offset + length];
                         if app1_data.len() >= 6 && &app1_data[0..4] == b"Exif" {
                             results.extend(parse_tiff_ifd(&app1_data[6..]));
                         }
                     }
-                    offset += 2 + length;
+                    offset += length;
                 }
             }
         }
@@ -4643,15 +4707,57 @@ async fn trash_file(state: tauri::State<'_, AppState>, file_path: String) -> Res
     .unwrap_or(false);
     
     if result {
+        let clean_path = normalize_unc_path(&file_path_clone).replace('/', "\\");
         if let Ok(conn) = state.db_conn.get() {
-            let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&file_path_clone]);
-            let clean_path = file_path_clone.replace("\\\\?\\", "");
-            let _ = conn.execute("DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE", rusqlite::params![&file_path_clone, &clean_path]);
+            let _ = conn.execute(
+                "DELETE FROM ratings WHERE path = ?1 OR path = ?2",
+                rusqlite::params![&file_path_clone, &clean_path],
+            );
+            let _ = conn.execute(
+                "DELETE FROM cache WHERE path = ?1 COLLATE NOCASE OR path = ?2 COLLATE NOCASE",
+                rusqlite::params![&file_path_clone, &clean_path],
+            );
         }
-        state.ratings.write().remove(&file_path_clone);
+        let mut ratings = state.ratings.write();
+        ratings.remove(&file_path_clone);
+        ratings.remove(&clean_path);
     }
     
     Ok(result)
+}
+
+/// フォルダ削除成功時に、SQLite の `ratings` / `cache` テーブルおよびメモリ上の `state.ratings` から
+/// 対象フォルダ配下のエントリのみをワイルドカードエスケープ付きで安全に削除する
+fn purge_trashed_folder_from_db_and_state(state: &AppState, folder_path: &str) {
+    let old_dir_prefix = format!("{}\\", folder_path);
+    let like_query = format!("{}%", escape_sql_like(&old_dir_prefix));
+    let clean_path = folder_path.replace("\\\\?\\", "");
+    let clean_dir_prefix = format!("{}\\", clean_path);
+    let clean_like_query = format!("{}%", escape_sql_like(&clean_dir_prefix));
+
+    if let Ok(conn) = state.db_conn.get() {
+        let _ = conn.execute(
+            "DELETE FROM ratings WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\' OR path = ?3 OR path LIKE ?4 ESCAPE '\\'",
+            rusqlite::params![folder_path, &like_query, &clean_path, &clean_like_query],
+        );
+        let _ = conn.execute(
+            "DELETE FROM cache WHERE path = ?1 COLLATE NOCASE OR path COLLATE NOCASE LIKE ?2 ESCAPE '\\' OR path = ?3 COLLATE NOCASE OR path COLLATE NOCASE LIKE ?4 ESCAPE '\\'",
+            rusqlite::params![folder_path, &like_query, &clean_path, &clean_like_query],
+        );
+    }
+    {
+        let mut lock = state.ratings.write();
+        let slash_prefix = format!("{}/", folder_path);
+        let clean_slash_prefix = format!("{}/", clean_path);
+        lock.retain(|p, _| {
+            p != folder_path
+                && p != &clean_path
+                && !p.starts_with(&old_dir_prefix)
+                && !p.starts_with(&clean_dir_prefix)
+                && !p.starts_with(&slash_prefix)
+                && !p.starts_with(&clean_slash_prefix)
+        });
+    }
 }
 
 #[tauri::command]
@@ -4685,27 +4791,7 @@ async fn trash_folder(state: tauri::State<'_, AppState>, folder_path: String) ->
     });
     
     if result.success {
-        let old_dir_prefix = format!("{}\\", folder_path_clone);
-        let like_query = format!("{}%", old_dir_prefix);
-        let clean_path = folder_path_clone.replace("\\\\?\\", "");
-        let clean_like_query = format!("{}\\%", clean_path);
-        
-        if let Ok(conn) = state.db_conn.get() {
-            let _ = conn.execute("DELETE FROM ratings WHERE path = ?1 OR path LIKE ?2", rusqlite::params![&folder_path_clone, &like_query]);
-            let _ = conn.execute("DELETE FROM cache WHERE path = ?1 COLLATE NOCASE OR path LIKE ?2 COLLATE NOCASE OR path = ?3 COLLATE NOCASE OR path LIKE ?4 COLLATE NOCASE", rusqlite::params![&folder_path_clone, &like_query, &clean_path, &clean_like_query]);
-        }
-        {
-            let mut lock = state.ratings.write();
-            let mut keys_to_remove = Vec::new();
-            for p in lock.keys() {
-                if p == &folder_path_clone || p.starts_with(&old_dir_prefix) || p.starts_with(&format!("{}/", folder_path_clone)) {
-                    keys_to_remove.push(p.clone());
-                }
-            }
-            for k in keys_to_remove {
-                lock.remove(&k);
-            }
-        }
+        purge_trashed_folder_from_db_and_state(&state, &folder_path_clone);
     }
     
     Ok(result)
@@ -4906,10 +4992,10 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
     // キャッシュテーブルも再帰的に更新する
     if let Ok(conn) = state.db_conn.get() {
         let old_dir_prefix = format!("{}\\", old_path_clone);
-        let like_query = format!("{}%", old_dir_prefix);
+        let like_query = format!("{}%", escape_sql_like(&old_dir_prefix));
         
         let mut updates = Vec::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT hash_key, path, mtime FROM cache WHERE path = ? COLLATE NOCASE OR path LIKE ? COLLATE NOCASE") {
+        if let Ok(mut stmt) = conn.prepare("SELECT hash_key, path, mtime FROM cache WHERE path = ? COLLATE NOCASE OR path COLLATE NOCASE LIKE ? ESCAPE '\\'") {
             if let Ok(mut rows) = stmt.query(rusqlite::params![&old_path_clone, &like_query]) {
                 while let Ok(Some(row)) = rows.next() {
                     let old_hash_key: String = row.get(0).unwrap_or_default();
@@ -8068,7 +8154,7 @@ mod viewer_tests {
             ],
         };
         let (q_in, p_in) = super::build_smart_folder_query(&rule_in, false, false);
-        assert!(q_in.contains("c.path LIKE ? AND c.path NOT LIKE ? AND c.path NOT LIKE ?"), "直下パス判定のLIKE構文が含まれるべき: {}", q_in);
+        assert!(q_in.contains("c.path LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\'"), "直下パス判定のLIKE構文が含まれるべき: {}", q_in);
         assert_eq!(p_in.len(), 3, "in_folder は3つのバインドパラメータを持つべき");
 
         // under_folder: 配下すべて (サブフォルダ含む)
@@ -8085,7 +8171,7 @@ mod viewer_tests {
             ],
         };
         let (q_under, p_under) = super::build_smart_folder_query(&rule_under, false, false);
-        assert!(q_under.contains("c.path LIKE ?"), "under_folder パス判定が含まれるべき: {}", q_under);
+        assert!(q_under.contains("c.path LIKE ? ESCAPE '\\'"), "under_folder パス判定が含まれるべき: {}", q_under);
         assert_eq!(p_under.len(), 1, "under_folder は1つのバインドパラメータを持つべき");
     }
 
@@ -11225,5 +11311,146 @@ mod viewer_tests {
         *state.rating_filter_op.lock() = "gte".to_string();
         let count_filtered = set_rating_inner(None, &state, "C:/test_rating/b.png".to_string(), 3);
         assert_eq!(count_filtered, 0);
+    }
+
+    #[test]
+    fn test_parse_jpeg_exif_malformed_app1_no_panic() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1. APP1 マーカー長が 0 (FF D8 FF E1 00 00) の最小クラッシュ再現データ
+        let zero_len_jpg = temp_dir.path().join("crash_len0.jpg");
+        std::fs::write(&zero_len_jpg, [0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x00]).unwrap();
+        let res0 = parse_jpeg_exif(zero_len_jpg.to_str().unwrap());
+        assert!(res0.is_empty(), "APP1 length=0 の不正JPEGでpanicせず空マップを返すこと");
+
+        // 2. APP1 マーカー長が 1 (FF D8 FF E1 00 01) のデータ
+        let one_len_jpg = temp_dir.path().join("crash_len1.jpg");
+        std::fs::write(&one_len_jpg, [0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x01]).unwrap();
+        let res1 = parse_jpeg_exif(one_len_jpg.to_str().unwrap());
+        assert!(res1.is_empty(), "APP1 length=1 の不正JPEGでpanicせず空マップを返すこと");
+
+        // 3. SOS (0xDA) 以降に偽の APP1 (0xFF 0xE1 0x00 0x00) が含まれるデータでも SOS で走査終了すること
+        let sos_jpg = temp_dir.path().join("sos_stop.jpg");
+        std::fs::write(&sos_jpg, [0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x02, 0xFF, 0xE1, 0x00, 0x00]).unwrap();
+        let res_sos = parse_jpeg_exif(sos_jpg.to_str().unwrap());
+        assert!(res_sos.is_empty());
+    }
+
+    #[test]
+    fn test_purge_trashed_folder_like_escape_isolation() {
+        let state = create_test_app_state("C:\\");
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO ratings (path, rating) VALUES (?1, 5), (?2, 4)",
+                rusqlite::params!["C:\\my_folder\\a.png", "C:\\myXfolder\\b.png"],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, mtime) VALUES ('h1', ?1, 100), ('h2', ?2, 200)",
+                rusqlite::params!["C:\\my_folder\\a.png", "C:\\myXfolder\\b.png"],
+            ).unwrap();
+        }
+        {
+            let mut lock = state.ratings.write();
+            lock.insert("C:\\my_folder\\a.png".to_string(), 5);
+            lock.insert("C:\\myXfolder\\b.png".to_string(), 4);
+        }
+
+        // アンダースコアを含む "C:\my_folder" を削除した際、"C:\myXfolder" が巻き込まれないこと
+        purge_trashed_folder_from_db_and_state(&state, "C:\\my_folder");
+
+        assert!(!state.ratings.read().contains_key("C:\\my_folder\\a.png"));
+        assert_eq!(
+            state.ratings.read().get("C:\\myXfolder\\b.png"),
+            Some(&4),
+            "アンダースコア1文字違いの別フォルダのメモリ上レーティングが保持されること"
+        );
+
+        let conn = state.db_conn.get().unwrap();
+        let remaining_ratings: i64 = conn.query_row("SELECT COUNT(*) FROM ratings WHERE path = 'C:\\myXfolder\\b.png'", [], |r| r.get(0)).unwrap();
+        let remaining_cache: i64 = conn.query_row("SELECT COUNT(*) FROM cache WHERE path = 'C:\\myXfolder\\b.png'", [], |r| r.get(0)).unwrap();
+        assert_eq!(remaining_ratings, 1, "DB内の別フォルダのレーティングが巻き込み削除されないこと");
+        assert_eq!(remaining_cache, 1, "DB内の別フォルダのキャッシュが巻き込み削除されないこと");
+    }
+
+    #[test]
+    fn test_parse_mp4_dimensions_moov_after_10mb_and_ztxt_png() {
+        use std::io::{Seek, SeekFrom, Write};
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1. 12MB の mdat ボックスの後ろ（10MB超の位置）に moov/trak/tkhd がある MP4
+        let mp4_path = temp_dir.path().join("late_moov.mp4");
+        {
+            let mut f = std::fs::File::create(&mp4_path).unwrap();
+            let mdat_size: u32 = 11 * 1024 * 1024; // 11MB (> 10MB)
+            f.write_all(&mdat_size.to_be_bytes()).unwrap();
+            f.write_all(b"mdat").unwrap();
+            // スパースに 11MB 先へシークして moov -> trak -> tkhd を書き込む
+            f.seek(SeekFrom::Start(mdat_size as u64)).unwrap();
+
+            let tkhd_payload_len = 84usize;
+            let tkhd_box_size = (8 + tkhd_payload_len) as u32;
+            let trak_box_size = 8 + tkhd_box_size;
+            let moov_box_size = 8 + trak_box_size;
+
+            f.write_all(&moov_box_size.to_be_bytes()).unwrap();
+            f.write_all(b"moov").unwrap();
+            f.write_all(&trak_box_size.to_be_bytes()).unwrap();
+            f.write_all(b"trak").unwrap();
+            f.write_all(&tkhd_box_size.to_be_bytes()).unwrap();
+            f.write_all(b"tkhd").unwrap();
+
+            let mut tkhd_payload = vec![0u8; tkhd_payload_len];
+            tkhd_payload[0] = 0; // version 0 -> width at 76, height at 80
+            tkhd_payload[76..80].copy_from_slice(&(1920u32 << 16).to_be_bytes());
+            tkhd_payload[80..84].copy_from_slice(&(1080u32 << 16).to_be_bytes());
+            f.write_all(&tkhd_payload).unwrap();
+        }
+        let dims = parse_mp4_dimensions(mp4_path.to_str().unwrap());
+        assert_eq!(dims, Some((1920, 1080)), "10MB以降にmoovがあるMP4でも正しく寸法が取得できること");
+
+        // 2. PNG zTXt チャンクの解凍検証
+        let png_path = temp_dir.path().join("ztxt_sample.png");
+        {
+            use flate2::write::ZlibEncoder;
+            use flate2::Compression;
+
+            let mut png_bytes = Vec::new();
+            png_bytes.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+            // IHDR (13 bytes)
+            png_bytes.extend_from_slice(&13u32.to_be_bytes());
+            png_bytes.extend_from_slice(b"IHDR");
+            png_bytes.extend_from_slice(&512u32.to_be_bytes());
+            png_bytes.extend_from_slice(&768u32.to_be_bytes());
+            png_bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+            png_bytes.extend_from_slice(&0u32.to_be_bytes()); // dummy CRC
+
+            // zTXt chunk ("parameters\0\0" + zlib compressed text)
+            let mut ztxt_data = Vec::new();
+            ztxt_data.extend_from_slice(b"parameters\0\0");
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(b"masterpiece, best quality, ztxt_prompt").unwrap();
+            let compressed = encoder.finish().unwrap();
+            ztxt_data.extend_from_slice(&compressed);
+
+            png_bytes.extend_from_slice(&(ztxt_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"zTXt");
+            png_bytes.extend_from_slice(&ztxt_data);
+            png_bytes.extend_from_slice(&0u32.to_be_bytes()); // dummy CRC
+
+            // IEND
+            png_bytes.extend_from_slice(&0u32.to_be_bytes());
+            png_bytes.extend_from_slice(b"IEND");
+            png_bytes.extend_from_slice(&0u32.to_be_bytes());
+
+            std::fs::write(&png_path, png_bytes).unwrap();
+        }
+        let (chunks, w, h, _) = parse_png_chunks_with_dimensions(png_path.to_str().unwrap());
+        assert_eq!((w, h), (512, 768));
+        assert_eq!(
+            chunks.get("parameters").map(|s| s.as_str()),
+            Some("masterpiece, best quality, ztxt_prompt"),
+            "zTXtチャンクが解凍されてparametersとして取得できること"
+        );
     }
 }
