@@ -1953,33 +1953,76 @@ fn update_file_dimensions(
     });
 }
 
+/// 単一または複数ファイルの追加・変更・削除を一括で `AppState` に反映し、
+/// インデックス再構築（`rebuild_all_indices`）とフィルタ・ソート（`apply_filters_and_sort`）を
+/// バッチの最後に1回だけ実行する。既存ファイルの検索には `path_to_all_idx` による O(1) ルックアップを使用する。
+fn notify_files_batch_inner(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    changed_files: Vec<ImageFile>,
+    removed_paths: Vec<String>,
+) -> usize {
+    if changed_files.is_empty() && removed_paths.is_empty() {
+        return state.filtered_files.read().len();
+    }
+
+    {
+        let mut all_files = state.all_files.write();
+
+        if !removed_paths.is_empty() {
+            let mut remove_set = std::collections::HashSet::with_capacity(removed_paths.len() * 2);
+            for p in removed_paths {
+                let clean = p.replace("\\\\?\\", "").replace('/', "\\");
+                remove_set.insert(p);
+                remove_set.insert(clean);
+            }
+            all_files.retain(|f| !remove_set.contains(&f.path));
+            if !changed_files.is_empty() {
+                state.rebuild_all_indices(&all_files);
+            }
+        }
+
+        if !changed_files.is_empty() {
+            let mut local_idx_map = state.path_to_all_idx.read().clone();
+            for mut file in changed_files {
+                let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
+                file.path = clean.clone();
+                if file.hash_key.is_empty() {
+                    file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime).into();
+                }
+
+                if let Some(&idx) = local_idx_map.get(&clean) {
+                    if let Some(existing) = all_files.get_mut(idx) {
+                        // 既存の幅・高さが取得済みで、通知された値が 0 の場合は既存の寸法を維持する
+                        if file.width == 0 && file.height == 0 && (existing.width > 0 || existing.height > 0) {
+                            file.width = existing.width;
+                            file.height = existing.height;
+                        }
+                        *existing = std::sync::Arc::new(file);
+                        continue;
+                    }
+                }
+
+                let new_idx = all_files.len();
+                all_files.push(std::sync::Arc::new(file));
+                local_idx_map.insert(clean, new_idx);
+            }
+        }
+
+        state.rebuild_all_indices(&all_files);
+    }
+
+    apply_filters_and_sort(app, state)
+}
+
 /// ファイルウォッチャーから通知されたファイル変更をRust側のSource of Truthに反映する
 #[tauri::command]
 fn notify_file_changed(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    mut file: ImageFile,
+    file: ImageFile,
 ) -> usize {
-    let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
-    file.path = clean.clone();
-    if file.hash_key.is_empty() {
-        file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime).into();
-    }
-    {
-        let mut all_files = state.all_files.write();
-        if let Some(existing) = all_files.iter_mut().find(|f| f.path == file.path) {
-            // 既存の幅・高さが取得済みで、通知された値が 0 の場合は既存の寸法を維持する
-            if file.width == 0 && file.height == 0 && (existing.width > 0 || existing.height > 0) {
-                file.width = existing.width;
-                file.height = existing.height;
-            }
-            *existing = std::sync::Arc::new(file.clone());
-        } else {
-            all_files.push(std::sync::Arc::new(file));
-        }
-        state.rebuild_all_indices(&all_files);
-    }
-    apply_filters_and_sort(Some(&app), &state)
+    notify_files_batch_inner(Some(&app), &state, vec![file], Vec::new())
 }
 
 /// ファイルウォッチャーから通知されたファイル削除をRust側のSource of Truthに反映する
@@ -1989,13 +2032,18 @@ fn notify_file_removed(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> usize {
-    let clean_path = path.replace("\\\\?\\", "").replace('/', "\\");
-    {
-        let mut all_files = state.all_files.write();
-        all_files.retain(|f| f.path != clean_path && f.path != path);
-        state.rebuild_all_indices(&all_files);
-    }
-    apply_filters_and_sort(Some(&app), &state)
+    notify_files_batch_inner(Some(&app), &state, Vec::new(), vec![path])
+}
+
+/// ファイルウォッチャーから通知された複数のファイル追加・変更・削除を一括で反映する
+#[tauri::command]
+fn notify_files_batch(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    changed_files: Vec<ImageFile>,
+    removed_paths: Vec<String>,
+) -> usize {
+    notify_files_batch_inner(Some(&app), &state, changed_files, removed_paths)
 }
 
 #[tauri::command]
@@ -2910,11 +2958,31 @@ fn parse_png_chunks(path: &str) -> std::collections::HashMap<String, String> {
     parse_png_chunks_with_dimensions(path).0
 }
 
+/// PNGファイルの先頭24バイト（シグネチャ8B + IHDRチャンクヘッダ8B + 幅4B・高さ4B）のみを
+/// スタックバッファに読み取り、全チャンク走査やテキスト解凍を行わずに寸法を取得する。
+fn read_png_dimensions_fast(path: &str) -> (u32, u32) {
+    use std::io::Read;
+    if let Ok(mut file) = std::fs::File::open(path) {
+        let mut header = [0u8; 24];
+        if file.read_exact(&mut header).is_ok() {
+            if &header[0..8] == &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+                && &header[12..16] == b"IHDR"
+            {
+                let w = u32::from_be_bytes([header[16], header[17], header[18], header[19]]);
+                let h = u32::from_be_bytes([header[20], header[21], header[22], header[23]]);
+                if w > 0 && h > 0 {
+                    return (w, h);
+                }
+            }
+        }
+    }
+    image::image_dimensions(path).unwrap_or((0, 0))
+}
+
 /// 画像・動画ファイルから軽量ヘッダー解析によりミリ秒未満で寸法(width, height)を取得する
 fn get_fast_dimensions_for_file(path: &str, ext_lower: &str) -> (u32, u32) {
     if ext_lower == "png" {
-        let (_, w, h, _) = parse_png_chunks_with_dimensions(path);
-        (w, h)
+        read_png_dimensions_fast(path)
     } else if ext_lower == "mp4" {
         parse_mp4_dimensions(path).unwrap_or((0, 0))
     } else {
@@ -6123,13 +6191,12 @@ fn main() {
                                             if let Some(&(old_size, old_mtime)) =
                                                 known_files.get(&path_str)
                                             {
-                                                let (initial_width, initial_height) = if size > 0 {
-                                                    get_fast_dimensions_for_file(&path_str, &ext_lower)
-                                                } else {
-                                                    (0, 0)
-                                                };
-
                                                 if old_size != size || old_mtime != mtime {
+                                                    let (initial_width, initial_height) = if size > 0 {
+                                                        get_fast_dimensions_for_file(&path_str, &ext_lower)
+                                                    } else {
+                                                        (0, 0)
+                                                    };
                                                     let ctime = meta
                                                         .created()
                                                         .ok()
@@ -6329,6 +6396,7 @@ fn main() {
             notify_file_changed,
             update_smart_folders,
             notify_file_removed,
+            notify_files_batch,
             get_full_metadata_batch,
             parse_metadata,
             generate_thumbnail,
@@ -11452,5 +11520,116 @@ mod viewer_tests {
             Some("masterpiece, best quality, ztxt_prompt"),
             "zTXtチャンクが解凍されてparametersとして取得できること"
         );
+    }
+
+    #[test]
+    fn test_read_png_dimensions_fast_and_notify_files_batch() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let png_path = temp_dir.path().join("fast_dim.png");
+        let img = image::RgbImage::new(640, 480);
+        img.save(&png_path).unwrap();
+
+        // 1. read_png_dimensions_fast が先頭24バイトから正確に寸法を返すこと
+        let dims = read_png_dimensions_fast(png_path.to_str().unwrap());
+        assert_eq!(dims, (640, 480));
+        assert_eq!(get_fast_dimensions_for_file(png_path.to_str().unwrap(), "png"), (640, 480));
+
+        // 2. notify_files_batch_inner が複数ファイルの追加・既存寸法保持更新・削除を一括反映すること
+        let state = create_test_app_state("C:\\batch_test");
+        let f1 = ImageFile {
+            name: "01.png".to_string(),
+            ext: ".png".into(),
+            path: "C:/batch_test/01.png".to_string(),
+            size: 100,
+            mtime: 1000,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 800,
+            height: 600,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: Default::default(),
+        };
+        let f2 = ImageFile {
+            name: "02.png".to_string(),
+            ext: ".png".into(),
+            path: "C:/batch_test/02.png".to_string(),
+            size: 200,
+            mtime: 2000,
+            ctime: 2000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 1024,
+            height: 1024,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: Default::default(),
+        };
+
+        let count1 = notify_files_batch_inner(None, &state, vec![f1, f2], Vec::new());
+        assert_eq!(count1, 2);
+        assert_eq!(state.path_to_all_idx.read().get("C:\\batch_test\\01.png"), Some(&0));
+        assert_eq!(state.path_to_all_idx.read().get("C:\\batch_test\\02.png"), Some(&1));
+
+        // 01.png の更新（width=0, height=0 で通知されても既存の 800x600 を保持）と 02.png の削除、03.png の追加を1バッチで実行
+        let f1_updated = ImageFile {
+            name: "01.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\batch_test\\01.png".to_string(),
+            size: 150,
+            mtime: 1500,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 0,
+            height: 0,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: Default::default(),
+        };
+        let f3 = ImageFile {
+            name: "03.png".to_string(),
+            ext: ".png".into(),
+            path: "C:/batch_test/03.png".to_string(),
+            size: 300,
+            mtime: 3000,
+            ctime: 3000,
+            has_thumbnail_cache: false,
+            has_metadata_cache: false,
+            width: 512,
+            height: 512,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: Default::default(),
+        };
+
+        let count2 = notify_files_batch_inner(
+            None,
+            &state,
+            vec![f1_updated, f3],
+            vec!["C:/batch_test/02.png".to_string()],
+        );
+        assert_eq!(count2, 2);
+        let filtered = state.filtered_files.read();
+        assert_eq!(filtered[0].name, "01.png");
+        assert_eq!((filtered[0].width, filtered[0].height), (800, 600), "既存ファイルの寸法が保持されること");
+        assert_eq!(filtered[1].name, "03.png");
     }
 }

@@ -3541,45 +3541,88 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (window.veloceAPI.onFileChanged) {
-    window.veloceAPI.onFileChanged(async (newFile) => {
-      const oldUrl = appState.thumbnailUrls.get(newFile.path);
-      if (oldUrl && oldUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(oldUrl);
-      }
-      appState.thumbnailUrls.delete(newFile.path);
+  if (window.veloceAPI.onFileChanged || window.veloceAPI.onFileRemoved) {
+    const pendingChangedFiles = new Map();
+    const pendingRemovedPaths = new Set();
+    let watcherFlushScheduled = false;
 
-      if (window.thumbnailManager) window.thumbnailManager.remove(newFile.path);
+    const flushWatcherEvents = async () => {
+      watcherFlushScheduled = false;
+      const changedList = Array.from(pendingChangedFiles.values());
+      const removedList = Array.from(pendingRemovedPaths);
+      pendingChangedFiles.clear();
+      pendingRemovedPaths.clear();
 
-      if (window.uiManager && window.uiManager._domByPath) {
-        const wrapper = window.uiManager._domByPath.get(newFile.path);
-        if (wrapper) {
-          wrapper.dataset.filepath = ''; // 意図的に空にして updateVirtualGrid での再描画を強制する
-          window.uiManager._domByPath.delete(newFile.path);
+      if (changedList.length === 0 && removedList.length === 0) return;
+
+      let newTotal;
+      if (typeof window.veloceAPI.notifyFilesBatch === 'function') {
+        newTotal = await window.veloceAPI.notifyFilesBatch(changedList, removedList);
+      } else {
+        for (const f of changedList) {
+          if (typeof window.veloceAPI.notifyFileChanged === 'function') {
+            newTotal = await window.veloceAPI.notifyFileChanged(f);
+          }
+        }
+        for (const p of removedList) {
+          if (typeof window.veloceAPI.notifyFileRemoved === 'function') {
+            newTotal = await window.veloceAPI.notifyFileRemoved(p);
+          }
         }
       }
 
-      const newTotal = await window.veloceAPI.notifyFileChanged(newFile);
       if (typeof newTotal === 'number') appState.totalCount = newTotal;
-      if (newFile.width > 0 && newFile.height > 0 && window.uiManager && typeof window.uiManager.updateFileDimensions === 'function') {
-        window.uiManager.updateFileDimensions(newFile.path, newFile.width, newFile.height);
+      if (window.uiManager && typeof window.uiManager.updateFileDimensions === 'function') {
+        for (const f of changedList) {
+          if (f.width > 0 && f.height > 0) {
+            window.uiManager.updateFileDimensions(f.path, f.width, f.height);
+          }
+        }
       }
       scheduleRefresh();
       if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
         window.debouncedUpdateSmartFolderCounts();
       }
-    });
-  }
+    };
 
-  if (window.veloceAPI.onFileRemoved) {
-    window.veloceAPI.onFileRemoved(async (path) => {
-      const newTotal = await window.veloceAPI.notifyFileRemoved(path);
-      if (typeof newTotal === 'number') appState.totalCount = newTotal;
-      scheduleRefresh();
-      if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
-        window.debouncedUpdateSmartFolderCounts();
+    const scheduleWatcherFlush = () => {
+      if (!watcherFlushScheduled) {
+        watcherFlushScheduled = true;
+        Promise.resolve().then(flushWatcherEvents);
       }
-    });
+    };
+
+    if (window.veloceAPI.onFileChanged) {
+      window.veloceAPI.onFileChanged((newFile) => {
+        const oldUrl = appState.thumbnailUrls.get(newFile.path);
+        if (oldUrl && oldUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(oldUrl);
+        }
+        appState.thumbnailUrls.delete(newFile.path);
+
+        if (window.thumbnailManager) window.thumbnailManager.remove(newFile.path);
+
+        if (window.uiManager && window.uiManager._domByPath) {
+          const wrapper = window.uiManager._domByPath.get(newFile.path);
+          if (wrapper) {
+            wrapper.dataset.filepath = ''; // 意図的に空にして updateVirtualGrid での再描画を強制する
+            window.uiManager._domByPath.delete(newFile.path);
+          }
+        }
+
+        pendingRemovedPaths.delete(newFile.path);
+        pendingChangedFiles.set(newFile.path, newFile);
+        scheduleWatcherFlush();
+      });
+    }
+
+    if (window.veloceAPI.onFileRemoved) {
+      window.veloceAPI.onFileRemoved((path) => {
+        pendingChangedFiles.delete(path);
+        pendingRemovedPaths.add(path);
+        scheduleWatcherFlush();
+      });
+    }
   }
 
   if (window.veloceAPI.onDirectoryChanged) {

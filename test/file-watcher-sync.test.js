@@ -143,4 +143,67 @@ describe('File Watcher Event Sync and State Reflection', () => {
       path: 'C:\\images\\novelai_gen.png'
     }));
   });
+
+  it('短時間に連続して発生した複数の file-changed / file-removed イベントが notifyFilesBatch に1回で集約されること', async () => {
+    mockVeloceAPI.notifyFilesBatch = vi.fn(async (changed, removed) => 10 + changed.length - removed.length);
+
+    const pendingChangedFiles = new Map();
+    const pendingRemovedPaths = new Set();
+    let watcherFlushScheduled = false;
+    let flushPromise = null;
+
+    const flushWatcherEvents = async () => {
+      watcherFlushScheduled = false;
+      const changedList = Array.from(pendingChangedFiles.values());
+      const removedList = Array.from(pendingRemovedPaths);
+      pendingChangedFiles.clear();
+      pendingRemovedPaths.clear();
+      if (changedList.length === 0 && removedList.length === 0) return;
+
+      const newTotal = await window.veloceAPI.notifyFilesBatch(changedList, removedList);
+      if (typeof newTotal === 'number') mockAppState.totalCount = newTotal;
+      for (const f of changedList) {
+        if (f.width > 0 && f.height > 0) {
+          window.uiManager.updateFileDimensions(f.path, f.width, f.height);
+        }
+      }
+      refreshScheduled = true;
+    };
+
+    const onFileChanged = (newFile) => {
+      pendingRemovedPaths.delete(newFile.path);
+      pendingChangedFiles.set(newFile.path, newFile);
+      if (!watcherFlushScheduled) {
+        watcherFlushScheduled = true;
+        flushPromise = Promise.resolve().then(flushWatcherEvents);
+      }
+    };
+
+    const onFileRemoved = (path) => {
+      pendingChangedFiles.delete(path);
+      pendingRemovedPaths.add(path);
+      if (!watcherFlushScheduled) {
+        watcherFlushScheduled = true;
+        flushPromise = Promise.resolve().then(flushWatcherEvents);
+      }
+    };
+
+    onFileChanged({ path: 'C:\\images\\batch1.png', width: 512, height: 512 });
+    onFileChanged({ path: 'C:\\images\\batch2.png', width: 1024, height: 768 });
+    onFileRemoved('C:\\images\\old.png');
+
+    await flushPromise;
+
+    expect(mockVeloceAPI.notifyFilesBatch).toHaveBeenCalledTimes(1);
+    expect(mockVeloceAPI.notifyFilesBatch).toHaveBeenCalledWith(
+      [
+        { path: 'C:\\images\\batch1.png', width: 512, height: 512 },
+        { path: 'C:\\images\\batch2.png', width: 1024, height: 768 }
+      ],
+      ['C:\\images\\old.png']
+    );
+    expect(mockAppState.totalCount).toBe(11);
+    expect(window.uiManager.updateFileDimensions).toHaveBeenCalledTimes(2);
+    expect(refreshScheduled).toBe(true);
+  });
 });

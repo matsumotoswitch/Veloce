@@ -148,6 +148,7 @@ window.veloceAPI = {
    * ファイルウォッチャーから通知されたファイル削除をRust側に通知する
    */
   notifyFileRemoved: (path) => invoke('notify_file_removed', { path }),
+  notifyFilesBatch: (changedFiles, removedPaths) => invoke('notify_files_batch', { changedFiles, removedPaths }),
   /**
    * 指定されたパス内のサブフォルダのリストを取得します。
    * @param {string} path - 調査するディレクトリのパス。
