@@ -238,6 +238,45 @@ pub fn hash_path_mtime_hex<T: std::fmt::Display>(path: &str, mtime: T) -> String
     format!("{:016x}", hash_path_mtime(path, mtime))
 }
 
+/// OSのCSPRNGが使用できない環境向けのフォールバックトークン生成。
+/// 標準ライブラリの `RandomState`（OS乱数シードで初期化される独立したハッシャー状態）を
+/// 前半64bit・後半64bitそれぞれに別個に混合し、128ビット全体が独立したエントロピーを持つようにする。
+fn generate_fallback_token(seed_addr: usize) -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id();
+
+    let mut hasher1 = RandomState::new().build_hasher();
+    hasher1.write_u128(nanos);
+    hasher1.write_u32(pid);
+    hasher1.write_usize(seed_addr);
+    let r1 = hasher1.finish();
+
+    let mut hasher2 = RandomState::new().build_hasher();
+    hasher2.write_u64(r1);
+    hasher2.write_u128(nanos.wrapping_add(1));
+    hasher2.write_usize(seed_addr.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    let r2 = hasher2.finish();
+
+    let mut mix1 = [0u8; 24];
+    mix1[..16].copy_from_slice(&nanos.to_le_bytes());
+    mix1[16..].copy_from_slice(&r1.to_le_bytes());
+    let h1 = xxhash_rust::xxh3::xxh3_64(&mix1);
+
+    let mut mix2 = [0u8; 24];
+    mix2[..8].copy_from_slice(&h1.to_le_bytes());
+    mix2[8..16].copy_from_slice(&r2.to_le_bytes());
+    mix2[16..].copy_from_slice(&(seed_addr as u64).to_le_bytes());
+    let h2 = xxhash_rust::xxh3::xxh3_64(&mix2);
+
+    format!("{:016x}{:016x}", h1, h2)
+}
+
 /// 暗号学的に安全な疑似乱数生成器（CSPRNG）を用いて128ビット（32文字hex）のセッショントークンを生成します。
 pub fn generate_secure_token() -> String {
     let mut random_bytes = [0u8; 16];
@@ -254,15 +293,7 @@ pub fn generate_secure_token() -> String {
         }
     }
     // 非Windows環境または万が一のOS乱数生成失敗時のフォールバック
-    let seed = format!(
-        "{}:{}:{:p}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos(),
-        std::process::id(),
-        &random_bytes
-    );
-    let h1 = xxhash_rust::xxh3::xxh3_64(seed.as_bytes());
-    let h2 = xxhash_rust::xxh3::xxh3_64(&h1.to_le_bytes());
-    format!("{:016x}{:016x}", h1, h2)
+    generate_fallback_token(random_bytes.as_ptr() as usize)
 }
 
 #[cfg(test)]
@@ -277,6 +308,23 @@ mod tests {
         assert_eq!(token2.len(), 32);
         assert_ne!(token1, token2, "2回生成したトークンが一意であること");
         assert!(token1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_generate_fallback_token_independent_entropy() {
+        let fb1 = generate_fallback_token(0x12345678);
+        let fb2 = generate_fallback_token(0x12345678);
+        assert_eq!(fb1.len(), 32);
+        assert_eq!(fb2.len(), 32);
+        assert_ne!(fb1, fb2, "同一アドレス引数でも RandomState により異なるトークンが生成されること");
+
+        let h1 = u64::from_str_radix(&fb1[..16], 16).unwrap();
+        let deterministic_h2 = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(&h1.to_le_bytes()));
+        assert_ne!(
+            &fb1[16..],
+            deterministic_h2,
+            "後半64bitが前半64bitからの単純な決定論的ハッシュではないこと"
+        );
     }
 
     #[test]

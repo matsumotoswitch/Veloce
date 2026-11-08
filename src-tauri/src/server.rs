@@ -105,6 +105,16 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     res == 0
 }
 
+/// 改行を含まない巨大データによるメモリ枯渇を防ぐため、1行あたりの最大バイト数を制限して読み取ります。
+pub fn read_line_bounded<R: std::io::BufRead>(
+    reader: &mut R,
+    buf: &mut String,
+    max_bytes: u64,
+) -> std::io::Result<usize> {
+    use std::io::{BufRead, Read};
+    reader.take(max_bytes).read_line(buf)
+}
+
 #[tauri::command]
 pub fn get_video_server_port(state: tauri::State<'_, AppState>) -> u16 {
     state.video_server_port
@@ -122,7 +132,7 @@ pub fn start_local_video_server(
     token: String,
 ) -> u16 {
     use std::net::TcpListener;
-    use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+    use std::io::{BufReader, Read, Seek, SeekFrom, Write};
     use std::fs::File;
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind local video server");
@@ -148,9 +158,12 @@ pub fn start_local_video_server(
                 let db_conn = db_conn.clone();
                 let token = token.clone();
                 http_pool.spawn(move || {
+                    const MAX_HEADER_LINE_BYTES: u64 = 8192;
+                    const MAX_HEADER_LINES: usize = 64;
+
                     let mut reader = BufReader::new(&mut stream);
                     let mut request_line = String::new();
-                    if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
+                    if read_line_bounded(&mut reader, &mut request_line, MAX_HEADER_LINE_BYTES).is_err() || request_line.is_empty() {
                         return;
                     }
 
@@ -160,9 +173,9 @@ pub fn start_local_video_server(
                     let uri = parts[1];
 
                     if method == "OPTIONS" {
-                        loop {
+                        for _ in 0..MAX_HEADER_LINES {
                             let mut header_line = String::new();
-                            if reader.read_line(&mut header_line).is_err() { break; }
+                            if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() { break; }
                             if header_line.trim().is_empty() { break; }
                         }
                         let mut headers = String::new();
@@ -217,9 +230,9 @@ pub fn start_local_video_server(
                         }
 
                         let mut content_length: usize = 0;
-                        loop {
+                        for _ in 0..MAX_HEADER_LINES {
                             let mut header_line = String::new();
-                            if reader.read_line(&mut header_line).is_err() { break; }
+                            if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() { break; }
                             let trimmed = header_line.trim();
                             if trimmed.is_empty() { break; }
                             let lower = trimmed.to_lowercase();
@@ -398,9 +411,9 @@ pub fn start_local_video_server(
                     }
 
                     let mut range_header = None;
-                    loop {
+                    for _ in 0..MAX_HEADER_LINES {
                         let mut header_line = String::new();
-                        if reader.read_line(&mut header_line).is_err() { break; }
+                        if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() { break; }
                         let trimmed = header_line.trim();
                         if trimmed.is_empty() { break; }
                         let lower = trimmed.to_lowercase();
@@ -571,5 +584,25 @@ mod tests {
         assert!(!constant_time_eq(b"token_12345", b"token_1234"));
         assert!(!constant_time_eq(b"token_1234", b"token_12345"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn test_read_line_bounded_truncates_long_line() {
+        use std::io::Cursor;
+
+        // 1. 上限以内の通常の行は改行まで読み取られること
+        let mut short_reader = Cursor::new(b"GET /?path=test.mp4 HTTP/1.1\r\nHost: 127.0.0.1\r\n".to_vec());
+        let mut line1 = String::new();
+        let n1 = read_line_bounded(&mut short_reader, &mut line1, 8192).unwrap();
+        assert_eq!(line1, "GET /?path=test.mp4 HTTP/1.1\r\n");
+        assert_eq!(n1, line1.len());
+
+        // 2. 改行を含まない巨大なデータ（20,000バイト）でも max_bytes (8192) で打ち切られること
+        let oversized = vec![b'A'; 20_000];
+        let mut long_reader = Cursor::new(oversized);
+        let mut line2 = String::new();
+        let n2 = read_line_bounded(&mut long_reader, &mut line2, 8192).unwrap();
+        assert_eq!(n2, 8192);
+        assert_eq!(line2.len(), 8192);
     }
 }
