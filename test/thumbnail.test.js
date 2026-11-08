@@ -1646,6 +1646,63 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
         expect(abortSpy).toHaveBeenCalled();
       });
     });
+
+    describe('Phase 9-3: Blob URL Cache LRU & Byte-Based Eviction', () => {
+      it('touchThumbnailUrl refreshes Map order so evictThumbnailCacheNow evicts LRU entries first while preserving visible items', async () => {
+        const { touchThumbnailUrl, evictThumbnailCacheNow } = await import('../src/renderer/renderer-thumbnails.js');
+        const { thumbnailState } = await import('../src/renderer/renderer-state.js');
+
+        thumbnailState.urls.clear();
+        thumbnailState.clearBlobBytes();
+        thumbnailState.visiblePathSet = new Set(['C:/test/visible.png']);
+        thumbnailState.viewportPathSet = new Set();
+
+        thumbnailState.urls.set('C:/test/visible.png', 'blob:visible');
+        thumbnailState.urls.set('C:/test/old1.png', 'blob:old1');
+        thumbnailState.urls.set('C:/test/old2.png', 'blob:old2');
+        thumbnailState.urls.set('C:/test/recent.png', 'blob:recent');
+
+        // old1 を参照して MRU（末尾）へ移動させる -> 非表示の最古エントリは old2 になる
+        expect(touchThumbnailUrl('C:/test/old1.png')).toBe('blob:old1');
+
+        // 上限 3 件で Evict 実行: visible は保護され、LRU 先頭の old2 が破棄されること
+        evictThumbnailCacheNow(3, 64 * 1024 * 1024);
+
+        expect(thumbnailState.urls.size).toBe(3);
+        expect(thumbnailState.urls.has('C:/test/visible.png')).toBe(true);
+        expect(thumbnailState.urls.has('C:/test/old1.png')).toBe(true);
+        expect(thumbnailState.urls.has('C:/test/recent.png')).toBe(true);
+        expect(thumbnailState.urls.has('C:/test/old2.png')).toBe(false);
+      });
+
+      it('evictThumbnailCacheNow evicts blob URLs when totalBlobBytes exceeds maxBlobBytes while retaining lightweight HTTP URLs', async () => {
+        const { evictThumbnailCacheNow } = await import('../src/renderer/renderer-thumbnails.js');
+        const { thumbnailState } = await import('../src/renderer/renderer-state.js');
+
+        thumbnailState.urls.clear();
+        thumbnailState.clearBlobBytes();
+        thumbnailState.visiblePathSet = new Set();
+        thumbnailState.viewportPathSet = new Set();
+
+        // 先頭に軽量な HTTP URL、その後に 2 件の大容量 Blob URL（各 600KB、合計 1.2MB）を登録
+        thumbnailState.urls.set('C:/test/http_cached.png', 'http://127.0.0.1:9999/?thumb=1');
+        thumbnailState.urls.set('C:/test/blob_a.png', 'blob:blob_a');
+        thumbnailState.recordBlobBytes('C:/test/blob_a.png', 600 * 1024);
+        thumbnailState.urls.set('C:/test/blob_b.png', 'blob:blob_b');
+        thumbnailState.recordBlobBytes('C:/test/blob_b.png', 600 * 1024);
+
+        expect(thumbnailState.totalBlobBytes).toBe(1200 * 1024);
+
+        // 件数上限（2000件）は十分余裕があるが、Blob バイト上限（800KB）を超過している状態で Evict
+        evictThumbnailCacheNow(2000, 800 * 1024);
+
+        // 軽量な HTTP URL は破棄されず、古い方の blob_a のみが解放されて 600KB に収まること
+        expect(thumbnailState.urls.has('C:/test/http_cached.png')).toBe(true);
+        expect(thumbnailState.urls.has('C:/test/blob_a.png')).toBe(false);
+        expect(thumbnailState.urls.has('C:/test/blob_b.png')).toBe(true);
+        expect(thumbnailState.totalBlobBytes).toBe(600 * 1024);
+      });
+    });
   });
 });
 

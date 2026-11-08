@@ -505,6 +505,22 @@ class ThumbnailWorkerPool {
 
 export const thumbnailWorkerPool = new ThumbnailWorkerPool();
 
+export const MAX_THUMBNAIL_BLOB_BYTES = 64 * 1024 * 1024;
+
+/**
+ * サムネイル URL キャッシュ（Map）の参照順序を O(1) で末尾（MRU）へ更新します。
+ * @param {string} filePath
+ * @returns {string|undefined}
+ */
+export function touchThumbnailUrl(filePath) {
+  const urls = (appState && appState.thumbnailUrls) || (thumbnailState && thumbnailState.urls);
+  if (!urls || !urls.has(filePath)) return undefined;
+  const val = urls.get(filePath);
+  urls.delete(filePath);
+  urls.set(filePath, val);
+  return val;
+}
+
 // Phase 4: Context Cleanup Strictness
 export function cleanupContext() {
   if (thumbnailState && thumbnailState.urls) {
@@ -514,6 +530,9 @@ export function cleanupContext() {
       }
     });
     thumbnailState.urls.clear();
+    if (typeof thumbnailState.clearBlobBytes === "function") {
+      thumbnailState.clearBlobBytes();
+    }
   }
   if (window.thumbnailManager) window.thumbnailManager.clear();
   
@@ -529,22 +548,45 @@ export function cleanupContext() {
   thumbnailState.resetProgress();
 }
 
+/**
+ * サムネイル URL キャッシュを LRU 順（Map 先頭から）に走査し、
+ * 件数上限（maxSize）または Blob 合計バイト数上限（maxBlobBytes）を超過した非表示エントリを解放します。
+ * @param {number} [maxSize=2000]
+ * @param {number} [maxBlobBytes=MAX_THUMBNAIL_BLOB_BYTES]
+ */
+export function evictThumbnailCacheNow(maxSize = 2000, maxBlobBytes = MAX_THUMBNAIL_BLOB_BYTES) {
+  if (!thumbnailState || !thumbnailState.urls) return;
+  const urls = thumbnailState.urls;
+  const overCount = urls.size > maxSize;
+  const overBytes = (thumbnailState.totalBlobBytes || 0) > maxBlobBytes;
+  if (!overCount && !overBytes) return;
 
-export const evictThumbnailCache = debounce((maxSize = 2000) => {
-  if (!thumbnailState || !thumbnailState.urls || thumbnailState.urls.size <= maxSize) return;
-  const toDelete = thumbnailState.urls.size - maxSize;
-  let i = 0;
-  for (const [key, val] of thumbnailState.urls) {
-    // 表示中のアイテムはスキップ
+  for (const [key, val] of urls) {
+    const stillOverCount = urls.size > maxSize;
+    const stillOverBytes = (thumbnailState.totalBlobBytes || 0) > maxBlobBytes;
+    if (!stillOverCount && !stillOverBytes) break;
+
+    // 表示中（またはビューポート内）のアイテムはスキップ
     if (thumbnailState.visiblePathSet && thumbnailState.visiblePathSet.has(key)) continue;
-    
-    if (val && val.startsWith('blob:')) {
+    if (thumbnailState.viewportPathSet && thumbnailState.viewportPathSet.has(key)) continue;
+
+    const isBlob = typeof val === 'string' && val.startsWith('blob:');
+    // 件数は上限以下で Blob バイト数のみ超過している場合、軽量な HTTP/Asset URL は残して Blob のみを優先解放する
+    if (!stillOverCount && stillOverBytes && !isBlob && !(thumbnailState.blobByteSizes && thumbnailState.blobByteSizes.has(key))) {
+      continue;
+    }
+
+    if (isBlob) {
       URL.revokeObjectURL(val);
     }
-    thumbnailState.urls.delete(key);
-    if (++i >= toDelete) break;
+    urls.delete(key);
+    if (typeof thumbnailState.removeBlobBytes === "function") {
+      thumbnailState.removeBlobBytes(key);
+    }
   }
-}, 100);
+}
+
+export const evictThumbnailCache = debounce(evictThumbnailCacheNow, 100);
 window.evictThumbnailCache = evictThumbnailCache;
 
 const THUMBNAIL_BATCH_SIZE = 8;
@@ -1413,6 +1455,9 @@ export class ThumbnailQueueManager {
             const lightUrl = savedUrl || blobUrl;
             if (lightUrl && lightUrl !== blobUrl && appState.thumbnailUrls.get(filePath) === blobUrl) {
               appState.thumbnailUrls.set(filePath, lightUrl);
+              if (thumbnailState && typeof thumbnailState.removeBlobBytes === "function") {
+                thumbnailState.removeBlobBytes(filePath);
+              }
               const uiMgr = window.uiManager || uiManager;
               const wrapper = (uiMgr && uiMgr._domByPath) ? uiMgr._domByPath.get(filePath) : null;
               const img = wrapper && wrapper.children ? wrapper.children[0] : null;
@@ -1441,6 +1486,9 @@ export class ThumbnailQueueManager {
           }
           
           appState.thumbnailUrls.set(filePath, blobUrl);
+          if (outBlob && typeof outBlob.size === "number" && thumbnailState && typeof thumbnailState.recordBlobBytes === "function") {
+            thumbnailState.recordBlobBytes(filePath, outBlob.size);
+          }
           evictThumbnailCache();
           this.updateDOM(filePath, blobUrl);
 

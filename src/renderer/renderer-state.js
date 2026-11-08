@@ -174,8 +174,40 @@ export const layoutState = {
  */
 export const thumbnailState = {
   urls: new Map(),
+  blobByteSizes: new Map(),
+  totalBlobBytes: 0,
   visiblePathSet: new Set(),
   viewportPathSet: new Set(),
+  recordBlobBytes(key, byteLength) {
+    const prev = this.blobByteSizes.get(key) || 0;
+    if (prev > 0) {
+      this.totalBlobBytes = Math.max(0, this.totalBlobBytes - prev);
+    }
+    if (typeof byteLength === "number" && byteLength > 0) {
+      this.blobByteSizes.set(key, byteLength);
+      this.totalBlobBytes += byteLength;
+    } else {
+      this.blobByteSizes.delete(key);
+    }
+  },
+  removeBlobBytes(key) {
+    const prev = this.blobByteSizes.get(key) || 0;
+    if (prev > 0) {
+      this.totalBlobBytes = Math.max(0, this.totalBlobBytes - prev);
+      this.blobByteSizes.delete(key);
+    }
+  },
+  clearBlobBytes() {
+    this.blobByteSizes.clear();
+    this.totalBlobBytes = 0;
+  },
+  touchUrl(key) {
+    if (!this.urls.has(key)) return undefined;
+    const val = this.urls.get(key);
+    this.urls.delete(key);
+    this.urls.set(key, val);
+    return val;
+  },
   preloadCursor: 0,
   isPreloadRunning: false,
   isFetchingPreload: false,
