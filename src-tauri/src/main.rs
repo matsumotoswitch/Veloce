@@ -3482,6 +3482,103 @@ fn get_alpha_overlay_image(file_path: String) -> Result<AlphaOverlayResult, Stri
     generate_alpha_overlay_image(&file_path)
 }
 
+/// XMP (XML) 文字列内の基本的な XML エンティティをデコードする。
+fn unescape_xml_entities(input: &str) -> String {
+    input
+        .replace("&#xA;", "\n")
+        .replace("&#xa;", "\n")
+        .replace("&#10;", "\n")
+        .replace("&#xD;", "\r")
+        .replace("&#xd;", "\r")
+        .replace("&#13;", "\r")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+/// XMP パケット文字列から指定したタグ名（要素形式 `<tag>...</tag>` または属性形式 `tag="..."`）の値を抽出する。
+/// `<rdf:Alt><rdf:li ...>...</rdf:li></rdf:Alt>` 構造がネストされている場合は最内層の `<rdf:li>` のテキストを取り出す。
+fn extract_xmp_field(xml: &str, tag_names: &[&str]) -> Option<String> {
+    for &tag in tag_names {
+        // 1. 要素形式: <tag ...>...</tag>
+        let open_pat = format!("<{}", tag);
+        let close_pat = format!("</{}>", tag);
+        if let Some(open_pos) = xml.find(&open_pat) {
+            let after_tag = &xml[open_pos + open_pat.len()..];
+            if after_tag.starts_with('>') || after_tag.starts_with(|c: char| c.is_ascii_whitespace()) {
+                if let Some(gt_offset) = after_tag.find('>') {
+                    let content_start = open_pos + open_pat.len() + gt_offset + 1;
+                    if let Some(close_offset) = xml[content_start..].find(&close_pat) {
+                        let mut inner = &xml[content_start..content_start + close_offset];
+                        if let Some(li_pos) = inner.find("<rdf:li") {
+                            let after_li = &inner[li_pos + "<rdf:li".len()..];
+                            if let Some(li_gt) = after_li.find('>') {
+                                let li_content_start = li_pos + "<rdf:li".len() + li_gt + 1;
+                                if let Some(li_close) = inner[li_content_start..].find("</rdf:li>") {
+                                    inner = &inner[li_content_start..li_content_start + li_close];
+                                }
+                            }
+                        }
+                        let decoded = unescape_xml_entities(inner.trim());
+                        if !decoded.is_empty() {
+                            return Some(decoded);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. 属性形式: tag="value" または tag='value'
+        for quote in ['"', '\''] {
+            let attr_pat = format!("{}={}", tag, quote);
+            let mut search_from = 0;
+            while let Some(rel_pos) = xml[search_from..].find(&attr_pat) {
+                let abs_pos = search_from + rel_pos;
+                let valid_boundary = abs_pos == 0 || {
+                    let prev = xml.as_bytes()[abs_pos - 1];
+                    prev.is_ascii_whitespace() || prev == b':'
+                };
+                let val_start = abs_pos + attr_pat.len();
+                if valid_boundary {
+                    if let Some(val_end) = xml[val_start..].find(quote) {
+                        let raw_val = &xml[val_start..val_start + val_end];
+                        let decoded = unescape_xml_entities(raw_val.trim());
+                        if !decoded.is_empty() {
+                            return Some(decoded);
+                        }
+                    }
+                }
+                search_from = val_start;
+            }
+        }
+    }
+    None
+}
+
+/// JPEG APP1 (`http://ns.adobe.com/xap/1.0/\0`) または WebP `XMP ` チャンクから
+/// プロンプトやソフトウェア情報（`ImageDescription`, `UserComment`, `Software`）を抽出してマップへ補完する。
+/// 既に TIFF EXIF で取得済みのキーは上書きせず、未取得のフィールドのみを補完する。
+fn parse_xmp_metadata(xmp_bytes: &[u8], results: &mut std::collections::HashMap<String, Vec<u8>>) {
+    let xml = String::from_utf8_lossy(xmp_bytes);
+    if let Some(desc) = extract_xmp_field(&xml, &["dc:description", "tiff:ImageDescription", "ImageDescription"]) {
+        results
+            .entry("ImageDescription".to_string())
+            .or_insert_with(|| desc.into_bytes());
+    }
+    if let Some(comment) = extract_xmp_field(&xml, &["exif:UserComment", "UserComment", "parameters", "c2pa:parameters"]) {
+        results
+            .entry("UserComment".to_string())
+            .or_insert_with(|| comment.into_bytes());
+    }
+    if let Some(sw) = extract_xmp_field(&xml, &["xmp:CreatorTool", "tiff:Software", "Software"]) {
+        results
+            .entry("Software".to_string())
+            .or_insert_with(|| sw.into_bytes());
+    }
+}
+
 fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
     let mut results = std::collections::HashMap::new();
     if let Ok(file) = std::fs::File::open(path) {
@@ -3503,6 +3600,9 @@ fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
                             exif_data = &exif_data[6..];
                         }
                         results.extend(parse_tiff_ifd(exif_data));
+                    } else if chunk_id == b"XMP " && data_offset + chunk_size <= buffer.len() {
+                        let xmp_data = &buffer[data_offset..data_offset + chunk_size];
+                        parse_xmp_metadata(xmp_data, &mut results);
                     }
                     offset = data_offset + chunk_size;
                     if chunk_size % 2 != 0 {
@@ -3516,6 +3616,7 @@ fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
 }
 
 fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
+    const XMP_HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
     let mut results = std::collections::HashMap::new();
     if let Ok(file) = std::fs::File::open(path) {
         if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
@@ -3557,6 +3658,8 @@ fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
                         let app1_data = &buffer[offset + 2..offset + length];
                         if app1_data.len() >= 6 && &app1_data[0..4] == b"Exif" {
                             results.extend(parse_tiff_ifd(&app1_data[6..]));
+                        } else if app1_data.starts_with(XMP_HEADER) {
+                            parse_xmp_metadata(&app1_data[XMP_HEADER.len()..], &mut results);
                         }
                     }
                     offset += length;
@@ -11886,6 +11989,90 @@ mod viewer_tests {
         assert!(
             resp.starts_with("HTTP/1.1 200 OK"),
             "db_tx チャネル飽和時でも try_send により HTTP ワーカースレッドがブロックせず 200 OK を返すこと"
+        );
+    }
+
+    /// [Phase 9-2] JPEG APP1 (`http://ns.adobe.com/xap/1.0/\0`) および WebP `XMP ` チャンクからのメタデータ抽出テスト
+    #[test]
+    fn test_parse_jpeg_and_webp_xmp_metadata() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1. JPEG APP1 XMP セグメント（要素形式 dc:description + 属性形式 exif:UserComment & xmp:CreatorTool）
+        let jpg_path = temp_dir.path().join("xmp_sample.jpg");
+        {
+            let xmp_xml = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+                <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+                    <rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"
+                        xmlns:exif="http://ns.adobe.com/exif/1.0/"
+                        xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+                        exif:UserComment="{&quot;prompt&quot;:&quot;1girl, xmp_json&quot;,&quot;uc&quot;:&quot;lowres&quot;}"
+                        xmp:CreatorTool="NovelAI Diffusion V4">
+                        <dc:description>
+                            <rdf:Alt>
+                                <rdf:li xml:lang="x-default">1girl, xmp_description</rdf:li>
+                            </rdf:Alt>
+                        </dc:description>
+                    </rdf:Description>
+                </rdf:RDF>
+            </x:xmpmeta>"#;
+
+            let mut payload = Vec::from(&b"http://ns.adobe.com/xap/1.0/\0"[..]);
+            payload.extend_from_slice(xmp_xml.as_bytes());
+            let seg_len = (payload.len() + 2) as u16;
+
+            let mut jpg_bytes = vec![0xFF, 0xD8, 0xFF, 0xE1];
+            jpg_bytes.extend_from_slice(&seg_len.to_be_bytes());
+            jpg_bytes.extend_from_slice(&payload);
+            jpg_bytes.extend_from_slice(&[0xFF, 0xD9]);
+            std::fs::write(&jpg_path, jpg_bytes).unwrap();
+        }
+
+        let jpg_meta = parse_jpeg_exif(jpg_path.to_str().unwrap());
+        assert_eq!(
+            String::from_utf8_lossy(jpg_meta.get("ImageDescription").unwrap()),
+            "1girl, xmp_description"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(jpg_meta.get("UserComment").unwrap()),
+            "{\"prompt\":\"1girl, xmp_json\",\"uc\":\"lowres\"}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(jpg_meta.get("Software").unwrap()),
+            "NovelAI Diffusion V4"
+        );
+
+        // 2. WebP `XMP ` チャンク（要素形式 exif:UserComment + tiff:Software）
+        let webp_path = temp_dir.path().join("xmp_sample.webp");
+        {
+            let xmp_xml = r#"<x:xmpmeta><rdf:RDF><rdf:Description>
+                <exif:UserComment>masterpiece, best quality&#xA;Steps: 28, Sampler: Euler a</exif:UserComment>
+                <tiff:Software>Stable Diffusion WebUI</tiff:Software>
+            </rdf:Description></rdf:RDF></x:xmpmeta>"#;
+            let xmp_bytes = xmp_xml.as_bytes();
+            let chunk_size = xmp_bytes.len() as u32;
+            let riff_size = 4 + 8 + chunk_size + (chunk_size % 2);
+
+            let mut webp_bytes = Vec::new();
+            webp_bytes.extend_from_slice(b"RIFF");
+            webp_bytes.extend_from_slice(&riff_size.to_le_bytes());
+            webp_bytes.extend_from_slice(b"WEBP");
+            webp_bytes.extend_from_slice(b"XMP ");
+            webp_bytes.extend_from_slice(&chunk_size.to_le_bytes());
+            webp_bytes.extend_from_slice(xmp_bytes);
+            if chunk_size % 2 != 0 {
+                webp_bytes.push(0);
+            }
+            std::fs::write(&webp_path, webp_bytes).unwrap();
+        }
+
+        let webp_meta = parse_webp_exif(webp_path.to_str().unwrap());
+        assert_eq!(
+            String::from_utf8_lossy(webp_meta.get("UserComment").unwrap()),
+            "masterpiece, best quality\nSteps: 28, Sampler: Euler a"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(webp_meta.get("Software").unwrap()),
+            "Stable Diffusion WebUI"
         );
     }
 }

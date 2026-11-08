@@ -101,8 +101,8 @@
 
 ### 3.1 網羅的なAI生成メタデータ解析ロジック
 画像バイナリを自前で解析し、主要なAI生成プログラミング形式を完全に網羅。
-1. **PNG形式:** `tEXt` / `iTXt`（Zlib圧縮対応）チャンクから Description, Comment, parameters などを抽出。ComfyUIの `workflow` / `prompt` 構造のフォールバックも実装。
-2. **WebP / JPEG形式:** バイナリをメモリマップ（`memmap2`）で展開し、TIFF IFD構造をパースして `ImageDescription` や `UserComment`（UNICODE/ASCIIヘッダースキップ処理付き）、`Software` を高速抽出。
+1. **PNG形式:** `tEXt` / `zTXt` / `iTXt`（Zlib圧縮対応）チャンクから Description, Comment, parameters などを抽出。ComfyUIの `workflow` / `prompt` 構造のフォールバックも実装。
+2. **WebP / JPEG形式:** バイナリをメモリマップ（`memmap2`）で展開し、TIFF IFD構造（EXIF）および XMP（JPEG APP1 `http://ns.adobe.com/xap/1.0/` / WebP `XMP ` チャンク）をパースして `ImageDescription` や `UserComment`（UNICODE/ASCIIヘッダースキップ・XMLエンティティ展開処理付き）、`Software` を高速抽出。
 3. **Stealth形式 (隠しメタデータ):** EXIF等に痕跡がない場合、画像のアルファチャンネル（最下位ビット）から Column-Major Order (x -> y) でビットを抽出し、MSB first でバイト配列に変換。`stealth_pngcomp` (Gzip圧縮) および `stealth_pnginfo` (非圧縮) をデコードしてプロンプトを復元。抽出されたプロンプトやタグは `unified_search_text` にも統合され、メイン画面の検索バーやフィルタリングでヒット可能。
 4. **NovelAI V4 / V4.5 特殊対応:** JSON内のマルチキャラクタープロンプト（`v4_prompt/caption/char_captions`）およびネガティブ側を自動パースし、フロントエンド側で `characterPrompts` 配列（`prompt`, `uc`）に再構造化して保持。
 5. **ランダマイザ（採用プロンプト）対応:** NovelAIの `||A|B||` 書式によるランダム抽選を検出。`Comment` 内の `actual_prompts` JSON構造から、ベースプロンプトおよび各キャラクタープロンプト・除外要素の「実際に採用された値」を抽出し `adoptedPrompt` として格納。抽選前プロンプト（ランダマイザ書式を含む）と採用後プロンプトの両方をインスペクター・ビューアーオーバーレイ・パラメータDiffモーダルに表示し、FTS5検索インデックスにも含める。
