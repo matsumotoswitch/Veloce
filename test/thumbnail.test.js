@@ -471,6 +471,57 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
       expect(cached2Img.src).toContain('https://veloce.localhost/thumbnail/?path=');
     });
 
+    it('updateVirtualGrid should append token parameter to veloce.localhost fallback URL when videoServerToken is set', async () => {
+      const prevPort = window.videoServerPort;
+      const prevToken = window.videoServerToken;
+      window.videoServerPort = 0;
+      window.videoServerToken = 'test_session_token_128bit';
+
+      try {
+        window.thumbnailManager = {
+          enqueuePriorityBatch: vi.fn(),
+          enqueuePriority: vi.fn()
+        };
+
+        const testFiles = [
+          { path: 'C:/media/cached_token.png', name: 'cached_token.png', mtime: 1500, hashKey: '0123456789abcdef', hasThumbnailCache: true }
+        ];
+
+        const { appState: sharedAppState } = await import('../src/renderer/renderer-state.js');
+        sharedAppState.totalCount = testFiles.length;
+        sharedAppState.initialChunk = testFiles;
+        sharedAppState.thumbnailUrls.clear();
+        sharedAppState.selection.clear();
+        sharedAppState.ratings = {};
+        sharedAppState.dragState = { isAppDragging: false };
+        window.appState = sharedAppState;
+
+        const gridContainer = document.createElement('div');
+        gridContainer.id = 'thumbnail-grid';
+        Object.defineProperty(gridContainer, 'clientWidth', { value: 800, configurable: true });
+        Object.defineProperty(gridContainer, 'clientHeight', { value: 600, configurable: true });
+        const gridContent = document.createElement('div');
+        gridContent.id = 'virtual-grid-content';
+        gridContainer.appendChild(gridContent);
+        document.body.appendChild(gridContainer);
+
+        const { UIManager } = await import('../src/renderer/renderer-ui.js');
+        const ui = new UIManager(sharedAppState);
+        ui.elements.thumbnailGrid = gridContainer;
+        ui.elements.thumbnailSizeSlider = { value: '180' };
+
+        await ui.updateVirtualGrid(true);
+
+        const cachedUrl = sharedAppState.thumbnailUrls.get('C:/media/cached_token.png');
+        expect(cachedUrl).toContain('https://veloce.localhost/thumbnail/?path=');
+        expect(cachedUrl).toContain('&hash=0123456789abcdef');
+        expect(cachedUrl).toContain('&token=test_session_token_128bit');
+      } finally {
+        window.videoServerPort = prevPort;
+        window.videoServerToken = prevToken;
+      }
+    });
+
     it('updateVirtualGrid should not enqueue files when all visible items have cached thumbnails', async () => {
       const enqueueMock = vi.fn();
       window.thumbnailManager = {

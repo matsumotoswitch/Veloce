@@ -2387,7 +2387,7 @@ class UIManager {
           const tokenParam = window.videoServerToken ? `&token=${encodeURIComponent(window.videoServerToken)}` : '';
           const url = window.videoServerPort
             ? `http://127.0.0.1:${window.videoServerPort}/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}&thumb=1${hashParam}${tokenParam}`
-            : `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}${hashParam}`;
+            : `https://veloce.localhost/thumbnail/?path=${encodeURIComponent(file.path)}&mtime=${file.mtime}${hashParam}${tokenParam}`;
           appState.thumbnailUrls.set(file.path, url);
           if (window.evictThumbnailCache) window.evictThumbnailCache();
           img.src = url;

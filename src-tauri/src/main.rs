@@ -5452,6 +5452,50 @@ fn commit_db_batch(
     }
 }
 
+/// `veloce://` カスタムプロトコルのクエリパラメータ検証
+/// セッショントークンの定数時間照合およびファイルパスの拡張子ホワイトリスト検証を行い、
+/// 正常時は `Ok((path_str, query_mtime, hash_param))`、不正時は HTTP ステータスコード（`400` または `403`）を返す。
+fn validate_veloce_protocol_request(uri: &str, expected_token: &str) -> Result<(String, Option<u64>, String), u16> {
+    let mut path_str = String::new();
+    let mut query_mtime: Option<u64> = None;
+    let mut hash_param = String::new();
+    let mut req_token = String::new();
+    if let Some(query) = uri.split('?').nth(1) {
+        for pair in query.split('&') {
+            if pair.starts_with("path=") {
+                path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+            } else if pair.starts_with("mtime=") {
+                if let Ok(m) = pair[6..].parse::<u64>() {
+                    query_mtime = Some(m);
+                }
+            } else if pair.starts_with("hash=") {
+                hash_param = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+            } else if pair.starts_with("token=") {
+                req_token = urlencoding::decode(&pair[6..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+            }
+        }
+    }
+
+    // セッショントークン認証（定数時間比較）
+    if !expected_token.is_empty() && !crate::server::constant_time_eq(req_token.as_bytes(), expected_token.as_bytes()) {
+        return Err(403);
+    }
+
+    if path_str.is_empty() && hash_param.is_empty() {
+        return Err(400);
+    }
+
+    // hash パラメータの有無にかかわらず、path が指定されている場合は常に対象拡張子ホワイトリストを検証する
+    if !path_str.is_empty() {
+        let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "mp4" | "webm" | "avi" | "mkv" | "mov") {
+            return Err(403);
+        }
+    }
+
+    Ok((path_str, query_mtime, hash_param))
+}
+
 fn main() {
     // Attach to parent console if running from command line (for debug logs)
     #[cfg(windows)]
@@ -5568,35 +5612,13 @@ fn main() {
             tauri::http::ResponseBuilder::new().status(404).body(Vec::new())
         });
         
+    let veloce_token = video_token.clone();
     let builder = builder.register_uri_scheme_protocol("veloce", move |app_handle, request| {
             let uri = request.uri();
-            let mut path_str = String::new();
-            let mut query_mtime: Option<u64> = None;
-            let mut hash_param = String::new();
-            if let Some(query) = uri.split('?').nth(1) {
-                for pair in query.split('&') {
-                    if pair.starts_with("path=") {
-                        path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
-                    } else if pair.starts_with("mtime=") {
-                        if let Ok(m) = pair[6..].parse::<u64>() {
-                            query_mtime = Some(m);
-                        }
-                    } else if pair.starts_with("hash=") {
-                        hash_param = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
-                    }
-                }
-            }
-
-            if path_str.is_empty() && hash_param.is_empty() {
-                return tauri::http::ResponseBuilder::new().status(400).body(Vec::new());
-            }
-
-            if !path_str.is_empty() {
-                let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "mp4" | "webm" | "avi" | "mkv") && hash_param.is_empty() {
-                    return tauri::http::ResponseBuilder::new().status(403).body(Vec::new());
-                }
-            }
+            let (path_str, query_mtime, hash_param) = match validate_veloce_protocol_request(uri, &veloce_token) {
+                Ok(parsed) => parsed,
+                Err(status) => return tauri::http::ResponseBuilder::new().status(status).body(Vec::new()),
+            };
 
             use tauri::Manager;
             let state = app_handle.state::<AppState>();
@@ -10997,5 +11019,61 @@ mod viewer_tests {
         let (meta_count_2, thumb_count_2) = precache_entries_chunk(&items, &pool);
         assert_eq!(meta_count_2, 0, "キャッシュ済み再実行時はメタデータ再保存が0件であること");
         assert_eq!(thumb_count_2, 0, "キャッシュ済み再実行時はサムネイル再保存が0件であること");
+    }
+
+    #[test]
+    fn test_validate_veloce_protocol_request_token_and_extension() {
+        let token = "0123456789abcdef0123456789abcdef";
+
+        // 1. トークン未指定・不一致は 403 Forbidden
+        assert_eq!(
+            validate_veloce_protocol_request("https://veloce.localhost/thumbnail/?path=C%3A%2Fimg.png&mtime=100", token),
+            Err(403),
+            "トークン未指定のリクエストは 403 で遮断されること"
+        );
+        assert_eq!(
+            validate_veloce_protocol_request("https://veloce.localhost/thumbnail/?path=C%3A%2Fimg.png&token=wrong_token", token),
+            Err(403),
+            "トークン不一致のリクエストは 403 で遮断されること"
+        );
+
+        // 2. 非対応拡張子は hash パラメータの有無にかかわらず 403 Forbidden
+        assert_eq!(
+            validate_veloce_protocol_request(
+                &format!("https://veloce.localhost/thumbnail/?path=C%3A%2Fsecret.txt&token={}", token),
+                token
+            ),
+            Err(403),
+            "非対応拡張子 (.txt) は 403 で遮断されること"
+        );
+        assert_eq!(
+            validate_veloce_protocol_request(
+                &format!("https://veloce.localhost/thumbnail/?path=C%3A%2Fsecret.db&hash=deadbeef01234567&token={}", token),
+                token
+            ),
+            Err(403),
+            "hash パラメータが存在しても非対応拡張子 (.db) は素通りせず 403 で遮断されること"
+        );
+
+        // 3. path も hash も空の場合は 400 Bad Request
+        assert_eq!(
+            validate_veloce_protocol_request(
+                &format!("https://veloce.localhost/thumbnail/?token={}", token),
+                token
+            ),
+            Err(400),
+            "path と hash が両方空の場合は 400 を返すこと"
+        );
+
+        // 4. 正常なトークンと許可拡張子 (.png, .mov 等) は Ok
+        let ok_res = validate_veloce_protocol_request(
+            &format!("https://veloce.localhost/thumbnail/?path=C%3A%2Ffolder%2Fsample.png&mtime=12345&hash=abcdef0123456789&token={}", token),
+            token
+        );
+        assert_eq!(
+            ok_res,
+            Ok(("C:/folder/sample.png".to_string(), Some(12345), "abcdef0123456789".to_string())),
+            "正しいトークンと許可拡張子の場合はパラメータが正常に抽出されること"
+        );
     }
 }
