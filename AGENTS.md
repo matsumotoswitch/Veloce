@@ -66,6 +66,7 @@
 
 ## 6. リポジトリの運用方針
 - 本プロジェクトはAI生成コードを主体として開発を行っているため、外部からの Pull Request (PR) は受け付けていない。
+- **GitHub Actions CI の不採用方針**: 外部からの PR を受け付けない個人主導の開発体制であり、すべての機能追加・修正時にローカル環境で自動テスト（Rust `cargo test` および JS `vitest`）と Windows 実機確認を完遂してからコミットする運用としているため、GitHub Actions によるクラウド CI（`.github/workflows/`）は意図的に導入しない。
 
 ## 7. セキュリティ方針とDOM操作規約 (Security & Sanitization Guidelines)
 - **外部入力（画像メタデータ・プロンプト・ファイルパス等）の厳格なサニタイズ**:
