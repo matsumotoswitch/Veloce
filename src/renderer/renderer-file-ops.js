@@ -358,13 +358,23 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
         uiManager.showToast('元に戻す操作に失敗しました', 3000, 'undo', 'warning');
       }
     } else if (action.type === 'COPY_FILE') {
-      await fs.removeFile(action.targetPath);
-      undoSucceeded = true;
-      if (window.veloceAPI.notifyFileRemoved) {
-        await window.veloceAPI.notifyFileRemoved(action.targetPath);
+      let trashed = false;
+      if (window.veloceAPI && typeof window.veloceAPI.trashFile === 'function') {
+        trashed = await window.veloceAPI.trashFile(action.targetPath);
+      } else {
+        await fs.removeFile(action.targetPath);
+        trashed = true;
       }
-      uiManager.showToast('ファイルのコピーを元に戻しました', 3000, 'undo', 'success');
-      if (callbacks.scheduleRefresh) callbacks.scheduleRefresh();
+      if (trashed) {
+        undoSucceeded = true;
+        if (window.veloceAPI.notifyFileRemoved) {
+          await window.veloceAPI.notifyFileRemoved(action.targetPath);
+        }
+        uiManager.showToast('ファイルのコピーを元に戻しました', 3000, 'undo', 'success');
+        if (callbacks.scheduleRefresh) callbacks.scheduleRefresh();
+      } else {
+        uiManager.showToast('元に戻す操作に失敗しました', 3000, 'undo', 'warning');
+      }
     }
 
     if (undoSucceeded) {

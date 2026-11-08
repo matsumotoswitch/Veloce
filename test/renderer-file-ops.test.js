@@ -190,7 +190,7 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
       expect(scheduleRefresh).toHaveBeenCalled();
     });
 
-    it('should undo COPY_FILE', async () => {
+    it('should undo COPY_FILE via trashFile', async () => {
       appState.undoStack.push({
         type: 'COPY_FILE',
         targetPath: 'C:\\target\\copy.png'
@@ -198,7 +198,8 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
       const scheduleRefresh = vi.fn();
 
       await performUndo({ scheduleRefresh });
-      expect(window.__TAURI__.fs.removeFile).toHaveBeenCalledWith('C:\\target\\copy.png');
+      expect(window.veloceAPI.trashFile).toHaveBeenCalledWith('C:\\target\\copy.png');
+      expect(window.__TAURI__.fs.removeFile).not.toHaveBeenCalled();
       expect(scheduleRefresh).toHaveBeenCalled();
     });
   });

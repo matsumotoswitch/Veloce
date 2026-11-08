@@ -3542,12 +3542,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (window.veloceAPI.onFileChanged || window.veloceAPI.onFileRemoved) {
+    const WATCHER_BATCH_WINDOW_MS = 40;
     const pendingChangedFiles = new Map();
     const pendingRemovedPaths = new Set();
-    let watcherFlushScheduled = false;
+    let watcherFlushTimer = null;
 
     const flushWatcherEvents = async () => {
-      watcherFlushScheduled = false;
+      watcherFlushTimer = null;
       const changedList = Array.from(pendingChangedFiles.values());
       const removedList = Array.from(pendingRemovedPaths);
       pendingChangedFiles.clear();
@@ -3586,9 +3587,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     };
 
     const scheduleWatcherFlush = () => {
-      if (!watcherFlushScheduled) {
-        watcherFlushScheduled = true;
-        Promise.resolve().then(flushWatcherEvents);
+      if (watcherFlushTimer === null) {
+        watcherFlushTimer = setTimeout(flushWatcherEvents, WATCHER_BATCH_WINDOW_MS);
       }
     };
 

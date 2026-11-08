@@ -144,16 +144,17 @@ describe('File Watcher Event Sync and State Reflection', () => {
     }));
   });
 
-  it('短時間に連続して発生した複数の file-changed / file-removed イベントが notifyFilesBatch に1回で集約されること', async () => {
+  it('複数のマクロタスクに分かれて連続到着した file-changed / file-removed イベントが 40ms タイマー窓で notifyFilesBatch に1回で集約されること', async () => {
+    vi.useFakeTimers();
     mockVeloceAPI.notifyFilesBatch = vi.fn(async (changed, removed) => 10 + changed.length - removed.length);
 
+    const WATCHER_BATCH_WINDOW_MS = 40;
     const pendingChangedFiles = new Map();
     const pendingRemovedPaths = new Set();
-    let watcherFlushScheduled = false;
-    let flushPromise = null;
+    let watcherFlushTimer = null;
 
     const flushWatcherEvents = async () => {
-      watcherFlushScheduled = false;
+      watcherFlushTimer = null;
       const changedList = Array.from(pendingChangedFiles.values());
       const removedList = Array.from(pendingRemovedPaths);
       pendingChangedFiles.clear();
@@ -170,29 +171,36 @@ describe('File Watcher Event Sync and State Reflection', () => {
       refreshScheduled = true;
     };
 
+    const scheduleWatcherFlush = () => {
+      if (watcherFlushTimer === null) {
+        watcherFlushTimer = setTimeout(flushWatcherEvents, WATCHER_BATCH_WINDOW_MS);
+      }
+    };
+
     const onFileChanged = (newFile) => {
       pendingRemovedPaths.delete(newFile.path);
       pendingChangedFiles.set(newFile.path, newFile);
-      if (!watcherFlushScheduled) {
-        watcherFlushScheduled = true;
-        flushPromise = Promise.resolve().then(flushWatcherEvents);
-      }
+      scheduleWatcherFlush();
     };
 
     const onFileRemoved = (path) => {
       pendingChangedFiles.delete(path);
       pendingRemovedPaths.add(path);
-      if (!watcherFlushScheduled) {
-        watcherFlushScheduled = true;
-        flushPromise = Promise.resolve().then(flushWatcherEvents);
-      }
+      scheduleWatcherFlush();
     };
 
+    // 別々のマクロタスク（10ms 間隔）で到着する Tauri IPC イベントを模倣
     onFileChanged({ path: 'C:\\images\\batch1.png', width: 512, height: 512 });
+    await vi.advanceTimersByTimeAsync(10);
     onFileChanged({ path: 'C:\\images\\batch2.png', width: 1024, height: 768 });
+    await vi.advanceTimersByTimeAsync(10);
     onFileRemoved('C:\\images\\old.png');
 
-    await flushPromise;
+    // まだ 20ms 経過時点なのでフラッシュされていないこと
+    expect(mockVeloceAPI.notifyFilesBatch).not.toHaveBeenCalled();
+
+    // 残り 20ms 進めて 40ms の窓を完了させる
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(mockVeloceAPI.notifyFilesBatch).toHaveBeenCalledTimes(1);
     expect(mockVeloceAPI.notifyFilesBatch).toHaveBeenCalledWith(
@@ -205,5 +213,6 @@ describe('File Watcher Event Sync and State Reflection', () => {
     expect(mockAppState.totalCount).toBe(11);
     expect(window.uiManager.updateFileDimensions).toHaveBeenCalledTimes(2);
     expect(refreshScheduled).toBe(true);
+    vi.useRealTimers();
   });
 });

@@ -111,4 +111,20 @@ describe('Undo Functionality', () => {
     expect(window.veloceAPI.renameFile).toHaveBeenCalledWith('/dir/new.png', 'old.png');
     expect(appState.undoStack.length).toBe(1);
   });
+
+  it('should use trashFile instead of permanent removeFile when undoing COPY_FILE', async () => {
+    window.veloceAPI.trashFile = vi.fn().mockResolvedValue(true);
+    window.veloceAPI.notifyFileRemoved = vi.fn().mockResolvedValue(undefined);
+    appState.undoStack.push({
+      type: 'COPY_FILE',
+      targetPath: '/dest/copied.png'
+    });
+
+    await performUndo();
+
+    expect(window.veloceAPI.trashFile).toHaveBeenCalledWith('/dest/copied.png');
+    expect(window.__TAURI__.fs.removeFile).not.toHaveBeenCalled();
+    expect(window.veloceAPI.notifyFileRemoved).toHaveBeenCalledWith('/dest/copied.png');
+    expect(appState.undoStack.length).toBe(0);
+  });
 });
