@@ -2337,6 +2337,9 @@ class UIManager {
 
         if (appState.thumbnailUrls.has(file.path)) {
           const targetUrl = appState.thumbnailUrls.get(file.path);
+          // O(1) LRU 更新: 参照されたエントリを Map 末尾（MRU）へ移動
+          appState.thumbnailUrls.delete(file.path);
+          appState.thumbnailUrls.set(file.path, targetUrl);
           if (img.src !== targetUrl) {
             img.src = targetUrl;
           }
