@@ -2,6 +2,97 @@ use crate::models::DbMsg;
 use crate::state::AppState;
 use crate::utils::normalize_unc_path;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RangeSpec {
+    EmptyFile,
+    NotSatisfiable,
+    Satisfiable {
+        start: u64,
+        end: u64,
+        chunk_size: u64,
+        is_partial: bool,
+    },
+}
+
+/// HTTP Range ヘッダーとファイルサイズに基づき、配信すべきバイト範囲とチャンク長を算出します。
+/// - クライアント要求の end をファイル末尾（file_size - 1）で厳格にクランプし、クライアントの待機フリーズを防止。
+/// - 開始位置がファイル長を超える場合は 416 Not Satisfiable を返却。
+/// - 空ファイル（file_size == 0）および Range 指定なし時の 2MB 部分配信（206 Partial Content）に対応。
+pub fn calculate_range(
+    range_header: Option<&str>,
+    file_size: u64,
+    max_chunk: u64,
+) -> RangeSpec {
+    if file_size == 0 {
+        return RangeSpec::EmptyFile;
+    }
+
+    let mut start: u64 = 0;
+    let mut end: u64 = file_size - 1;
+    let mut is_partial = false;
+
+    if let Some(range) = range_header {
+        let trimmed = range.trim();
+        if trimmed.starts_with("bytes=") {
+            let bytes_spec = &trimmed["bytes=".len()..];
+            let parts: Vec<&str> = bytes_spec.split('-').collect();
+            if parts.len() == 2 {
+                if parts[0].is_empty() && !parts[1].is_empty() {
+                    // Suffix byte range: e.g. "bytes=-500"
+                    if let Ok(suffix_len) = parts[1].trim().parse::<u64>() {
+                        if suffix_len == 0 {
+                            return RangeSpec::NotSatisfiable;
+                        }
+                        start = file_size.saturating_sub(suffix_len);
+                        end = file_size - 1;
+                        is_partial = true;
+                    } else {
+                        return RangeSpec::NotSatisfiable;
+                    }
+                } else if !parts[0].is_empty() {
+                    if let Ok(s) = parts[0].trim().parse::<u64>() {
+                        if s >= file_size {
+                            return RangeSpec::NotSatisfiable;
+                        }
+                        start = s;
+                        if !parts[1].is_empty() {
+                            if let Ok(e) = parts[1].trim().parse::<u64>() {
+                                end = std::cmp::min(e, file_size - 1);
+                            } else {
+                                return RangeSpec::NotSatisfiable;
+                            }
+                        } else {
+                            end = file_size - 1;
+                        }
+                        if start > end {
+                            return RangeSpec::NotSatisfiable;
+                        }
+                        is_partial = true;
+                    } else {
+                        return RangeSpec::NotSatisfiable;
+                    }
+                }
+            }
+        }
+    }
+
+    let available = end.saturating_sub(start) + 1;
+    let chunk_size = std::cmp::min(available, max_chunk);
+    let actual_end = start + chunk_size - 1;
+
+    // chunk_size がファイル全体より小さい場合は 2MB メモリ保護のため 206 Partial Content として配信
+    if chunk_size < file_size {
+        is_partial = true;
+    }
+
+    RangeSpec::Satisfiable {
+        start,
+        end: actual_end,
+        chunk_size,
+        is_partial,
+    }
+}
+
 #[tauri::command]
 pub fn get_video_server_port(state: tauri::State<'_, AppState>) -> u16 {
     state.video_server_port
@@ -38,6 +129,8 @@ pub fn start_local_video_server(
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
                 let db_tx = db_tx.clone();
                 let app_handle_slot = app_handle_slot.clone();
                 let db_conn = db_conn.clone();
@@ -304,57 +397,68 @@ pub fn start_local_video_server(
                         }
                     }
 
+                    let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                    // 動画・アニメーション配信対象の拡張子ホワイトリスト検証
+                    if !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
+                        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n");
+                        return;
+                    }
+
                     if let Ok(mut file) = File::open(&path_str) {
                         if let Ok(metadata) = file.metadata() {
                             let file_size = metadata.len();
-                            let mut start: u64 = 0;
-                            let mut end: u64 = file_size.saturating_sub(1);
-                            if let Some(range) = range_header {
-                                if range.starts_with("bytes=") {
-                                    let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
-                                    if parts.len() == 2 && parts[0].is_empty() && !parts[1].is_empty() {
-                                        // Suffix byte range: e.g. "bytes=-500"
-                                        let suffix_len = parts[1].parse::<u64>().unwrap_or(0);
-                                        start = file_size.saturating_sub(suffix_len);
-                                        end = file_size.saturating_sub(1);
-                                    } else {
-                                        if !parts.is_empty() && !parts[0].is_empty() {
-                                            start = parts[0].parse::<u64>().unwrap_or(0);
-                                        }
-                                        if parts.len() > 1 && !parts[1].is_empty() {
-                                            end = parts[1].parse::<u64>().unwrap_or(end);
-                                        }
-                                    }
-                                }
-                            }
-
                             let max_chunk: u64 = 2 * 1024 * 1024;
-                            let chunk_size = std::cmp::min(end.saturating_sub(start) + 1, max_chunk);
-
-                            let mut headers = String::new();
-                            // Always return 206 Partial Content to safely limit memory to chunk_size
-                            headers.push_str("HTTP/1.1 206 Partial Content\r\n");
-                            headers.push_str(&format!("Content-Range: bytes {}-{}/{}\r\n", start, start + chunk_size - 1, file_size));
-                            let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                             let content_type = match ext.as_str() {
                                 "webm" => "video/webm",
                                 "gif" => "image/gif",
                                 _ => "video/mp4",
                             };
-                            headers.push_str(&format!("Content-Type: {}\r\n", content_type));
-                            headers.push_str("Accept-Ranges: bytes\r\n");
-                            headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                            headers.push_str(&format!("Content-Length: {}\r\n", chunk_size));
-                            headers.push_str("Connection: close\r\n");
-                            headers.push_str("\r\n");
 
-                            if stream.write_all(headers.as_bytes()).is_ok() {
-                                if file.seek(SeekFrom::Start(start)).is_ok() {
-                                    let mut handle = file.take(chunk_size);
-                                    let _ = std::io::copy(&mut handle, &mut stream);
+                            match calculate_range(range_header.as_deref(), file_size, max_chunk) {
+                                RangeSpec::EmptyFile => {
+                                    let mut headers = String::new();
+                                    headers.push_str("HTTP/1.1 200 OK\r\n");
+                                    headers.push_str(&format!("Content-Type: {}\r\n", content_type));
+                                    headers.push_str("Content-Length: 0\r\n");
+                                    headers.push_str("Accept-Ranges: bytes\r\n");
+                                    headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                                    headers.push_str("Connection: close\r\n\r\n");
+                                    let _ = stream.write_all(headers.as_bytes());
+                                    return;
+                                }
+                                RangeSpec::NotSatisfiable => {
+                                    let mut headers = String::new();
+                                    headers.push_str("HTTP/1.1 416 Range Not Satisfiable\r\n");
+                                    headers.push_str(&format!("Content-Range: bytes */{}\r\n", file_size));
+                                    headers.push_str("Content-Length: 0\r\n");
+                                    headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                                    headers.push_str("Connection: close\r\n\r\n");
+                                    let _ = stream.write_all(headers.as_bytes());
+                                    return;
+                                }
+                                RangeSpec::Satisfiable { start, end, chunk_size, is_partial } => {
+                                    let mut headers = String::new();
+                                    if is_partial {
+                                        headers.push_str("HTTP/1.1 206 Partial Content\r\n");
+                                        headers.push_str(&format!("Content-Range: bytes {}-{}/{}\r\n", start, end, file_size));
+                                    } else {
+                                        headers.push_str("HTTP/1.1 200 OK\r\n");
+                                    }
+                                    headers.push_str(&format!("Content-Type: {}\r\n", content_type));
+                                    headers.push_str("Accept-Ranges: bytes\r\n");
+                                    headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                                    headers.push_str(&format!("Content-Length: {}\r\n", chunk_size));
+                                    headers.push_str("Connection: close\r\n\r\n");
+
+                                    if stream.write_all(headers.as_bytes()).is_ok() {
+                                        if file.seek(SeekFrom::Start(start)).is_ok() {
+                                            let mut handle = file.take(chunk_size);
+                                            let _ = std::io::copy(&mut handle, &mut stream);
+                                        }
+                                    }
+                                    return;
                                 }
                             }
-                            return;
                         }
                     }
                     let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n");
@@ -364,4 +468,87 @@ pub fn start_local_video_server(
     });
 
     port
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_range_empty_file() {
+        let res = calculate_range(None, 0, 2 * 1024 * 1024);
+        assert_eq!(res, RangeSpec::EmptyFile);
+
+        let res_with_header = calculate_range(Some("bytes=0-100"), 0, 2 * 1024 * 1024);
+        assert_eq!(res_with_header, RangeSpec::EmptyFile);
+    }
+
+    #[test]
+    fn test_calculate_range_no_header_small_file() {
+        let res = calculate_range(None, 500, 2 * 1024 * 1024);
+        assert_eq!(res, RangeSpec::Satisfiable {
+            start: 0,
+            end: 499,
+            chunk_size: 500,
+            is_partial: false,
+        });
+    }
+
+    #[test]
+    fn test_calculate_range_no_header_large_file() {
+        let max_chunk = 2 * 1024 * 1024;
+        let file_size = 10 * 1024 * 1024;
+        let res = calculate_range(None, file_size, max_chunk);
+        assert_eq!(res, RangeSpec::Satisfiable {
+            start: 0,
+            end: max_chunk - 1,
+            chunk_size: max_chunk,
+            is_partial: true,
+        });
+    }
+
+    #[test]
+    fn test_calculate_range_clamped_end() {
+        let file_size = 100;
+        let res = calculate_range(Some("bytes=0-9999"), file_size, 2 * 1024 * 1024);
+        assert_eq!(res, RangeSpec::Satisfiable {
+            start: 0,
+            end: 99,
+            chunk_size: 100,
+            is_partial: true,
+        });
+    }
+
+    #[test]
+    fn test_calculate_range_out_of_bounds_start() {
+        let file_size = 100;
+        let res = calculate_range(Some("bytes=500-600"), file_size, 2 * 1024 * 1024);
+        assert_eq!(res, RangeSpec::NotSatisfiable);
+
+        let res_exact = calculate_range(Some("bytes=100-"), file_size, 2 * 1024 * 1024);
+        assert_eq!(res_exact, RangeSpec::NotSatisfiable);
+    }
+
+    #[test]
+    fn test_calculate_range_reversed_range() {
+        let file_size = 100;
+        let res = calculate_range(Some("bytes=50-20"), file_size, 2 * 1024 * 1024);
+        assert_eq!(res, RangeSpec::NotSatisfiable);
+    }
+
+    #[test]
+    fn test_calculate_range_suffix() {
+        let file_size = 1000;
+        let res = calculate_range(Some("bytes=-200"), file_size, 2 * 1024 * 1024);
+        assert_eq!(res, RangeSpec::Satisfiable {
+            start: 800,
+            end: 999,
+            chunk_size: 200,
+            is_partial: true,
+        });
+
+        let res_zero = calculate_range(Some("bytes=-0"), file_size, 2 * 1024 * 1024);
+        assert_eq!(res_zero, RangeSpec::NotSatisfiable);
+    }
 }

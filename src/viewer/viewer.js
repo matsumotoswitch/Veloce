@@ -19,7 +19,7 @@
 
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
-import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect } from '../common/utils.js';
+import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect, isVideoFile } from '../common/utils.js';
 import { extractMetadataFields, parsePromptTags, buildInspectorSections } from '../common/metadata-format.js';
 
 blockDevtoolsShortcuts();
@@ -1340,11 +1340,14 @@ async function loadImage() {
     }
 
     let targetImg;
+    const isVideo = isVideoFile(viewerState.currentImagePath);
     if (viewerState.preloadCache.has(viewerState.currentIndex)) {
       const cachedData = viewerState.preloadCache.get(viewerState.currentIndex);
       if (cachedData.path === viewerState.currentImagePath) {
-        // 動画要素で万が一 src が欠落していた場合はキャッシュ破損とみなして新規生成へフォールバック
-        if (cachedData.img && cachedData.img.tagName === 'VIDEO' && (!cachedData.img.src || cachedData.img.src === '')) {
+        // タグ種別（VIDEO/IMG）の整合性確認、および動画要素の破損（src欠落）検出時は安全に破棄
+        const isTagMismatched = cachedData.img && (isVideo ? cachedData.img.tagName !== 'VIDEO' : cachedData.img.tagName === 'VIDEO');
+        const isCorruptedVideo = cachedData.img && cachedData.img.tagName === 'VIDEO' && (!cachedData.img.src || cachedData.img.src === '');
+        if (isTagMismatched || isCorruptedVideo) {
           viewerState.preloadCache.delete(viewerState.currentIndex);
         } else {
           targetImg = cachedData.img;
@@ -1354,11 +1357,14 @@ async function loadImage() {
 
     const targetSrc = getStreamUrl(viewerState.currentImagePath, window.veloceAPI.convertFileSrc(viewerState.currentImagePath));
     if (!targetImg && currentViewerImg && currentViewerImg.src === targetSrc) {
-      targetImg = currentViewerImg;
+      const isTagMismatched = isVideo ? currentViewerImg.tagName !== 'VIDEO' : currentViewerImg.tagName === 'VIDEO';
+      if (!isTagMismatched) {
+        targetImg = currentViewerImg;
+      }
     }
 
     if (!targetImg) {
-      if (targetSrc.toLowerCase().endsWith('.mp4') || targetSrc.toLowerCase().endsWith('.webm') || targetSrc.toLowerCase().endsWith('.avi') || targetSrc.toLowerCase().endsWith('.mkv')) {
+      if (isVideo) {
         targetImg = document.createElement('video');
         targetImg.autoplay = true;
         targetImg.loop = true;
@@ -1431,7 +1437,7 @@ async function preloadAdjacentImages() {
       if (path && !viewerState.preloadCache.has(idx)) {
         const url = getStreamUrl(path, window.veloceAPI.convertFileSrc(path));
         let img;
-        if (path.toLowerCase().endsWith('.mp4') || path.toLowerCase().endsWith('.webm') || path.toLowerCase().endsWith('.avi') || path.toLowerCase().endsWith('.mkv')) {
+        if (isVideoFile(path)) {
           img = document.createElement('video');
           img.autoplay = true;
           img.loop = true;
@@ -2289,7 +2295,10 @@ function toggleVideoSeekBar() {
   setVideoSeekBarVisibility(!isVisible);
 }
 
+export { loadImage };
+
 if (typeof window !== 'undefined') {
+  window.loadImage = loadImage;
   window.isDefaultSeekBarEnabled = isDefaultSeekBarEnabled;
   window.ensureVideoSeekBarContainer = ensureVideoSeekBarContainer;
   window.setVideoSeekBarVisibility = setVideoSeekBarVisibility;

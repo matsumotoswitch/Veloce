@@ -143,6 +143,12 @@ describe('Utils', () => {
       expect(result).toBe('asset://stream.localhost/?path=C%3A%5Cvideos%5Ctest.mp4');
     });
 
+    it('should include token in fallback url if videoServerPort is missing and token is present', () => {
+      window.videoServerToken = 'fallback_token_123';
+      const result = getStreamUrl('C:\\videos\\test.mp4', 'asset://localhost/C:/videos/test.mp4');
+      expect(result).toBe('asset://stream.localhost/?path=C%3A%5Cvideos%5Ctest.mp4&token=fallback_token_123');
+    });
+
     it('should return baseSrc for non-mp4 files', () => {
       const result = getStreamUrl('C:\\images\\test.png', 'asset://localhost/C:/images/test.png');
       expect(result).toBe('asset://localhost/C:/images/test.png');

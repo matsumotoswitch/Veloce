@@ -72,28 +72,28 @@ export function blockDevtoolsShortcuts() {
 
 export function getStreamUrl(filePath, baseSrc) {
   if (filePath.toLowerCase().endsWith('.mp4')) {
+    const tokenParam = window.videoServerToken ? `&token=${encodeURIComponent(window.videoServerToken)}` : '';
     if (window.videoServerPort) {
-      const tokenParam = window.videoServerToken ? `&token=${encodeURIComponent(window.videoServerToken)}` : '';
       return `http://localhost:${window.videoServerPort}/?path=` + encodeURIComponent(filePath) + tokenParam;
     }
     console.warn("videoServerPort is missing! Falling back for", filePath);
     try {
       const urlObj = new URL(baseSrc);
-      return urlObj.protocol + '//stream.localhost/?path=' + encodeURIComponent(filePath);
+      return urlObj.protocol + '//stream.localhost/?path=' + encodeURIComponent(filePath) + tokenParam;
     } catch (e) {
-      return 'https://stream.localhost/?path=' + encodeURIComponent(filePath);
+      return 'https://stream.localhost/?path=' + encodeURIComponent(filePath) + tokenParam;
     }
   }
   return baseSrc;
 }
 
 /**
- * 対象ファイルが動画形式（MP4/WebM/AVI/MKV）であるかを判定する
+ * 対象ファイルが動画形式（MP4/WebM/AVI/MKV/MOV）であるかを判定する
  * @param {string} filePath - ファイルパス
  * @returns {boolean} 動画形式であれば true
  */
 export function isVideoFile(filePath) {
   if (!filePath || typeof filePath !== 'string') return false;
   const lower = filePath.toLowerCase();
-  return lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.avi') || lower.endsWith('.mkv');
+  return lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.avi') || lower.endsWith('.mkv') || lower.endsWith('.mov');
 }

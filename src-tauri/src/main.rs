@@ -5454,20 +5454,34 @@ fn main() {
     let window_configs = context.config_mut().tauri.windows.clone();
     context.config_mut().tauri.windows.clear();
 
+    let stream_token = video_token.clone();
     let builder = tauri::Builder::default()
         .register_uri_scheme_protocol("stream", move |_app_handle, request| {
             let uri = request.uri();
             let mut path_str = String::new();
+            let mut req_token = String::new();
             if let Some(query) = uri.split('?').nth(1) {
                 for pair in query.split('&') {
                     if pair.starts_with("path=") {
                         path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                    } else if pair.starts_with("token=") {
+                        req_token = urlencoding::decode(&pair[6..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
                     }
                 }
             }
 
+            // セッショントークン認証
+            if !stream_token.is_empty() && req_token != stream_token {
+                return tauri::http::ResponseBuilder::new().status(403).body(Vec::new());
+            }
+
             if path_str.is_empty() {
                 return tauri::http::ResponseBuilder::new().status(400).body(Vec::new());
+            }
+
+            let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
+                return tauri::http::ResponseBuilder::new().status(403).body(Vec::new());
             }
 
             use std::io::{Read, Seek, SeekFrom};
@@ -5476,49 +5490,56 @@ fn main() {
             if let Ok(mut file) = File::open(&path_str) {
                 if let Ok(metadata) = file.metadata() {
                     let file_size = metadata.len();
-                    
                     let range_header = request.headers().get("Range").and_then(|v| v.to_str().ok());
-                    let mut start: u64 = 0;
-                    let mut end: u64 = file_size.saturating_sub(1);
-                    let mut is_range = false;
-
-                    if let Some(range) = range_header {
-                        if range.starts_with("bytes=") {
-                            is_range = true;
-                            let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
-                            if !parts.is_empty() && !parts[0].is_empty() {
-                                start = parts[0].parse::<u64>().unwrap_or(0);
-                            }
-                            if parts.len() > 1 && !parts[1].is_empty() {
-                                end = parts[1].parse::<u64>().unwrap_or(end);
-                            }
-                        }
-                    }
-
-                    // チャンクサイズを最大2MBに制限してストリーミングを実現
                     let max_chunk: u64 = 2 * 1024 * 1024;
-                    let chunk_size = std::cmp::min(end.saturating_sub(start) + 1, max_chunk);
-                    
-                    let mut buf = vec![0; chunk_size as usize];
-                    if file.seek(SeekFrom::Start(start)).is_ok() {
-                        if let Ok(read_len) = file.read(&mut buf) {
-                            buf.truncate(read_len);
-                            
-                            let mut resp = tauri::http::ResponseBuilder::new()
-                                .header("Content-Type", "video/mp4")
-                                .header("Accept-Ranges", "bytes")
-                                .header("Access-Control-Allow-Origin", "*");
+                    let content_type = match ext.as_str() {
+                        "webm" => "video/webm",
+                        "gif" => "image/gif",
+                        _ => "video/mp4",
+                    };
 
-                            if is_range {
-                                resp = resp.status(206).header(
-                                    "Content-Range",
-                                    format!("bytes {}-{}/{}", start, start + read_len as u64 - 1, file_size),
-                                );
-                            } else {
-                                resp = resp.status(200).header("Content-Length", file_size.to_string());
+                    match crate::server::calculate_range(range_header, file_size, max_chunk) {
+                        crate::server::RangeSpec::EmptyFile => {
+                            return tauri::http::ResponseBuilder::new()
+                                .header("Content-Type", content_type)
+                                .header("Content-Length", "0")
+                                .header("Accept-Ranges", "bytes")
+                                .header("Access-Control-Allow-Origin", "*")
+                                .status(200)
+                                .body(Vec::new());
+                        }
+                        crate::server::RangeSpec::NotSatisfiable => {
+                            return tauri::http::ResponseBuilder::new()
+                                .header("Content-Range", format!("bytes */{}", file_size))
+                                .header("Content-Length", "0")
+                                .header("Access-Control-Allow-Origin", "*")
+                                .status(416)
+                                .body(Vec::new());
+                        }
+                        crate::server::RangeSpec::Satisfiable { start, chunk_size, is_partial, .. } => {
+                            let mut buf = vec![0u8; chunk_size as usize];
+                            if file.seek(SeekFrom::Start(start)).is_ok() {
+                                if let Ok(read_len) = file.read(&mut buf) {
+                                    buf.truncate(read_len);
+                                    let range_end = if read_len > 0 { start + read_len as u64 - 1 } else { start };
+                                    let mut resp = tauri::http::ResponseBuilder::new()
+                                        .header("Content-Type", content_type)
+                                        .header("Accept-Ranges", "bytes")
+                                        .header("Access-Control-Allow-Origin", "*")
+                                        .header("Content-Length", read_len.to_string());
+
+                                    if is_partial {
+                                        resp = resp.status(206).header(
+                                            "Content-Range",
+                                            format!("bytes {}-{}/{}", start, range_end, file_size),
+                                        );
+                                    } else {
+                                        resp = resp.status(200);
+                                    }
+
+                                    return resp.body(buf);
+                                }
                             }
-                            
-                            return resp.body(buf);
                         }
                     }
                 }
@@ -5547,6 +5568,13 @@ fn main() {
 
             if path_str.is_empty() && hash_param.is_empty() {
                 return tauri::http::ResponseBuilder::new().status(400).body(Vec::new());
+            }
+
+            if !path_str.is_empty() {
+                let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "mp4" | "webm" | "avi" | "mkv") && hash_param.is_empty() {
+                    return tauri::http::ResponseBuilder::new().status(403).body(Vec::new());
+                }
             }
 
             use tauri::Manager;
@@ -8599,6 +8627,58 @@ mod viewer_tests {
             let resp_str = String::from_utf8_lossy(&resp_bytes);
             assert!(resp_str.starts_with("HTTP/1.1 200 OK"), "キャッシュ済みの場合は 200 OK が返ること");
             assert!(resp_bytes.windows(dummy_jpeg.len()).any(|w| w == dummy_jpeg.as_slice()), "正しいサムネイルバイナリが含まれること");
+        }
+
+        // 6. 動画ストリーミングの拡張子ホワイトリスト検証（動画以外の拡張子は 403 Forbidden）
+        {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let forbidden_ext_req = format!(
+                "GET /?path={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                urlencoding::encode("C:\\test\\secret.txt"),
+                test_token,
+                port
+            );
+            stream.write_all(forbidden_ext_req.as_bytes()).unwrap();
+            let mut resp = String::new();
+            stream.read_to_string(&mut resp).unwrap();
+            assert!(resp.starts_with("HTTP/1.1 403 Forbidden"), "非動画拡張子のリクエストは 403 Forbidden となること");
+        }
+
+        // 7. 動画ストリーミングの Range クランプ検証（ファイル末尾クランプと 206 Partial Content の整合性）
+        {
+            let temp_video_path = std::env::temp_dir().join("veloce_test_stream_clamp.mp4");
+            let dummy_video_data = vec![0x42u8; 100]; // 100 バイトのダミー動画データ
+            std::fs::write(&temp_video_path, &dummy_video_data).unwrap();
+
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            // クライアントが 100バイトのファイルに bytes=0-9999 を要求
+            let range_req = format!(
+                "GET /?path={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nRange: bytes=0-9999\r\nConnection: close\r\n\r\n",
+                urlencoding::encode(temp_video_path.to_str().unwrap()),
+                test_token,
+                port
+            );
+            stream.write_all(range_req.as_bytes()).unwrap();
+
+            let mut resp_header = Vec::new();
+            let mut buf = [0u8; 1];
+            while stream.read_exact(&mut buf).is_ok() {
+                resp_header.push(buf[0]);
+                if resp_header.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let header_str = String::from_utf8_lossy(&resp_header);
+            assert!(header_str.starts_with("HTTP/1.1 206 Partial Content"), "Range 要求時は 206 Partial Content が返ること");
+            assert!(header_str.contains("Content-Range: bytes 0-99/100"), "end が 99 (100 - 1) にクランプされていること");
+            assert!(header_str.contains("Content-Length: 100"), "Content-Length が実際の chunk_size (100) と一致すること");
+
+            let mut body = Vec::new();
+            stream.read_to_end(&mut body).unwrap();
+            assert_eq!(body.len(), 100, "ボディが正確に 100 バイト送信されクライアントがフリーズしないこと");
+            assert_eq!(body, dummy_video_data);
+
+            let _ = std::fs::remove_file(temp_video_path);
         }
     }
 
