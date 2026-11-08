@@ -4945,8 +4945,119 @@ async fn sync_file_move(state: tauri::State<'_, AppState>, old_path: String, new
     Ok(())
 }
 
+/// ファイル・フォルダのリネーム時に指定された新しいエントリ名を検証する。
+/// 空文字、`.` / `..`、パス区切り文字（`/`, `\`）、Windows 禁止文字、末尾のスペースやドット、予約デバイス名を拒否し、
+/// パストラバーサル（`..\` 等）や不正なファイル名の生成をバックエンド境界で遮断する。
+pub fn validate_new_entry_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("名前を入力してください。".to_string());
+    }
+    if name == "." || name == ".." || name.ends_with(' ') || name.ends_with('.') {
+        return Err("末尾にスペースやドットを含めることはできません。".to_string());
+    }
+    for c in name.chars() {
+        if matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+            return Err("ファイル名に使用できない文字（\\ / : * ? \" < > |）が含まれています。".to_string());
+        }
+    }
+    let stem = name.split('.').next().unwrap_or("");
+    let upper = stem.to_ascii_uppercase();
+    if matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    ) {
+        return Err("システム予約語は名前に使用できません。".to_string());
+    }
+    Ok(())
+}
+
+/// フォルダリネームに伴うメモリ上のレーティングと SQLite（`ratings` および `cache` テーブル）の一括同期。
+/// 書き込みロック内での DB アクセスを排除し、単一コネクション・トランザクションで原子的に更新する。
+pub fn sync_folder_rename_in_db_and_state(state: &AppState, old_path_exact: &str, new_path_exact: &str) {
+    let old_prefix_backslash = format!("{}\\", old_path_exact);
+    let old_prefix_slash = format!("{}/", old_path_exact);
+    let mut keys_to_remove = Vec::new();
+    let mut rating_updates = Vec::new();
+    {
+        let mut lock = state.ratings.write();
+        for (p, rating) in lock.iter() {
+            if p == old_path_exact {
+                keys_to_remove.push(p.clone());
+                rating_updates.push((new_path_exact.to_string(), *rating));
+            } else if p.starts_with(&old_prefix_backslash) || p.starts_with(&old_prefix_slash) {
+                keys_to_remove.push(p.clone());
+                let new_p = format!("{}{}", new_path_exact, &p[old_path_exact.len()..]);
+                rating_updates.push((new_p, *rating));
+            }
+        }
+        for k in &keys_to_remove {
+            lock.remove(k);
+        }
+        for (new_p, rating) in &rating_updates {
+            lock.insert(new_p.clone(), *rating);
+        }
+    }
+
+    if let Ok(conn) = state.db_conn.get() {
+        if !keys_to_remove.is_empty() || !rating_updates.is_empty() {
+            if let Ok(tx) = conn.unchecked_transaction() {
+                for k in &keys_to_remove {
+                    let _ = tx.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![k]);
+                }
+                for (new_p, rating) in &rating_updates {
+                    let _ = tx.execute(
+                        "INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)",
+                        rusqlite::params![new_p, rating],
+                    );
+                }
+                let _ = tx.commit();
+            }
+        }
+
+        let like_query = format!("{}%", escape_sql_like(&old_prefix_backslash));
+        let mut cache_updates = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT hash_key, path, mtime FROM cache WHERE path = ? COLLATE NOCASE OR path COLLATE NOCASE LIKE ? ESCAPE '\\'",
+        ) {
+            if let Ok(mut rows) = stmt.query(rusqlite::params![old_path_exact, &like_query]) {
+                while let Ok(Some(row)) = rows.next() {
+                    let old_hash_key: String = row.get(0).unwrap_or_default();
+                    let old_path: String = row.get(1).unwrap_or_default();
+                    let mtime: u64 = row.get(2).unwrap_or(0);
+
+                    let new_path = if old_path == old_path_exact {
+                        new_path_exact.to_string()
+                    } else if old_path.starts_with(&old_prefix_backslash) {
+                        format!("{}\\{}", new_path_exact, &old_path[old_prefix_backslash.len()..])
+                    } else {
+                        continue;
+                    };
+
+                    let new_hash_key = crate::utils::hash_path_mtime_hex(&new_path, mtime);
+                    cache_updates.push((new_path, new_hash_key, old_hash_key));
+                }
+            }
+        }
+
+        if !cache_updates.is_empty() {
+            if let Ok(tx) = conn.unchecked_transaction() {
+                for (new_path, new_hash_key, old_hash_key) in cache_updates {
+                    let _ = tx.execute(
+                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
+                        rusqlite::params![&new_path, &new_hash_key, &old_hash_key],
+                    );
+                }
+                let _ = tx.commit();
+            }
+        }
+    }
+}
+
 #[tauri::command]
 async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_name: String) -> Result<String, String> {
+    validate_new_entry_name(&new_name)?;
     let old_path_clone = old_path.clone();
     let new_path_str = tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&old_path);
@@ -4958,6 +5069,7 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
                 final_name = format!("{}.{}", final_name, ext.to_string_lossy());
             }
         }
+        validate_new_entry_name(&final_name)?;
 
         let new_path = parent.join(&final_name);
 
@@ -4990,6 +5102,7 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
 
 #[tauri::command]
 async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_name: String) -> Result<String, String> {
+    validate_new_entry_name(&new_name)?;
     let old_path_clone = old_path.clone();
     let new_path_str = tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&old_path);
@@ -5017,86 +5130,7 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
     .await
     .unwrap_or_else(|e| Err(e.to_string()))?;
 
-    // フォルダのリネームに合わせてレーティングのパスも更新する
-    let _old_prefix = format!("{}\\*", old_path_clone);
-    let _old_prefix_slash = format!("{}\\*", old_path_clone.replace("\\", "/"));
-    let old_path_exact = old_path_clone.clone();
-    let new_path_exact = new_path_str.clone();
-    
-    let _old_base = if old_path_clone.ends_with('\\') || old_path_clone.ends_with('/') {
-        old_path_clone.clone()
-    } else {
-        format!("{}\\*", old_path_clone) // 末尾にセパレータがない場合のprefix用
-    };
-    // 厳密な前方一致置換は面倒なので、Rustのメモリ側で計算したペアでDBも更新する
-    let mut updates = Vec::new();
-    {
-        let mut lock = state.ratings.write();
-        let mut keys_to_remove = Vec::new();
-        for (p, rating) in lock.iter() {
-            if p == &old_path_exact {
-                keys_to_remove.push(p.clone());
-                updates.push((new_path_exact.clone(), *rating));
-            } else if p.starts_with(&format!("{}\\*", old_path_exact).replace("*", "")) || p.starts_with(&format!("{}/", old_path_exact)) {
-                keys_to_remove.push(p.clone());
-                let new_p = format!("{}{}", new_path_exact, &p[old_path_exact.len()..]);
-                updates.push((new_p, *rating));
-            }
-        }
-        for k in keys_to_remove {
-            lock.remove(&k);
-            if let Ok(conn) = state.db_conn.get() {
-                let _ = conn.execute("DELETE FROM ratings WHERE path = ?1", rusqlite::params![&k]);
-            }
-        }
-        for (new_p, rating) in updates {
-            lock.insert(new_p.clone(), rating);
-            if let Ok(conn) = state.db_conn.get() {
-                let _ = conn.execute("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![&new_p, rating]);
-            }
-        }
-    }
-    
-    // キャッシュテーブルも再帰的に更新する
-    if let Ok(conn) = state.db_conn.get() {
-        let old_dir_prefix = format!("{}\\", old_path_clone);
-        let like_query = format!("{}%", escape_sql_like(&old_dir_prefix));
-        
-        let mut updates = Vec::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT hash_key, path, mtime FROM cache WHERE path = ? COLLATE NOCASE OR path COLLATE NOCASE LIKE ? ESCAPE '\\'") {
-            if let Ok(mut rows) = stmt.query(rusqlite::params![&old_path_clone, &like_query]) {
-                while let Ok(Some(row)) = rows.next() {
-                    let old_hash_key: String = row.get(0).unwrap_or_default();
-                    let old_path: String = row.get(1).unwrap_or_default();
-                    let mtime: u64 = row.get(2).unwrap_or(0);
-                    
-                    let new_path = if old_path == old_path_clone {
-                        new_path_str.clone()
-                    } else if old_path.starts_with(&old_dir_prefix) {
-                        format!("{}\\{}", new_path_str, &old_path[old_dir_prefix.len()..])
-                    } else {
-                        continue;
-                    };
-                    
-                    let new_hash_key = crate::utils::hash_path_mtime_hex(&new_path, mtime);
-                    
-                    updates.push((new_path, new_hash_key, old_hash_key));
-                }
-            }
-        }
-        
-        if !updates.is_empty() {
-            if let Ok(tx) = conn.unchecked_transaction() {
-                for (new_path, new_hash_key, old_hash_key) in updates {
-                    let _ = tx.execute(
-                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
-                        rusqlite::params![&new_path, &new_hash_key, &old_hash_key],
-                    );
-                }
-                let _ = tx.commit();
-            }
-        }
-    }
+    sync_folder_rename_in_db_and_state(&state, &old_path_clone, &new_path_str);
 
     Ok(new_path_str)
 }
@@ -6440,7 +6474,39 @@ fn main() {
 
 #[cfg(test)]
 pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState {
-    let db_conn = init_db().unwrap();
+    let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+    let db_conn = r2d2::Pool::builder()
+        .max_size(1)
+        .build(manager)
+        .unwrap();
+    {
+        let conn = db_conn.get().unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                metadata_source TEXT DEFAULT ''
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ratings (
+                path TEXT PRIMARY KEY,
+                rating INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+    }
     crate::state::AppState {
         image_paths: parking_lot::RwLock::new(std::sync::Arc::new(Vec::new())),
         current_dir: parking_lot::RwLock::new(current_dir.to_string()),
@@ -11631,5 +11697,79 @@ mod viewer_tests {
         assert_eq!(filtered[0].name, "01.png");
         assert_eq!((filtered[0].width, filtered[0].height), (800, 600), "既存ファイルの寸法が保持されること");
         assert_eq!(filtered[1].name, "03.png");
+    }
+
+    /// [Phase 7] `validate_new_entry_name` の境界検証と `sync_folder_rename_in_db_and_state` の一括トランザクション同期テスト
+    #[test]
+    fn test_validate_new_entry_name_and_folder_rename_sync() {
+        // 正常な名前
+        assert!(validate_new_entry_name("valid_name.png").is_ok());
+        assert!(validate_new_entry_name("新規フォルダ_01").is_ok());
+
+        // 空文字、ドット、パストラバーサル、禁止文字、予約デバイス名を拒否
+        assert!(validate_new_entry_name("").is_err());
+        assert!(validate_new_entry_name("   ").is_err());
+        assert!(validate_new_entry_name(".").is_err());
+        assert!(validate_new_entry_name("..").is_err());
+        assert!(validate_new_entry_name("../escape.png").is_err());
+        assert!(validate_new_entry_name("..\\escape.png").is_err());
+        assert!(validate_new_entry_name("sub/file.png").is_err());
+        assert!(validate_new_entry_name("bad:name.png").is_err());
+        assert!(validate_new_entry_name("trailing.").is_err());
+        assert!(validate_new_entry_name("trailing ").is_err());
+        assert!(validate_new_entry_name("CON.png").is_err());
+        assert!(validate_new_entry_name("nul").is_err());
+
+        // フォルダリネーム時の ratings / cache 一括同期と LIKE ワイルドカード隔離の検証
+        let state = create_test_app_state("C:\\Photos");
+        let target_file = "C:\\Photos\\album_1\\01.png";
+        let sibling_file = "C:\\Photos\\albumX1\\01.png";
+
+        {
+            let mut r = state.ratings.write();
+            r.insert(target_file.to_string(), 5);
+            r.insert(sibling_file.to_string(), 3);
+        }
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![target_file, 5]).unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, ?2)", rusqlite::params![sibling_file, 3]).unwrap();
+            let h1 = crate::utils::hash_path_mtime_hex(target_file, 100);
+            let h2 = crate::utils::hash_path_mtime_hex(sibling_file, 100);
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, mtime) VALUES (?1, ?2, 100)",
+                rusqlite::params![h1, target_file],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, mtime) VALUES (?1, ?2, 100)",
+                rusqlite::params![h2, sibling_file],
+            ).unwrap();
+        }
+
+        sync_folder_rename_in_db_and_state(&state, "C:\\Photos\\album_1", "C:\\Photos\\album_renamed");
+
+        let renamed_file = "C:\\Photos\\album_renamed\\01.png";
+        assert_eq!(state.ratings.read().get(target_file), None);
+        assert_eq!(state.ratings.read().get(renamed_file), Some(&5));
+        assert_eq!(state.ratings.read().get(sibling_file), Some(&3), "アンダースコアを含む別フォルダが巻き込まれないこと");
+
+        let conn = state.db_conn.get().unwrap();
+        let r_renamed: Option<i32> = conn
+            .query_row("SELECT rating FROM ratings WHERE path = ?1", rusqlite::params![renamed_file], |row| row.get(0))
+            .ok();
+        let r_sibling: Option<i32> = conn
+            .query_row("SELECT rating FROM ratings WHERE path = ?1", rusqlite::params![sibling_file], |row| row.get(0))
+            .ok();
+        assert_eq!(r_renamed, Some(5));
+        assert_eq!(r_sibling, Some(3));
+
+        let c_renamed: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cache WHERE path = ?1", rusqlite::params![renamed_file], |row| row.get(0))
+            .unwrap();
+        let c_sibling: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cache WHERE path = ?1", rusqlite::params![sibling_file], |row| row.get(0))
+            .unwrap();
+        assert_eq!(c_renamed, 1);
+        assert_eq!(c_sibling, 1);
     }
 }

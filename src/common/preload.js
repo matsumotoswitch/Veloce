@@ -351,9 +351,10 @@ window.veloceAPI = {
    * @param {string} sourcePath - 元のファイルパス。
    * @param {string} targetDir - ドロップ先のディレクトリパス。
    * @param {'auto' | 'copy' | 'move'} [intent='auto'] - 強制的に実行するアクション
+   * @param {object} [options={}] - 追加オプション（{ overwrite: false } 指定時は競合検出で中断）
    * @returns {Promise<object>} 処理結果 { success, action, targetPath, reason }。
    */
-  moveOrCopyFile: async (sourcePath, targetDir, intent = 'auto') => {
+  moveOrCopyFile: async (sourcePath, targetDir, intent = 'auto', options = {}) => {
     const { fs, path } = window.__TAURI__;
     try {
       const fileName = await path.basename(sourcePath);
@@ -362,6 +363,13 @@ window.veloceAPI = {
 
       if (sourceDir === targetDir) {
         return { success: false, action: '', reason: 'same_directory' };
+      }
+
+      if (options && options.overwrite === false) {
+        const conflicts = await invoke('check_conflicts', { paths: [sourcePath], destDir: targetDir });
+        if (Array.isArray(conflicts) && conflicts.length > 0) {
+          return { success: false, action: '', reason: 'conflict' };
+        }
       }
 
       let action = intent;
@@ -373,23 +381,28 @@ window.veloceAPI = {
       if (action === 'copy') {
         await fs.copyFile(sourcePath, targetPath);
       } else {
+        let movedByFallback = false;
         try {
           await fs.renameFile(sourcePath, targetPath);
         } catch (e) {
           // 別ドライブ間への移動など、renameFileが失敗した際のフォールバック
           await fs.copyFile(sourcePath, targetPath);
+          movedByFallback = true;
+        }
+        // 移動成功時（またはフォールバックのコピー完了直後）、元ファイル削除や trash_file より先に
+        // SQLite のキャッシュおよびレーティングのパスをアトミックに同期してレーティング消失を防ぐ
+        try {
+          await invoke('sync_file_move', { oldPath: sourcePath, newPath: targetPath });
+        } catch (syncErr) {
+          console.error('Failed to sync file move in DB:', syncErr);
+        }
+        if (movedByFallback) {
           try {
             await fs.removeFile(sourcePath);
           } catch (rmErr) {
             // removeFileも失敗した場合は invoke('trash_file') でゴミ箱送りを試みる
             await invoke('trash_file', { filePath: sourcePath });
           }
-        }
-        // 移動成功時、SQLite のキャッシュおよびレーティングのパスをアトミックに同期
-        try {
-          await invoke('sync_file_move', { oldPath: sourcePath, newPath: targetPath });
-        } catch (syncErr) {
-          console.error('Failed to sync file move in DB:', syncErr);
         }
       }
       return { success: true, action, targetPath, reason: null };

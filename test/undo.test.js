@@ -82,4 +82,33 @@ describe('Undo Functionality', () => {
     expect(appState.ratings['/dest/file.png']).toBeUndefined();
     expect(appState.undoStack.length).toBe(0);
   });
+
+  it('should not overwrite or pop undo stack when MOVE_FILE undo detects a conflict at original directory', async () => {
+    window.veloceAPI.checkConflicts = vi.fn().mockResolvedValue(['/dest/file.png']);
+    appState.undoStack.push({
+      type: 'MOVE_FILE',
+      sourcePath: '/source/file.png',
+      targetPath: '/dest/file.png'
+    });
+
+    await performUndo();
+
+    expect(window.veloceAPI.checkConflicts).toHaveBeenCalledWith(['/dest/file.png'], '/source');
+    expect(window.veloceAPI.moveOrCopyFile).not.toHaveBeenCalled();
+    expect(appState.undoStack.length).toBe(1);
+  });
+
+  it('should retain action on undo stack when operation fails', async () => {
+    window.veloceAPI.renameFile.mockResolvedValue({ success: false, error: 'Exists' });
+    appState.undoStack.push({
+      type: 'RENAME_FILE',
+      oldPath: '/dir/old.png',
+      newPath: '/dir/new.png'
+    });
+
+    await performUndo();
+
+    expect(window.veloceAPI.renameFile).toHaveBeenCalledWith('/dir/new.png', 'old.png');
+    expect(appState.undoStack.length).toBe(1);
+  });
 });

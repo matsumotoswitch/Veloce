@@ -113,5 +113,34 @@ describe('File Move Cache and Rating Sync (Section 4)', () => {
         newPath: 'C:\\new.png'
       });
     });
+
+    it('invokes sync_file_move before trash_file in cross-drive move fallback so ratings are not lost', async () => {
+      const callOrder = [];
+      mockFs.renameFile.mockRejectedValue(new Error('EXDEV: cross-device link not permitted'));
+      mockFs.copyFile.mockImplementation(async () => {
+        callOrder.push('copyFile');
+      });
+      mockFs.removeFile.mockRejectedValue(new Error('EPERM'));
+      mockInvoke.mockImplementation(async (cmd) => {
+        callOrder.push(cmd);
+      });
+
+      const result = await window.veloceAPI.moveOrCopyFile('C:\\source\\image.png', 'D:\\dest', 'move');
+
+      expect(result.success).toBe(true);
+      expect(callOrder).toEqual(['copyFile', 'sync_file_move', 'trash_file']);
+    });
+
+    it('aborts moveOrCopyFile when overwrite: false option detects conflicts', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'check_conflicts') return ['C:\\source\\image.png'];
+      });
+
+      const result = await window.veloceAPI.moveOrCopyFile('C:\\source\\image.png', 'C:\\dest', 'move', { overwrite: false });
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('conflict');
+      expect(mockFs.renameFile).not.toHaveBeenCalled();
+    });
   });
 });
