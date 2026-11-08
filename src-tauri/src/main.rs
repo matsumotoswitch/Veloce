@@ -17,9 +17,6 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-
-use std::io::Read; // flate2のread_to_stringやバイナリ解析用
-
 use std::time::UNIX_EPOCH;
 use tauri::Manager;
 
@@ -570,6 +567,23 @@ fn build_smart_folder_query(
 
 
 
+/// SQLite コネクションに対する `PRAGMA case_sensitive_like = ON;` をスコープ内でのみ有効化し、
+/// スコープ終了時（Drop時）に確実に `OFF` にリセットしてコネクションプールへ返却する RAII ガード。
+pub struct CaseSensitiveLikeGuard<'a>(&'a rusqlite::Connection);
+
+impl<'a> CaseSensitiveLikeGuard<'a> {
+    pub fn new(conn: &'a rusqlite::Connection) -> Self {
+        let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
+        Self(conn)
+    }
+}
+
+impl<'a> Drop for CaseSensitiveLikeGuard<'a> {
+    fn drop(&mut self) {
+        let _ = self.0.execute("PRAGMA case_sensitive_like = OFF;", []);
+    }
+}
+
 /// SQLite クエリから中間オブジェクトを介さず、直接 ImageFile の Arc リストを高速生成する
 fn query_smart_folder_image_files(
     rule: &SmartFolderRule,
@@ -582,7 +596,7 @@ fn query_smart_folder_image_files(
     let Ok(conn) = db_conn.get() else {
         return files;
     };
-    let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
+    let _like_guard = CaseSensitiveLikeGuard::new(&conn);
 
     let mut use_fallback = false;
     let (mut query_str, mut params) = build_smart_folder_query_with_sort(rule, false, false, sort_key, asc, limit);
@@ -667,7 +681,7 @@ fn get_smart_folder_paths(
 
     if let Some(rule) = rules.iter().find(|r| r.id == folder_id) {
         if let Ok(conn) = db_conn.get() {
-            let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
+            let _like_guard = CaseSensitiveLikeGuard::new(&conn);
             
             let mut use_fallback = false;
             let (mut query_str, mut params) = build_smart_folder_query(rule, false, false);
@@ -1524,7 +1538,7 @@ fn get_smart_folder_counts(
     let db_conn = state.db_conn.clone();
     
     if let Ok(conn) = db_conn.get() {
-        let _ = conn.execute("PRAGMA case_sensitive_like = ON;", []);
+        let _like_guard = CaseSensitiveLikeGuard::new(&conn);
         
         for rule in rules {
             let mut count = 0;
@@ -2036,7 +2050,12 @@ fn parse_mp4_dimensions(path: &str) -> Option<(u32, u32)> {
             continue;
         } else if box_type == b"tkhd" {
             let content_size = size - 8;
-            let mut tkhd_data = vec![0u8; content_size as usize];
+            // 悪意ある巨大サイズ（最大4GB）によるOOMを防ぐため、解像度解析に必要な上限256バイトでバッファをクランプ。
+            // またファイル末尾を超えて read_exact が失敗しないよう実残バイト数でもクランプする。
+            let remaining_file_bytes = file_len.saturating_sub(pos + 8);
+            let target_read = std::cmp::min(content_size, remaining_file_bytes);
+            let read_len = std::cmp::min(target_read, 256) as usize;
+            let mut tkhd_data = vec![0u8; read_len];
             if file.read_exact(&mut tkhd_data).is_ok() {
                 if !tkhd_data.is_empty() {
                     let version = tkhd_data[0];
@@ -2782,9 +2801,11 @@ fn parse_png_chunks_with_dimensions_and_types(
                                         off += n2 + 1; // skip trans keyword
                                         let text_data = &data[off..];
                                         let text = if comp_flag == 1 {
-                                            let mut decoder = flate2::read::ZlibDecoder::new(text_data);
+                                            use std::io::Read;
+                                            let decoder = flate2::read::ZlibDecoder::new(text_data);
+                                            let mut limited = decoder.take(10 * 1024 * 1024);
                                             let mut s = String::new();
-                                            decoder.read_to_string(&mut s).unwrap_or_default();
+                                            limited.read_to_string(&mut s).unwrap_or_default();
                                             s
                                         } else {
                                             String::from_utf8_lossy(text_data).to_string()
@@ -3081,9 +3102,10 @@ fn extract_stealth_pnginfo_with_type(path: &str) -> Option<(String, &'static str
         }
 
         if is_comp {
-            let mut decoder = GzDecoder::new(&payload_bytes[..]);
+            let decoder = GzDecoder::new(&payload_bytes[..]);
+            let mut limited = decoder.take(10 * 1024 * 1024);
             let mut decompressed = String::new();
-            if decoder.read_to_string(&mut decompressed).is_ok() {
+            if limited.read_to_string(&mut decompressed).is_ok() {
                 return Some(decompressed);
             }
         } else if is_raw {
@@ -5444,8 +5466,7 @@ fn main() {
 
     let app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
-    let seed = format!("{}:{}:{:p}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(), std::process::id(), &db_tx);
-    let video_token = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(seed.as_bytes()));
+    let video_token = crate::utils::generate_secure_token();
     let video_port = start_local_video_server(db_tx.clone(), app_handle_slot.clone(), db_conn.clone(), video_token.clone());
 
     let mut context = tauri::generate_context!();
@@ -5470,8 +5491,8 @@ fn main() {
                 }
             }
 
-            // セッショントークン認証
-            if !stream_token.is_empty() && req_token != stream_token {
+            // セッショントークン認証（定数時間比較）
+            if !stream_token.is_empty() && !crate::server::constant_time_eq(req_token.as_bytes(), stream_token.as_bytes()) {
                 return tauri::http::ResponseBuilder::new().status(403).body(Vec::new());
             }
 
@@ -6387,6 +6408,66 @@ mod tests {
         
         // テスト後はファイルを削除 (Rule #4)
         let _ = std::fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_parse_mp4_dimensions_oversized_tkhd_clamping() {
+        use super::parse_mp4_dimensions;
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_oversized_tkhd.mp4");
+
+        // 1920x1080のtkhdペイロード (version 0: offset 76)
+        let mut tkhd_payload = vec![0u8; 84];
+        tkhd_payload[76..80].copy_from_slice(&(1920u32 << 16).to_be_bytes());
+        tkhd_payload[80..84].copy_from_slice(&(1080u32 << 16).to_be_bytes());
+
+        let mut tkhd_box = vec![];
+        // 意図的に巨大なサイズ（1GB = 0x4000_0000）を宣言
+        tkhd_box.extend_from_slice(&0x4000_0000u32.to_be_bytes());
+        tkhd_box.extend_from_slice(b"tkhd");
+        tkhd_box.extend_from_slice(&tkhd_payload);
+
+        let mut moov_data = vec![];
+        moov_data.extend_from_slice(&(8u32 + tkhd_box.len() as u32).to_be_bytes());
+        moov_data.extend_from_slice(b"moov");
+        moov_data.extend_from_slice(&tkhd_box);
+
+        let mut ftyp = vec![];
+        ftyp.extend_from_slice(&16u32.to_be_bytes());
+        ftyp.extend_from_slice(b"ftypisomisom");
+
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            file.write_all(&ftyp).unwrap();
+            file.write_all(&moov_data).unwrap();
+        }
+
+        // 巨大サイズが宣言されていても、256バイト上限で安全にクランプされ1920x1080が取得できること
+        let dims = parse_mp4_dimensions(test_file.to_str().unwrap());
+        assert_eq!(dims, Some((1920, 1080)));
+
+        let _ = std::fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_case_sensitive_like_guard_restores_off() {
+        use super::CaseSensitiveLikeGuard;
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // SQLite の LIKE 演算子の大文字小文字区別をクエリ結果で直接検証
+        // デフォルト (case_sensitive_like = OFF) では 'abc' LIKE 'ABC' は 1 (true)
+        let initial: i32 = conn.query_row("SELECT 'abc' LIKE 'ABC';", [], |row| row.get(0)).unwrap();
+        assert_eq!(initial, 1, "デフォルトでは大文字小文字を区別せず一致 (1)");
+
+        {
+            let _guard = CaseSensitiveLikeGuard::new(&conn);
+            let active: i32 = conn.query_row("SELECT 'abc' LIKE 'ABC';", [], |row| row.get(0)).unwrap();
+            assert_eq!(active, 0, "ガード有効時は case_sensitive_like = ON となり不一致 (0)");
+        }
+
+        let restored: i32 = conn.query_row("SELECT 'abc' LIKE 'ABC';", [], |row| row.get(0)).unwrap();
+        assert_eq!(restored, 1, "ガード破棄後は case_sensitive_like = OFF に確実に復元され一致 (1)");
     }
 
     #[test]

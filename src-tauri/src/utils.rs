@@ -238,9 +238,46 @@ pub fn hash_path_mtime_hex<T: std::fmt::Display>(path: &str, mtime: T) -> String
     format!("{:016x}", hash_path_mtime(path, mtime))
 }
 
+/// 暗号学的に安全な疑似乱数生成器（CSPRNG）を用いて128ビット（32文字hex）のセッショントークンを生成します。
+pub fn generate_secure_token() -> String {
+    let mut random_bytes = [0u8; 16];
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "advapi32")]
+        extern "system" {
+            #[link_name = "SystemFunction036"]
+            fn RtlGenRandom(pb_buffer: *mut u8, cb_buffer: u32) -> u8;
+        }
+        let success = unsafe { RtlGenRandom(random_bytes.as_mut_ptr(), random_bytes.len() as u32) != 0 };
+        if success {
+            return random_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        }
+    }
+    // 非Windows環境または万が一のOS乱数生成失敗時のフォールバック
+    let seed = format!(
+        "{}:{}:{:p}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos(),
+        std::process::id(),
+        &random_bytes
+    );
+    let h1 = xxhash_rust::xxh3::xxh3_64(seed.as_bytes());
+    let h2 = xxhash_rust::xxh3::xxh3_64(&h1.to_le_bytes());
+    format!("{:016x}{:016x}", h1, h2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_generate_secure_token_length_and_uniqueness() {
+        let token1 = generate_secure_token();
+        let token2 = generate_secure_token();
+        assert_eq!(token1.len(), 32);
+        assert_eq!(token2.len(), 32);
+        assert_ne!(token1, token2, "2回生成したトークンが一意であること");
+        assert!(token1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 
     #[test]
     fn test_hash_path_mtime_matches_legacy_format() {

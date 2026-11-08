@@ -93,6 +93,18 @@ pub fn calculate_range(
     }
 }
 
+/// タイミング攻撃を防ぐため、一定時間でバイト列を比較します。
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut res = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        res |= x ^ y;
+    }
+    res == 0
+}
+
 #[tauri::command]
 pub fn get_video_server_port(state: tauri::State<'_, AppState>) -> u16 {
     state.video_server_port
@@ -177,7 +189,7 @@ pub fn start_local_video_server(
                                 }
                             }
                         }
-                        if req_token != token.as_str() {
+                        if !constant_time_eq(req_token.as_bytes(), token.as_bytes()) {
                             let resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nForbidden";
                             let _ = stream.write_all(resp.as_bytes());
                             return;
@@ -550,5 +562,14 @@ mod tests {
 
         let res_zero = calculate_range(Some("bytes=-0"), file_size, 2 * 1024 * 1024);
         assert_eq!(res_zero, RangeSpec::NotSatisfiable);
+    }
+
+    #[test]
+    fn test_constant_time_eq() {
+        assert!(constant_time_eq(b"token_12345", b"token_12345"));
+        assert!(!constant_time_eq(b"token_12345", b"token_12346"));
+        assert!(!constant_time_eq(b"token_12345", b"token_1234"));
+        assert!(!constant_time_eq(b"token_1234", b"token_12345"));
+        assert!(constant_time_eq(b"", b""));
     }
 }
