@@ -1583,10 +1583,12 @@ fn get_smart_folder_counts(
     result
 }
 
-#[tauri::command]
-fn set_rating(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
+/// ファイルのレーティングを更新してデータベースおよびメモリ上の状態に反映する。
+/// レーティングフィルタが有効な場合またはソートキーが `"rating"` の場合のみ `apply_filters_and_sort` を実行し、
+/// それ以外の場合は既存の `filtered_files` の順序・内容が変化しないため O(1) で現在の件数を返却する。
+fn set_rating_inner(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
     path: String,
     rating: u8,
 ) -> usize {
@@ -1608,14 +1610,33 @@ fn set_rating(
             lock.insert(clean_path.clone(), rating);
         }
     }
-    let _ = app.emit_all(
-        "rating-changed",
-        RatingPayload {
-            path: clean_path,
-            rating,
-        },
-    );
-    apply_filters_and_sort(Some(&app), &state)
+    if let Some(app_handle) = app {
+        let _ = app_handle.emit_all(
+            "rating-changed",
+            RatingPayload {
+                path: clean_path,
+                rating,
+            },
+        );
+    }
+
+    let rating_filter_active = *state.rating_filter_val.lock() > 0;
+    let sort_by_rating = state.sort_config.read().key == "rating";
+    if rating_filter_active || sort_by_rating {
+        apply_filters_and_sort(app, state)
+    } else {
+        state.filtered_files.read().len()
+    }
+}
+
+#[tauri::command]
+fn set_rating(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    path: String,
+    rating: u8,
+) -> usize {
+    set_rating_inner(Some(&app), &state, path, rating)
 }
 
 fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
@@ -11125,5 +11146,84 @@ mod viewer_tests {
             Ok(("C:/folder/sample.png".to_string(), Some(12345), "abcdef0123456789".to_string())),
             "正しいトークンと許可拡張子の場合はパラメータが正常に抽出されること"
         );
+    }
+
+    #[test]
+    fn test_set_rating_fastpath_and_resort() {
+        use std::sync::Arc;
+
+        let state = create_test_app_state("C:\\test_rating");
+        *state.all_files.write() = vec![
+            Arc::new(ImageFile {
+                name: "a.png".to_string(),
+                ext: ".png".into(),
+                path: "C:\\test_rating\\a.png".to_string(),
+                size: 100,
+                mtime: 1000,
+                ctime: 1000,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 100,
+                height: 100,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: Default::default(),
+            }),
+            Arc::new(ImageFile {
+                name: "b.png".to_string(),
+                ext: ".png".into(),
+                path: "C:\\test_rating\\b.png".to_string(),
+                size: 100,
+                mtime: 2000,
+                ctime: 2000,
+                has_thumbnail_cache: false,
+                has_metadata_cache: false,
+                width: 100,
+                height: 100,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: Default::default(),
+            }),
+        ];
+        apply_filters_and_sort(None, &state);
+        let paths_before = Arc::clone(&state.image_paths.read());
+
+        // 1. ソートキーが "name" かつレートフィルタ無効 (0) の場合:
+        //    全件再ソート・image_paths再生成をスキップし、O(1) で件数を返すこと
+        let count = set_rating_inner(None, &state, "C:/test_rating/b.png".to_string(), 5);
+        assert_eq!(count, 2);
+        assert_eq!(state.ratings.read().get("C:\\test_rating\\b.png"), Some(&5));
+        let paths_after = Arc::clone(&state.image_paths.read());
+        assert!(
+            Arc::ptr_eq(&paths_before, &paths_after),
+            "レートフィルタ無効かつソートキーがrating以外の場合は全件再構築をスキップすること"
+        );
+
+        // 2. ソートキーが "rating" (降順) の場合:
+        //    set_rating_inner 実行時に再ソートが行われ、高評価の b.png が先頭に来ること
+        {
+            let mut sort_cfg = state.sort_config.write();
+            sort_cfg.key = "rating".to_string();
+            sort_cfg.asc = false;
+        }
+        let count_sorted = set_rating_inner(None, &state, "C:/test_rating/a.png".to_string(), 2);
+        assert_eq!(count_sorted, 2);
+        assert_eq!(state.filtered_files.read()[0].name, "b.png");
+        assert_eq!(state.filtered_files.read()[1].name, "a.png");
+
+        // 3. レートフィルタが有効 (>= 4) の場合:
+        //    b.png のレートを 3 に下げるとフィルタが再適用されて 0 件になること
+        *state.rating_filter_val.lock() = 4;
+        *state.rating_filter_op.lock() = "gte".to_string();
+        let count_filtered = set_rating_inner(None, &state, "C:/test_rating/b.png".to_string(), 3);
+        assert_eq!(count_filtered, 0);
     }
 }
