@@ -1222,7 +1222,7 @@ class UIManager {
           let className = 'common';
           if (mode === 'left' && !otherSet.has(t)) className = 'removed';
           if (mode === 'right' && !otherSet.has(t)) className = 'added';
-          return `<span class="diff-tag ${className}">${t}</span>`;
+          return `<span class="diff-tag ${className}">${escapeHtml(t)}</span>`;
         }).join('');
       };
 
@@ -1241,9 +1241,9 @@ class UIManager {
       if (isParam) {
         const renderParamText = (val, mode) => {
           if (val === '-') return '<span class="diff-tag-empty">なし</span>';
-          if (!hasDiff) return `<span class="diff-param-text">${val}</span>`;
+          if (!hasDiff) return `<span class="diff-param-text">${escapeHtml(val)}</span>`;
           const diffClass = mode === 'left' ? 'removed' : 'added';
-          return `<span class="diff-param-text ${diffClass}">${val}</span>`;
+          return `<span class="diff-param-text ${diffClass}">${escapeHtml(val)}</span>`;
         };
         body1Html = renderParamText(v1, 'left');
         body2Html = renderParamText(v2, 'right');
@@ -1270,7 +1270,7 @@ class UIManager {
           } else {
             modifier = ' sublabel-tag--muted';
           }
-          return `<span class="sublabel-tag${modifier}">[${lbl}]</span>`;
+          return `<span class="sublabel-tag${modifier}">[${escapeHtml(lbl)}]</span>`;
         });
         return `<span class="sublabel-tags-wrapper">${spans.join('')}</span>`;
       };

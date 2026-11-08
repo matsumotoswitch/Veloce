@@ -70,7 +70,7 @@ function getMediaHeight(media) {
  * @param {number} [duration=3000] - 表示時間 (ms)
  * @param {string} [type='info'] - トースト種別 ('info' | 'success' | 'warning' | 'error')
  */
-export function showToast(message, duration = 3000, type = 'info') {
+export function showToast(message, duration = 3000, type = 'info', options = {}) {
   let container = document.getElementById('toast-container');
   if (!container) {
     container = document.createElement('div');
@@ -80,7 +80,7 @@ export function showToast(message, duration = 3000, type = 'info') {
 
   const toast = document.createElement('div');
   toast.className = `toast-message ${type}`;
-  if (typeof message === 'string' && message.includes('<') && message.includes('>')) {
+  if (options && options.isHtml === true && typeof message === 'string') {
     toast.innerHTML = message;
   } else {
     toast.textContent = message;

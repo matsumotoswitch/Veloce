@@ -40,8 +40,8 @@ describe('Utils', () => {
   });
 
   describe('escapeHtml', () => {
-    it('should escape HTML special characters', () => {
-      expect(escapeHtml('<div>&"Test"</div>')).toBe('&lt;div&gt;&amp;&quot;Test&quot;&lt;/div&gt;');
+    it('should escape HTML special characters including single quotes', () => {
+      expect(escapeHtml('<div>&"Test"\'</div>')).toBe('&lt;div&gt;&amp;&quot;Test&quot;&#39;&lt;/div&gt;');
     });
 
     it('should handle non-string inputs gracefully', () => {

@@ -54,13 +54,23 @@ describe('Viewer Toast Notification', () => {
     expect(toasts[1].classList.contains('success')).toBe(true);
   });
 
-  it('should support HTML content like SVG star icons for ratings', () => {
+  it('should support HTML content like SVG star icons for ratings when isHtml is true', () => {
     const starSvg = '<svg class="rating-star-icon"></svg>5';
-    showToast(starSvg, 3000, 'info');
+    showToast(starSvg, 3000, 'info', { isHtml: true });
 
     const toast = document.querySelector('.toast-message');
     expect(toast.innerHTML).toBe(starSvg);
     expect(toast.querySelector('.rating-star-icon')).not.toBeNull();
+  });
+
+  it('should treat HTML tags as plain text by default when isHtml is not true to prevent XSS', () => {
+    const malicious = '<img src=x onerror=alert(1)>test-tag';
+    showToast(malicious, 3000, 'info');
+
+    const toast = document.querySelector('.toast-message');
+    expect(toast.textContent).toBe(malicious);
+    expect(toast.querySelector('img')).toBeNull();
+    expect(toast.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;test-tag');
   });
 
   it('should remove show class and remove element from DOM after duration', () => {
