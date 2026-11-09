@@ -12075,4 +12075,94 @@ mod viewer_tests {
             "Stable Diffusion WebUI"
         );
     }
+
+    /// [Phase 9-4] ローカル HTTP サーバーのサムネイル GET における同一 TCP 接続 `keep-alive` 連続応答テスト
+    #[test]
+    fn test_local_server_thumbnail_keep_alive() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        let (db_tx, _db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
+        let state = create_test_app_state("C:\\");
+        let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let test_token = "keep_alive_token_789";
+
+        let cached_path = "C:\\test\\keep_alive_thumb.png";
+        let mtime = 77777u64;
+        let hash_key = crate::utils::hash_path_mtime_hex(cached_path, mtime);
+        let dummy_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46, 0xFF, 0xD9];
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![&hash_key, &dummy_jpeg, cached_path, mtime],
+            )
+            .unwrap();
+        }
+
+        let port = start_local_video_server(
+            db_tx,
+            app_handle_slot,
+            state.db_conn.clone(),
+            test_token.to_string(),
+        );
+
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut reader = BufReader::new(stream);
+
+        // 1回目: Connection: keep-alive でキャッシュ済みサムネイルを要求 -> 200 OK + Connection: keep-alive
+        let req1 = format!(
+            "GET /?path={}&mtime={}&thumb=1&hash={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: keep-alive\r\n\r\n",
+            urlencoding::encode(cached_path),
+            mtime,
+            hash_key,
+            test_token,
+            port
+        );
+        reader.get_mut().write_all(req1.as_bytes()).unwrap();
+
+        let mut status1 = String::new();
+        reader.read_line(&mut status1).unwrap();
+        assert!(status1.starts_with("HTTP/1.1 200 OK"));
+
+        let mut content_len1 = 0usize;
+        let mut saw_keep_alive = false;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.starts_with("content-length:") {
+                content_len1 = lower["content-length:".len()..].trim().parse().unwrap();
+            } else if lower.starts_with("connection:") && lower.contains("keep-alive") {
+                saw_keep_alive = true;
+            }
+        }
+        assert!(saw_keep_alive, "keep-alive ヘッダが返却されること");
+        assert_eq!(content_len1, dummy_jpeg.len());
+        let mut body1 = vec![0u8; content_len1];
+        reader.read_exact(&mut body1).unwrap();
+        assert_eq!(body1, dummy_jpeg);
+
+        // 2回目: 同じ TCP ストリームを再利用して 2 件目のサムネイル GET（未キャッシュ -> 404）を送信
+        let req2 = format!(
+            "GET /?path={}&mtime=1&thumb=1&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+            urlencoding::encode("C:\\test\\missing_second.png"),
+            test_token,
+            port
+        );
+        reader.get_mut().write_all(req2.as_bytes()).unwrap();
+
+        let mut status2 = String::new();
+        reader.read_line(&mut status2).unwrap();
+        assert!(
+            status2.starts_with("HTTP/1.1 404 Not Found"),
+            "同一 TCP 接続上の 2 回目のリクエストも再接続なしで正常に応答されること"
+        );
+    }
 }
