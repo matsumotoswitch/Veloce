@@ -9,10 +9,11 @@
 ### 1.1 技術スタック & コア最適化
 * **基本設計思想:** 確実にサムネイル表示が行われ、正常に動作することを大前提とした上で極限の速度を追求する。特定の破損ファイルや環境依存のAPI遅延によって処理が沈黙（ハングアップ）しないよう、タイムアウト制御やフェイルセーフを徹底した堅牢な基盤の上に最適化を構築する。
 * **バックエンド:** Rust (Tauri v1)
-  * **モジュール分離アーキテクチャ:** 保守性と凝集度を高めるため、ドメイン・責務ごとに7つのモジュールへ分割（`main.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）。
+  * **モジュール分離アーキテクチャ:** 保守性と凝集度を高めるため、ドメイン・責務ごとに8つのモジュールへ分割（`main.rs`, `audio.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）。
     * `main.rs`: アプリケーション初期化、Tauri コマンドハンドラ、ファイル監視、DBマイグレーション統括
-    * `models.rs`: 画像メタデータ、スマートフォルダ定義、IPCリクエスト/レスポンスの型定義
-    * `server.rs`: ローカルHTTPストリーミングサーバー（動画2MBチャンク配信およびサムネイルバイナリ直接保存）
+    * `audio.rs`: `lofty` クレートを用いたMP3音声メタデータ（ID3タグ、再生時間、FFmpeg `TXXX` 拡張タグ）および埋め込みカバーアート（APIC）の抽出
+    * `models.rs`: 画像・音声メタデータ、スマートフォルダ定義、IPCリクエスト/レスポンスの型定義
+    * `server.rs`: ローカルHTTPストリーミングサーバー（動画・音声の2MBチャンクRange配信、MP3カバーアート配信、短時間keep-alive、およびサムネイルバイナリ直接保存）
     * `settings.rs`: SQLite設定DB (`veloce_settings.db`) の管理、設定CRUDおよびWALチェックポイント
     * `state.rs`: スレッドセーフなグローバル状態管理（`AppState`）、高速ハッシャーマップ
     * `utils.rs`: パス正規化、ハッシュ生成、Windows APIバインディング等のユーティリティ
@@ -36,7 +37,7 @@
       * `preload.js`: Tauri IPCブリッジ、起動初期化
       * `utils.js`: 汎用ユーティリティ（デバウンス、DevTools無効化、ストリームURL等）
       * `path-utils.js`: パス正規化、親ディレクトリ取得、ファイル名/フォルダ名バリデーションの一元管理（`validateFilename`）
-      * `metadata-format.js`: AIメタデータ解析（PNG/WebP）、プロンプトハイライト
+      * `metadata-format.js`: AIメタデータ解析（PNG/WebP/JPEG）、MP3音声メタデータ整形（タイトル・アーティスト・アルバム・歌詞・コメント・録音日時フォーマット）、プロンプトハイライト
       * `dialog-base.js`: 共通ダイアログ基盤、キーボード/オーバーレイハンドラー
       * `settings-store.js`: SQLite (`veloce_settings.db`) を Single Source of Truth とするアプリケーション設定ストア。起動時に4条件調停（localStorage/DBの有無の組み合わせ）で設定を最新化し、メモリ内キャッシュによるO(1)同期取得・100msデバウンスでのSQLiteバッチ書き込み。タブ状態、ペインレイアウト、スマートフォルダ定義、フォルダ別ソート設定等の永続化を一元管理
     * **メインウィンドウ (`src/renderer/`):**
@@ -65,7 +66,7 @@
 
 ### 1.2 動作環境要件
 * **OS:** Windows 8.1 環境（WebView2 v109 / Chromium 109 互換）への完全準拠。
-* **UI制約:** 文字化けや環境依存を防ぐため、システム内での絵文字（⭐や✖など）の使用は厳禁とし、すべて高品質な **SVGアイコン（`ICON_SVGS`）で代替**。
+* **UI制約:** 文字化けや環境依存を防ぐため、システム内での絵文字（星記号やバツ記号など）の使用は厳禁とし、すべて高品質な **SVGアイコン（`ICON_SVGS`）で代替**。
 * **JS/CSS制約:** 古いChromium互換のため、最新のECMAScript配列メソッドやCSSネストなどの利用制限を遵守。
 
 ---
@@ -75,7 +76,7 @@
 ### 2.1 独立マルチビューアーウィンドウ
 * **ウィンドウ制御 (Window Pool):** メイン画面から完全に独立した子ウィンドウを展開。ウィンドウの都度生成・破棄によるWebView2の起動遅延やGC負荷を防止するため、既存の非表示ウィンドウを再利用する Window Pool パターンを採用。セッション開始時に `viewer-init-session` イベントでインデックス・パス・総件数を安全に同期して初期化。多重起動時はショートカット（`L` キー）でモニターの有効ワークエリアに合わせて**横一列に素早く自動整列**。
 * **Windows 8.1 前面化ハック:** 整列時、バックエンド側で別スレッドから `SetForegroundWindow` および `SetWindowPos (HWND_TOPMOST)` をミリ秒遅延させて呼び出し、古いOS特有のウィンドウフォーカス奪取問題を物理的に解決。
-* **メディア表示とフィルター処理:** 静止画像に加え動画（MP4等）の再生に対応し、メディア種別に応じた自然寸法（`videoWidth` / `naturalWidth`）を正確に取得。拡大縮小、回転（左右90度）、水平・垂直反転、等倍（100%）表示、SVGフィルター定義（`feConvolveMatrix` によるアンシャープマスク）を用いた小数倍率拡大時の輪郭鮮鋭化に対応。
+* **メディア表示とフィルター処理:** 静止画像に加え動画（MP4等）および音声（MP3）の再生に対応し、メディア種別に応じた自然寸法（`videoWidth` / `naturalWidth`、カバーなし音声プレースホルダ時は仮想480×480）を正確に取得。音声ファイル表示時は埋め込みカバーアートまたはプレースホルダを表示しつつ `<audio>` 要素で自動再生し、コントロールバーを常時表示（縦型音量ポップアップによる音量調整・ミュート切替および設定永続化に対応）。拡大縮小、回転（左右90度）、水平・垂直反転、等倍（100%）表示、SVGフィルター定義（`feConvolveMatrix` によるアンシャープマスク）を用いた小数倍率拡大時の輪郭鮮鋭化に対応。
 * **メタデータ表示オーバーレイ (`I` キー):** ビューアー画面上で `I` キーを押すことで、半透明のメタデータオーバーレイを呼び出してプロンプト・生成パラメータ詳細を確認・タグコピー可能（従来のPキーからIキーに一本化）。
 * **ダブルバッファリング（DOM Swap）描画:** ビューアーの画像切り替え時、直接 `src` を書き換えて発生するチラつきやデコード遅延を防ぐため、裏で非表示の `Image` オブジェクトに先行して画像をデコード（`onload` / `onerror` 待機）させ、完了した瞬間に `replaceChildren()` でコンテナごとDOMをすり替えるゼロ遅延レンダリング機構を実装。
 * **隣接画像プリロード並列化:** 表示中の画像の前後の隣接画像を `Promise.all` により並列プリフェッチ。ループ表示時のインデックス循環解決を含め、高速な画像切り替え時のレスポンスを確保。
@@ -107,7 +108,8 @@
 4. **NovelAI V4 / V4.5 特殊対応:** JSON内のマルチキャラクタープロンプト（`v4_prompt/caption/char_captions`）およびネガティブ側を自動パースし、フロントエンド側で `characterPrompts` 配列（`prompt`, `uc`）に再構造化して保持。
 5. **ランダマイザ（採用プロンプト）対応:** NovelAIの `||A|B||` 書式によるランダム抽選を検出。`Comment` 内の `actual_prompts` JSON構造から、ベースプロンプトおよび各キャラクタープロンプト・除外要素の「実際に採用された値」を抽出し `adoptedPrompt` として格納。抽選前プロンプト（ランダマイザ書式を含む）と採用後プロンプトの両方をインスペクター・ビューアーオーバーレイ・パラメータDiffモーダルに表示し、FTS5検索インデックスにも含める。
 6. **A1111 / WebUI形式フォールバック:** parameters 内の `Steps: ` 等の文字列パターンを検出し、自動的に `rawParameters` フィールドに格納してパース。
-7. **情報ソース判定と表示:** 画像バイナリの解析経路に応じた出処（`PNG Chunks`, `Alpha Channel`, `WebP EXIF`, `JPEG EXIF`）を判定し、SQLite `cache` テーブルの `metadata_source` カラムに永続化。インスペクター・独立ビューアー・差分表示の「プロンプト」見出し横にサブラベルタグとして表示。アルファチャンネル（Stealth PNGInfo）検出時のみゴールド色（`--glow-gold`）で強調し、通常ソースは控えめな文字色（`opacity: 0.6`）で統一。
+7. **MP3音声メタデータ解析 (`lofty`):** ID3v2 / ID3v1 タグおよびオーディオプロパティからタイトル、アーティスト、アルバム、歌詞（`USLT` および FFmpeg 等が出力する `TXXX: USLT`）、コメント（`COMM` および `TXXX: comment`）、録音日時（`TDRC` 等を `yyyy/mm/dd hh:mm:ss` 書式に正規化）、再生時間、ならびに埋め込みカバー画像（`APIC` JPEG/PNG）を抽出。カバー画像は通常画像と同一のリサイズパイプラインを通じてSQLiteサムネイルキャッシュへ保存。タグ欠損や破損ファイルでもパニックせず安全に処理を継続。
+8. **情報ソース判定と表示:** メタデータの解析経路に応じた出処（`PNG Chunks`, `Alpha Channel`, `WebP EXIF`, `WebP XMP`, `JPEG EXIF`, `JPEG XMP`, `ID3`）を判定し、SQLite `cache` テーブルの `metadata_source` カラムに永続化。インスペクター・独立ビューアー・差分表示の「プロンプト」見出し横にサブラベルタグとして表示。アルファチャンネル（Stealth PNGInfo）検出時のみゴールド色（`--glow-gold`）で強調し、通常ソースは控えめな文字色（`opacity: 0.6`）で統一。
 
 ### 3.2 フロントエンド・インスペクター & DOM Pool
 * **DOM Pool（要素の再利用）:** インスペクターに大量のプロンプトタグやパラメータを描画する際、メモリ解放（GC）によるガタつきを排除するため、`inspectorSectionPool` および `inspectorTagPool` を実装。画面更新時はDOM要素を一度も破棄せず、`display = 'none'` による非表示化と中身の `replaceChildren()` による書き換えだけで要素を高速に再利用。
@@ -131,11 +133,11 @@
 6. **キューの即時破棄（Abort）機構:** 別フォルダへの移動や「ソート順の変更」、および「**タブの切り替え**」が行われた際は、現在バックグラウンドで実行中・待機中のすべてのサムネイルタスクに対して世代管理（`generation`）と `AbortController` で即座に中断シグナルを発行しキューを破棄する。これにより、古い画面状態や非アクティブタブのタスクが、現在表示中のタブの処理をブロックする遅延を完全に防ぐ。
 7. **キャッシュ再構築の即時反映:** ユーザーが「選択項目のキャッシュ再構築」を実行した際、再生成された画像をブラウザのハードキャッシュを回避して即座に画面へ反映させるため、画像URLにキャッシュバスター（`&_cb=日時`）を付与し、画面のリロードなしで即座にUIをアップデートする。
 
-### 4.2 動画対応・ストリーミングサーバー
-* **ネイティブ動画サムネイル抽出:** MP4動画ファイルのサムネイルを要求された場合、Windows環境では組み込みの `ffmpeg.exe`（存在する場合、非ウィンドウモード `CREATE_NO_WINDOW` で実行）または Windows ネイティブの `IShellItemImageFactory`（Shell API）を呼び出し、動画の1秒目のフレームからダイレクトにビットマップ（BGRA→RGBA変換）を抽出し、高速にPNGデータとしてフロントエンドに返却。
-* **ローカルHTTP動画サーバー:** 大容量の動画（MP4）をWebView2でスムーズに再生するため、Rust側でランダムな空きポートを使って `TcpListener` をホストする軽量なオンデマンドHTTPサーバーが稼働。
-* **2MB制限チャンクストリーミング:** 動画再生時、ブラウザ側からの `Range: bytes=...` ヘッダーを解析。バックエンド側でファイルのシーク位置（`SeekFrom::Start`）を調整し、**1回のリクエストに対する返却サイズを最大2MBに厳格に制限**して部分配信（`206 Partial Content`）を行うことで、大容量動画でもメモリを圧迫せずに即時シーク・再生可能。
-* **イベント駆動型シークバー同期:** 動画シークバーの位置更新は、従来のポーリング（`setInterval`）を廃止し、`<video>` 要素の `timeupdate` イベント委譲による駆動方式を採用。動画再生中のCPU使用率を大幅に低減。
+### 4.2 動画・音声対応・ストリーミングサーバー
+* **ネイティブ動画・音声サムネイル抽出:** MP4動画ファイルのサムネイルを要求された場合、Windows環境では組み込みの `ffmpeg.exe`（存在する場合、非ウィンドウモード `CREATE_NO_WINDOW` で実行）または Windows ネイティブの `IShellItemImageFactory`（Shell API）を呼び出し、動画の1秒目のフレームからダイレクトにビットマップ（BGRA→RGBA変換）を抽出し、高速にPNGデータとしてフロントエンドに返却。MP3音声ファイルでは埋め込みカバー画像（APIC）を抽出して通常画像と同じリサイズ経路でサムネイル化し、カバー未収録時はMusicアイコンのSVGプレースホルダへフォールバック。
+* **ローカルHTTPメディアサーバー（短時間keep-alive対応）:** 大容量の動画（MP4）や音声（MP3、`Content-Type: audio/mpeg`）のスムーズな再生、およびMP3埋め込みカバー画像（`/audio-cover`）やサムネイルの高速配信のため、Rust側でランダムな空きポートと一意のセッショントークン（`?token=...`）を使って `TcpListener` をホストする軽量なHTTPサーバーが稼働。短時間HTTP keep-aliveにより連続リクエスト時の接続オーバーヘッドを削減。
+* **2MB制限チャンクストリーミング:** 動画・音声再生時、ブラウザ側からの `Range: bytes=...` ヘッダーを解析。バックエンド側でファイルのシーク位置（`SeekFrom::Start`）を調整し、**1回のリクエストに対する返却サイズを最大2MBに厳格に制限**して部分配信（`206 Partial Content`）を行うことで、大容量メディアでもメモリを圧迫せずに即時シーク・再生可能。
+* **イベント駆動型コントロールバーと縦型音量ポップアップ:** シークバーの位置更新はポーリング（`setInterval`）を排し、`<video>` / `<audio>` 要素の `timeupdate` イベント駆動方式を採用。また右端スピーカーボタンからWindows 8.1風の縦型音量スライダ＋ミュート切替ポップアップを開閉でき、音量・ミュート状態を設定ストアへ永続化。
 
 ### 4.3 仮想スクロール（バーチャルスクロール）
 * **通信ボトルネックの排除:** フォルダ内に数万枚の画像があっても、Rust側で状態（`all_files` / `filtered_files`）をSource of Truthとして保持し、JS側には総件数（`total_count`）のみを通知。JS側の仮想スクロールの描画領域に必要な分（例：100件ずつ）だけ、`get_items(offset, limit)` IPCコマンドでピンポイントにスライスして取得。
@@ -167,8 +169,8 @@
 | **prompt** | `contains` / `not_contains` | **FTS5 全文検索:** `c.rowid IN/NOT IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?)`<br>※構文エラー時やフォールバック時はエスケープ付き `searchable_prompt LIKE ? ESCAPE '\\'` を使用 |
 | **negative_prompt** | `contains` / `not_contains` | **FTS5 全文検索:** `c.rowid IN/NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)`<br>※フォールバック時は `searchable_negative_prompt LIKE ? ESCAPE '\\'` を使用 |
 | **source** | `==` / `!=`<br>(`contains` / `not_contains`) | UI上では一致・不一致を選択。FTS5 MATCH 検索または `searchable_source LIKE ? ESCAPE '\\'` による評価 |
-| **rating** | `>=`, `<=`, `==`, `!=` | `coalesce(r.rating, 0)` を用いた数値評価。<br>**INNER JOIN 最適化:** 条件結合が `all` かつ評価値が 1 以上の正の条件（`>=`, `>`, `==`）の場合、`ratings r INNER JOIN cache c` に自動切り替え、インデックス結合で高速化 |
-| **width** / **height** | `<=`, `==`, `>=` | `c.width` / `c.height` に対する数値評価 |
+| **rating** | `>=`, `>`, `<=`, `<`, `==`, `!=` | `coalesce(r.rating, 0)` を用いた数値評価。<br>**INNER JOIN 最適化:** 条件結合が `all` かつ評価値が 1 以上の正の条件（`>=`, `>`, `==`）の場合、`ratings r INNER JOIN cache c` に自動切り替え、インデックス結合で高速化 |
+| **width** / **height** | `<=`, `<`, `==`, `!=`, `>=`, `>` | `c.width` / `c.height` に対する数値評価 |
 | **aspect_ratio** | `portrait` | 縦長画像判定公式: `(width * 100 < height * 95)` |
 | | `landscape` | 横長画像判定公式: `(width * 100 > height * 105)` |
 | | `square` | 正方形判定公式: `(width * 100 >= height * 95 AND width * 100 <= height * 105)` |
@@ -251,10 +253,10 @@
 * `L`: 開いているすべての独立ビューアーウィンドウを作業領域に合わせて横一列に自動整列。
 * `B`: ウィンドウ外枠（アクセントボーダー）および右上コントロール群の表示 / 非表示切り替え。
 * `I`: メタデータオーバーレイ（プロンプト・生成パラメータ詳細）の表示 / 非表示切り替え。
-* `S`: 動画のシークバーの表示 / 非表示切り替え。
+* `S`: 動画・音声のコントロールバー（シークバー・音量調整）の表示 / 非表示切り替え。
 * `U`: 画像のシャープ表示（SVGアンシャープマスクフィルター） / 滑らか表示の切り替え。
 * `Delete`: 現在表示中の画像をゴミ箱へ移動し、自動的に次の画像を表示。
-* `Esc`: ビューアーウィンドウを閉じる。
+* `Esc`: ビューアーウィンドウを閉じる（音量ポップアップ表示中はポップアップのみを閉じる）。
 
 ### 6.7 フロントエンド状態アーキテクチャとサブドメイン局所化
 巨大な単一グローバル状態（`appState`）の肥大化・強結合を解消するため、責任範囲ごとに4つのサブドメイン状態オブジェクトへ分割・局所化を実施。既存呼び出し元および全ユニットテストとの互換性を完全に保つため、`AppState` クラス上に ES6 ゲッター/セッターによる透過的プロキシ（Facade）を設置している。
@@ -273,6 +275,6 @@
 ### 7.1 コードコメントとドキュメンテーション品質規範
 * **場当たり的・カジュアルなコメントの排除:** 不具合修正時の一時的なチケットIDや「〜対策」等の短絡的コメントは一切残さず、修正理由をブラウザのレンダリングパイプライン（Chromium 109 / WebView2 同期Reflow）、OS API（Windows 8.1 論理ドライブビットマスク）、非同期並行排他制御（`_runWithUpdateLock`）などの**客観的な技術的根拠・設計意図としてコメントに昇華**する方針を徹底。
 * **Rust / JS 双方向でのドキュメンテーション標準化:**
-  * **Rust (`src-tauri/src/`):** クレートレベル（`//!`）および各モジュール（`main.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）でmimalloc、SQLite WAL/mmap、xxh3_64、jwalk並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `save_thumbnail`, `parse_metadata`, `build_smart_folder_query` 等）および内部構造体・関数には `///` doc comments を完備。
+  * **Rust (`src-tauri/src/`):** クレートレベル（`//!`）および各モジュール（`main.rs`, `audio.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）でmimalloc、SQLite WAL/mmap、xxh3_64、jwalk並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `save_thumbnail`, `parse_metadata`, `build_smart_folder_query` 等）および内部構造体・関数には `///` doc comments を完備。
   * **JavaScript (`src/common/`, `src/renderer/`, `src/viewer/`):** `renderer-thumbnails.js`（Workerプール/タイムアウト/Blob URL即時描画）、`renderer-ui.js`（仮想スクロール/DOM Pool/排他ロック/ツールチップ・トースト基盤）、`viewer.js`（二重バッファリングDOM Swap/先行プリロード/Unsharp SVGフィルター）、`renderer-folder-tree.js`（ツリー走査/遅延展開）、`renderer-file-ops.js`（ファイル操作/Undo）、`renderer-bookmarks.js`（お気に入り管理）、`renderer-resizer.js`（ペインリサイズ）、`renderer.js`（ライフサイクル/グローバルショートカット統括）の各モジュールヘッダーおよび主要関数にJSDocと設計意図を網羅。
 * **過度な誇張表現・絵文字の厳禁:** コメント内であっても「一瞬」「神速」「爆速」等の過度な誇張表現や絵文字（⭐など）は使用せず、客観的で落ち着いた技術的表現を用いる。
