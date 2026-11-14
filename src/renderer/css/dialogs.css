@@ -421,6 +421,14 @@ input:-webkit-autofill:focus {
   overflow-y: auto;
 }
 
+/* 複数行プレーンテキスト表示用（コメント・歌詞等、フォントは通常UIと統一） */
+.prompt-look.text-box {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
 .sublabel-tags-wrapper {
   display: flex;
   gap: 4px;
@@ -459,7 +467,7 @@ input:-webkit-autofill:focus {
 }
 
 /* Diffモーダル内では左右比較のため一定の最小高さを維持 */
-.diff-section .prompt-look:not(.param-box):not(.raw-box) {
+.diff-section .prompt-look:not(.param-box):not(.raw-box):not(.text-box) {
   min-height: 120px;
 }
 
@@ -1040,6 +1048,37 @@ kbd {
   /* Gold/Yellow star */
   width: 12px;
   height: 12px;
+}
+
+.media-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background-color: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  color: var(--text-on-overlay);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: var(--font-size-xs);
+  font-weight: bold;
+  letter-spacing: 0.4px;
+  display: none;
+  align-items: center;
+  gap: 3px;
+  z-index: 10;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.media-badge.show {
+  display: flex;
+}
+
+.thumbnail-item:hover .media-badge {
+  background-color: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .rating-star-icon {

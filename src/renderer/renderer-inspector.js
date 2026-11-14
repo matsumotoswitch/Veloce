@@ -515,8 +515,8 @@ export async function renderMetadata(file, options = {}) {
           secEl.box.appendChild(mapWrapper);
           secEl.box.appendChild(coordsContainer);
         }
-      } else if (section.isRaw) {
-        secEl.box.className = 'prompt-look raw-box';
+      } else if (section.isRaw || section.isText) {
+        secEl.box.className = section.isText ? 'prompt-look text-box' : 'prompt-look raw-box';
         secEl.box.style.cssText = '';
         const rawText = String(section.value);
         if (termsRegex) {

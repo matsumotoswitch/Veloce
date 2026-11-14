@@ -58,6 +58,18 @@ html.viewer-html,
   background-size: var(--checkerboard-size) var(--checkerboard-size);
 }
 
+.viewer-body #viewer-img.audio-placeholder {
+  background-image: none;
+  background-color: rgba(var(--panel-rgb), 0.35);
+  width: 480px;
+  height: 480px;
+  max-width: 100vw;
+  max-height: 100vh;
+  padding: 96px;
+  box-sizing: border-box;
+  border-radius: var(--radius-md);
+}
+
 .viewer-body #viewer-img.is-zoomed {
   max-width: none;
   max-height: none;
@@ -373,10 +385,10 @@ html.viewer-html,
   max-width: 800px;
   background: rgba(var(--panel-rgb), 0.65);
   border-radius: var(--radius-md);
-  padding: 10px 20px;
+  padding: 8px 14px;
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 10px;
   box-shadow: var(--popup-shadow);
   border: 1px solid var(--border-color);
   z-index: 10001;
@@ -389,8 +401,14 @@ html.viewer-html,
   background: rgba(var(--panel-rgb), 0.95);
 }
 
+#video-controls-container.volume-popup-open {
+  opacity: 0.95;
+  background: rgba(var(--panel-rgb), 0.95);
+}
+
 #video-seek-bar {
-  flex-grow: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   cursor: pointer;
 }
 
@@ -400,7 +418,8 @@ html.viewer-html,
   font-size: var(--font-size-base);
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  min-width: 80px;
+  white-space: nowrap;
+  flex-shrink: 0;
   text-align: right;
   user-select: none;
 }
@@ -416,6 +435,7 @@ html.viewer-html,
   padding: 5px;
   border-radius: var(--radius-xs);
   transition: background-color 0.2s;
+  flex-shrink: 0;
 }
 
 #video-play-btn:hover {
@@ -424,6 +444,84 @@ html.viewer-html,
 
 #video-play-btn svg {
   fill: currentColor;
+}
+
+#video-controls-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+#video-volume-btn-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+#video-volume-btn,
+#video-mute-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-color);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: var(--radius-xs);
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+}
+
+#video-volume-btn:hover,
+#video-mute-btn:hover {
+  background-color: var(--accent-subtle);
+}
+
+#video-volume-btn svg,
+#video-mute-btn svg {
+  stroke: currentColor;
+  fill: none;
+}
+
+#video-volume-popup {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 6px 6px;
+  background: rgba(var(--panel-rgb), 0.96);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--popup-shadow);
+  z-index: 10002;
+}
+
+#video-volume-slider-wrapper {
+  width: 24px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+#video-volume-slider {
+  /* Chromium 109 では slider-vertical が独自トラック/サムを無効化するため、水平スライダを回転させてシークバーと見た目を統一する */
+  -webkit-appearance: none;
+  appearance: none;
+  width: 96px;
+  height: 20px;
+  flex-shrink: 0;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+  transform: rotate(-90deg);
 }
 
 .search-highlight {

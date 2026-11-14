@@ -192,7 +192,33 @@ pub fn extract_searchable_strings(meta: &FullMetadata) -> (String, String, Strin
         }
     }
 
-    (p.to_lowercase(), np.to_lowercase(), meta.source.to_lowercase())
+    let mut s = meta.source.clone();
+    if let Some(title) = meta.params.get("title").and_then(|v| v.as_str()) {
+        let trimmed = title.trim();
+        if !trimmed.is_empty() {
+            if !p.is_empty() {
+                p.push(' ');
+            }
+            p.push_str(trimmed);
+        }
+    }
+    if let Some(artist) = meta.params.get("artist").and_then(|v| v.as_str()) {
+        let trimmed = artist.trim();
+        if !trimmed.is_empty() {
+            if !p.is_empty() {
+                p.push(' ');
+            }
+            p.push_str(trimmed);
+            if s.is_empty() {
+                s = trimmed.to_string();
+            } else if !s.to_lowercase().contains(&trimmed.to_lowercase()) {
+                s.push(' ');
+                s.push_str(trimmed);
+            }
+        }
+    }
+
+    (p.to_lowercase(), np.to_lowercase(), s.to_lowercase())
 }
 
 /// アプリケーション専用のローカルデータディレクトリを取得する (`AppData/Local/Veloce`)

@@ -391,6 +391,11 @@ input[type="range"]:focus {
   background-size: var(--checkerboard-size) var(--checkerboard-size);
 }
 
+.thumbnail-img.audio-placeholder {
+  background-image: none;
+  background-color: rgba(var(--panel-rgb), 0.35);
+}
+
 .thumbnail-label {
   position: absolute;
   bottom: 4px;

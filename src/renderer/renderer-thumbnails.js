@@ -21,9 +21,9 @@
 // ============================================================================
 
 import { appState, thumbnailState } from './renderer-state.js';
-import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL } from './renderer-ui.js';
-import { getStreamUrl, debounce, isVideoFile } from '../common/utils.js';
-export { isVideoFile };
+import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL, AUDIO_PLACEHOLDER_URL } from './renderer-ui.js';
+import { getStreamUrl, debounce, isVideoFile, isAudioFile } from '../common/utils.js';
+export { isVideoFile, isAudioFile };
 
 /**
  * サムネイルCanvas塗りつぶし背景色 (var(--bg-darker) から動的解決)
@@ -1349,7 +1349,21 @@ export class ThumbnailQueueManager {
             window.markThumbnailCompleted(filePath);
           }
         } else {
-          failedItems.push(item);
+          if (isAudioFile(filePath)) {
+            this.activeTasks.delete(filePath);
+            if (this.activeBatchPaths) this.activeBatchPaths.delete(filePath);
+            appState.thumbnailUrls.set(filePath, AUDIO_PLACEHOLDER_URL);
+            this.updateDOM(filePath, AUDIO_PLACEHOLDER_URL);
+            if (this._trackedPaths && this._trackedPaths.has(filePath)) {
+              this._trackedPaths.delete(filePath);
+              this.completedCount++;
+            }
+            if (typeof window.markThumbnailCompleted === 'function') {
+              window.markThumbnailCompleted(filePath);
+            }
+          } else {
+            failedItems.push(item);
+          }
         }
       }
 
@@ -1411,13 +1425,18 @@ export class ThumbnailQueueManager {
     try {
       // 1. Rust からキャッシュ取得試行（未キャッシュ確定時または再構築中は不要なIPCラウンドトリップをスキップ）
       let url = null;
-      if (!skipDbCheck && !(appState.rebuiltPaths && appState.rebuiltPaths.has(filePath))) {
+      const isAudio = isAudioFile(filePath);
+      if (isAudio || (!skipDbCheck && !(appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)))) {
         url = await window.veloceAPI.getThumbnail(filePath);
       }
       
       if (signal.aborted) return;
       if (this._dirtyTasks && this._dirtyTasks.has(filePath)) {
         throw new Error('Task invalidated by file-changed');
+      }
+
+      if (!url && isAudio) {
+        url = AUDIO_PLACEHOLDER_URL;
       }
 
       // 2. キャッシュがない場合、非同期に生成
@@ -1613,6 +1632,7 @@ export class ThumbnailQueueManager {
       const img = wrapper.children[0]; // .thumbnail-img
       if (img) {
         img.src = url;
+        img.classList.toggle('audio-placeholder', url === AUDIO_PLACEHOLDER_URL);
         const normWrapper = (wrapper.dataset.filepath || '').replace(/\\/g, '/').toLowerCase();
         const normTarget = (filePath || '').replace(/\\/g, '/').toLowerCase();
         const isMatch = () => normWrapper === normTarget;
@@ -1633,6 +1653,18 @@ export class ThumbnailQueueManager {
             if (!isMatch()) return;
             this.classList.remove('loading');
             wrapper.classList.remove('loading');
+            if (isAudioFile(filePath)) {
+              if (this.src !== AUDIO_PLACEHOLDER_URL) {
+                this.classList.add('audio-placeholder');
+                appState.thumbnailUrls.set(filePath, AUDIO_PLACEHOLDER_URL);
+                if (window.appState && window.appState.thumbnailUrls && window.appState.thumbnailUrls !== appState.thumbnailUrls) {
+                  window.appState.thumbnailUrls.set(filePath, AUDIO_PLACEHOLDER_URL);
+                }
+                if (window.evictThumbnailCache) window.evictThumbnailCache();
+                this.src = AUDIO_PLACEHOLDER_URL;
+              }
+              return;
+            }
             const fallback = window.veloceAPI.convertFileSrc(filePath);
             if (this.src !== fallback && !this.src.startsWith('asset://')) {
               if (window.appState && window.appState.thumbnailUrls) {
@@ -1697,7 +1729,8 @@ export function checkThumbnailSelfHealing() {
     if (!img) continue;
 
     const isStuckLoading = img.classList.contains('loading');
-    const isSvgFallback = img.src && img.src.startsWith('data:image/svg+xml');
+    const isAudioPlaceholder = isAudioFile(path) && img.src === AUDIO_PLACEHOLDER_URL;
+    const isSvgFallback = !isAudioPlaceholder && img.src && img.src.startsWith('data:image/svg+xml');
 
     if (isStuckLoading || isSvgFallback) {
       if (!tm.activeTasks || !tm.activeTasks.has(path)) {

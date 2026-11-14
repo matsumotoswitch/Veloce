@@ -68,6 +68,7 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 * **zune-jpeg** (https://github.com/etemesi254/zune-image)
 * **zune-core** (https://github.com/etemesi254/zune-image)
 * **zune-png** (https://github.com/etemesi254/zune-image)
+* **lofty** (https://github.com/Serial-ATA/lofty-rs)
 
 ## 2. MIT License
 以下のソフトウェアおよび多くのフロントエンド・パッケージ（Vite等）は、MIT License の下で提供されています。

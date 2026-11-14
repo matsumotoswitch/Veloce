@@ -20,6 +20,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::time::UNIX_EPOCH;
 use tauri::Manager;
 
+pub mod audio;
 pub mod models;
 pub mod server;
 pub mod state;
@@ -27,12 +28,52 @@ pub mod settings;
 pub mod utils;
 pub mod viewer;
 
+pub use audio::*;
 pub use models::*;
 pub use server::*;
 pub use state::*;
 pub use settings::*;
 pub use utils::*;
 pub use viewer::*;
+
+/// ディレクトリスキャン・ファイル監視で一覧対象とするメディア拡張子（小文字、ドットなし）を判定する
+#[inline]
+fn is_listed_media_extension(ext_lower: &str) -> bool {
+    matches!(ext_lower, "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4")
+        || crate::audio::is_audio_extension(ext_lower)
+}
+
+/// 監視対象ディレクトリ内のメディアファイル（`is_listed_media_extension` 準拠）とサブフォルダ一覧を収集する
+/// 初期構築と定期再スキャンの双方から共有し、拡張子判定の不一致による誤削除検知を防ぐ
+fn collect_watcher_dir_snapshot(
+    dir_path: &str,
+) -> (
+    Vec<(String, String, String, std::fs::Metadata)>,
+    std::collections::HashSet<String>,
+) {
+    let mut files = Vec::new();
+    let mut folders = std::collections::HashSet::new();
+    if let Ok(entries) = std::fs::read_dir(dir_path) {
+        for entry in entries.filter_map(Result::ok) {
+            let p = entry.path();
+            let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
+            if p.is_file() {
+                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if is_listed_media_extension(&ext_lower) {
+                        if let Ok(meta) = entry.metadata() {
+                            let file_name = entry.file_name().to_string_lossy().into_owned();
+                            files.push((clean_p, file_name, ext_lower, meta));
+                        }
+                    }
+                }
+            } else if p.is_dir() {
+                folders.insert(clean_p);
+            }
+        }
+    }
+    (files, folders)
+}
 
 
 
@@ -1117,7 +1158,7 @@ fn load_directory(
                         // 1. 拡張子を先に判定して非対象ファイルを即時除外（不要な stat システムコールをゼロに抑制）
                         if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                             let ext_lower = ext.to_lowercase();
-                            if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4") {
+                            if is_listed_media_extension(&ext_lower) {
                                 // 2. jwalk がディレクトリスキャン時に取得済みの file_type を使用（ディスク追加 stat を回避）
                                 if entry.file_type.is_file() || (entry.file_type.is_symlink() && p.is_file()) {
                                     // 3. 対象画像ファイルに対してのみメタデータ（サイズ・日時）を1回だけ取得
@@ -2327,20 +2368,36 @@ fn get_full_metadata_for_path_with_stat_inner(
                         // 早期リターンせず、最新の仕様で再解析を行ってDBを更新・保存する
                         let is_valid_source = matches!(
                             cached_meta.metadata_source.as_str(),
-                            "PNG Chunks" | "Alpha Channel" | "WebP EXIF" | "JPEG EXIF" | "None"
+                            "PNG Chunks" | "Alpha Channel" | "WebP EXIF" | "JPEG EXIF" | "Audio Tags" | "None"
                         );
                         let lower_path = file_path.to_lowercase();
                         let can_have_alpha_stealth = lower_path.ends_with(".png") || lower_path.ends_with(".webp");
                         // 過去の解析でアルファチャンネルからの抽出に失敗し "None" かつプロンプト空でキャッシュされた場合、
                         // 最新のデコード仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
                         let needs_stealth_retry = cached_meta.metadata_source == "None" && cached_meta.prompt.is_empty() && can_have_alpha_stealth;
-                        if is_valid_source && !needs_stealth_retry {
+                        // 旧バージョンの音声タグ解析（拡張タグ・TXXX 未対応時）のキャッシュをオンデマンドで最新化する
+                        let needs_audio_reparse = crate::audio::is_audio_path(file_path)
+                            && cached_meta.params.get("tagSchema").and_then(|v| v.as_u64()) != Some(2);
+                        if is_valid_source && !needs_stealth_retry && !needs_audio_reparse {
                             return (cached_meta, mtime_millis, file_size, None);
                         }
                     }
                 }
             }
         }
+    }
+
+    if crate::audio::is_audio_path(file_path) {
+        let meta = build_audio_full_metadata(file_path);
+        let row = build_metadata_cache_row(
+            file_path,
+            file_size,
+            mtime_millis,
+            ctime_millis,
+            &meta,
+        );
+        save_metadata_cache_row_if_needed(auto_save, &row, db_conn);
+        return (meta, mtime_millis, file_size, row);
     }
 
     let lower_path = file_path.to_lowercase();
@@ -2781,19 +2838,82 @@ fn get_full_metadata_for_path_with_stat_inner(
         &meta,
     );
 
-    if auto_save {
-        if let Some(ref r) = row {
-            if let Ok(conn) = db_conn.get() {
-                let _ = conn.execute(
-                    "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source",
-                    rusqlite::params![&r.hash_key, &r.json_str, r.width, r.height, &r.path, r.file_size, r.mtime, r.ctime, r.now, &r.sp, &r.snp, &r.ss, &r.metadata_source]
-                );
-            }
-        }
-    }
+    save_metadata_cache_row_if_needed(auto_save, &row, db_conn);
 
     (meta, mtime_millis, file_size, row)
+}
+
+/// 音声ファイル向けの FullMetadata を構築する（タグなし・破損時は metadata_source="None" で安全継続）
+fn build_audio_full_metadata(file_path: &str) -> FullMetadata {
+    let audio_meta = crate::audio::parse_audio_metadata(file_path);
+    let mut map = serde_json::Map::new();
+    let mut insert_opt = |key: &str, val: Option<&String>| {
+        if let Some(s) = val {
+            map.insert(key.to_string(), serde_json::Value::String(s.clone()));
+        }
+    };
+    insert_opt("title", audio_meta.title.as_ref());
+    insert_opt("artist", audio_meta.artist.as_ref());
+    insert_opt("album", audio_meta.album.as_ref());
+    insert_opt("lyrics", audio_meta.lyrics.as_ref());
+    insert_opt("comment", audio_meta.comment.as_ref());
+    insert_opt("recordingDate", audio_meta.recording_date.as_ref());
+    map.insert("tagSchema".to_string(), serde_json::json!(2));
+    if let Some(dur) = audio_meta.duration_secs {
+        map.insert("durationSecs".to_string(), serde_json::json!(dur));
+        map.insert(
+            "duration".to_string(),
+            serde_json::Value::String(crate::audio::format_duration(dur)),
+        );
+    }
+
+    let metadata_source = if audio_meta.has_tags {
+        "Audio Tags".to_string()
+    } else {
+        "None".to_string()
+    };
+
+    let (width, height) = audio_meta
+        .cover_bytes
+        .as_deref()
+        .and_then(|bytes| {
+            image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
+                .ok()
+                .and_then(|r| r.into_dimensions().ok())
+        })
+        .unwrap_or((0, 0));
+
+    FullMetadata {
+        path: file_path.to_string(),
+        prompt: String::new(),
+        negative_prompt: String::new(),
+        width,
+        height,
+        params: serde_json::Value::Object(map),
+        source: String::new(),
+        metadata_source,
+    }
+}
+
+/// 解析済みメタデータ行を必要に応じて SQLite キャッシュへ UPSERT する
+fn save_metadata_cache_row_if_needed(
+    auto_save: bool,
+    row: &Option<MetadataCacheRow>,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) {
+    if !auto_save {
+        return;
+    }
+    if let Some(ref r) = row {
+        if let Ok(conn) = db_conn.get() {
+            let _ = conn.execute(
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source",
+                rusqlite::params![&r.hash_key, &r.json_str, r.width, r.height, &r.path, r.file_size, r.mtime, r.ctime, r.now, &r.sp, &r.snp, &r.ss, &r.metadata_source]
+            );
+        }
+    }
 }
 
 struct MetadataCacheRow {
@@ -2981,7 +3101,9 @@ fn read_png_dimensions_fast(path: &str) -> (u32, u32) {
 
 /// 画像・動画ファイルから軽量ヘッダー解析によりミリ秒未満で寸法(width, height)を取得する
 fn get_fast_dimensions_for_file(path: &str, ext_lower: &str) -> (u32, u32) {
-    if ext_lower == "png" {
+    if crate::audio::is_audio_extension(ext_lower) {
+        (0, 0)
+    } else if ext_lower == "png" {
         read_png_dimensions_fast(path)
     } else if ext_lower == "mp4" {
         parse_mp4_dimensions(path).unwrap_or((0, 0))
@@ -4179,30 +4301,59 @@ fn generate_image_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
     }
 
     if let Some(img) = open_image_buffered(path_str) {
-        let has_alpha = img.color().has_alpha();
-        let width = img.width();
-        let height = img.height();
-
-        use fast_image_resize as fr;
-        // into_rgba8 / into_rgb8 を使用して DynamicImage 内部バッファの不要な原寸複製を完全に排除
-        let (pixel_type, raw_pixels) = if has_alpha {
-            let rgba = img.into_rgba8();
-            (fr::PixelType::U8x4, rgba.into_raw())
-        } else {
-            let rgb = img.into_rgb8();
-            (fr::PixelType::U8x3, rgb.into_raw())
-        };
-
-        return resize_and_encode_thumbnail(
-            raw_pixels,
-            width,
-            height,
-            pixel_type,
-            has_alpha,
-        );
+        return encode_dynamic_image_thumbnail(img);
     }
 
     None
+}
+
+/// DynamicImage から中間複製を省いてサムネイルバイト列へリサイズ・エンコードする
+fn encode_dynamic_image_thumbnail(img: image::DynamicImage) -> Option<Vec<u8>> {
+    let has_alpha = img.color().has_alpha();
+    let width = img.width();
+    let height = img.height();
+
+    use fast_image_resize as fr;
+    // into_rgba8 / into_rgb8 を使用して DynamicImage 内部バッファの不要な原寸複製を完全に排除
+    let (pixel_type, raw_pixels) = if has_alpha {
+        let rgba = img.into_rgba8();
+        (fr::PixelType::U8x4, rgba.into_raw())
+    } else {
+        let rgb = img.into_rgb8();
+        (fr::PixelType::U8x3, rgb.into_raw())
+    };
+
+    resize_and_encode_thumbnail(
+        raw_pixels,
+        width,
+        height,
+        pixel_type,
+        has_alpha,
+    )
+}
+
+/// 音声ファイルから埋め込みカバー画像を抽出し、既存画像経路と同じくサムネイルを生成する（カバー無しは None）
+fn generate_audio_thumbnail_sync(path_str: &str) -> Option<Vec<u8>> {
+    let cover_bytes = crate::audio::extract_audio_cover(path_str)?;
+    let img = image::load_from_memory(&cover_bytes).ok()?;
+    encode_dynamic_image_thumbnail(img)
+}
+
+/// メディア種別（動画・音声・静止画）に応じた同期サムネイル生成ディスパッチャ
+fn generate_media_thumbnail_sync(file_path: &str) -> Option<Vec<u8>> {
+    let lower_path = file_path.to_lowercase();
+    let is_video = lower_path.ends_with(".mp4")
+        || lower_path.ends_with(".webm")
+        || lower_path.ends_with(".avi")
+        || lower_path.ends_with(".mkv");
+
+    if is_video {
+        generate_video_thumbnail_sync(file_path)
+    } else if crate::audio::is_audio_path(file_path) {
+        generate_audio_thumbnail_sync(file_path)
+    } else {
+        generate_image_thumbnail_sync(file_path)
+    }
 }
 
 /// 子プロセスを起動して標準出力をパイプで読み取りつつ、指定したタイムアウト時間を超過した場合は
@@ -4508,17 +4659,7 @@ fn generate_thumbnail_compute_only(
         }
     }
 
-    let lower_path = file_path.to_lowercase();
-    let is_video = lower_path.ends_with(".mp4")
-        || lower_path.ends_with(".webm")
-        || lower_path.ends_with(".avi")
-        || lower_path.ends_with(".mkv");
-
-    let generated = if is_video {
-        generate_video_thumbnail_sync(file_path)
-    } else {
-        generate_image_thumbnail_sync(file_path)
-    };
+    let generated = generate_media_thumbnail_sync(file_path);
 
     if let Some(bytes) = generated {
         let clean_path = normalize_unc_path(file_path).into_owned();
@@ -4708,8 +4849,15 @@ async fn precache_directory_recursively(
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| {
-                let path = e.path().to_string_lossy().to_lowercase();
-                path.ends_with(".png") || path.ends_with(".jpg") || path.ends_with(".jpeg") || path.ends_with(".webp")
+                e.path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(|ext| {
+                        let ext_lower = ext.to_ascii_lowercase();
+                        matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "webp")
+                            || crate::audio::is_audio_extension(&ext_lower)
+                    })
+                    .unwrap_or(false)
             })
             .map(|entry| {
                 let path = entry.path().to_string_lossy().to_string();
@@ -5462,12 +5610,7 @@ where
     use rayon::prelude::*;
     for chunk in missing_thumbnails.chunks(32) {
         let generated_chunk: Vec<_> = chunk.par_iter().filter_map(|(hash_key, path_str, needs_update)| {
-            let lower_path = path_str.to_lowercase();
-            let generated = if lower_path.ends_with(".mp4") || lower_path.ends_with(".webm") || lower_path.ends_with(".avi") || lower_path.ends_with(".mkv") {
-                generate_video_thumbnail_sync(path_str)
-            } else {
-                generate_image_thumbnail_sync(path_str)
-            };
+            let generated = generate_media_thumbnail_sync(path_str);
             generated.map(|bytes| (hash_key.clone(), bytes, *needs_update))
         }).collect();
 
@@ -5855,7 +5998,9 @@ fn validate_veloce_protocol_request(uri: &str, expected_token: &str) -> Result<(
     // hash パラメータの有無にかかわらず、path が指定されている場合は常に対象拡張子ホワイトリストを検証する
     if !path_str.is_empty() {
         let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "mp4" | "webm" | "avi" | "mkv" | "mov") {
+        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "mp4" | "webm" | "avi" | "mkv" | "mov")
+            && !crate::audio::is_audio_extension(&ext)
+        {
             return Err(403);
         }
     }
@@ -5912,7 +6057,8 @@ fn main() {
             }
 
             let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-            if !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
+            let is_audio = crate::audio::is_audio_extension(&ext);
+            if !is_audio && !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
                 return tauri::http::ResponseBuilder::new().status(403).body(Vec::new());
             }
 
@@ -5924,10 +6070,14 @@ fn main() {
                     let file_size = metadata.len();
                     let range_header = request.headers().get("Range").and_then(|v| v.to_str().ok());
                     let max_chunk: u64 = 2 * 1024 * 1024;
-                    let content_type = match ext.as_str() {
-                        "webm" => "video/webm",
-                        "gif" => "image/gif",
-                        _ => "video/mp4",
+                    let content_type = if is_audio {
+                        crate::audio::audio_content_type(&ext)
+                    } else {
+                        match ext.as_str() {
+                            "webm" => "video/webm",
+                            "gif" => "image/gif",
+                            _ => "video/mp4",
+                        }
                     };
 
                     match crate::server::calculate_range(range_header, file_size, max_chunk) {
@@ -6295,39 +6445,19 @@ fn main() {
                         known_files.clear();
                         known_folders.clear();
 
-                        if let Ok(entries) = std::fs::read_dir(&clean_current_dir) {
-                            for entry in entries.filter_map(Result::ok) {
-                                let p = entry.path();
-                                let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
-                                if p.is_file() {
-                                    if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                                        let ext_lower = ext.to_lowercase();
-                                        if matches!(
-                                            ext_lower.as_str(),
-                                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4"
-                                        ) {
-                                            if let Ok(meta) = entry.metadata() {
-                                                let size = meta.len();
-                                                let mtime = meta
-                                                    .modified()
-                                                    .ok()
-                                                    .and_then(|t| {
-                                                        t.duration_since(std::time::UNIX_EPOCH).ok()
-                                                    })
-                                                    .map(|d| d.as_millis() as u64)
-                                                    .unwrap_or(0);
-                                                known_files.insert(
-                                                    clean_p,
-                                                    (size, mtime),
-                                                );
-                                            }
-                                        }
-                                    }
-                                } else if p.is_dir() {
-                                    known_folders.insert(clean_p);
-                                }
-                            }
+                        let (snapshot_files, snapshot_folders) =
+                            collect_watcher_dir_snapshot(&clean_current_dir);
+                        for (path_str, _file_name, _ext_lower, meta) in snapshot_files {
+                            let size = meta.len();
+                            let mtime = meta
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            known_files.insert(path_str, (size, mtime));
                         }
+                        known_folders.extend(snapshot_folders);
                         if let Some(ref parent) = parent_dir {
                             if let Ok(entries) = std::fs::read_dir(parent) {
                                 for entry in entries.filter_map(Result::ok) {
@@ -6348,128 +6478,93 @@ fn main() {
                         std::collections::HashSet::new();
                     let mut folder_changed = false;
 
-                    if let Ok(entries) = std::fs::read_dir(&clean_current_dir) {
-                        for entry in entries.filter_map(Result::ok) {
-                            let p = entry.path();
-                            let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
-                            if p.is_file() {
-                                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                                    let ext_lower = ext.to_lowercase();
-                                    if matches!(
-                                        ext_lower.as_str(),
-                                        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "mp4"
-                                    ) {
-                                        if let Ok(meta) = entry.metadata() {
-                                            let size = meta.len();
-                                            let mtime = meta
-                                                .modified()
-                                                .ok()
-                                                .and_then(|t| {
-                                                    t.duration_since(std::time::UNIX_EPOCH).ok()
-                                                })
-                                                .map(|d| d.as_millis() as u64)
-                                                .unwrap_or(0);
-                                            let path_str = clean_p;
-                                            current_files.insert(path_str.clone(), (size, mtime));
+                    let (snapshot_files, snapshot_folders) =
+                        collect_watcher_dir_snapshot(&clean_current_dir);
+                    for (path_str, file_name, ext_lower, meta) in snapshot_files {
+                        let size = meta.len();
+                        let mtime = meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        current_files.insert(path_str.clone(), (size, mtime));
 
-                                            if let Some(&(old_size, old_mtime)) =
-                                                known_files.get(&path_str)
-                                            {
-                                                if old_size != size || old_mtime != mtime {
-                                                    let (initial_width, initial_height) = if size > 0 {
-                                                        get_fast_dimensions_for_file(&path_str, &ext_lower)
-                                                    } else {
-                                                        (0, 0)
-                                                    };
-                                                    let ctime = meta
-                                                        .created()
-                                                        .ok()
-                                                        .and_then(|t| {
-                                                            t.duration_since(std::time::UNIX_EPOCH)
-                                                                .ok()
-                                                        })
-                                                        .map(|d| d.as_millis() as u64)
-                                                        .unwrap_or(0);
-                                                    let file_name = entry
-                                                        .file_name()
-                                                        .to_string_lossy()
-                                                        .into_owned();
-                                                    let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
-                                                    let img_file = ImageFile {
-                                                        name: file_name,
-                                                        ext: format_compact!(".{}", ext_lower),
-                                                        path: path_str.clone(),
-                                                        size,
-                                                        mtime,
-                                                        ctime,
-                                                        has_thumbnail_cache: false,
-                                                        has_metadata_cache: false,
-                                                        width: initial_width,
-                                                        height: initial_height,
-                                                        prompt: String::new(),
-                                                        negative_prompt: String::new(),
-                                                        source: String::new(),
-                                                        meta_loaded: false,
-                                                        search_text: String::new(),
-                                                        unified_search_text: String::new(),
-                                                        hash_key: hash_key.into(),
-                                                    };
-                                                    let _ = app_handle
-                                                        .emit_all("file-changed", img_file);
-                                                }
-                                            } else {
-                                                let (initial_width, initial_height) = if size > 0 {
-                                                    get_fast_dimensions_for_file(&path_str, &ext_lower)
-                                                } else {
-                                                    (0, 0)
-                                                };
-                                                let ctime = meta
-                                                    .created()
-                                                    .ok()
-                                                    .and_then(|t| {
-                                                        t.duration_since(std::time::UNIX_EPOCH)
-                                                            .ok()
-                                                    })
-                                                    .map(|d| d.as_millis() as u64)
-                                                    .unwrap_or(0);
-                                                let file_name = entry
-                                                    .file_name()
-                                                    .to_string_lossy()
-                                                    .into_owned();
-                                                let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
-                                                let img_file = ImageFile {
-                                                    name: file_name,
-                                                    ext: format_compact!(".{}", ext_lower),
-                                                    path: path_str.clone(),
-                                                    size,
-                                                    mtime,
-                                                    ctime,
-                                                    has_thumbnail_cache: false,
-                                                    has_metadata_cache: false,
-                                                    width: initial_width,
-                                                    height: initial_height,
-                                                    prompt: String::new(),
-                                                    negative_prompt: String::new(),
-                                                    source: String::new(),
-                                                    meta_loaded: false,
-                                                    search_text: String::new(),
-                                                    unified_search_text: String::new(),
-                                                    hash_key: hash_key.into(),
-                                                };
-                                                let _ =
-                                                    app_handle.emit_all("file-changed", img_file);
-                                            }
-                                        }
-                                    }
-                                }
-                            } else if p.is_dir() {
-                                let path_str = clean_p;
-                                current_folders.insert(path_str.clone());
-                                if !known_folders.contains(&path_str) {
-                                    folder_changed = true;
-                                }
+                        if let Some(&(old_size, old_mtime)) = known_files.get(&path_str) {
+                            if old_size != size || old_mtime != mtime {
+                                let (initial_width, initial_height) = if size > 0 {
+                                    get_fast_dimensions_for_file(&path_str, &ext_lower)
+                                } else {
+                                    (0, 0)
+                                };
+                                let ctime = meta
+                                    .created()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0);
+                                let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
+                                let img_file = ImageFile {
+                                    name: file_name,
+                                    ext: format_compact!(".{}", ext_lower),
+                                    path: path_str.clone(),
+                                    size,
+                                    mtime,
+                                    ctime,
+                                    has_thumbnail_cache: false,
+                                    has_metadata_cache: false,
+                                    width: initial_width,
+                                    height: initial_height,
+                                    prompt: String::new(),
+                                    negative_prompt: String::new(),
+                                    source: String::new(),
+                                    meta_loaded: false,
+                                    search_text: String::new(),
+                                    unified_search_text: String::new(),
+                                    hash_key: hash_key.into(),
+                                };
+                                let _ = app_handle.emit_all("file-changed", img_file);
                             }
+                        } else {
+                            let (initial_width, initial_height) = if size > 0 {
+                                get_fast_dimensions_for_file(&path_str, &ext_lower)
+                            } else {
+                                (0, 0)
+                            };
+                            let ctime = meta
+                                .created()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
+                            let img_file = ImageFile {
+                                name: file_name,
+                                ext: format_compact!(".{}", ext_lower),
+                                path: path_str.clone(),
+                                size,
+                                mtime,
+                                ctime,
+                                has_thumbnail_cache: false,
+                                has_metadata_cache: false,
+                                width: initial_width,
+                                height: initial_height,
+                                prompt: String::new(),
+                                negative_prompt: String::new(),
+                                source: String::new(),
+                                meta_loaded: false,
+                                search_text: String::new(),
+                                unified_search_text: String::new(),
+                                hash_key: hash_key.into(),
+                            };
+                            let _ = app_handle.emit_all("file-changed", img_file);
                         }
+                    }
+                    for folder_path in snapshot_folders {
+                        if !known_folders.contains(&folder_path) {
+                            folder_changed = true;
+                        }
+                        current_folders.insert(folder_path);
                     }
 
                     if let Some(ref parent) = parent_dir {
@@ -12163,6 +12258,310 @@ mod viewer_tests {
         assert!(
             status2.starts_with("HTTP/1.1 404 Not Found"),
             "同一 TCP 接続上の 2 回目のリクエストも再接続なしで正常に応答されること"
+        );
+    }
+
+    #[test]
+    fn test_mp3_metadata_cache_fts_and_cover_thumbnail() {
+        let dir = tempfile::tempdir().unwrap();
+        let tagged_path = dir.path().join("starlight.mp3");
+        let tagless_path = dir.path().join("plain.mp3");
+
+        let tagged_bytes = crate::audio::test_fixtures::build_mp3_with_tags(
+            "Starlight Echo",
+            "Aurora Synth",
+            crate::audio::test_fixtures::SAMPLE_PNG_1X1,
+            40,
+        );
+        let tagless_bytes = crate::audio::test_fixtures::build_mpeg_frames(40);
+        std::fs::write(&tagged_path, &tagged_bytes).unwrap();
+        std::fs::write(&tagless_path, &tagless_bytes).unwrap();
+
+        let state = create_test_app_state("C:\\");
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute_batch(
+                "ALTER TABLE cache ADD COLUMN searchable_prompt TEXT DEFAULT '';
+                 ALTER TABLE cache ADD COLUMN searchable_negative_prompt TEXT DEFAULT '';
+                 ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT '';
+                 CREATE VIRTUAL TABLE IF NOT EXISTS cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source);
+                 CREATE TRIGGER IF NOT EXISTS cache_ai AFTER INSERT ON cache BEGIN
+                     INSERT INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+                     VALUES (new.rowid, new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);
+                 END;
+                 CREATE TRIGGER IF NOT EXISTS cache_au AFTER UPDATE OF hash_key, searchable_prompt, searchable_negative_prompt, searchable_source ON cache BEGIN
+                     UPDATE cache_fts SET
+                         hash_key = new.hash_key,
+                         searchable_prompt = new.searchable_prompt,
+                         searchable_negative_prompt = new.searchable_negative_prompt,
+                         searchable_source = new.searchable_source
+                     WHERE rowid = old.rowid;
+                 END;"
+            ).unwrap();
+        }
+        let tagged_str = tagged_path.to_string_lossy().to_string();
+        let tagless_str = tagless_path.to_string_lossy().to_string();
+
+        let (tagged_meta, _, _, _) = get_full_metadata_for_path_with_stat_inner(
+            &tagged_str,
+            1000,
+            1000,
+            tagged_bytes.len() as u64,
+            &state.db_conn,
+            true,
+        );
+        assert_eq!(tagged_meta.metadata_source, "Audio Tags");
+        assert_eq!(tagged_meta.width, 1);
+        assert_eq!(tagged_meta.height, 1);
+        assert_eq!(
+            tagged_meta.params.get("title").and_then(|v| v.as_str()),
+            Some("Starlight Echo")
+        );
+        assert_eq!(
+            tagged_meta.params.get("artist").and_then(|v| v.as_str()),
+            Some("Aurora Synth")
+        );
+        assert!(tagged_meta.params.get("duration").is_some());
+
+        let (tagless_meta, _, _, _) = get_full_metadata_for_path_with_stat_inner(
+            &tagless_str,
+            2000,
+            2000,
+            tagless_bytes.len() as u64,
+            &state.db_conn,
+            true,
+        );
+        assert_eq!(tagless_meta.metadata_source, "None");
+        assert_eq!(tagless_meta.width, 0);
+        assert_eq!(tagless_meta.height, 0);
+        assert!(tagless_meta.params.get("title").is_none());
+        assert!(tagless_meta.params.get("duration").is_some());
+
+        // FTS5 インデックスにタイトル・アーティストが登録されていること
+        {
+            let conn = state.db_conn.get().unwrap();
+            let hit_title: String = conn
+                .query_row(
+                    "SELECT c.path FROM cache c JOIN cache_fts f ON c.rowid = f.rowid WHERE cache_fts MATCH '\"Starlight\"'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(hit_title, tagged_str);
+
+            let hit_artist: String = conn
+                .query_row(
+                    "SELECT c.path FROM cache c JOIN cache_fts f ON c.rowid = f.rowid WHERE cache_fts MATCH '\"Aurora\"'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(hit_artist, tagged_str);
+        }
+
+        // カバー画像あり MP3 はサムネイル JPEG が生成され、なし MP3 は空になること
+        let (thumb_bytes, pending) =
+            generate_thumbnail_compute_only(&tagged_str, 1000, None, &state.db_conn);
+        assert!(!thumb_bytes.is_empty(), "カバー付き MP3 からサムネイルが生成されること");
+        assert!(pending.is_some());
+        assert!(image::load_from_memory(&thumb_bytes).is_ok());
+
+        let (no_thumb_bytes, no_pending) =
+            generate_thumbnail_compute_only(&tagless_str, 2000, None, &state.db_conn);
+        assert!(no_thumb_bytes.is_empty(), "カバー無し MP3 はサムネイル無しになること");
+        assert!(no_pending.is_none());
+
+        // tagSchema が無い旧形式キャッシュが存在する場合でも再解析されて TXXX タグ等が補完されること
+        let ffmpeg_path = dir.path().join("ffmpeg_stale_cache.mp3");
+        let ffmpeg_bytes = crate::audio::test_fixtures::build_id3v24_mp3_with_txxx_tags(
+            "2026-11-14T15:46:20",
+            "自己紹介",
+            "赤城",
+            "全員挨拶セット",
+            "歌詞テキスト",
+            "コメントテキスト",
+            crate::audio::test_fixtures::SAMPLE_PNG_1X1,
+            20,
+        );
+        std::fs::write(&ffmpeg_path, &ffmpeg_bytes).unwrap();
+        let ffmpeg_str = ffmpeg_path.to_string_lossy().to_string();
+        let stale_hash = crate::utils::hash_path_mtime_hex(&ffmpeg_str, 3000);
+        {
+            let conn = state.db_conn.get().unwrap();
+            let stale_meta = serde_json::json!({
+                "path": ffmpeg_str,
+                "prompt": "",
+                "negative_prompt": "",
+                "width": 1,
+                "height": 1,
+                "params": { "title": "旧タイトル" },
+                "source": "",
+                "metadata_source": "Audio Tags"
+            })
+            .to_string();
+            conn.execute(
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, metadata_source) VALUES (?, ?, 1, 1, ?, ?, 3000, 3000, 0, 'Audio Tags')",
+                rusqlite::params![stale_hash, stale_meta, ffmpeg_str, ffmpeg_bytes.len() as i64],
+            )
+            .unwrap();
+        }
+        let (re_parsed, _, _, _) = get_full_metadata_for_path_with_stat_inner(
+            &ffmpeg_str,
+            3000,
+            3000,
+            ffmpeg_bytes.len() as u64,
+            &state.db_conn,
+            true,
+        );
+        assert_eq!(re_parsed.params.get("album").and_then(|v| v.as_str()), Some("全員挨拶セット"));
+        assert_eq!(re_parsed.params.get("lyrics").and_then(|v| v.as_str()), Some("歌詞テキスト"));
+        assert_eq!(re_parsed.params.get("comment").and_then(|v| v.as_str()), Some("コメントテキスト"));
+        assert_eq!(re_parsed.params.get("recordingDate").and_then(|v| v.as_str()), Some("2026-11-14T15:46:20"));
+        assert_eq!(re_parsed.params.get("tagSchema").and_then(|v| v.as_u64()), Some(2));
+    }
+
+    #[test]
+    fn test_local_server_mp3_streaming_and_cover_endpoint() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let tagged_path = dir.path().join("cover_track.mp3");
+        let tagless_path = dir.path().join("no_cover_track.mp3");
+
+        let tagged_bytes = crate::audio::test_fixtures::build_mp3_with_tags(
+            "Server Song",
+            "Server Artist",
+            crate::audio::test_fixtures::SAMPLE_PNG_1X1,
+            20,
+        );
+        let tagless_bytes = crate::audio::test_fixtures::build_mpeg_frames(20);
+        std::fs::write(&tagged_path, &tagged_bytes).unwrap();
+        std::fs::write(&tagless_path, &tagless_bytes).unwrap();
+
+        let (db_tx, _db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
+        let state = create_test_app_state("C:\\");
+        let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let test_token = "mp3_server_token_123";
+        let port = start_local_video_server(
+            db_tx,
+            app_handle_slot,
+            state.db_conn.clone(),
+            test_token.to_string(),
+        );
+
+        let send_get = |query: &str, range_hdr: Option<&str>| -> (String, String, Vec<u8>) {
+            let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut reader = BufReader::new(stream);
+            let range_line = range_hdr
+                .map(|r| format!("Range: {}\r\n", r))
+                .unwrap_or_default();
+            let req = format!(
+                "GET {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{}Connection: close\r\n\r\n",
+                query, port, range_line
+            );
+            reader.get_mut().write_all(req.as_bytes()).unwrap();
+
+            let mut status = String::new();
+            reader.read_line(&mut status).unwrap();
+            let mut content_type = String::new();
+            let mut content_len = 0usize;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    break;
+                }
+                let lower = trimmed.to_ascii_lowercase();
+                if lower.starts_with("content-type:") {
+                    content_type = trimmed["content-type:".len()..].trim().to_string();
+                } else if lower.starts_with("content-length:") {
+                    content_len = lower["content-length:".len()..].trim().parse().unwrap();
+                }
+            }
+            let mut body = vec![0u8; content_len];
+            reader.read_exact(&mut body).unwrap();
+            (status, content_type, body)
+        };
+
+        let tagged_str = tagged_path.to_string_lossy().to_string();
+        let tagless_str = tagless_path.to_string_lossy().to_string();
+
+        // 1. Range リクエストで MP3 が 206 Partial Content / audio/mpeg で返ること
+        let (st1, ct1, body1) = send_get(
+            &format!("/?path={}&token={}", urlencoding::encode(&tagged_str), test_token),
+            Some("bytes=0-63"),
+        );
+        assert!(st1.starts_with("HTTP/1.1 206 Partial Content"), "status: {}", st1);
+        assert_eq!(ct1, "audio/mpeg");
+        assert_eq!(body1, &tagged_bytes[0..64]);
+
+        // 2. カバー付き MP3 の ?cover=1 は 200 OK + embedded PNG を返すこと
+        let (st2, ct2, body2) = send_get(
+            &format!(
+                "/?path={}&cover=1&token={}",
+                urlencoding::encode(&tagged_str),
+                test_token
+            ),
+            None,
+        );
+        assert!(st2.starts_with("HTTP/1.1 200 OK"), "status: {}", st2);
+        assert_eq!(ct2, "image/png");
+        assert_eq!(body2, crate::audio::test_fixtures::SAMPLE_PNG_1X1);
+
+        // 3. カバー無し MP3 の ?cover=1 は 404 Not Found を返すこと
+        let (st3, _, _) = send_get(
+            &format!(
+                "/?path={}&cover=1&token={}",
+                urlencoding::encode(&tagless_str),
+                test_token
+            ),
+            None,
+        );
+        assert!(st3.starts_with("HTTP/1.1 404 Not Found"), "status: {}", st3);
+    }
+
+    #[test]
+    fn test_watcher_snapshot_includes_mp3_and_no_duplicate_extension_lists() {
+        let dir = tempfile::tempdir().unwrap();
+        let expected_media = ["track.mp3", "photo.jpg", "pic.png", "anim.webp", "clip.mp4"];
+        for name in expected_media {
+            std::fs::write(dir.path().join(name), b"dummy").unwrap();
+        }
+        for ignored in ["notes.txt", "audio.wav", "lossless.flac"] {
+            std::fs::write(dir.path().join(ignored), b"dummy").unwrap();
+        }
+        std::fs::create_dir(dir.path().join("subdir")).unwrap();
+
+        let dir_str = dir.path().to_string_lossy().to_string();
+        let (files_first, folders_first) = collect_watcher_dir_snapshot(&dir_str);
+        let (files_rescan, folders_rescan) = collect_watcher_dir_snapshot(&dir_str);
+
+        let names_first: std::collections::HashSet<String> =
+            files_first.iter().map(|(_, n, _, _)| n.clone()).collect();
+        let names_rescan: std::collections::HashSet<String> =
+            files_rescan.iter().map(|(_, n, _, _)| n.clone()).collect();
+
+        assert_eq!(names_first, names_rescan, "初期構築と再スキャンで検出集合が完全一致すること");
+        assert!(names_first.contains("track.mp3"), "監視スナップショットに .mp3 が含まれること");
+        assert!(!names_first.contains("notes.txt"));
+        assert!(!names_first.contains("audio.wav"));
+        assert_eq!(names_first.len(), expected_media.len());
+        assert_eq!(folders_first, folders_rescan);
+        assert_eq!(folders_first.len(), 1);
+
+        // 本番コード側（#[cfg(test)] 以前）に is_listed_media_extension 以外の直書きリストが残っていないことを検証
+        let main_src = include_str!("main.rs");
+        let prod_src = main_src.split("#[cfg(test)]").next().unwrap_or(main_src);
+        let hardcoded_pattern = "\"jpg\" | \"jpeg\" | \"png\" | \"gif\" | \"webp\" | \"bmp\" | \"mp4\"";
+        let occurrences = prod_src.matches(hardcoded_pattern).count();
+        assert_eq!(
+            occurrences, 1,
+            "is_listed_media_extension 以外にメディア拡張子の直書きリストが残っていないこと (found: {})",
+            occurrences
         );
     }
 }

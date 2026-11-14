@@ -1,3 +1,5 @@
+import { formatDurationSeconds } from './utils.js';
+
 /**
  * メタデータの数値を表示用にフォーマットします。
  * @param {number|string|null|undefined} num
@@ -7,6 +9,47 @@ export function formatMetadataNumber(num) {
   if (num === null || num === undefined) return null;
   const n = Number(num);
   return !isNaN(n) ? n.toLocaleString() : num;
+}
+
+/**
+ * 録音日時文字列を「yyyy/mm/dd hh:mm:ss」形式に整形します。
+ * タイムゾーン指定がない文字列（ID3v2 TDRC 等）は記載値のまま整形し、
+ * 年のみ等（月日情報がない形式）は元の値を維持します。
+ * @param {string|null|undefined} raw
+ * @returns {string|null}
+ */
+export function formatRecordingDate(raw) {
+  if (raw === null || raw === undefined) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      const yyyy = parsed.getFullYear();
+      const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+      const dd = String(parsed.getDate()).padStart(2, '0');
+      const hh = String(parsed.getHours()).padStart(2, '0');
+      const mi = String(parsed.getMinutes()).padStart(2, '0');
+      const ss = String(parsed.getSeconds()).padStart(2, '0');
+      return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+    }
+  }
+
+  const m = trimmed.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2})(?::(\d{1,2})(?::(\d{1,2}))?)?)?/
+  );
+  if (m) {
+    const yyyy = m[1];
+    const mm = m[2].padStart(2, '0');
+    const dd = m[3].padStart(2, '0');
+    const hh = (m[4] || '0').padStart(2, '0');
+    const mi = (m[5] || '0').padStart(2, '0');
+    const ss = (m[6] || '0').padStart(2, '0');
+    return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+  }
+
+  return trimmed;
 }
 
 export function formatRequestType(reqType) {
@@ -252,6 +295,13 @@ export function extractMetadataFields(file, meta = {}) {
   }
 
   data.params = {
+    title: p.title ?? null,
+    artist: p.artist ?? null,
+    album: p.album ?? null,
+    lyrics: p.lyrics ?? null,
+    comment: p.comment ?? null,
+    recordingDate: formatRecordingDate(p.recordingDate),
+    duration: p.duration ?? (typeof p.durationSecs === 'number' && p.durationSecs > 0 ? formatDurationSeconds(p.durationSecs) : null),
     resolution: res,
     seed: p.seed ?? file.seed ?? null,
     steps: formatMetadataNumber(p.steps ?? file.steps ?? null),
@@ -315,7 +365,7 @@ export function highlightSearchTerms(text, termsOrRegex) {
 /**
  * インスペクター用のセクション定義をデータから生成します。
  * @param {ReturnType<typeof extractMetadataFields>} data
- * @returns {Array<{title: string, value: *, isParam?: boolean, isPosition?: boolean, copyable?: boolean}>}
+ * @returns {Array<{title: string, value: *, isParam?: boolean, isRaw?: boolean, isText?: boolean, isPosition?: boolean, copyable?: boolean}>}
  */
 export function buildInspectorSections(data) {
   const sections = [
@@ -354,6 +404,28 @@ export function buildInspectorSections(data) {
       sections.push({ title: `キャラクター ${i + 1} 採用除外したい要素`, value: c.adoptedUc, copyable: true });
     }
   });
+
+  if (data.params.title) {
+    sections.push({ title: 'タイトル', value: data.params.title, isParam: true, copyable: true });
+  }
+  if (data.params.artist) {
+    sections.push({ title: 'アーティスト', value: data.params.artist, isParam: true, copyable: true });
+  }
+  if (data.params.album) {
+    sections.push({ title: 'アルバム', value: data.params.album, isParam: true, copyable: true });
+  }
+  if (data.params.duration) {
+    sections.push({ title: '再生時間', value: data.params.duration, isParam: true });
+  }
+  if (data.params.recordingDate) {
+    sections.push({ title: '録音日時', value: data.params.recordingDate, isParam: true });
+  }
+  if (data.params.comment) {
+    sections.push({ title: 'コメント', value: data.params.comment, isText: true, copyable: true });
+  }
+  if (data.params.lyrics) {
+    sections.push({ title: '歌詞', value: data.params.lyrics, isText: true, copyable: true });
+  }
 
   sections.push(
     { title: '画像サイズ', value: data.params.resolution, isParam: true },

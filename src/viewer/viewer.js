@@ -19,7 +19,7 @@
 
 import { viewerState } from './viewer-state.js';
 import { ViewerUI, viewerUI } from './viewer-ui.js';
-import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect, isVideoFile } from '../common/utils.js';
+import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect, isVideoFile, isAudioFile, getAudioCoverUrl, AUDIO_PLACEHOLDER_URL, formatDurationSeconds } from '../common/utils.js';
 import { extractMetadataFields, parsePromptTags, buildInspectorSections } from '../common/metadata-format.js';
 
 blockDevtoolsShortcuts();
@@ -55,12 +55,109 @@ const CONFIG = {
   RESIZE_THROTTLE: 150    // リサイズイベントの間引き時間(ms)
 };
 
+const VIEWER_VOLUME_KEY = 'viewerVolume';
+const VIEWER_MUTED_KEY = 'viewerMuted';
+
+/**
+ * SettingsStore（フォールバック時は localStorage）から設定値を読み込む
+ * @param {string} key
+ * @returns {string|null}
+ */
+function readViewerSetting(key) {
+  if (typeof window !== 'undefined' && window.SettingsStore && typeof window.SettingsStore.getItem === 'function') {
+    return window.SettingsStore.getItem(key);
+  }
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem(key);
+  }
+  return null;
+}
+
+/**
+ * SettingsStore（フォールバック時は localStorage）へ設定値を保存する
+ * @param {string} key
+ * @param {string} value
+ */
+function writeViewerSetting(key, value) {
+  const strVal = String(value);
+  if (typeof window !== 'undefined' && window.SettingsStore && typeof window.SettingsStore.setItem === 'function') {
+    window.SettingsStore.setItem(key, strVal);
+  } else if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(key, strVal);
+  }
+}
+
+/**
+ * 永続化された音量（0.0 〜 1.0、未設定時は 1.0）を取得する
+ * @returns {number}
+ */
+export function getSavedViewerVolume() {
+  const raw = readViewerSetting(VIEWER_VOLUME_KEY);
+  if (raw === null || raw === undefined || raw === '') return 1;
+  const num = parseFloat(raw);
+  if (isNaN(num)) return 1;
+  return Math.max(0, Math.min(1, num));
+}
+
+/**
+ * 永続化されたミュート状態を取得する（未設定時は引数の既定値に従う）
+ * @param {boolean} [defaultIfUnset=false]
+ * @returns {boolean}
+ */
+export function getSavedViewerMuted(defaultIfUnset = false) {
+  const raw = readViewerSetting(VIEWER_MUTED_KEY);
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return Boolean(defaultIfUnset);
+}
+
+/**
+ * 対象メディア要素（<video> / <audio>）へ保存済みの音量・ミュート状態を適用する
+ * @param {HTMLMediaElement} media
+ * @param {boolean} [defaultMutedIfUnset=false]
+ */
+export function applyVolumeSettingsToMedia(media, defaultMutedIfUnset = false) {
+  if (!media) return;
+  try {
+    media.volume = getSavedViewerVolume();
+  } catch (e) {}
+  media.muted = getSavedViewerMuted(defaultMutedIfUnset);
+}
+
+function isAudioPlaceholderMedia(media) {
+  if (!media) return false;
+  if (media.classList && media.classList.contains('audio-placeholder')) return true;
+  if (typeof media.src === 'string' && media.src === AUDIO_PLACEHOLDER_URL) return true;
+  if (media.dataset && media.dataset.audioPath) {
+    const natW = media.naturalWidth || 0;
+    const natH = media.naturalHeight || 0;
+    if (natW === 0 || natH === 0) return true;
+  }
+  return false;
+}
+
 function getMediaWidth(media) {
+  if (!media) return 1;
+  if (isAudioPlaceholderMedia(media)) return 480;
   return media.tagName === 'VIDEO' ? (media.videoWidth || 1) : (media.naturalWidth || 1);
 }
 
 function getMediaHeight(media) {
+  if (!media) return 1;
+  if (isAudioPlaceholderMedia(media)) return 480;
   return media.tagName === 'VIDEO' ? (media.videoHeight || 1) : (media.naturalHeight || 1);
+}
+
+/**
+ * 対象メディア要素でコントロールバーを既定表示すべきかを判定する
+ * 音声ファイル（<audio>）では設定にかかわらず常時表示し、動画（<video>）は設定に従う
+ * @param {HTMLMediaElement|null} media
+ * @returns {boolean}
+ */
+function shouldShowSeekBarForMedia(media) {
+  if (!isPlayableMedia(media)) return false;
+  if (media.tagName === 'AUDIO') return true;
+  return isDefaultSeekBarEnabled();
 }
 
 /**
@@ -106,16 +203,90 @@ if (typeof window !== 'undefined') {
 }
 
 window.addEventListener('focus', () => {
-  // <video> 要素の内部操作（再生・一時停止等）がウィンドウ focus を誘発するケースがある。
+  // <video> / <audio> 要素の内部操作（再生・一時停止等）がウィンドウ focus を誘発するケースがある。
   // これを「フォーカス目的クリック」と誤判定して ignoreNextClick を立てないよう、
-  // activeElement が VIDEO の場合は lastFocusTime を更新しない。
-  if (document.activeElement && document.activeElement.tagName === 'VIDEO') return;
+  // activeElement が VIDEO または AUDIO の場合は lastFocusTime を更新しない。
+  if (document.activeElement && (document.activeElement.tagName === 'VIDEO' || document.activeElement.tagName === 'AUDIO')) return;
   viewerState.lastFocusTime = Date.now();
 });
 
 let currentViewerImg = document.getElementById('viewer-img');
 let currentlyVisibleImg = currentViewerImg;
+let currentAudioElement = null;
 if (currentViewerImg) currentViewerImg.classList.add('mode-default');
+
+function isPlayableMedia(media) {
+  return !!(media && (media.tagName === 'VIDEO' || media.tagName === 'AUDIO'));
+}
+
+/**
+ * 現在ビューアで再生制御対象となるメディア要素（<audio> または <video>）を返す
+ * @returns {HTMLMediaElement|null}
+ */
+export function getActivePlaybackMedia() {
+  if (currentAudioElement && currentAudioElement.tagName === 'AUDIO') {
+    return currentAudioElement;
+  }
+  const activeImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+  if (activeImg && activeImg.tagName === 'VIDEO') {
+    return activeImg;
+  }
+  return null;
+}
+
+/**
+ * 再生中の音声要素（<audio>）を確実に停止・破棄し、音声残りやバックグラウンド再生を防ぐ
+ */
+export function stopAndDiscardAudio() {
+  if (currentAudioElement) {
+    try {
+      currentAudioElement.pause();
+      currentAudioElement.removeAttribute('src');
+      if (typeof currentAudioElement.load === 'function') {
+        currentAudioElement.load();
+      }
+    } catch (e) {}
+    if (typeof currentAudioElement.remove === 'function') {
+      currentAudioElement.remove();
+    }
+    currentAudioElement = null;
+  }
+}
+
+/**
+ * 音声ファイル（MP3）のカバー画像表示用 <img> 要素を生成する。
+ * カバーが存在しない・読み込み失敗時は Lucide ベースのプレースホルダへ切り替える。
+ * @param {string} filePath
+ * @returns {HTMLImageElement}
+ */
+function createAudioCoverImageElement(filePath) {
+  const img = document.createElement('img');
+  img.decoding = 'async';
+  img.dataset.audioPath = filePath;
+  const coverUrl = getAudioCoverUrl(filePath);
+  if (coverUrl) {
+    img.addEventListener('error', () => {
+      if (!img.classList.contains('audio-placeholder')) {
+        img.classList.add('audio-placeholder');
+        img.src = AUDIO_PLACEHOLDER_URL;
+        if (img === currentlyVisibleImg) {
+          img.addEventListener('load', () => {
+            if (img === currentlyVisibleImg) {
+              setZoomState(viewerState.isZoomed);
+              viewerUI.updateImageRendering();
+              resizeWindowToFitImage();
+            }
+          }, { once: true });
+        }
+      }
+    }, { once: true });
+    img.src = coverUrl;
+  } else {
+    img.classList.add('audio-placeholder');
+    img.src = AUDIO_PLACEHOLDER_URL;
+  }
+  return img;
+}
 
 /**
  * プリロードキャッシュ内の全画像・動画リソースを確実に解放してキャッシュを消去
@@ -397,8 +568,8 @@ function createInspectorSectionElement(title, value, isParam = false, isRaw = fa
       box.appendChild(mapWrapper);
       box.appendChild(coordsContainer);
     }
-  } else if (isRaw) {
-    box.className = 'prompt-look raw-box';
+  } else if (isRaw || (sectionObj && sectionObj.isText)) {
+    box.className = (sectionObj && sectionObj.isText) ? 'prompt-look text-box' : 'prompt-look raw-box';
     box.textContent = String(value);
   } else if (isParam) {
     box.className = 'prompt-look param-box';
@@ -636,6 +807,8 @@ export async function toggleAlphaOverlayMode(customImgEl = null) {
  * 現在表示中の画像・動画要素のリソースを即座に解放
  */
 function cleanupCurrentImage() {
+  closeVolumePopup();
+  stopAndDiscardAudio();
   if (viewerState.isAlphaOverlayMode && viewerState.originalSrc && currentlyVisibleImg) {
     currentlyVisibleImg.src = viewerState.originalSrc;
   }
@@ -903,15 +1076,24 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // --- シークバーの規定表示設定の監視 ---
     const updateSeekBarDefaultVisibility = () => {
-      const currentImg = viewerUI && viewerUI.elements ? viewerUI.elements.viewerImg : document.getElementById('viewer-img');
-      if (currentImg && currentImg.tagName === 'VIDEO' && typeof setVideoSeekBarVisibility === 'function') {
-        setVideoSeekBarVisibility(isDefaultSeekBarEnabled());
+      const activeMedia = getActivePlaybackMedia();
+      if (isPlayableMedia(activeMedia) && typeof setVideoSeekBarVisibility === 'function') {
+        setVideoSeekBarVisibility(shouldShowSeekBarForMedia(activeMedia));
       }
     };
 
     window.addEventListener('storage', (e) => {
       if (e.key === 'showViewerFilename') updateFilenameVisibility();
       if (e.key === 'showViewerSeekBar') updateSeekBarDefaultVisibility();
+      if (e.key === VIEWER_VOLUME_KEY || e.key === VIEWER_MUTED_KEY) {
+        const activeMedia = getActivePlaybackMedia();
+        if (isPlayableMedia(activeMedia)) {
+          applyVolumeSettingsToMedia(activeMedia, activeMedia.tagName === 'VIDEO');
+        }
+        if (videoSeekBarContainer && typeof videoSeekBarContainer.updateVolumeControls === 'function') {
+          videoSeekBarContainer.updateVolumeControls();
+        }
+      }
       if (e.key === 'theme') applyViewerTheme(e.newValue === 'light' ? 'light' : 'dark');
     });
 });
@@ -1220,7 +1402,7 @@ function swapImageElement(newImg, sequenceId) {
     return;
   }
   
-  newImg.className = 'viewer-img-pending';
+  newImg.classList.add('viewer-img-pending');
   newImg.style.display = 'none'; // Initially hide it to prevent pushing the visible image
   viewerUI.elements.viewerImg = newImg;
   
@@ -1249,6 +1431,9 @@ function swapImageElement(newImg, sequenceId) {
     }
   });
 
+  // ファイル移動・切り替え時は直前の音声再生を即座に停止・破棄する
+  stopAndDiscardAudio();
+
   const makeVisible = () => {
     if (sequenceId !== imageLoadSequence) return;
     
@@ -1273,9 +1458,30 @@ function swapImageElement(newImg, sequenceId) {
     setZoomState(viewerState.isZoomed);
     viewerUI.updateImageRendering();
     resizeWindowToFitImage();
+
+    if (newImg.dataset && newImg.dataset.audioPath) {
+      stopAndDiscardAudio();
+      const audioPath = newImg.dataset.audioPath;
+      const audioEl = document.createElement('audio');
+      audioEl.autoplay = true;
+      audioEl.loop = false;
+      audioEl.tabIndex = -1;
+      applyVolumeSettingsToMedia(audioEl, false);
+      const baseSrc = (window.veloceAPI && window.veloceAPI.convertFileSrc) ? window.veloceAPI.convertFileSrc(audioPath) : '';
+      audioEl.src = getStreamUrl(audioPath, baseSrc);
+      currentAudioElement = audioEl;
+      document.body.appendChild(audioEl);
+      if (typeof audioEl.play === 'function') {
+        audioEl.play().catch(e => console.warn('Audio play failed:', e));
+      }
+      if (typeof setVideoSeekBarVisibility === 'function') {
+        setVideoSeekBarVisibility(shouldShowSeekBarForMedia(audioEl));
+      }
+    }
   };
 
   if (newImg.tagName === 'VIDEO') {
+    applyVolumeSettingsToMedia(newImg, true);
     // 再訪時やループ遷移時、動画を確実に先頭から再生する
     try {
       newImg.currentTime = 0;
@@ -1312,11 +1518,12 @@ function swapImageElement(newImg, sequenceId) {
     }
   }
 
+  const isAudioTarget = Boolean(newImg.dataset && newImg.dataset.audioPath);
   if (newImg.tagName === 'VIDEO') {
     if (typeof setVideoSeekBarVisibility === 'function') {
-      setVideoSeekBarVisibility(isDefaultSeekBarEnabled());
+      setVideoSeekBarVisibility(shouldShowSeekBarForMedia(newImg));
     }
-  } else {
+  } else if (!isAudioTarget) {
     if (typeof setVideoSeekBarVisibility === 'function') {
       setVideoSeekBarVisibility(false);
     } else if (typeof videoSeekBarContainer !== 'undefined' && videoSeekBarContainer) {
@@ -1326,6 +1533,7 @@ function swapImageElement(newImg, sequenceId) {
 }
 
 async function loadImage() {
+  closeVolumePopup();
 
   const currentSeq = ++imageLoadSequence;
 
@@ -1341,11 +1549,17 @@ async function loadImage() {
 
     let targetImg;
     const isVideo = isVideoFile(viewerState.currentImagePath);
+    const isAudio = isAudioFile(viewerState.currentImagePath);
     if (viewerState.preloadCache.has(viewerState.currentIndex)) {
       const cachedData = viewerState.preloadCache.get(viewerState.currentIndex);
       if (cachedData.path === viewerState.currentImagePath) {
-        // タグ種別（VIDEO/IMG）の整合性確認、および動画要素の破損（src欠落）検出時は安全に破棄
-        const isTagMismatched = cachedData.img && (isVideo ? cachedData.img.tagName !== 'VIDEO' : cachedData.img.tagName === 'VIDEO');
+        // タグ種別（VIDEO / Audio用IMG / 通常IMG）の整合性確認、および動画要素の破損検出時は安全に破棄
+        const hasAudioTag = Boolean(cachedData.img && cachedData.img.dataset && cachedData.img.dataset.audioPath);
+        const isTagMismatched = cachedData.img && (
+          isVideo ? cachedData.img.tagName !== 'VIDEO'
+            : (isAudio ? (cachedData.img.tagName !== 'IMG' || !hasAudioTag)
+              : (cachedData.img.tagName === 'VIDEO' || hasAudioTag))
+        );
         const isCorruptedVideo = cachedData.img && cachedData.img.tagName === 'VIDEO' && (!cachedData.img.src || cachedData.img.src === '');
         if (isTagMismatched || isCorruptedVideo) {
           viewerState.preloadCache.delete(viewerState.currentIndex);
@@ -1356,8 +1570,9 @@ async function loadImage() {
     }
 
     const targetSrc = getStreamUrl(viewerState.currentImagePath, window.veloceAPI.convertFileSrc(viewerState.currentImagePath));
-    if (!targetImg && currentViewerImg && currentViewerImg.src === targetSrc) {
-      const isTagMismatched = isVideo ? currentViewerImg.tagName !== 'VIDEO' : currentViewerImg.tagName === 'VIDEO';
+    if (!targetImg && !isAudio && currentViewerImg && currentViewerImg.src === targetSrc) {
+      const hasAudioTag = Boolean(currentViewerImg.dataset && currentViewerImg.dataset.audioPath);
+      const isTagMismatched = isVideo ? currentViewerImg.tagName !== 'VIDEO' : (currentViewerImg.tagName === 'VIDEO' || hasAudioTag);
       if (!isTagMismatched) {
         targetImg = currentViewerImg;
       }
@@ -1368,14 +1583,17 @@ async function loadImage() {
         targetImg = document.createElement('video');
         targetImg.autoplay = true;
         targetImg.loop = true;
-        targetImg.muted = true;
+        applyVolumeSettingsToMedia(targetImg, true);
         // フォーカスを受け取らないようにし、window.focus 誘発による ignoreNextClick 誤爆を防ぐ
         targetImg.tabIndex = -1;
+        targetImg.src = targetSrc;
+      } else if (isAudio) {
+        targetImg = createAudioCoverImageElement(viewerState.currentImagePath);
       } else {
         targetImg = document.createElement('img');
         targetImg.decoding = 'async';
+        targetImg.src = targetSrc;
       }
-      targetImg.src = targetSrc;
       viewerState.preloadCache.set(viewerState.currentIndex, { img: targetImg, path: viewerState.currentImagePath });
     }
 
@@ -1441,17 +1659,20 @@ async function preloadAdjacentImages() {
           img = document.createElement('video');
           img.autoplay = true;
           img.loop = true;
-          img.muted = true;
+          applyVolumeSettingsToMedia(img, true);
           // フォーカスを受け取らないようにし、window.focus 誘発による ignoreNextClick 誤爆を防ぐ
           img.tabIndex = -1;
+          img.src = url;
+        } else if (isAudioFile(path)) {
+          img = createAudioCoverImageElement(path);
         } else {
           img = document.createElement('img');
           img.decoding = 'async';
+          img.src = url;
         }
-        img.src = url;
         viewerState.preloadCache.set(idx, { img: img, path: path });
 
-        if (img.tagName === 'IMG') {
+        if (img.tagName === 'IMG' && typeof img.decode === 'function') {
           img.decode().catch(e => { /* ignore */ });
         }
       }
@@ -1943,6 +2164,11 @@ window.addEventListener('keydown', async (e) => {
       break;
     }
     case 'Escape':
+      if (isVolumePopupOpen()) {
+        e.preventDefault();
+        closeVolumePopup();
+        return;
+      }
       if (window.veloceAPI && window.veloceAPI.closeWindow) {
         window.veloceAPI.closeWindow();
       }
@@ -2126,6 +2352,40 @@ function updateInfoContainerVisibility() {
 window.updateScaleDisplay = updateScaleDisplay;
 
 let videoSeekBarContainer = null;
+let volumePopupElement = null;
+let volumeBtnElement = null;
+let isVolumePopupOutsideListenerBound = false;
+
+/**
+ * 音量ポップアップが現在開いているかを返す。
+ * @returns {boolean} 開いていれば true
+ */
+function isVolumePopupOpen() {
+  return Boolean(volumePopupElement && volumePopupElement.style.display === 'flex');
+}
+
+/**
+ * 音量ポップアップの表示状態と関連 ARIA 属性を同期する。
+ * @param {boolean} open 表示する場合は true
+ */
+function setVolumePopupOpen(open) {
+  if (!volumePopupElement) return;
+  const nextOpen = Boolean(open);
+  volumePopupElement.style.display = nextOpen ? 'flex' : 'none';
+  if (videoSeekBarContainer) {
+    videoSeekBarContainer.classList.toggle('volume-popup-open', nextOpen);
+  }
+  if (volumeBtnElement) {
+    volumeBtnElement.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  }
+}
+
+/**
+ * 音量ポップアップを閉じる。
+ */
+function closeVolumePopup() {
+  setVolumePopupOpen(false);
+}
 
 function isDefaultSeekBarEnabled() {
   return (typeof window !== 'undefined' && window.SettingsStore
@@ -2134,7 +2394,12 @@ function isDefaultSeekBarEnabled() {
 }
 
 function ensureVideoSeekBarContainer() {
-  if (videoSeekBarContainer) return videoSeekBarContainer;
+  if (videoSeekBarContainer) {
+    if (!videoSeekBarContainer.isConnected && document.body) {
+      document.body.appendChild(videoSeekBarContainer);
+    }
+    return videoSeekBarContainer;
+  }
 
   videoSeekBarContainer = document.createElement('div');
   videoSeekBarContainer.id = 'video-controls-container';
@@ -2157,37 +2422,106 @@ function ensureVideoSeekBarContainer() {
   timeDisplay.id = 'video-time-display';
   timeDisplay.innerText = '0:00 / 0:00';
 
+  const volumeOnIcon = '<svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>';
+  const volumeZeroIcon = '<svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg>';
+  const volumeMutedIcon = '<svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
+
+  const actionsContainer = document.createElement('div');
+  actionsContainer.id = 'video-controls-actions';
+
+  const volumeWrapper = document.createElement('div');
+  volumeWrapper.id = 'video-volume-btn-wrapper';
+
+  const volumeBtn = document.createElement('button');
+  volumeBtn.id = 'video-volume-btn';
+  volumeBtn.type = 'button';
+  volumeBtn.title = '音量';
+  volumeBtn.setAttribute('aria-haspopup', 'true');
+  volumeBtn.setAttribute('aria-expanded', 'false');
+  volumeBtn.setAttribute('aria-controls', 'video-volume-popup');
+  volumeBtnElement = volumeBtn;
+
+  const volumePopup = document.createElement('div');
+  volumePopup.id = 'video-volume-popup';
+  volumePopup.style.display = 'none';
+  volumePopupElement = volumePopup;
+
+  const volumeSliderWrapper = document.createElement('div');
+  volumeSliderWrapper.id = 'video-volume-slider-wrapper';
+
+  const volumeSlider = document.createElement('input');
+  volumeSlider.type = 'range';
+  volumeSlider.id = 'video-volume-slider';
+  volumeSlider.min = 0;
+  volumeSlider.max = 1;
+  volumeSlider.step = 0.01;
+  volumeSlider.value = String(getSavedViewerVolume());
+  volumeSlider.title = '音量';
+
+  const muteBtn = document.createElement('button');
+  muteBtn.id = 'video-mute-btn';
+  muteBtn.type = 'button';
+  muteBtn.title = 'ミュート切替';
+
+  volumeSliderWrapper.appendChild(volumeSlider);
+  volumePopup.appendChild(volumeSliderWrapper);
+  volumePopup.appendChild(muteBtn);
+  volumeWrapper.appendChild(volumeBtn);
+  volumeWrapper.appendChild(volumePopup);
+  actionsContainer.appendChild(volumeWrapper);
+
   videoSeekBarContainer.appendChild(playBtn);
   videoSeekBarContainer.appendChild(seekBar);
   videoSeekBarContainer.appendChild(timeDisplay);
+  videoSeekBarContainer.appendChild(actionsContainer);
   document.body.appendChild(videoSeekBarContainer);
 
-  // シークバー操作時に画面のパン（移動）やその他のクリックイベントが誤爆するのを防ぐ
+  // シークバー・音量ポップアップ操作時に画面のパン（移動）やクリック判定が誤爆するのを防ぐ
   const stopPropagation = (e) => e.stopPropagation();
   ['mousedown', 'mousemove', 'mouseup', 'wheel', 'click', 'dblclick', 'contextmenu'].forEach(event => {
     videoSeekBarContainer.addEventListener(event, stopPropagation);
+    volumePopup.addEventListener(event, stopPropagation);
   });
 
+  if (!isVolumePopupOutsideListenerBound) {
+    isVolumePopupOutsideListenerBound = true;
+    const handleOutsidePopupPointer = (e) => {
+      if (!isVolumePopupOpen()) return;
+      if (volumeWrapper && !volumeWrapper.contains(e.target)) {
+        closeVolumePopup();
+      }
+    };
+    // コントロールバーの stopPropagation によりバブルが止まる要素（シークバー等）やバー外クリックも捕捉するためキャプチャフェーズで監視
+    document.addEventListener('mousedown', handleOutsidePopupPointer, true);
+    document.addEventListener('click', handleOutsidePopupPointer, true);
+  }
+
   // グローバルキャプチャリングフェーズでのメディアイベント監視
-  // DOMに追加される各video要素にリスナーを個別にバインドするコストを削減
+  // DOMに追加される各video/audio要素にリスナーを個別にバインドするコストを削減
   document.addEventListener('timeupdate', (e) => {
-    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === currentImg) {
+    const activeMedia = getActivePlaybackMedia();
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === activeMedia) {
       videoSeekBarContainer.updateProgress();
     }
   }, true);
 
-
   document.addEventListener('play', (e) => {
-    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === currentImg) {
+    const activeMedia = getActivePlaybackMedia();
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === activeMedia) {
       videoSeekBarContainer.updatePlayStateIcon();
     }
   }, true);
 
   document.addEventListener('pause', (e) => {
-    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === currentImg) {
+    const activeMedia = getActivePlaybackMedia();
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === activeMedia) {
+      videoSeekBarContainer.updatePlayStateIcon();
+    }
+  }, true);
+
+  document.addEventListener('ended', (e) => {
+    const activeMedia = getActivePlaybackMedia();
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === activeMedia) {
       videoSeekBarContainer.updatePlayStateIcon();
     }
   }, true);
@@ -2195,12 +2529,12 @@ function ensureVideoSeekBarContainer() {
   let isSeeking = false;
 
   playBtn.addEventListener('click', () => {
-    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-    if (currentImg && currentImg.tagName === 'VIDEO') {
-      if (currentImg.paused) {
-        currentImg.play();
+    const activeMedia = getActivePlaybackMedia();
+    if (isPlayableMedia(activeMedia)) {
+      if (activeMedia.paused) {
+        activeMedia.play();
       } else {
-        currentImg.pause();
+        activeMedia.pause();
       }
     }
     playBtn.blur();
@@ -2208,22 +2542,92 @@ function ensureVideoSeekBarContainer() {
 
   let lastPausedState = null;
   videoSeekBarContainer.updatePlayStateIcon = () => {
-    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-    if (currentImg && currentImg.tagName === 'VIDEO') {
-      if (currentImg.paused !== lastPausedState) {
-        lastPausedState = currentImg.paused;
-        playBtn.innerHTML = currentImg.paused ? playIcon : pauseIcon;
+    const activeMedia = getActivePlaybackMedia();
+    if (isPlayableMedia(activeMedia)) {
+      if (activeMedia.paused !== lastPausedState) {
+        lastPausedState = activeMedia.paused;
+        playBtn.innerHTML = activeMedia.paused ? playIcon : pauseIcon;
       }
     }
   };
 
+  let lastVolumeBtnState = null;
+  let lastMutedIconState = null;
+  videoSeekBarContainer.updateVolumeControls = () => {
+    const activeMedia = getActivePlaybackMedia();
+    const rawVol = isPlayableMedia(activeMedia) ? activeMedia.volume : getSavedViewerVolume();
+    const vol = (typeof rawVol === 'number' && !isNaN(rawVol)) ? Math.max(0, Math.min(1, rawVol)) : 1;
+    const muted = isPlayableMedia(activeMedia) ? activeMedia.muted : getSavedViewerMuted(false);
+    volumeSlider.value = String(vol);
+
+    const nextVolumeBtnState = muted ? 'muted' : (vol === 0 ? 'zero' : 'on');
+    if (nextVolumeBtnState !== lastVolumeBtnState) {
+      lastVolumeBtnState = nextVolumeBtnState;
+      volumeBtn.innerHTML = muted
+        ? volumeMutedIcon
+        : (vol === 0 ? volumeZeroIcon : volumeOnIcon);
+    }
+
+    if (muted !== lastMutedIconState) {
+      lastMutedIconState = muted;
+      muteBtn.innerHTML = muted ? volumeMutedIcon : volumeOnIcon;
+      muteBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    }
+  };
+  videoSeekBarContainer.updateVolumeControls();
+
+  volumeBtn.addEventListener('click', () => {
+    const nextOpen = !isVolumePopupOpen();
+    setVolumePopupOpen(nextOpen);
+    if (nextOpen && videoSeekBarContainer.updateVolumeControls) {
+      videoSeekBarContainer.updateVolumeControls();
+    }
+    volumeBtn.blur();
+  });
+
+  muteBtn.addEventListener('click', () => {
+    const activeMedia = getActivePlaybackMedia();
+    const currentMuted = isPlayableMedia(activeMedia) ? activeMedia.muted : getSavedViewerMuted(false);
+    const nextMuted = !currentMuted;
+    writeViewerSetting(VIEWER_MUTED_KEY, nextMuted ? 'true' : 'false');
+    if (isPlayableMedia(activeMedia)) {
+      activeMedia.muted = nextMuted;
+    }
+    videoSeekBarContainer.updateVolumeControls();
+    muteBtn.blur();
+  });
+
+  volumeSlider.addEventListener('input', () => {
+    const rawVal = parseFloat(volumeSlider.value);
+    const vol = isNaN(rawVal) ? 1 : Math.max(0, Math.min(1, rawVal));
+    writeViewerSetting(VIEWER_VOLUME_KEY, String(vol));
+    const activeMedia = getActivePlaybackMedia();
+    if (isPlayableMedia(activeMedia)) {
+      try {
+        activeMedia.volume = vol;
+      } catch (e) {}
+    }
+    videoSeekBarContainer.updateVolumeControls();
+  });
+
+  volumeSlider.addEventListener('change', () => {
+    volumeSlider.blur();
+  });
+
+  volumeSlider.addEventListener('mouseup', () => {
+    volumeSlider.blur();
+  });
+
   seekBar.addEventListener('input', () => {
     isSeeking = true;
-    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-    if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
-      const time = (seekBar.value / 100) * currentImg.duration;
-      currentImg.currentTime = time;
-      timeDisplay.innerText = formatTime(time) + ' / ' + formatTime(currentImg.duration);
+    const activeMedia = getActivePlaybackMedia();
+    if (isPlayableMedia(activeMedia) && activeMedia.duration) {
+      const time = (seekBar.value / 100) * activeMedia.duration;
+      activeMedia.currentTime = time;
+      const nextText = formatDurationSeconds(time) + ' / ' + formatDurationSeconds(activeMedia.duration);
+      if (timeDisplay.textContent !== nextText) {
+        timeDisplay.textContent = nextText;
+      }
     }
   });
 
@@ -2244,19 +2648,15 @@ function ensureVideoSeekBarContainer() {
     }
   });
 
-  function formatTime(seconds) {
-    if (isNaN(seconds)) return "0:00";
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
-
   videoSeekBarContainer.updateProgress = () => {
     if (isSeeking) return;
-    const currentImg = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-    if (currentImg && currentImg.tagName === 'VIDEO' && currentImg.duration) {
-      seekBar.value = (currentImg.currentTime / currentImg.duration) * 100;
-      timeDisplay.innerText = formatTime(currentImg.currentTime) + ' / ' + formatTime(currentImg.duration);
+    const activeMedia = getActivePlaybackMedia();
+    if (isPlayableMedia(activeMedia) && activeMedia.duration) {
+      seekBar.value = (activeMedia.currentTime / activeMedia.duration) * 100;
+      const nextText = formatDurationSeconds(activeMedia.currentTime) + ' / ' + formatDurationSeconds(activeMedia.duration);
+      if (timeDisplay.textContent !== nextText) {
+        timeDisplay.textContent = nextText;
+      }
       videoSeekBarContainer.updatePlayStateIcon();
     }
   };
@@ -2265,8 +2665,9 @@ function ensureVideoSeekBarContainer() {
 }
 
 function setVideoSeekBarVisibility(visible) {
-  const img = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-  if (!visible || !img || img.tagName !== 'VIDEO') {
+  const activeMedia = getActivePlaybackMedia();
+  if (!visible || !isPlayableMedia(activeMedia)) {
+    closeVolumePopup();
     if (videoSeekBarContainer) {
       videoSeekBarContainer.style.display = 'none';
     }
@@ -2277,6 +2678,9 @@ function setVideoSeekBarVisibility(visible) {
   if (videoSeekBarContainer.updatePlayStateIcon) {
     videoSeekBarContainer.updatePlayStateIcon();
   }
+  if (videoSeekBarContainer.updateVolumeControls) {
+    videoSeekBarContainer.updateVolumeControls();
+  }
   if (videoSeekBarContainer.updateProgress) {
     videoSeekBarContainer.updateProgress();
   }
@@ -2284,9 +2688,9 @@ function setVideoSeekBarVisibility(visible) {
 }
 
 function toggleVideoSeekBar() {
-  const img = (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-  if (!img || img.tagName !== 'VIDEO') {
-    showToast("動画ではありません", 3000, 'warning');
+  const activeMedia = getActivePlaybackMedia();
+  if (!isPlayableMedia(activeMedia)) {
+    showToast("動画・音声ではありません", 3000, 'warning');
     return;
   }
 
@@ -2295,7 +2699,7 @@ function toggleVideoSeekBar() {
   setVideoSeekBarVisibility(!isVisible);
 }
 
-export { loadImage };
+export { loadImage, getMediaWidth, getMediaHeight, swapImageElement };
 
 if (typeof window !== 'undefined') {
   window.loadImage = loadImage;
@@ -2303,6 +2707,11 @@ if (typeof window !== 'undefined') {
   window.ensureVideoSeekBarContainer = ensureVideoSeekBarContainer;
   window.setVideoSeekBarVisibility = setVideoSeekBarVisibility;
   window.toggleVideoSeekBar = toggleVideoSeekBar;
+  window.getActivePlaybackMedia = getActivePlaybackMedia;
+  window.stopAndDiscardAudio = stopAndDiscardAudio;
+  window.getSavedViewerVolume = getSavedViewerVolume;
+  window.getSavedViewerMuted = getSavedViewerMuted;
+  window.applyVolumeSettingsToMedia = applyVolumeSettingsToMedia;
   window.showNext = showNext;
   window.showPrev = showPrev;
   window.handleWheel = handleWheel;

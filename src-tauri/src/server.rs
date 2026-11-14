@@ -340,6 +340,7 @@ pub fn start_local_video_server(
 
                         let mut path_str = String::new();
                         let mut is_thumb = false;
+                        let mut is_cover = false;
                         let mut mtime: u64 = 0;
                         let mut hash_param = String::new();
                         if let Some(query) = uri.split('?').nth(1) {
@@ -348,6 +349,8 @@ pub fn start_local_video_server(
                                     path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
                                 } else if pair.starts_with("thumb=1") {
                                     is_thumb = true;
+                                } else if pair.starts_with("cover=1") {
+                                    is_cover = true;
                                 } else if pair.starts_with("mtime=") {
                                     mtime = pair[6..].parse().unwrap_or(0);
                                 } else if pair.starts_with("hash=") {
@@ -358,6 +361,72 @@ pub fn start_local_video_server(
 
                         if path_str.is_empty() && hash_param.is_empty() {
                             let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                            return;
+                        }
+
+                        if is_cover {
+                            let mut client_wants_close = false;
+                            for _ in 0..MAX_HEADER_LINES {
+                                let mut header_line = String::new();
+                                if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
+                                    client_wants_close = true;
+                                    break;
+                                }
+                                let trimmed = header_line.trim();
+                                if trimmed.is_empty() {
+                                    break;
+                                }
+                                let lower = trimmed.to_ascii_lowercase();
+                                if lower.starts_with("connection:") && lower["connection:".len()..].trim().contains("close") {
+                                    client_wants_close = true;
+                                }
+                            }
+                            let keep_alive = !client_wants_close && (req_idx + 1 < MAX_KEEP_ALIVE_REQUESTS);
+                            let conn_header = if keep_alive {
+                                "Connection: keep-alive\r\nKeep-Alive: timeout=1, max=32\r\n"
+                            } else {
+                                "Connection: close\r\n"
+                            };
+
+                            if !crate::audio::is_audio_path(&path_str) {
+                                let _ = reader.get_mut().write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n");
+                                return;
+                            }
+
+                            if let Some(cover_bytes) = crate::audio::extract_audio_cover(&path_str) {
+                                let mimetype = if cover_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                                    "image/png"
+                                } else {
+                                    "image/jpeg"
+                                };
+                                let mut headers = String::new();
+                                headers.push_str("HTTP/1.1 200 OK\r\n");
+                                headers.push_str(&format!("Content-Type: {}\r\n", mimetype));
+                                headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                                headers.push_str("Cache-Control: public, max-age=3600\r\n");
+                                headers.push_str(conn_header);
+                                headers.push_str(&format!("Content-Length: {}\r\n\r\n", cover_bytes.len()));
+                                if reader.get_mut().write_all(headers.as_bytes()).is_err()
+                                    || reader.get_mut().write_all(&cover_bytes).is_err()
+                                    || reader.get_mut().flush().is_err()
+                                {
+                                    return;
+                                }
+                            } else {
+                                let not_found = format!(
+                                    "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\n{}Content-Length: 0\r\n\r\n",
+                                    conn_header
+                                );
+                                if reader.get_mut().write_all(not_found.as_bytes()).is_err()
+                                    || reader.get_mut().flush().is_err()
+                                {
+                                    return;
+                                }
+                            }
+
+                            if keep_alive {
+                                continue;
+                            }
                             return;
                         }
 
@@ -489,8 +558,9 @@ pub fn start_local_video_server(
                         }
 
                         let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                        // 動画・アニメーション配信対象の拡張子ホワイトリスト検証
-                        if !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
+                        // 動画・アニメーション・音声配信対象の拡張子ホワイトリスト検証
+                        let is_audio = crate::audio::is_audio_extension(&ext);
+                        if !is_audio && !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
                             let _ = reader.get_mut().write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n");
                             return;
                         }
@@ -500,10 +570,14 @@ pub fn start_local_video_server(
                             if let Ok(metadata) = file.metadata() {
                                 let file_size = metadata.len();
                                 let max_chunk: u64 = 2 * 1024 * 1024;
-                                let content_type = match ext.as_str() {
-                                    "webm" => "video/webm",
-                                    "gif" => "image/gif",
-                                    _ => "video/mp4",
+                                let content_type = if is_audio {
+                                    crate::audio::audio_content_type(&ext)
+                                } else {
+                                    match ext.as_str() {
+                                        "webm" => "video/webm",
+                                        "gif" => "image/gif",
+                                        _ => "video/mp4",
+                                    }
                                 };
 
                                 match calculate_range(range_header.as_deref(), file_size, max_chunk) {

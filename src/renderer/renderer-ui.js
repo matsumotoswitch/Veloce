@@ -17,7 +17,7 @@
 // ============================================================================
 
 import { appState, dndState } from './renderer-state.js';
-import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml } from '../common/utils.js';
+import { applyGlowEffect as glowElement, getStreamUrl, escapeHtml, isAudioFile, getAudioCoverUrl, AUDIO_PLACEHOLDER_URL, isLocalMediaServerUrl } from '../common/utils.js';
 import { validateFilename, INVALID_FILENAME_RE } from '../common/path-utils.js';
 import { showAppDialog } from '../common/dialog-base.js';
 import { extractMetadataFields, parsePromptTags, formatRequestType } from '../common/metadata-format.js';
@@ -26,6 +26,8 @@ const CHUNK_SIZE = 100;
 
 // 破損MP4動画用のフォールバックSVGを事前にBase64化し、onerrorでの都度エンコードとGC発生を排除
 export const BROKEN_MP4_FALLBACK_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiBmaWxsPSJub25lIiBzdHJva2U9IiM0NDQiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgcng9IjIiIHJ5PSIyIj48L3JlY3Q+PGNpcmNsZSBjeD0iOC41IiBjeT0iOC41IiByPSIxLjUiPjwvY2lyY2xlPjxwb2x5bGluZSBwb2ludHM9IjIxIDE1IDE2IDEwIDUgMjEiPjwvcG9seWxpbmU+PC9zdmc+';
+
+export { AUDIO_PLACEHOLDER_URL };
 
 let dragCache = { element: null, midX: 0 };
 
@@ -1494,6 +1496,10 @@ class UIManager {
       if (path.toLowerCase().endsWith('.mp4')) {
         return `<video src="${src}" class="diff-thumbnail" autoplay loop muted playsinline></video>`;
       }
+      if (isAudioFile(path)) {
+        const coverSrc = getAudioCoverUrl(path) || AUDIO_PLACEHOLDER_URL;
+        return `<img src="${coverSrc}" class="diff-thumbnail" decoding="async" onerror="this.src='${AUDIO_PLACEHOLDER_URL}'">`;
+      }
       return `<img src="${src}" class="diff-thumbnail" decoding="async">`;
     };
 
@@ -2200,10 +2206,15 @@ class UIManager {
       badge.className = 'rating-badge';
       badge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="rating-value"></span>';
       badge.classList.remove('show');
-      
+
+      const mediaBadge = document.createElement('div');
+      mediaBadge.className = 'media-badge';
+      mediaBadge.innerHTML = '<span class="media-badge-text"></span>';
+
       wrapper.appendChild(img);
       wrapper.appendChild(label);
       wrapper.appendChild(badge);
+      wrapper.appendChild(mediaBadge);
       content.appendChild(wrapper);
     }
 
@@ -2287,6 +2298,21 @@ class UIManager {
           }
         }
       }
+
+      // メディア種別オーバーレイバッジの同期（O(1) キャッシュ比較）
+      const mediaBadgeLabel = isAudioFile(file.path) ? 'MP3' : '';
+      if (wrapper._cachedMediaType !== mediaBadgeLabel) {
+        wrapper._cachedMediaType = mediaBadgeLabel;
+        const mediaBadge = wrapper.children[3];
+        if (mediaBadge) {
+          if (mediaBadgeLabel) {
+            mediaBadge.children[0].textContent = mediaBadgeLabel;
+            mediaBadge.classList.add('show');
+          } else {
+            mediaBadge.classList.remove('show');
+          }
+        }
+      }
     }
 
     // --- サムネイル画像描写の優先順序構築 (Phase 2: スクロール方向への動的適応) ---
@@ -2340,6 +2366,7 @@ class UIManager {
           // O(1) LRU 更新: 参照されたエントリを Map 末尾（MRU）へ移動
           appState.thumbnailUrls.delete(file.path);
           appState.thumbnailUrls.set(file.path, targetUrl);
+          img.classList.toggle('audio-placeholder', targetUrl === AUDIO_PLACEHOLDER_URL);
           if (img.src !== targetUrl) {
             img.src = targetUrl;
           }
@@ -2366,15 +2393,21 @@ class UIManager {
               let fallback;
               if (file.path.toLowerCase().endsWith('.mp4')) {
                 fallback = BROKEN_MP4_FALLBACK_URL;
+              } else if (isAudioFile(file.path)) {
+                fallback = AUDIO_PLACEHOLDER_URL;
+                this.classList.add('audio-placeholder');
               } else {
                 fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
               }
-              if (this.src !== fallback && !this.src.startsWith('asset://') && !this.src.startsWith('http://localhost:')) {
-                if (window.appState && window.appState.thumbnailUrls) {
-                  window.appState.thumbnailUrls.set(file.path, fallback);
-                  if (window.evictThumbnailCache) window.evictThumbnailCache();
+              if (this.src !== fallback) {
+                const isStaticFallback = isAudioFile(file.path) || file.path.toLowerCase().endsWith('.mp4');
+                if (isStaticFallback || (!this.src.startsWith('asset://') && !isLocalMediaServerUrl(this.src))) {
+                  if (window.appState && window.appState.thumbnailUrls) {
+                    window.appState.thumbnailUrls.set(file.path, fallback);
+                    if (window.evictThumbnailCache) window.evictThumbnailCache();
+                  }
+                  this.src = fallback;
                 }
-                this.src = fallback;
               }
             };
             if (img.complete && img.naturalWidth > 0) {
