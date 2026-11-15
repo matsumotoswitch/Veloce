@@ -209,66 +209,93 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
             WHERE rowid = old.rowid;
         END;", []
     ).map_err(|e| e.to_string())?;
-    
-    let pool_clone = pool.clone();
-    std::thread::spawn(move || {
-        // 起動直後のディレクトリ読み込み等のI/Oと競合しないよう、バックグラウンド処理を数秒遅延させる
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        
-        if let Ok(mut bg_conn) = pool_clone.get() {
-            // 既存データのバックフィル (width, height, path)
-            let _ = bg_conn.execute("UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL", []);
 
-            // カラムのマイグレーション (searchable_*)
-            let has_unmigrated = bg_conn.query_row(
-                "SELECT 1 FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != '' LIMIT 1",
-                [],
-                |_| Ok(()),
-            ).is_ok();
-            
-            if has_unmigrated {
-                let mut rows_to_update = Vec::new();
-                if let Ok(mut stmt) = bg_conn.prepare("SELECT hash_key, metadata FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != ''") {
-                    if let Ok(mut rows) = stmt.query([]) {
-                        while let Ok(Some(row)) = rows.next() {
-                            let hash_key: String = row.get(0).unwrap_or_default();
-                            let metadata_str: String = row.get(1).unwrap_or_default();
-                            if let Ok(meta) = serde_json::from_str::<FullMetadata>(&metadata_str) {
-                                let (sp, snp, ss) = extract_searchable_strings(&meta);
-                                rows_to_update.push((hash_key, sp, snp, ss));
-                            }
-                        }
-                    }
-                }
+    let user_version: u32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap_or(0);
 
-                if !rows_to_update.is_empty() {
-                    if let Ok(tx) = bg_conn.transaction() {
-                        if let Ok(mut update_stmt) = tx.prepare("UPDATE cache SET searchable_prompt = ?, searchable_negative_prompt = ?, searchable_source = ? WHERE hash_key = ?") {
-                            for (hk, sp, snp, ss) in rows_to_update {
-                                let _ = update_stmt.execute(rusqlite::params![sp, snp, ss, hk]);
-                            }
-                        }
-                        let _ = tx.commit();
-                    }
-                }
+    if user_version < CURRENT_CACHE_DB_VERSION {
+        let pool_clone = pool.clone();
+        std::thread::spawn(move || {
+            // 起動直後のディレクトリ読み込み等のI/Oと競合しないよう、バックグラウンド処理を数秒遅延させる
+            std::thread::sleep(std::time::Duration::from_secs(5));
+
+            if let Ok(mut bg_conn) = pool_clone.get() {
+                let _ = migrate_cache_db(&mut bg_conn);
+                #[cfg(debug_assertions)]
+                println!("Migration completed. user_version set to {}.", CURRENT_CACHE_DB_VERSION);
             }
-            
-            // FTSバックフィル
-            let fts_count: i64 = bg_conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
-            let cache_count: i64 = bg_conn.query_row("SELECT count(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
-            if fts_count != cache_count {
-                let _ = bg_conn.execute(
-                    "INSERT OR REPLACE INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
-                     SELECT rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache",
-                    []
-                );
-            }
-            #[cfg(debug_assertions)]
-            println!("Migration completed.");
-        }
-    });
+        });
+    }
 
     Ok(pool)
+}
+
+/// キャッシュDBの現在のスキーマ・マイグレーション世代
+pub const CURRENT_CACHE_DB_VERSION: u32 = 1;
+
+/// 起動時マイグレーション処理（レガシーデータ補完、FTSバックフィル）を実行する。
+/// すでに `PRAGMA user_version >= CURRENT_CACHE_DB_VERSION` の場合は即座に早期リターン（Ok(false)）し、
+/// テーブル走査・ロック競合を回避する。マイグレーションを実行した場合は `PRAGMA user_version = 1` を記録して Ok(true) を返す。
+pub fn migrate_cache_db(conn: &mut rusqlite::Connection) -> Result<bool, rusqlite::Error> {
+    let current_version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if current_version >= CURRENT_CACHE_DB_VERSION {
+        return Ok(false);
+    }
+
+    // 既存データのバックフィル (width, height, path)
+    let _ = conn.execute(
+        "UPDATE cache SET width = CAST(json_extract(metadata, '$.width') AS INTEGER), height = CAST(json_extract(metadata, '$.height') AS INTEGER), path = json_extract(metadata, '$.path') WHERE path = '' OR path IS NULL",
+        [],
+    );
+
+    // カラムのマイグレーション (searchable_*)
+    let has_unmigrated = conn.query_row(
+        "SELECT 1 FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != '' LIMIT 1",
+        [],
+        |_| Ok(()),
+    ).is_ok();
+
+    if has_unmigrated {
+        let mut rows_to_update = Vec::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT hash_key, metadata FROM cache WHERE searchable_prompt = '' AND metadata IS NOT NULL AND metadata != ''") {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Ok(Some(row)) = rows.next() {
+                    let hash_key: String = row.get(0).unwrap_or_default();
+                    let metadata_str: String = row.get(1).unwrap_or_default();
+                    if let Ok(meta) = serde_json::from_str::<FullMetadata>(&metadata_str) {
+                        let (sp, snp, ss) = extract_searchable_strings(&meta);
+                        rows_to_update.push((hash_key, sp, snp, ss));
+                    }
+                }
+            }
+        }
+
+        if !rows_to_update.is_empty() {
+            if let Ok(tx) = conn.transaction() {
+                if let Ok(mut update_stmt) = tx.prepare("UPDATE cache SET searchable_prompt = ?, searchable_negative_prompt = ?, searchable_source = ? WHERE hash_key = ?") {
+                    for (hk, sp, snp, ss) in rows_to_update {
+                        let _ = update_stmt.execute(rusqlite::params![sp, snp, ss, hk]);
+                    }
+                }
+                let _ = tx.commit();
+            }
+        }
+    }
+
+    // FTSバックフィル
+    let fts_count: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |row| row.get(0)).unwrap_or(0);
+    let cache_count: i64 = conn.query_row("SELECT count(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
+    if fts_count != cache_count {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
+             SELECT rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache",
+            [],
+        );
+    }
+
+    conn.execute(&format!("PRAGMA user_version = {}", CURRENT_CACHE_DB_VERSION), [])?;
+    Ok(true)
 }
 
 
@@ -12780,5 +12807,84 @@ mod viewer_tests {
             "is_listed_media_extension 以外にメディア拡張子の直書きリストが残っていないこと (found: {})",
             occurrences
         );
+    }
+
+    #[test]
+    fn test_cache_db_user_version_migration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_migration.db");
+        let mut conn = rusqlite::Connection::open(&db_path).unwrap();
+
+        // テーブル初期化
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                metadata_source TEXT DEFAULT '',
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "CREATE VIRTUAL TABLE cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source)",
+            [],
+        ).unwrap();
+
+        // user_version の初期値は 0
+        let v0: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v0, 0);
+
+        // 未移行レコードを挿入（path が空、メタデータから抽出が必要）
+        let full_meta = crate::models::FullMetadata {
+            path: "C:\\art\\pic.png".to_string(),
+            width: 512,
+            height: 768,
+            prompt: "masterpiece, 1girl".to_string(),
+            negative_prompt: "worst quality".to_string(),
+            params: serde_json::json!({}),
+            source: "NovelAI".to_string(),
+            metadata_source: "PNG Chunks".to_string(),
+        };
+        let meta_json = serde_json::to_string(&full_meta).unwrap();
+        conn.execute(
+            "INSERT INTO cache (hash_key, metadata, path) VALUES ('hk_test', ?, '')",
+            rusqlite::params![meta_json],
+        ).unwrap();
+
+        // 1回目のマイグレーション実行 -> true を返し、user_version = CURRENT_CACHE_DB_VERSION (1) になること
+        let migrated = super::migrate_cache_db(&mut conn).unwrap();
+        assert!(migrated, "初回マイグレーションは実行されること");
+
+        let v1: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v1, super::CURRENT_CACHE_DB_VERSION);
+
+        // path, width, height, searchable_prompt, cache_fts が正しくバックフィルされていること
+        let (path, width, height, sp): (String, u32, u32, String) = conn.query_row(
+            "SELECT path, width, height, searchable_prompt FROM cache WHERE hash_key = 'hk_test'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        ).unwrap();
+        assert_eq!(path, "C:\\art\\pic.png");
+        assert_eq!(width, 512);
+        assert_eq!(height, 768);
+        assert!(sp.contains("masterpiece"));
+
+        let fts_count: i64 = conn.query_row("SELECT count(*) FROM cache_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(fts_count, 1);
+
+        // 2回目のマイグレーション実行 -> すでに user_version >= 1 のため false を返し、スキップされること
+        let second_run = super::migrate_cache_db(&mut conn).unwrap();
+        assert!(!second_run, "2回目の実行はスキップされること");
     }
 }
