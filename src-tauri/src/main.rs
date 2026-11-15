@@ -531,12 +531,14 @@ fn build_smart_folder_query_with_sort(
                 }
             }
             "source" => {
+                let is_pos = cond.operator == "contains" || cond.operator == "==" || cond.operator == "=";
+                let is_neg = cond.operator == "not_contains" || cond.operator == "!=" || cond.operator == "<>";
                 if use_fallback {
                     let like_query = format!("%{}%", val_lower.replace("%", "\\%").replace("_", "\\_"));
-                    if cond.operator == "contains" {
+                    if is_pos {
                         clause = "c.searchable_source LIKE ? ESCAPE '\\'".to_string();
                         params.push(rusqlite::types::Value::Text(like_query));
-                    } else if cond.operator == "not_contains" {
+                    } else if is_neg {
                         clause = "c.searchable_source NOT LIKE ? ESCAPE '\\'".to_string();
                         params.push(rusqlite::types::Value::Text(like_query));
                     } else { clause = "1=1".to_string(); }
@@ -544,13 +546,93 @@ fn build_smart_folder_query_with_sort(
                     let fts_query = build_safe_fts_query(&val_lower);
                     if fts_query.is_empty() {
                         clause = "1=1".to_string();
-                    } else if cond.operator == "contains" {
+                    } else if is_pos {
                         clause = "c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
-                    } else if cond.operator == "not_contains" {
+                    } else if is_neg {
                         clause = "c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_source MATCH ?)".to_string();
                         params.push(rusqlite::types::Value::Text(fts_query));
                     } else { clause = "1=1".to_string(); }
+                }
+            }
+            "media_type" => {
+                let media_key = if val_lower.trim().is_empty() {
+                    cond.operator.trim().to_lowercase()
+                } else {
+                    val_lower.trim().to_string()
+                };
+                let target_exts: &[&str] = match media_key.as_str() {
+                    "image" => &["png", "jpg", "jpeg", "webp", "gif", "bmp"],
+                    "video" => &["mp4"],
+                    "audio" => &["mp3"],
+                    _ => &[],
+                };
+                if target_exts.is_empty() {
+                    clause = "1=1".to_string();
+                } else {
+                    let is_negated = normalize_comparison_operator(&cond.operator) == "!="
+                        || cond.operator == "not_contains";
+                    let mut parts = Vec::with_capacity(target_exts.len());
+                    for ext in target_exts {
+                        if is_negated {
+                            parts.push("LOWER(c.path) NOT LIKE ? ESCAPE '\\'");
+                        } else {
+                            parts.push("LOWER(c.path) LIKE ? ESCAPE '\\'");
+                        }
+                        params.push(rusqlite::types::Value::Text(format!("%.{}", ext)));
+                    }
+                    let joiner = if is_negated { " AND " } else { " OR " };
+                    clause = format!("({})", parts.join(joiner));
+                }
+            }
+            "ext" => {
+                let exts: Vec<String> = val_lower
+                    .split(|c: char| c == ',' || c.is_whitespace())
+                    .map(|s| s.trim().trim_start_matches('.').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if exts.is_empty() {
+                    clause = "1=1".to_string();
+                } else {
+                    let is_negated = normalize_comparison_operator(&cond.operator) == "!="
+                        || cond.operator == "not_contains";
+                    let mut parts = Vec::with_capacity(exts.len());
+                    for ext in exts {
+                        if is_negated {
+                            parts.push("LOWER(c.path) NOT LIKE ? ESCAPE '\\'");
+                        } else {
+                            parts.push("LOWER(c.path) LIKE ? ESCAPE '\\'");
+                        }
+                        params.push(rusqlite::types::Value::Text(format!(
+                            "%.{}",
+                            escape_sql_like(&ext)
+                        )));
+                    }
+                    let joiner = if is_negated { " AND " } else { " OR " };
+                    clause = format!("({})", parts.join(joiner));
+                }
+            }
+            "metadata_source" => {
+                let target_source = val_lower.trim().to_string();
+                if target_source.is_empty() {
+                    clause = "1=1".to_string();
+                } else {
+                    let is_negated = normalize_comparison_operator(&cond.operator) == "!="
+                        || cond.operator == "not_contains";
+                    if target_source == "exif" {
+                        if is_negated {
+                            clause = "(LOWER(coalesce(NULLIF(c.metadata_source, ''), 'None')) != 'webp exif' AND LOWER(coalesce(NULLIF(c.metadata_source, ''), 'None')) != 'jpeg exif')".to_string();
+                        } else {
+                            clause = "(LOWER(coalesce(NULLIF(c.metadata_source, ''), 'None')) = 'webp exif' OR LOWER(coalesce(NULLIF(c.metadata_source, ''), 'None')) = 'jpeg exif')".to_string();
+                        }
+                    } else {
+                        let cmp_op = if is_negated { "!=" } else { "=" };
+                        clause = format!(
+                            "LOWER(coalesce(NULLIF(c.metadata_source, ''), 'None')) {} ?",
+                            cmp_op
+                        );
+                        params.push(rusqlite::types::Value::Text(target_source));
+                    }
                 }
             }
             "rating" => {
@@ -8622,6 +8704,173 @@ mod viewer_tests {
         };
         let (q_lt, _) = super::build_smart_folder_query(&rule_rating_lt, false, false);
         assert!(q_lt.contains("coalesce(r.rating, 0) < ?"), "coalesce(r.rating, 0) < ? が生成されること: {}", q_lt);
+    }
+
+    /// PLAN.md Sec 5.3: メディア種別 (media_type)・拡張子 (ext)・メタデータ出処 (metadata_source) 条件のSQL生成および実DB評価テスト
+    #[test]
+    fn test_smart_folder_media_type_ext_and_metadata_source() {
+        use super::{SmartFolderRule, SmartFolderCondition};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                path TEXT,
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                thumbnail BLOB,
+                metadata_source TEXT DEFAULT ''
+            )",
+            [],
+        )
+        .unwrap();
+
+        let sample_rows = [
+            ("h1", "C:\\media\\illust1.png", "Alpha Channel"),
+            ("h2", "C:\\media\\illust2.PNG", "PNG Chunks"),
+            ("h3", "C:\\media\\photo.jpg", "JPEG EXIF"),
+            ("h4", "C:\\media\\art.webp", "WebP EXIF"),
+            ("h5", "C:\\media\\movie.MP4", "None"),
+            ("h6", "C:\\media\\track.MP3", "Audio Tags"),
+            ("h7", "C:\\media\\plain.png", ""),
+        ];
+        for (hk, p, ms) in &sample_rows {
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, metadata_source) VALUES (?, ?, ?)",
+                rusqlite::params![hk, p, ms],
+            )
+            .unwrap();
+        }
+
+        // CaseSensitiveLikeGuard が有効な状態でも大文字拡張子 (.PNG / .MP3 / .MP4) が正しくヒットすることを確認
+        let _guard = super::CaseSensitiveLikeGuard::new(&conn);
+
+        let eval_count = |rule: &SmartFolderRule| -> usize {
+            let (q, params) = super::build_smart_folder_query(rule, true, false);
+            let mut stmt = conn.prepare(&q).unwrap();
+            stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, usize>(0))
+                .unwrap()
+        };
+
+        // 1. media_type == audio -> track.MP3 (1件)
+        let rule_audio = SmartFolderRule {
+            id: "mt_audio".to_string(),
+            name: "Audio Only".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "media_type".to_string(),
+                operator: "==".to_string(),
+                value: "audio".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_audio), 1);
+
+        // 2. media_type == video -> movie.MP4 (1件)
+        let rule_video = SmartFolderRule {
+            id: "mt_video".to_string(),
+            name: "Video Only".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "media_type".to_string(),
+                operator: "==".to_string(),
+                value: "video".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_video), 1);
+
+        // 3. media_type == image -> illust1.png, illust2.PNG, photo.jpg, art.webp, plain.png (5件)
+        let rule_image = SmartFolderRule {
+            id: "mt_image".to_string(),
+            name: "Image Only".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "media_type".to_string(),
+                operator: "==".to_string(),
+                value: "image".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_image), 5);
+
+        // 4. media_type != image -> movie.MP4, track.MP3 (2件)
+        let rule_not_image = SmartFolderRule {
+            id: "mt_not_image".to_string(),
+            name: "Not Image".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "media_type".to_string(),
+                operator: "!=".to_string(),
+                value: "image".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_not_image), 2);
+
+        // 5. ext == ".png, webp" -> illust1.png, illust2.PNG, art.webp, plain.png (4件)
+        let rule_ext = SmartFolderRule {
+            id: "ext_png_webp".to_string(),
+            name: "PNG or WebP".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "ext".to_string(),
+                operator: "==".to_string(),
+                value: ".png, webp".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_ext), 4);
+
+        // 6. ext != "png" -> photo.jpg, art.webp, movie.MP4, track.MP3 (4件)
+        let rule_ext_not = SmartFolderRule {
+            id: "ext_not_png".to_string(),
+            name: "Not PNG".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "ext".to_string(),
+                operator: "!=".to_string(),
+                value: "png".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_ext_not), 4);
+
+        // 7. metadata_source == "Alpha Channel" -> illust1.png (1件)
+        let rule_stealth = SmartFolderRule {
+            id: "ms_stealth".to_string(),
+            name: "Stealth Only".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "metadata_source".to_string(),
+                operator: "==".to_string(),
+                value: "Alpha Channel".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_stealth), 1);
+
+        // 8. metadata_source == "None" -> movie.MP4 ("None") と plain.png ("") の両方 (2件)
+        let rule_ms_none = SmartFolderRule {
+            id: "ms_none".to_string(),
+            name: "No Metadata".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "metadata_source".to_string(),
+                operator: "==".to_string(),
+                value: "None".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_ms_none), 2);
+
+        // 9. metadata_source != "None" -> メタデータありの5件
+        let rule_ms_has = SmartFolderRule {
+            id: "ms_has".to_string(),
+            name: "Has Metadata".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "metadata_source".to_string(),
+                operator: "!=".to_string(),
+                value: "None".to_string(),
+            }],
+        };
+        assert_eq!(eval_count(&rule_ms_has), 5);
     }
 
     /// 自然順ソート natural_cmp の高度なエッジケース（日本語、大文字小文字、ゼロ埋め、拡張子違い）

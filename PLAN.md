@@ -169,6 +169,9 @@
 | **prompt** | `contains` / `not_contains` | **FTS5 全文検索:** `c.rowid IN/NOT IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?)`<br>※構文エラー時やフォールバック時はエスケープ付き `searchable_prompt LIKE ? ESCAPE '\\'` を使用 |
 | **negative_prompt** | `contains` / `not_contains` | **FTS5 全文検索:** `c.rowid IN/NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)`<br>※フォールバック時は `searchable_negative_prompt LIKE ? ESCAPE '\\'` を使用 |
 | **source** | `==` / `!=`<br>(`contains` / `not_contains`) | UI上では一致・不一致を選択。FTS5 MATCH 検索または `searchable_source LIKE ? ESCAPE '\\'` による評価 |
+| **metadata_source** | `==` / `!=` | メタデータ出処（`Alpha Channel`, `PNG Chunks`, `WebP EXIF`, `JPEG EXIF`, `Audio Tags`, `None`）に対する大文字小文字非依存の一致・不一致評価（空文字・NULL は `None` として正規化） |
+| **media_type** | `==` / `!=` | メディア種別（`image`: PNG/JPG/JPEG/WebP/GIF/BMP、`video`: MP4、`audio`: MP3）に応じた拡張子群に対する `LOWER(c.path) LIKE / NOT LIKE` 評価 |
+| **ext** | `==` / `!=` | 指定された拡張子（カンマ・空白区切り複数指定および先頭ドット有無に対応）に対する `LOWER(c.path) LIKE / NOT LIKE` 評価 |
 | **rating** | `>=`, `>`, `<=`, `<`, `==`, `!=` | `coalesce(r.rating, 0)` を用いた数値評価。<br>**INNER JOIN 最適化:** 条件結合が `all` かつ評価値が 1 以上の正の条件（`>=`, `>`, `==`）の場合、`ratings r INNER JOIN cache c` に自動切り替え、インデックス結合で高速化 |
 | **width** / **height** | `<=`, `<`, `==`, `!=`, `>=`, `>` | `c.width` / `c.height` に対する数値評価 |
 | **aspect_ratio** | `portrait` | 縦長画像判定公式: `(width * 100 < height * 95)` |

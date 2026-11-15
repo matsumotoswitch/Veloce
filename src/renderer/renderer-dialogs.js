@@ -21,7 +21,7 @@ let sfModalDelegated = false;
  * スマートフォルダ条件行のUI（演算子プルダウンおよび入力欄）を条件種別に応じて更新する。
  *
  * @param {HTMLElement} row - 条件行要素 (.sf-condition-row)
- * @param {string} type - 条件種別 ('prompt' | 'negative_prompt' | 'source' | 'width' | 'height' | 'rating' | 'aspect_ratio' | 'path')
+ * @param {string} type - 条件種別 ('prompt' | 'negative_prompt' | 'source' | 'metadata_source' | 'media_type' | 'ext' | 'width' | 'height' | 'rating' | 'aspect_ratio' | 'path')
  * @param {Object|null} initialCond - 既存条件データ
  */
 export function updateSmartFolderRowUI(row, type, initialCond = null) {
@@ -58,6 +58,21 @@ export function updateSmartFolderRowUI(row, type, initialCond = null) {
     if (opInput) opInput.value = selectedOp.value;
   }
 
+  function setValueCustomSelect(items) {
+    const selectedItem = items.find(item => item.value === valVal) || items[0];
+    const itemsHtml = items
+      .map(item => `<div class="custom-select-item ${item.value === selectedItem.value ? 'selected' : ''}" data-value="${item.value}">${item.label}</div>`)
+      .join('');
+    valueContainer.innerHTML = `
+      <div class="custom-select cond-value-select flex-1" tabindex="0">
+        <span class="custom-select-label">${selectedItem.label}</span>
+        <svg class="custom-select-arrow" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        <div class="custom-select-menu">${itemsHtml}</div>
+        <input type="hidden" class="cond-value-input" value="${selectedItem.value}">
+      </div>
+    `;
+  }
+
   if (type === 'prompt' || type === 'negative_prompt') {
     setOpCustomSelect([
       { value: 'contains', label: 'を含む' },
@@ -72,6 +87,36 @@ export function updateSmartFolderRowUI(row, type, initialCond = null) {
     ]);
     valueContainer.innerHTML = '<input type="text" class="cond-value-input dialog-input flex-1" placeholder="生成元">';
     valueContainer.querySelector('input').value = valVal;
+  } else if (type === 'media_type') {
+    setOpCustomSelect([
+      { value: '==', label: 'と一致' },
+      { value: '!=', label: 'と一致しない' }
+    ]);
+    setValueCustomSelect([
+      { value: 'image', label: '画像 (PNG/JPEG/WebP等)' },
+      { value: 'video', label: '動画 (MP4)' },
+      { value: 'audio', label: '音声 (MP3)' }
+    ]);
+  } else if (type === 'ext') {
+    setOpCustomSelect([
+      { value: '==', label: 'と一致' },
+      { value: '!=', label: 'と一致しない' }
+    ]);
+    valueContainer.innerHTML = '<input type="text" class="cond-value-input dialog-input flex-1" placeholder="例: png, jpg, mp3">';
+    valueContainer.querySelector('input').value = valVal;
+  } else if (type === 'metadata_source') {
+    setOpCustomSelect([
+      { value: '==', label: 'と一致' },
+      { value: '!=', label: 'と一致しない' }
+    ]);
+    setValueCustomSelect([
+      { value: 'Alpha Channel', label: 'Alpha Channel (Stealth)' },
+      { value: 'PNG Chunks', label: 'PNG Chunks' },
+      { value: 'WebP EXIF', label: 'WebP EXIF / XMP' },
+      { value: 'JPEG EXIF', label: 'JPEG EXIF / XMP' },
+      { value: 'Audio Tags', label: 'Audio Tags (MP3)' },
+      { value: 'None', label: 'None (メタデータなし)' }
+    ]);
   } else if (type === 'width' || type === 'height') {
     setOpCustomSelect([
       { value: '<=', label: '以下' },

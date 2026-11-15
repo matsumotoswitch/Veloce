@@ -1499,6 +1499,13 @@ table#file-table {
   flex-shrink: 0;
 }
 
+.sf-condition-row .cond-value-select {
+  flex: 1;
+  width: 100%;
+  min-width: 120px;
+  height: 32px;
+}
+
 .sf-cond-val-box {
   display: flex;
   flex: 1;

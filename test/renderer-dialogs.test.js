@@ -44,6 +44,9 @@ describe('renderer-dialogs.js - Modal and Dialog Management', () => {
             <div class="custom-select-menu">
               <div class="custom-select-item selected" data-value="prompt">プロンプト</div>
               <div class="custom-select-item" data-value="rating">レーティング</div>
+              <div class="custom-select-item" data-value="metadata_source">メタデータ出処</div>
+              <div class="custom-select-item" data-value="media_type">メディア種別</div>
+              <div class="custom-select-item" data-value="ext">拡張子</div>
               <div class="custom-select-item" data-value="path">パス</div>
             </div>
           </div>
@@ -113,6 +116,64 @@ describe('renderer-dialogs.js - Modal and Dialog Management', () => {
       const browseBtn = row.querySelector('.btn-browse-path');
       expect(browseBtn).not.toBeNull();
       expect(browseBtn.textContent).toBe('参照...');
+    });
+
+    it('sets up media_type, ext, and metadata_source condition rows and saves selected values', async () => {
+      const template = document.getElementById('sf-condition-template');
+
+      // 1. media_type
+      const rowMedia = template.content.cloneNode(true).querySelector('.sf-condition-row');
+      updateSmartFolderRowUI(rowMedia, 'media_type', { operator: '==', value: 'audio' });
+      expect(rowMedia.querySelector('.cond-operator').value).toBe('==');
+      expect(rowMedia.querySelector('.cond-value-input').value).toBe('audio');
+      expect(rowMedia.querySelector('.cond-value-select .custom-select-label').textContent).toContain('音声');
+
+      // 2. ext
+      const rowExt = template.content.cloneNode(true).querySelector('.sf-condition-row');
+      updateSmartFolderRowUI(rowExt, 'ext', { operator: '!=', value: 'png, webp' });
+      expect(rowExt.querySelector('.cond-operator').value).toBe('!=');
+      expect(rowExt.querySelector('.cond-value-input').value).toBe('png, webp');
+
+      // 3. metadata_source
+      const rowMetaSrc = template.content.cloneNode(true).querySelector('.sf-condition-row');
+      updateSmartFolderRowUI(rowMetaSrc, 'metadata_source', { operator: '==', value: 'Alpha Channel' });
+      expect(rowMetaSrc.querySelector('.cond-operator').value).toBe('==');
+      expect(rowMetaSrc.querySelector('.cond-value-input').value).toBe('Alpha Channel');
+      expect(rowMetaSrc.querySelector('.cond-value-select .custom-select-label').textContent).toContain('Alpha Channel');
+
+      // 4. End-to-end modal save with custom-select interaction inside valueContainer
+      const upsertSpy = vi.spyOn(SmartFolderStore, 'upsertFolder').mockResolvedValue([]);
+      const sf = {
+        id: 'sf_new_types',
+        name: 'Media & Source Filter',
+        icon: 'FAV_STAR',
+        color: 'orange',
+        conditions: [
+          { type: 'media_type', operator: '==', value: 'image' },
+          { type: 'ext', operator: '==', value: 'png' },
+          { type: 'metadata_source', operator: '==', value: 'Alpha Channel' }
+        ]
+      };
+      showEditSmartFolderModal(sf, false);
+
+      const rows = document.querySelectorAll('#smart-conditions-list .sf-condition-row');
+      expect(rows).toHaveLength(3);
+
+      // Click 'Audio Tags' inside the 3rd row's .cond-value-select menu
+      const audioTagsItem = rows[2].querySelector('.cond-value-select .custom-select-item[data-value="Audio Tags"]');
+      expect(audioTagsItem).not.toBeNull();
+      audioTagsItem.click();
+      expect(rows[2].querySelector('.cond-value-input').value).toBe('Audio Tags');
+
+      document.getElementById('smart-save-btn').click();
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(sf.conditions).toEqual([
+        { type: 'media_type', operator: '==', value: 'image' },
+        { type: 'ext', operator: '==', value: 'png' },
+        { type: 'metadata_source', operator: '==', value: 'Audio Tags' }
+      ]);
     });
   });
 
