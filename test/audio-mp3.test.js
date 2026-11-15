@@ -658,5 +658,192 @@ describe('MP3 Audio Support', () => {
       expect(css).not.toMatch(/-webkit-appearance:\s*slider-vertical/);
       expect(css).not.toMatch(/writing-mode:\s*vertical-lr/);
     });
+
+    it('adjusts volume by ±5% with Shift+Up/Down (clamped 0..100, unmutes on Shift+Up, updates slider/icon/toast) and seeks ±5s with Shift+Left/Right', async () => {
+      await import('../src/common/settings-store.js');
+      const { loadImage, getActivePlaybackMedia } = await import('../src/viewer/viewer.js');
+      const { viewerState } = await import('../src/viewer/viewer-state.js');
+
+      window.SettingsStore.setItem('viewerVolume', '0.95');
+      window.SettingsStore.setItem('viewerMuted', 'false');
+
+      viewerState.paths = ['C:/music/track1.mp3'];
+      viewerState.totalImages = 1;
+      viewerState.currentIndex = 0;
+      viewerState.preloadCache.clear();
+
+      await loadImage();
+      const audio = getActivePlaybackMedia();
+      expect(audio).not.toBeNull();
+      Object.defineProperty(audio, 'duration', { value: 20, writable: true, configurable: true });
+      audio.currentTime = 3;
+
+      window.ensureVideoSeekBarContainer();
+      const volumeSlider = document.getElementById('video-volume-slider');
+      const volumeBtn = document.getElementById('video-volume-btn');
+      const seekBar = document.getElementById('video-seek-bar');
+      const timeDisplay = document.getElementById('video-time-display');
+
+      // 1. Shift+Up (+5% -> 100%) and clamp at 100%
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true }));
+      expect(audio.volume).toBeCloseTo(1.0, 2);
+      expect(localStorage.getItem('viewerVolume')).toBe('1');
+      expect(volumeSlider.value).toBe('1');
+      expect(document.getElementById('toast-container').textContent).toContain('音量 100%');
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, repeat: true, bubbles: true }));
+      expect(audio.volume).toBeCloseTo(1.0, 2);
+      expect(localStorage.getItem('viewerVolume')).toBe('1');
+
+      // 2. Shift+Down (-5% -> 95%) and clamp at 0%
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true }));
+      expect(audio.volume).toBeCloseTo(0.95, 2);
+      expect(localStorage.getItem('viewerVolume')).toBe('0.95');
+      expect(volumeSlider.value).toBe('0.95');
+      expect(document.getElementById('toast-container').textContent).toContain('音量 95%');
+
+      audio.volume = 0.05;
+      window.SettingsStore.setItem('viewerVolume', '0.05');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true }));
+      expect(audio.volume).toBe(0);
+      expect(audio.muted).toBe(false);
+      expect(localStorage.getItem('viewerVolume')).toBe('0');
+      expect(volumeBtn.querySelector('path')).toBeNull();
+      expect(volumeBtn.querySelector('line')).toBeNull();
+      expect(document.getElementById('toast-container').textContent).toContain('音量 0%');
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true }));
+      expect(audio.volume).toBe(0);
+
+      // 3. Muted + Shift+Up unmutes and raises volume by 5%
+      audio.muted = true;
+      window.SettingsStore.setItem('viewerMuted', 'true');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true }));
+      expect(audio.muted).toBe(false);
+      expect(localStorage.getItem('viewerMuted')).toBe('false');
+      expect(audio.volume).toBeCloseTo(0.05, 2);
+      expect(volumeBtn.querySelector('path')).not.toBeNull();
+
+      // 4. Ctrl or Alt combined with Shift+Arrow must NOT trigger volume or seek
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, ctrlKey: true, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, altKey: true, bubbles: true }));
+      expect(audio.volume).toBeCloseTo(0.05, 2);
+
+      // 5. Shift+Left / Shift+Right seeks ±5s clamped to [0, duration] and updates seekBar/timeDisplay
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }));
+      expect(audio.currentTime).toBe(0);
+      expect(timeDisplay.textContent).toBe('0:00 / 0:20');
+      expect(Number(seekBar.value)).toBeCloseTo(0, 1);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
+      expect(audio.currentTime).toBe(5);
+      expect(timeDisplay.textContent).toBe('0:05 / 0:20');
+      expect(Number(seekBar.value)).toBeCloseTo(25, 1);
+
+      audio.currentTime = 18;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
+      expect(audio.currentTime).toBe(20);
+      expect(timeDisplay.textContent).toBe('0:20 / 0:20');
+
+      // When duration is NaN or Infinity, Shift+Left/Right is a no-op
+      Object.defineProperty(audio, 'duration', { value: NaN, writable: true, configurable: true });
+      audio.currentTime = 10;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
+      expect(audio.currentTime).toBe(10);
+    });
+
+    it('disables plain Up/Down and H/V on audio placeholder, enables them when audio cover image is displayed, and keeps U/A disabled on audio', async () => {
+      await import('../src/common/settings-store.js');
+      const { loadImage } = await import('../src/viewer/viewer.js');
+      const { viewerState } = await import('../src/viewer/viewer-state.js');
+
+      window.veloceAPI.getAlphaOverlayImage = vi.fn().mockResolvedValue({ data_url: 'data:image/png;base64,AAA' });
+
+      viewerState.paths = ['C:/music/track1.mp3', 'C:/images/pic1.png', 'C:/images/pic2.png'];
+      viewerState.totalImages = viewerState.paths.length;
+      viewerState.currentIndex = 0;
+      viewerState.currentRotation = 0;
+      viewerState.flipX = 1;
+      viewerState.flipY = 1;
+      viewerState.isUnsharped = false;
+      viewerState.isAlphaOverlayMode = false;
+      viewerState.preloadCache.clear();
+
+      await loadImage();
+
+      // 1a. On audio placeholder (or before cover image loads: naturalWidth === 0), plain Up/Down, H, V, U, A are all no-ops
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+
+      expect(viewerState.currentRotation).toBe(0);
+      expect(viewerState.flipX).toBe(1);
+      expect(viewerState.flipY).toBe(1);
+      expect(viewerState.isUnsharped).toBe(false);
+      expect(viewerState.isAlphaOverlayMode).toBe(false);
+      expect(window.veloceAPI.getAlphaOverlayImage).not.toHaveBeenCalled();
+
+      // 1b. When audio cover image is registered and loaded (non-placeholder, naturalWidth > 0 & naturalHeight > 0), plain Up/Down rotation and H/V flip are enabled while U/A remain disabled
+      const audioCoverImg = document.getElementById('viewer-img');
+      Object.defineProperty(audioCoverImg, 'naturalWidth', { value: 600, writable: true, configurable: true });
+      Object.defineProperty(audioCoverImg, 'naturalHeight', { value: 600, writable: true, configurable: true });
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      expect(viewerState.currentRotation).toBe(90);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      expect(viewerState.currentRotation).toBe(0);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      expect(viewerState.flipX).toBe(-1);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', bubbles: true }));
+      expect(viewerState.flipY).toBe(-1);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', bubbles: true }));
+      expect(viewerState.flipX).toBe(1);
+      expect(viewerState.flipY).toBe(1);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+      expect(viewerState.isUnsharped).toBe(false);
+      expect(viewerState.isAlphaOverlayMode).toBe(false);
+
+      // 1c. If cover image falls back to placeholder (.audio-placeholder), plain Up/Down and H/V are disabled again
+      audioCoverImg.dispatchEvent(new Event('error'));
+      expect(audioCoverImg.classList.contains('audio-placeholder')).toBe(true);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', bubbles: true }));
+      expect(viewerState.currentRotation).toBe(0);
+      expect(viewerState.flipX).toBe(1);
+      expect(viewerState.flipY).toBe(1);
+
+      // 2. Navigate to static image (index 1) via plain ArrowRight
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      expect(viewerState.currentIndex).toBe(1);
+      await loadImage();
+      const pendingImg = viewerState.preloadCache.get(1)?.img;
+      if (pendingImg) pendingImg.dispatchEvent(new Event('load'));
+
+      // 3. On static image, Shift+Arrow is disabled (neither rotates nor navigates), while plain arrows work as before
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true }));
+      expect(viewerState.currentIndex).toBe(1);
+      expect(viewerState.currentRotation).toBe(0);
+
+      // Plain Up rotates +90, H flips X, U toggles unsharp, plain Right moves to index 2
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      expect(viewerState.currentRotation).toBe(90);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      expect(viewerState.flipX).toBe(-1);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', bubbles: true }));
+      expect(viewerState.isUnsharped).toBe(true);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      expect(viewerState.currentIndex).toBe(2);
+    });
   });
 });

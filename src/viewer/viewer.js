@@ -235,6 +235,87 @@ export function getActivePlaybackMedia() {
 }
 
 /**
+ * 現在ビューアで音声ファイル（MP3）を表示中かを判定する
+ * @returns {boolean}
+ */
+function isCurrentlyDisplayingAudio() {
+  if (isAudioFile(viewerState.currentImagePath)) return true;
+  if (currentAudioElement && currentAudioElement.tagName === 'AUDIO') return true;
+  const imgEl = currentlyVisibleImg || currentViewerImg || (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg);
+  if (imgEl && imgEl.dataset && imgEl.dataset.audioPath) return true;
+  return false;
+}
+
+/**
+ * 現在ビューアで音声ファイル（MP3）のプレースホルダ（カバー画像なし／未ロード）を表示中かを判定する
+ * カバー画像が登録されており正常にロード・表示されている場合は false を返す
+ * @returns {boolean}
+ */
+function isCurrentlyDisplayingAudioPlaceholder() {
+  if (!isCurrentlyDisplayingAudio()) return false;
+  const imgEl = currentlyVisibleImg || currentViewerImg || (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
+  return isAudioPlaceholderMedia(imgEl);
+}
+
+/**
+ * 現在再生対象のメディア（動画・音声）の音量を指定パーセント（±5等）増減させ、永続化・UI同期・トースト通知を行う
+ * @param {number} deltaPercent - 増減パーセント（例: +5, -5）
+ * @returns {boolean} 適用された場合は true
+ */
+function adjustActiveMediaVolumeByPercent(deltaPercent) {
+  const activeMedia = getActivePlaybackMedia();
+  if (!isPlayableMedia(activeMedia)) return false;
+
+  const currentVol = (typeof activeMedia.volume === 'number' && !isNaN(activeMedia.volume))
+    ? activeMedia.volume
+    : getSavedViewerVolume();
+  const currentMuted = (typeof activeMedia.muted === 'boolean')
+    ? activeMedia.muted
+    : getSavedViewerMuted(false);
+
+  const nextPercent = Math.max(0, Math.min(100, Math.round(currentVol * 100) + deltaPercent));
+  const nextVol = nextPercent / 100;
+
+  if (deltaPercent > 0 && currentMuted) {
+    writeViewerSetting(VIEWER_MUTED_KEY, 'false');
+  }
+  writeViewerSetting(VIEWER_VOLUME_KEY, String(nextVol));
+  applyVolumeSettingsToMedia(activeMedia, currentMuted && deltaPercent <= 0);
+
+  if (videoSeekBarContainer && typeof videoSeekBarContainer.updateVolumeControls === 'function') {
+    videoSeekBarContainer.updateVolumeControls();
+  }
+  showToast(`音量 ${nextPercent}%`);
+  return true;
+}
+
+/**
+ * 現在再生対象のメディア（動画・音声）の再生位置を指定秒数（±5等）シークし、[0, duration] にクランプする
+ * @param {number} deltaSeconds - シーク秒数（例: +5, -5）
+ * @returns {boolean} シークが実行された場合は true
+ */
+function seekActiveMediaBySeconds(deltaSeconds) {
+  const activeMedia = getActivePlaybackMedia();
+  if (!isPlayableMedia(activeMedia)) return false;
+
+  const duration = activeMedia.duration;
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
+    return false;
+  }
+
+  const current = (typeof activeMedia.currentTime === 'number' && Number.isFinite(activeMedia.currentTime))
+    ? activeMedia.currentTime
+    : 0;
+  const nextTime = Math.max(0, Math.min(duration, current + deltaSeconds));
+  activeMedia.currentTime = nextTime;
+
+  if (videoSeekBarContainer && typeof videoSeekBarContainer.updateProgress === 'function') {
+    videoSeekBarContainer.updateProgress();
+  }
+  return true;
+}
+
+/**
  * 再生中の音声要素（<audio>）を確実に停止・破棄し、音声残りやバックグラウンド再生を防ぐ
  */
 export function stopAndDiscardAudio() {
@@ -782,8 +863,11 @@ export async function applyAlphaOverlay(imgEl, filePath, isAutoFollow = false) {
  * @param {HTMLImageElement} [customImgEl=null] - 任意の対象画像要素（未指定時は表示中要素を自動解決）
  */
 export async function toggleAlphaOverlayMode(customImgEl = null) {
+  if (isCurrentlyDisplayingAudio()) {
+    return;
+  }
   const imgEl = customImgEl || currentViewerImg || (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
-  if (!imgEl || imgEl.tagName !== 'IMG') {
+  if (!imgEl || imgEl.tagName !== 'IMG' || (imgEl.dataset && imgEl.dataset.audioPath)) {
     return;
   }
 
@@ -2081,14 +2165,41 @@ window.addEventListener('keydown', async (e) => {
     return;
   }
 
+  const isPlainKey = !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
+  const isShiftOnly = e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
+
   switch (e.key) {
     case 'ArrowLeft':
+      if (isShiftOnly) {
+        if (isPlayableMedia(getActivePlaybackMedia())) {
+          e.preventDefault();
+          seekActiveMediaBySeconds(-5);
+        }
+        break;
+      }
+      if (!isPlainKey) break;
       showPrev();
       break;
     case 'ArrowRight':
+      if (isShiftOnly) {
+        if (isPlayableMedia(getActivePlaybackMedia())) {
+          e.preventDefault();
+          seekActiveMediaBySeconds(5);
+        }
+        break;
+      }
+      if (!isPlainKey) break;
       showNext();
       break;
     case 'ArrowUp':
+      if (isShiftOnly) {
+        if (isPlayableMedia(getActivePlaybackMedia())) {
+          e.preventDefault();
+          adjustActiveMediaVolumeByPercent(5);
+        }
+        break;
+      }
+      if (!isPlainKey || isCurrentlyDisplayingAudioPlaceholder()) return;
       viewerState.currentRotation += 90;
       applyFitState();
       updateFullscreenStyles();
@@ -2098,6 +2209,14 @@ window.addEventListener('keydown', async (e) => {
       resizeWindowToFitImage();
       break;
     case 'ArrowDown':
+      if (isShiftOnly) {
+        if (isPlayableMedia(getActivePlaybackMedia())) {
+          e.preventDefault();
+          adjustActiveMediaVolumeByPercent(-5);
+        }
+        break;
+      }
+      if (!isPlainKey || isCurrentlyDisplayingAudioPlaceholder()) return;
       viewerState.currentRotation -= 90;
       applyFitState();
       updateFullscreenStyles();
@@ -2179,6 +2298,7 @@ window.addEventListener('keydown', async (e) => {
       break;
     case 'a':
     case 'A':
+      if (isCurrentlyDisplayingAudio()) return;
       e.preventDefault();
       toggleAlphaOverlayMode();
       break;
@@ -2204,16 +2324,19 @@ window.addEventListener('keydown', async (e) => {
       break;
     case 'u':
     case 'U':
+      if (isCurrentlyDisplayingAudio()) return;
       viewerState.isUnsharped = !viewerState.isUnsharped;
       viewerUI.updateImageRendering();
       break;
     case 'h':
     case 'H':
+      if (isCurrentlyDisplayingAudioPlaceholder()) return;
       viewerState.flipX *= -1;
       viewerUI.updateImageRendering();
       break;
     case 'v':
     case 'V':
+      if (isCurrentlyDisplayingAudioPlaceholder()) return;
       viewerState.flipY *= -1;
       viewerUI.updateImageRendering();
       break;
