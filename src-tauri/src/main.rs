@@ -346,7 +346,6 @@ fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
         mtime,
         ctime,
         has_thumbnail_cache: item.has_thumbnail,
-        has_metadata_cache: false,
         width: item.width,
         height: item.height,
         prompt: String::new(),
@@ -796,7 +795,6 @@ fn query_smart_folder_image_files(
                 mtime,
                 ctime,
                 has_thumbnail_cache: has_thumbnail,
-                has_metadata_cache: false,
                 width,
                 height,
                 prompt: String::new(),
@@ -1261,7 +1259,6 @@ fn load_directory(
                                             mtime,
                                             ctime,
                                             has_thumbnail_cache: false,
-                                            has_metadata_cache: false,
                                             width: 0,
                                             height: 0,
                                             prompt: String::new(),
@@ -5078,7 +5075,6 @@ async fn clear_metadata_cache(
             if file_paths_set.contains(&f.path) {
                 let f_mut = std::sync::Arc::make_mut(f);
                 f_mut.has_thumbnail_cache = false;
-                f_mut.has_metadata_cache = false;
                 f_mut.meta_loaded = false;
             }
         }
@@ -5089,7 +5085,6 @@ async fn clear_metadata_cache(
             if file_paths_set.contains(&f.path) {
                 let f_mut = std::sync::Arc::make_mut(f);
                 f_mut.has_thumbnail_cache = false;
-                f_mut.has_metadata_cache = false;
                 f_mut.meta_loaded = false;
             }
         }
@@ -6594,7 +6589,6 @@ fn main() {
                                     mtime,
                                     ctime,
                                     has_thumbnail_cache: false,
-                                    has_metadata_cache: false,
                                     width: initial_width,
                                     height: initial_height,
                                     prompt: String::new(),
@@ -6628,7 +6622,6 @@ fn main() {
                                 mtime,
                                 ctime,
                                 has_thumbnail_cache: false,
-                                has_metadata_cache: false,
                                 width: initial_width,
                                 height: initial_height,
                                 prompt: String::new(),
@@ -7547,7 +7540,7 @@ mod tests {
         assert_eq!(img.size, 0);
         assert_eq!(img.mtime, 0);
         assert!(img.has_thumbnail_cache);
-        assert!(!img.has_metadata_cache);
+        assert!(!img.meta_loaded);
 
         let _ = std::fs::remove_file(file_path);
     }
@@ -7874,7 +7867,6 @@ mod viewer_tests {
                 mtime: 2000,
                 ctime: 2000,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 0,
                 height: 0,
                 prompt: "".to_string(),
@@ -7893,7 +7885,6 @@ mod viewer_tests {
                 mtime: 1000,
                 ctime: 1000,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 0,
                 height: 0,
                 prompt: "".to_string(),
@@ -8242,7 +8233,6 @@ mod viewer_tests {
                 mtime: 100,
                 ctime: 100,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 100,
                 height: 100,
                 prompt: String::new(),
@@ -8261,7 +8251,6 @@ mod viewer_tests {
                 mtime: 100,
                 ctime: 100,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 100,
                 height: 100,
                 prompt: String::new(),
@@ -8280,7 +8269,6 @@ mod viewer_tests {
                 mtime: 100,
                 ctime: 100,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 100,
                 height: 100,
                 prompt: String::new(),
@@ -8327,7 +8315,6 @@ mod viewer_tests {
                 mtime: 100,
                 ctime: 100,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 0,
                 height: 0,
                 prompt: String::new(),
@@ -8346,7 +8333,6 @@ mod viewer_tests {
                 mtime: 200,
                 ctime: 200,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 0,
                 height: 0,
                 prompt: String::new(),
@@ -8973,7 +8959,6 @@ mod viewer_tests {
             mtime: 1000,
             ctime: 1000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 0,
             height: 0,
             prompt: String::new(),
@@ -9018,7 +9003,6 @@ mod viewer_tests {
             mtime: 2000,
             ctime: 1000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 0,
             height: 0,
             prompt: String::new(),
@@ -9210,7 +9194,6 @@ mod viewer_tests {
             mtime: 1700000001,
             ctime: 1700000000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 512,
             height: 512,
             prompt: "".to_string(),
@@ -9230,7 +9213,6 @@ mod viewer_tests {
             mtime: 1700000002,
             ctime: 1700000000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 1024,
             height: 768,
             prompt: "".to_string(),
@@ -9686,7 +9668,6 @@ mod viewer_tests {
             mtime: 100,
             ctime: 100,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 100,
             height: 100,
             prompt: String::new(),
@@ -10008,7 +9989,6 @@ mod viewer_tests {
             mtime: 1700000000,
             ctime: 1700000000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: full_meta.width,
             height: full_meta.height,
             prompt: full_meta.prompt.clone(),
@@ -10374,7 +10354,6 @@ mod viewer_tests {
             mtime: 1700000000 + i as u64,
             ctime: 1700000000 + i as u64,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 800,
             height: 600,
             prompt: String::new(),
@@ -10428,7 +10407,6 @@ mod viewer_tests {
                 mtime: 1700000010,
                 ctime: 1700000010,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 800,
                 height: 600,
                 prompt: String::new(),
@@ -10447,7 +10425,6 @@ mod viewer_tests {
                 mtime: 1700000020,
                 ctime: 1700000020,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 1024,
                 height: 768,
                 prompt: String::new(),
@@ -10466,7 +10443,6 @@ mod viewer_tests {
                 mtime: 1700000030,
                 ctime: 1700000030,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 1024,
                 height: 768,
                 prompt: String::new(),
@@ -10989,7 +10965,6 @@ mod viewer_tests {
             mtime: 1700000000,
             ctime: 1700000000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 1024,
             height: 768,
             prompt: "".to_string(),
@@ -11029,7 +11004,6 @@ mod viewer_tests {
             mtime: 1700000050,
             ctime: 1700000000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 0,
             height: 0,
             prompt: "".to_string(),
@@ -11876,7 +11850,6 @@ mod viewer_tests {
                 mtime: 1000,
                 ctime: 1000,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 100,
                 height: 100,
                 prompt: String::new(),
@@ -11895,7 +11868,6 @@ mod viewer_tests {
                 mtime: 2000,
                 ctime: 2000,
                 has_thumbnail_cache: false,
-                has_metadata_cache: false,
                 width: 100,
                 height: 100,
                 prompt: String::new(),
@@ -12104,7 +12076,6 @@ mod viewer_tests {
             mtime: 1000,
             ctime: 1000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 800,
             height: 600,
             prompt: String::new(),
@@ -12123,7 +12094,6 @@ mod viewer_tests {
             mtime: 2000,
             ctime: 2000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 1024,
             height: 1024,
             prompt: String::new(),
@@ -12149,7 +12119,6 @@ mod viewer_tests {
             mtime: 1500,
             ctime: 1000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 0,
             height: 0,
             prompt: String::new(),
@@ -12168,7 +12137,6 @@ mod viewer_tests {
             mtime: 3000,
             ctime: 3000,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 512,
             height: 512,
             prompt: String::new(),

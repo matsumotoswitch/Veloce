@@ -14,7 +14,6 @@
  * @property {Array<string|Object>} [charPrompts] - キャラクタープロンプト
  * @property {boolean} [metaLoaded] - メタデータが読み込み済みかどうか
  * @property {boolean} [hasThumbnailCache] - サムネイルキャッシュが存在するかどうか
- * @property {boolean} [hasMetadataCache] - メタデータキャッシュが存在するかどうか
  */
 
 const DEFAULT_SMART_FOLDERS = [

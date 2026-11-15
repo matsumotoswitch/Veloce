@@ -89,7 +89,6 @@ describe('File Watcher Event Sync and State Reflection', () => {
       width: 1920,
       height: 1080,
       has_thumbnail_cache: false,
-      has_metadata_cache: false,
       hash_key: '0123456789abcdef'
     };
 

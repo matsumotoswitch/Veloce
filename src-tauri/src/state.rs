@@ -217,7 +217,6 @@ mod tests {
             mtime,
             ctime: mtime,
             has_thumbnail_cache: false,
-            has_metadata_cache: false,
             width: 512,
             height: 512,
             prompt: String::new(),

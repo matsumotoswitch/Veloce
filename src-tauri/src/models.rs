@@ -27,7 +27,6 @@ pub struct ImageFile {
     pub mtime: u64,
     pub ctime: u64,
     pub has_thumbnail_cache: bool,
-    pub has_metadata_cache: bool,
     #[serde(default)]
     pub width: u32,
     #[serde(default)]
@@ -219,7 +218,6 @@ mod tests {
             mtime: 123456,
             ctime: 123456,
             has_thumbnail_cache: true,
-            has_metadata_cache: false,
             width: 832,
             height: 1216,
             prompt: String::new(),
@@ -247,7 +245,6 @@ mod tests {
             mtime: 78910,
             ctime: 78910,
             has_thumbnail_cache: false,
-            has_metadata_cache: true,
             width: 1024,
             height: 1024,
             prompt: "1girl".to_string(),
@@ -259,10 +256,11 @@ mod tests {
             hash_key: CompactString::new("fedcba9876543210"),
         };
 
-        // JSONシリアライズ結果の互換性検証（camelCase, hashKey など）
+        // JSONシリアライズ結果の互換性検証（camelCase, hashKey など、および不要な hasMetadataCache を含まないこと）
         let json_str = serde_json::to_string(&file).expect("JSON serialization failed");
         assert!(json_str.contains("\"ext\":\".webp\""), "ext が正しくシリアライズされること");
         assert!(json_str.contains("\"hashKey\":\"fedcba9876543210\""), "hashKey が正しく camelCase でシリアライズされること");
+        assert!(!json_str.contains("hasMetadataCache"), "形骸化した hasMetadataCache がシリアライズされないこと");
 
         // デシリアライズ検証
         let deserialized: ImageFile = serde_json::from_str(&json_str).expect("JSON deserialization failed");
@@ -270,5 +268,10 @@ mod tests {
         assert_eq!(deserialized.hash_key, "fedcba9876543210");
         assert!(!deserialized.ext.is_heap_allocated());
         assert!(!deserialized.hash_key.is_heap_allocated());
+
+        // 旧形式の JSON（hasMetadataCache を含む）も安全にデシリアライズできること
+        let legacy_json = r#"{"name":"legacy.png","ext":".png","path":"C:\\test\\legacy.png","size":100,"mtime":1,"ctime":1,"hasThumbnailCache":false,"hasMetadataCache":true}"#;
+        let legacy_deserialized: ImageFile = serde_json::from_str(legacy_json).expect("Legacy JSON deserialization failed");
+        assert_eq!(legacy_deserialized.name, "legacy.png");
     }
 }
