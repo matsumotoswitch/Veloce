@@ -436,19 +436,16 @@ pub(crate) fn query_smart_folder_image_files(
     };
     let _like_guard = CaseSensitiveLikeGuard::new(&conn);
 
-    let mut use_fallback = false;
     let (mut query_str, mut params) = build_smart_folder_query_with_sort(rule, false, false, sort_key, asc, limit);
 
-    if conn.prepare(&query_str).is_err() {
-        use_fallback = true;
-    }
-    if use_fallback {
+    let stmt_result = conn.prepare(&query_str).or_else(|_| {
         let (fallback_query, fallback_params) = build_smart_folder_query_with_sort(rule, false, true, sort_key, asc, limit);
         query_str = fallback_query;
         params = fallback_params;
-    }
+        conn.prepare(&query_str)
+    });
 
-    if let Ok(mut stmt) = conn.prepare(&query_str) {
+    if let Ok(mut stmt) = stmt_result {
         if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
             let raw_path: String = row.get(0)?;
             let size: u64 = row.get(1)?;
@@ -520,19 +517,16 @@ pub(crate) fn get_smart_folder_paths(
         if let Ok(conn) = db_conn.get() {
             let _like_guard = CaseSensitiveLikeGuard::new(&conn);
             
-            let mut use_fallback = false;
             let (mut query_str, mut params) = build_smart_folder_query(rule, false, false);
-            
-            if let Err(_) = conn.prepare(&query_str) {
-                use_fallback = true;
-            }
-            if use_fallback {
+
+            let stmt_result = conn.prepare(&query_str).or_else(|_| {
                 let (fallback_query, fallback_params) = build_smart_folder_query(rule, false, true);
                 query_str = fallback_query;
                 params = fallback_params;
-            }
+                conn.prepare(&query_str)
+            });
 
-            if let Ok(mut stmt) = conn.prepare(&query_str) {
+            if let Ok(mut stmt) = stmt_result {
                 if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
@@ -623,46 +617,55 @@ pub(crate) fn get_smart_folder_counts(
     state: tauri::State<'_, AppState>,
 ) -> std::collections::HashMap<String, usize> {
     let mut result = std::collections::HashMap::new();
-    
-    let ratings_map = state.ratings.read().clone();
-    
+
+    let has_rating_rule = rules.iter().any(|r| {
+        (r.conditions.is_empty() && (r.id == "fav_5" || r.id == "fav_4_plus"))
+            || r.conditions.iter().any(|c| c.r#type == "rating")
+    });
+    let ratings_map = if has_rating_rule {
+        Some(state.ratings.read().clone())
+    } else {
+        None
+    };
+
     let db_conn = state.db_conn.clone();
-    
+
     if let Ok(conn) = db_conn.get() {
         let _like_guard = CaseSensitiveLikeGuard::new(&conn);
-        
+
         for rule in rules {
             let mut count = 0;
             if rule.conditions.is_empty() && (rule.id == "fav_5" || rule.id == "fav_4_plus" || rule.id == "history") {
                 if rule.id == "fav_5" {
-                    count = ratings_map.values().filter(|&&r| r >= 5).count();
+                    if let Some(ref map) = ratings_map {
+                        count = map.values().filter(|&&r| r >= 5).count();
+                    }
                 } else if rule.id == "fav_4_plus" {
-                    count = ratings_map.values().filter(|&&r| r >= 4).count();
+                    if let Some(ref map) = ratings_map {
+                        count = map.values().filter(|&&r| r >= 4).count();
+                    }
                 } else if rule.id == "history" {
                     count = conn.query_row("SELECT COUNT(*) FROM cache WHERE path != '' AND path IS NOT NULL", [], |row| row.get::<_, usize>(0)).unwrap_or(0);
                     if count > 100 { count = 100; }
                 }
             } else {
-                let mut use_fallback = false;
                 let (mut query_str, mut params) = build_smart_folder_query(&rule, true, false);
-                
-                if let Err(_) = conn.prepare(&query_str) {
-                    use_fallback = true;
-                }
-                if use_fallback {
+
+                let stmt_result = conn.prepare(&query_str).or_else(|_| {
                     let (fallback_query, fallback_params) = build_smart_folder_query(&rule, true, true);
                     query_str = fallback_query;
                     params = fallback_params;
-                }
+                    conn.prepare(&query_str)
+                });
 
-                if let Ok(mut stmt) = conn.prepare(&query_str) {
+                if let Ok(mut stmt) = stmt_result {
                     count = stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, usize>(0)).unwrap_or(0);
                 }
             }
             result.insert(rule.id, count);
         }
     }
-    
+
     result
 }
 
@@ -1489,5 +1492,56 @@ mod tests {
         assert_eq!(items_34k.len(), 34000);
         assert_eq!(items_34k[0].name, "img_0001.png");
         assert!(t_total.as_millis() < 1000, "34,000件のクエリとソートは1秒未満で完了すること (実測: {}ms)", t_total.as_millis());
+    }
+
+    /// FTS5 構文エラーまたは FTS5 テーブル未存在時に、1 回目の prepare 失敗を検知して
+    /// フォールバッククエリ（LIKE検索）へシームレスに切り替わり正常に取得できることの検証
+    #[test]
+    fn test_smart_folder_prepare_fallback_on_fts_error() {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = db_conn.get().unwrap();
+            // FTS5 テーブルを作成せず、cache テーブルのみ作成（FTS クエリでエラーを誘発）
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    path TEXT,
+                    metadata TEXT,
+                    thumbnail BLOB,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT ''
+                )",
+                [],
+            ).unwrap();
+
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, metadata, searchable_prompt) VALUES (?, ?, ?, ?)",
+                rusqlite::params!["h1", "C:\\test\\fallback.png", "{\"prompt\":\"masterpiece, 1girl\"}", "masterpiece, 1girl"],
+            ).unwrap();
+        }
+
+        let rule = SmartFolderRule {
+            id: "fallback_test".to_string(),
+            name: "Fallback Test".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "prompt".to_string(),
+                operator: "contains".to_string(),
+                value: "1girl".to_string(),
+            }],
+        };
+
+        // FTS テーブルがないため 1 回目の prepare は失敗し、フォールバッククエリへ切り替わって正常にアイテムが取得できること
+        let items = query_smart_folder_image_files(&rule, &db_conn, None, true, None);
+        assert_eq!(items.len(), 1, "フォールバッククエリで正常にアイテムが取得されること");
+        assert_eq!(items[0].name, "fallback.png");
     }
 }

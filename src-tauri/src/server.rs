@@ -18,11 +18,7 @@ pub enum RangeSpec {
 /// - クライアント要求の end をファイル末尾（file_size - 1）で厳格にクランプし、クライアントの待機フリーズを防止。
 /// - 開始位置がファイル長を超える場合は 416 Not Satisfiable を返却。
 /// - 空ファイル（file_size == 0）および Range 指定なし時の 2MB 部分配信（206 Partial Content）に対応。
-pub fn calculate_range(
-    range_header: Option<&str>,
-    file_size: u64,
-    max_chunk: u64,
-) -> RangeSpec {
+pub fn calculate_range(range_header: Option<&str>, file_size: u64, max_chunk: u64) -> RangeSpec {
     if file_size == 0 {
         return RangeSpec::EmptyFile;
     }
@@ -131,9 +127,9 @@ pub fn start_local_video_server(
     db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     token: String,
 ) -> u16 {
-    use std::net::TcpListener;
-    use std::io::{BufReader, Read, Seek, SeekFrom, Write};
     use std::fs::File;
+    use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+    use std::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind local video server");
     let port = listener.local_addr().unwrap().port();
@@ -151,6 +147,7 @@ pub fn start_local_video_server(
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(stream) = stream {
+                let _ = stream.set_nodelay(true);
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
                 let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
                 let db_tx = db_tx.clone();
@@ -165,11 +162,11 @@ pub fn start_local_video_server(
                     let mut reader = BufReader::new(stream);
                     for req_idx in 0..MAX_KEEP_ALIVE_REQUESTS {
                         if req_idx > 0 {
-                            // keep-alive 2回目以降の待機は短いアイドルタイムアウト（500ms）とし、
+                            // keep-alive 2回目以降の待機は短いアイドルタイムアウト（100ms）とし、
                             // アイドル接続によるワーカースレッド（8本）の占有を防ぐ
                             let _ = reader
                                 .get_ref()
-                                .set_read_timeout(Some(std::time::Duration::from_millis(500)));
+                                .set_read_timeout(Some(std::time::Duration::from_millis(100)));
                         }
 
                         let mut request_line = String::new();
@@ -638,7 +635,6 @@ pub fn start_local_video_server(
     port
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,12 +651,15 @@ mod tests {
     #[test]
     fn test_calculate_range_no_header_small_file() {
         let res = calculate_range(None, 500, 2 * 1024 * 1024);
-        assert_eq!(res, RangeSpec::Satisfiable {
-            start: 0,
-            end: 499,
-            chunk_size: 500,
-            is_partial: false,
-        });
+        assert_eq!(
+            res,
+            RangeSpec::Satisfiable {
+                start: 0,
+                end: 499,
+                chunk_size: 500,
+                is_partial: false,
+            }
+        );
     }
 
     #[test]
@@ -668,24 +667,30 @@ mod tests {
         let max_chunk = 2 * 1024 * 1024;
         let file_size = 10 * 1024 * 1024;
         let res = calculate_range(None, file_size, max_chunk);
-        assert_eq!(res, RangeSpec::Satisfiable {
-            start: 0,
-            end: max_chunk - 1,
-            chunk_size: max_chunk,
-            is_partial: true,
-        });
+        assert_eq!(
+            res,
+            RangeSpec::Satisfiable {
+                start: 0,
+                end: max_chunk - 1,
+                chunk_size: max_chunk,
+                is_partial: true,
+            }
+        );
     }
 
     #[test]
     fn test_calculate_range_clamped_end() {
         let file_size = 100;
         let res = calculate_range(Some("bytes=0-9999"), file_size, 2 * 1024 * 1024);
-        assert_eq!(res, RangeSpec::Satisfiable {
-            start: 0,
-            end: 99,
-            chunk_size: 100,
-            is_partial: true,
-        });
+        assert_eq!(
+            res,
+            RangeSpec::Satisfiable {
+                start: 0,
+                end: 99,
+                chunk_size: 100,
+                is_partial: true,
+            }
+        );
     }
 
     #[test]
@@ -709,12 +714,15 @@ mod tests {
     fn test_calculate_range_suffix() {
         let file_size = 1000;
         let res = calculate_range(Some("bytes=-200"), file_size, 2 * 1024 * 1024);
-        assert_eq!(res, RangeSpec::Satisfiable {
-            start: 800,
-            end: 999,
-            chunk_size: 200,
-            is_partial: true,
-        });
+        assert_eq!(
+            res,
+            RangeSpec::Satisfiable {
+                start: 800,
+                end: 999,
+                chunk_size: 200,
+                is_partial: true,
+            }
+        );
 
         let res_zero = calculate_range(Some("bytes=-0"), file_size, 2 * 1024 * 1024);
         assert_eq!(res_zero, RangeSpec::NotSatisfiable);
@@ -734,7 +742,8 @@ mod tests {
         use std::io::Cursor;
 
         // 1. 上限以内の通常の行は改行まで読み取られること
-        let mut short_reader = Cursor::new(b"GET /?path=test.mp4 HTTP/1.1\r\nHost: 127.0.0.1\r\n".to_vec());
+        let mut short_reader =
+            Cursor::new(b"GET /?path=test.mp4 HTTP/1.1\r\nHost: 127.0.0.1\r\n".to_vec());
         let mut line1 = String::new();
         let n1 = read_line_bounded(&mut short_reader, &mut line1, 8192).unwrap();
         assert_eq!(line1, "GET /?path=test.mp4 HTTP/1.1\r\n");

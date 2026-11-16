@@ -218,17 +218,15 @@ pub(crate) async fn get_cached_thumbnail_batch(
             let clean_path = file_path.replace(r"\\?\", "");
             let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
 
-            // DB のみを参照（生成しない）
+            // DB のみを参照（生成しない・BLOB全体の読み出しを避け、存在確認のみで高速化）
             if let Ok(conn) = db_conn.get() {
                 if let Ok(mut stmt) = conn.prepare_cached(
-                    "SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL"
+                    "SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND length(thumbnail) > 0"
                 ) {
-                    if let Ok(bytes) = stmt.query_row([&hash_key], |row| row.get::<_, Vec<u8>>(0)) {
-                        if !bytes.is_empty() {
-                            let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
-                            let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}", video_port, urlencoding::encode(&file_path), mtime, hash_key, token_param);
-                            return Some(ThumbnailResult { path: file_path, url, cancelled: false });
-                        }
+                    if stmt.exists([&hash_key]).unwrap_or(false) {
+                        let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
+                        let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}", video_port, urlencoding::encode(&file_path), mtime, hash_key, token_param);
+                        return Some(ThumbnailResult { path: file_path, url, cancelled: false });
                     }
                 }
             }
@@ -1829,6 +1827,47 @@ mod tests {
         std::fs::write(&corrupted_path, b"\x89PNG\r\n\x1a\ncorrupted_data_here").unwrap();
         let thumb_corrupted = generate_image_thumbnail_sync(corrupted_path.to_str().unwrap());
         assert!(thumb_corrupted.is_none(), "破損PNGに対してパニックせず安全にNoneを返却すること");
+    }
+
+    /// get_cached_thumbnail_batch の高速存在確認（BLOB全体の読み出しを行わず 1 / length(thumbnail) > 0 のみで照会）のテスト
+    #[test]
+    fn test_get_cached_thumbnail_batch_fast_existence_check() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (hash_key TEXT PRIMARY KEY, thumbnail BLOB, last_accessed INTEGER)",
+            [],
+        ).unwrap();
+
+        let valid_hash = "hash_valid_thumb";
+        let empty_thumb_hash = "hash_empty_thumb";
+        let null_thumb_hash = "hash_null_thumb";
+
+        // 正常なサムネイルBLOB
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, 0)",
+            rusqlite::params![valid_hash, vec![0xFFu8, 0xD8, 0xFF, 0xE0]],
+        ).unwrap();
+
+        // 空のサムネイルBLOB (長さ0)
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, 0)",
+            rusqlite::params![empty_thumb_hash, Vec::<u8>::new()],
+        ).unwrap();
+
+        // NULL のサムネイルBLOB
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, NULL, 0)",
+            rusqlite::params![null_thumb_hash],
+        ).unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND length(thumbnail) > 0"
+        ).unwrap();
+
+        assert!(stmt.exists([valid_hash]).unwrap(), "正常サムネイルが存在する場合は true");
+        assert!(!stmt.exists([empty_thumb_hash]).unwrap(), "長さ0のBLOBは存在しないと判定されること");
+        assert!(!stmt.exists([null_thumb_hash]).unwrap(), "NULLサムネイルは存在しないと判定されること");
+        assert!(!stmt.exists(["non_existent_hash"]).unwrap(), "未登録キーは false");
     }
 
 }

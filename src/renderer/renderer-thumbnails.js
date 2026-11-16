@@ -320,10 +320,13 @@ class ThumbnailWorkerPool {
           }
 
           // Chromium 109環境の安全レース制御 (2000ms)
-          const decodeRace = (promise) => Promise.race([
-            promise,
-            new Promise((_, r) => setTimeout(() => r(new Error("createImageBitmap timed out")), 2000))
-          ]);
+          const decodeRace = (promise) => {
+            let timer;
+            const timeout = new Promise((_, r) => {
+              timer = setTimeout(() => r(new Error("createImageBitmap timed out")), 2000);
+            });
+            return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+          };
 
           if (typeof createImageBitmap === 'function') {
             try {

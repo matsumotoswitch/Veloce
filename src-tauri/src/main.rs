@@ -336,7 +336,12 @@ fn load_directory(
     let app_clone = window.app_handle();
     let db_conn_clone = state.db_conn.clone();
     let db_conn_purge = state.db_conn.clone();
-    let ratings_map = state.ratings.read().clone();
+    let is_smart_target = target_path.starts_with("smart://");
+    let mut ratings_map_opt = if is_smart_target {
+        Some(state.ratings.read().clone())
+    } else {
+        None
+    };
     let smart_folders_clone = state.smart_folders.read().clone();
     let current_sort = state.sort_config.read().clone();
 
@@ -372,7 +377,7 @@ fn load_directory(
                 let db_conn_for_query = db_conn_clone.clone();
                 let rule_sf = rule.clone();
                 let sort_sf = current_sort.clone();
-                let ratings_map_sf = ratings_map.clone();
+                let ratings_map_sf = ratings_map_opt.take().unwrap_or_default();
 
                 let (files, head_valid, head_missing, all_paths_for_bg_purge) = tokio::task::spawn_blocking(move || {
                     let mut arcs = query_smart_folder_image_files(
@@ -603,6 +608,7 @@ fn load_directory(
             use rayon::prelude::*;
 
             let (files, missing_paths): (Vec<std::sync::Arc<ImageFile>>, Vec<String>) = if path_for_spawn.starts_with("smart://") {
+                let ratings_map = ratings_map_opt.unwrap_or_default();
                 let smart_items = get_smart_folder_paths(&path_for_spawn, &ratings_map, &db_conn_clone, &smart_folders_clone);
                 // 大規模スマートフォルダ（3万件以上等）でも30秒以上の同期ブロックが発生しないよう、
                 // 初期画面に必要な先頭200件のみ同期検証し、残りは即時有効ファイルとして返却する

@@ -1544,26 +1544,43 @@ class UIManager {
       // Always check and update dynamic metadata (they may arrive asynchronously)
       const tds = tr.children;
       
-      const newWidth = file.width ? file.width.toLocaleString() : '-';
-      if (tds[2].textContent !== newWidth) tds[2].textContent = newWidth;
-      
-      const newHeight = file.height ? file.height.toLocaleString() : '-';
-      if (tds[3].textContent !== newHeight) tds[3].textContent = newHeight;
-      
-      let ratioStr = '-';
-      if (file.width && file.height) {
-        const d = gcd(file.width, file.height);
-        const rw = file.width / d;
-        const rh = file.height / d;
-        ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
+      // メタデータ列の同期（生数値キャッシュによる O(1) 判定で毎フレームの文字列化・日付計算・DOM走査を排除）
+      if (tds[2]._cachedWidth !== file.width) {
+        tds[2]._cachedWidth = file.width;
+        const newWidth = file.width ? file.width.toLocaleString() : '-';
+        if (tds[2].textContent !== newWidth) tds[2].textContent = newWidth;
       }
-      if (tds[4].textContent !== ratioStr) tds[4].textContent = ratioStr;
-
-      const newSize = formatSize(file.size);
-      if (tds[5].textContent !== newSize) tds[5].textContent = newSize;
       
-      const newMtime = formatDate(file.mtime);
-      if (tds[6].textContent !== newMtime) tds[6].textContent = newMtime;
+      if (tds[3]._cachedHeight !== file.height) {
+        tds[3]._cachedHeight = file.height;
+        const newHeight = file.height ? file.height.toLocaleString() : '-';
+        if (tds[3].textContent !== newHeight) tds[3].textContent = newHeight;
+      }
+      
+      if (tds[4]._cachedWidth !== file.width || tds[4]._cachedHeight !== file.height) {
+        tds[4]._cachedWidth = file.width;
+        tds[4]._cachedHeight = file.height;
+        let ratioStr = '-';
+        if (file.width && file.height) {
+          const d = gcd(file.width, file.height);
+          const rw = file.width / d;
+          const rh = file.height / d;
+          ratioStr = (rw > 100 || rh > 100) ? `${(file.width / file.height).toFixed(2)}:1` : `${rw}:${rh}`;
+        }
+        if (tds[4].textContent !== ratioStr) tds[4].textContent = ratioStr;
+      }
+
+      if (tds[5]._cachedSize !== file.size) {
+        tds[5]._cachedSize = file.size;
+        const newSize = formatSize(file.size);
+        if (tds[5].textContent !== newSize) tds[5].textContent = newSize;
+      }
+      
+      if (tds[6]._cachedMtime !== file.mtime) {
+        tds[6]._cachedMtime = file.mtime;
+        const newMtime = formatDate(file.mtime);
+        if (tds[6].textContent !== newMtime) tds[6].textContent = newMtime;
+      }
 
       // レーティングの同期（_cachedRating による O(1) キャッシュ判定で毎フレームの innerHTML シリアライズを排除）
       const rating = getRatingForPath(file.path);
