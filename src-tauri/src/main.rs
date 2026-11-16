@@ -680,12 +680,8 @@ fn load_directory(
 
             let mut files = files;
 
-            // デフォルトソート（高速自然順ソート）
-            if !path_for_spawn.starts_with("smart://") {
-                sort_files_by_natural_name(&mut files, true);
-            }
-
-            // ソート完了後、SQLite DBを一括照会して has_thumbnail_cache フラグを事前確定させる
+            // SQLite DBを一括照会して has_thumbnail_cache フラグを事前確定させ、ImageFile.hash_key を書き戻す
+            // （初期表示のソートは直後の apply_filters_and_sort で確定するため、ここでのプリソートは省略）
             if !path_for_spawn.starts_with("smart://") && !files.is_empty() {
                 let hash_to_idx: std::collections::HashMap<String, usize> = files
                     .par_iter()
@@ -696,6 +692,12 @@ fn load_directory(
                         (hash_key, i)
                     })
                     .collect();
+
+                for (hash_key, &idx) in &hash_to_idx {
+                    if let Some(f) = files.get_mut(idx) {
+                        std::sync::Arc::make_mut(f).hash_key = compact_str::CompactString::new(hash_key);
+                    }
+                }
 
                 if let Ok(conn) = db_conn_clone.get() {
                     let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
@@ -741,8 +743,6 @@ fn load_directory(
             }
 
             *state.all_files.write() = files.clone();
-            *state.filtered_files.write() = files.clone();
-            *state.image_paths.write() = std::sync::Arc::new(files.iter().map(|f| f.path.clone()).collect());
             state.rebuild_all_indices(&files);
 
             let total_count = apply_filters_and_sort(None, &state);
@@ -4687,6 +4687,143 @@ mod viewer_tests {
         assert_eq!(seq_map.len(), 500);
         assert_eq!(par_map.len(), 500);
         assert_eq!(seq_map, par_map, "並列ハッシュ生成とシーケンシャル生成の結果が完全に一致すること");
+    }
+
+    /// load_directory の速度改善検証テスト：
+    /// 1. 全ファイルの ImageFile.hash_key が空でなく正しく計算・設定されること
+    /// 2. DB のサムネイル有無フラグ (has_thumbnail_cache) が正しく確定すること
+    /// 3. 走査直後のプリソートを省略しても、apply_filters_and_sort 後の表示順序および内容が
+    ///    従来のプリソートあり実装と 100% 完全一致すること
+    #[test]
+    fn test_load_directory_populates_hash_key_and_matches_sort_order() {
+        use std::sync::Arc;
+        use compact_str::CompactString;
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (hash_key TEXT PRIMARY KEY, thumbnail BLOB, last_accessed INTEGER)",
+            [],
+        ).unwrap();
+
+        // 異なる名前・番号・日時のダミーファイル（あえて未ソート・シャッフル順）
+        let raw_names = vec![
+            ("img_10.png", 1700000010u64),
+            ("img_2.png", 1700000002u64),
+            ("img_1.png", 1700000001u64),
+            ("img_20.png", 1700000020u64),
+            ("img_03.png", 1700000003u64),
+        ];
+
+        let mut files: Vec<Arc<ImageFile>> = raw_names
+            .into_iter()
+            .map(|(name, mtime)| {
+                Arc::new(ImageFile {
+                    name: name.to_string(),
+                    ext: ".png".into(),
+                    path: format!("C:\\images\\{}", name),
+                    size: 1024,
+                    mtime,
+                    ctime: mtime,
+                    has_thumbnail_cache: false,
+                    width: 800,
+                    height: 600,
+                    prompt: String::new(),
+                    negative_prompt: String::new(),
+                    source: String::new(),
+                    meta_loaded: false,
+                    search_text: String::new(),
+                    unified_search_text: String::new(),
+                    hash_key: CompactString::default(),
+                })
+            })
+            .collect();
+
+        // img_1.png のみサムネイルキャッシュを登録
+        let cached_clean = "C:\\images\\img_1.png";
+        let cached_hash = crate::utils::hash_path_mtime_hex(cached_clean, 1700000001);
+        let dummy_thumb: Vec<u8> = vec![0xFF, 0xD8, 0xFF];
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, last_accessed) VALUES (?, ?, 0)",
+            rusqlite::params![cached_hash, dummy_thumb],
+        ).unwrap();
+
+        // 改善後の load_directory パイプライン（プリソートなし）:
+        // 1. hash_to_idx 計算と ImageFile.hash_key の書き戻し
+        let hash_to_idx: std::collections::HashMap<String, usize> = files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let clean = f.path.replace("\\\\?\\", "");
+                let hash_key = crate::utils::hash_path_mtime_hex(&clean, f.mtime);
+                (hash_key, i)
+            })
+            .collect();
+
+        for (hash_key, &idx) in &hash_to_idx {
+            if let Some(f) = files.get_mut(idx) {
+                Arc::make_mut(f).hash_key = CompactString::new(hash_key);
+            }
+        }
+
+        // 2. DB照会による has_thumbnail_cache の事前確定
+        let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
+        for chunk in hash_keys.chunks(900) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let query = format!(
+                "SELECT hash_key FROM cache WHERE hash_key IN ({}) AND thumbnail IS NOT NULL",
+                placeholders
+            );
+            let mut stmt = conn.prepare(&query).unwrap();
+            let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| row.get::<_, String>(0)).unwrap();
+            for row in rows.flatten() {
+                if let Some(&idx) = hash_to_idx.get(&row) {
+                    if let Some(f) = files.get_mut(idx) {
+                        Arc::make_mut(f).has_thumbnail_cache = true;
+                    }
+                }
+            }
+        }
+
+        // 検証: 全ファイルに hash_key が埋まっていること
+        for f in &files {
+            assert!(!f.hash_key.is_empty(), "hash_key が空でないこと: {}", f.name);
+            let expected_hash = crate::utils::hash_path_mtime_hex(&f.path, f.mtime);
+            assert_eq!(f.hash_key.as_str(), expected_hash);
+        }
+        let img1 = files.iter().find(|f| f.name == "img_1.png").unwrap();
+        assert!(img1.has_thumbnail_cache, "DBに存在するサムネイルのフラグが true になること");
+        let img2 = files.iter().find(|f| f.name == "img_2.png").unwrap();
+        assert!(!img2.has_thumbnail_cache, "DBに存在しないサムネイルのフラグが false であること");
+
+        // 3. プリソートなしで apply_filters_and_sort を実行（改善後パイプライン）
+        let state_no_presort = create_test_app_state("C:\\images");
+        *state_no_presort.all_files.write() = files.clone();
+        state_no_presort.rebuild_all_indices(&files);
+        apply_filters_and_sort(None, &state_no_presort);
+
+        // 4. プリソートありで apply_filters_and_sort を実行（従来パイプライン）
+        let mut files_presorted = files.clone();
+        sort_files_by_natural_name(&mut files_presorted, true);
+        let state_presorted = create_test_app_state("C:\\images");
+        *state_presorted.all_files.write() = files_presorted.clone();
+        state_presorted.rebuild_all_indices(&files_presorted);
+        apply_filters_and_sort(None, &state_presorted);
+
+        // 検証: filtered_files の順序と内容が現行（プリソートあり）と改善後（プリソートなし）で完全一致すること
+        let filtered_no_presort = state_no_presort.filtered_files.read();
+        let filtered_presorted = state_presorted.filtered_files.read();
+
+        assert_eq!(filtered_no_presort.len(), filtered_presorted.len());
+        for (a, b) in filtered_no_presort.iter().zip(filtered_presorted.iter()) {
+            assert_eq!(a.path, b.path, "表示順が完全一致すること");
+            assert_eq!(a.hash_key, b.hash_key);
+            assert_eq!(a.has_thumbnail_cache, b.has_thumbnail_cache);
+        }
+
+        // 自然順（img_1, img_2, img_03, img_10, img_20）になっていることを確認
+        let names: Vec<&str> = filtered_no_presort.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["img_1.png", "img_2.png", "img_03.png", "img_10.png", "img_20.png"]);
     }
 
     #[test]
