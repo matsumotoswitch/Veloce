@@ -8,6 +8,7 @@ describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mas
   const rootDir = path.resolve(__dirname, '..');
   const thumbnailsJsPath = path.join(rootDir, 'src', 'renderer', 'renderer-thumbnails.js');
   const mainRsPath = path.join(rootDir, 'src-tauri', 'src', 'main.rs');
+  const thumbnailRsPath = path.join(rootDir, 'src-tauri', 'src', 'thumbnail.rs');
 
   describe('1. applySharpenFilter algorithm test', () => {
     it('preserves flat color areas without distortion or luminance shift', () => {
@@ -116,8 +117,8 @@ describe('Thumbnail Sharpness Optimizations (Lanczos3, High Quality, Unsharp Mas
   });
 
   describe('3. Rust backend configuration test', () => {
-    it('uses FilterType::Lanczos3 without active sharpen_rgb_buffer invocation in main.rs', () => {
-      const rustCode = fs.readFileSync(mainRsPath, 'utf-8');
+    it('uses FilterType::Lanczos3 without active sharpen_rgb_buffer invocation in thumbnail.rs', () => {
+      const rustCode = fs.readFileSync(thumbnailRsPath, 'utf-8');
       expect(rustCode).toContain('FilterType::Lanczos3');
       expect(rustCode).not.toContain('sharpen_rgb_buffer(&mut buffer');
     });

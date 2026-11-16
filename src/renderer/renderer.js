@@ -64,6 +64,26 @@ import {
   initFavoritesDnd
 } from './renderer-dnd.js';
 import { initResizers, updateResizerToggleStates } from './renderer-resizer.js';
+import {
+  updateThumbnailSize,
+  setupThumbnailSliderEvents,
+  setupSearchBarEvents
+} from './renderer-toolbar.js';
+import {
+  createSmartFolderNode,
+  updateSmartFolderCountsUI,
+  debouncedUpdateSmartFolderCounts,
+  initSmartFolders as initSmartFolderModule
+} from './renderer-smart-folder.js';
+import {
+  initNav,
+  updateNavButtons,
+  navigateUp,
+  navigateHistory,
+  showHistoryMenu,
+  setupNavButtonEvents,
+  initNavUpButton
+} from './renderer-nav.js';
 import { getSetting, setSetting, getFolderSort, setFolderSort } from '../common/settings-store.js';
 import { renderFavorites, initBookmarkEvents } from './renderer-bookmarks.js';
 import {
@@ -101,7 +121,17 @@ export {
   expandTreeToPath,
   refreshTree,
   handleTreeNavigation,
-  updateSortIndicators
+  updateSortIndicators,
+  updateThumbnailSize,
+  setupThumbnailSliderEvents,
+  setupSearchBarEvents,
+  createSmartFolderNode,
+  updateSmartFolderCountsUI,
+  debouncedUpdateSmartFolderCounts,
+  initSmartFolders,
+  updateNavButtons,
+  navigateUp,
+  initNavUpButton
 };
 
 // 開発者ツールショートカット (F12, Ctrl+Shift+I 等) の無効化
@@ -128,6 +158,14 @@ const contextMenuManager = new ContextMenuManager();
 window.contextMenuManager = contextMenuManager;
 const contextMenu = contextMenuManager.menuElement;
 
+// ナビゲーション連携コールバックの即時初期化
+initNav({
+  refreshFileList,
+  expandTreeToPath,
+  saveTabsState,
+  getTabNameForPath
+});
+
 // タブ一覧メニュー
 const tabListMenu = document.createElement('div');
 tabListMenu.id = 'tab-list-menu';
@@ -136,81 +174,6 @@ document.body.appendChild(tabListMenu);
 // ============================================================================
 // 2. Tauri API & Backend Communication
 // ============================================================================
-
-export function updateNavButtons() {
-  const backBtn = document.getElementById('nav-back-btn');
-  const forwardBtn = document.getElementById('nav-forward-btn');
-  const upBtn = document.getElementById('nav-up-btn');
-  const tab = appState.tabs[appState.activeTabIndex];
-  const currentDir = appState.currentDirectory || (tab && tab.path) || '';
-  if (upBtn) {
-    upBtn.disabled = !getParentDirectory(currentDir);
-  }
-  if (!tab || !tab.history) {
-    if (backBtn) backBtn.disabled = true;
-    if (forwardBtn) forwardBtn.disabled = true;
-    return;
-  }
-  if (backBtn) backBtn.disabled = tab.historyIndex <= 0;
-  if (forwardBtn) forwardBtn.disabled = tab.historyIndex >= tab.history.length - 1;
-}
-
-/**
- * 現在表示中のフォルダから1階層上の親フォルダへ移動する。
- * ルートディレクトリ・PC・スマートフォルダ等の親が存在しない状態では何もしない。
- */
-export async function navigateUp() {
-  const activeTab = appState.tabs && appState.tabs[appState.activeTabIndex];
-  const currentDir = appState.currentDirectory || (activeTab && activeTab.path) || '';
-  const parentPath = getParentDirectory(currentDir);
-  if (!parentPath) return;
-
-  appState.selection.clear();
-  appState.selectedIndex = -1;
-  uiManager.updateSelectionUI();
-
-  if (activeTab) {
-    activeTab.path = parentPath;
-    activeTab.name = getTabNameForPath(parentPath);
-    activeTab.scrollTop = 0;
-  }
-  appState.savedScrollTopGrid = 0;
-  appState.savedScrollTopList = 0;
-  appState.currentDirectory = parentPath;
-  setSetting('currentDirectory', parentPath);
-  uiManager.renderTabs();
-  saveTabsState();
-
-  await refreshFileList(true);
-  await expandTreeToPath(parentPath);
-  updateNavButtons();
-}
-
-async function navigateHistory(offset) {
-  const tab = appState.tabs[appState.activeTabIndex];
-  if (!tab || !tab.history) return;
-
-  const newIndex = tab.historyIndex + offset;
-  if (newIndex >= 0 && newIndex < tab.history.length) {
-    appState.isNavigatingHistory = true;
-    tab.historyIndex = newIndex;
-    const targetPath = tab.history[newIndex];
-
-    tab.path = targetPath;
-    tab.name = getTabNameForPath(targetPath);
-    tab.scrollTop = 0;
-    appState.currentDirectory = targetPath;
-    setSetting('currentDirectory', appState.currentDirectory);
-    uiManager.renderTabs();
-    saveTabsState();
-
-    await refreshFileList(true);
-    await expandTreeToPath(targetPath);
-
-    updateNavButtons();
-    appState.isNavigatingHistory = false;
-  }
-}
 
 async function refreshFileList(showToast = false) {
   if (!appState.currentDirectory) return;
@@ -692,70 +655,6 @@ function getTabNameForPath(path) {
     return 'スマートフォルダ';
   }
   return resolveTabName(path, appState.favorites);
-}
-
-/**
- * 戻る・進むの履歴メニューを表示します。
- */
-function showHistoryMenu(event, direction, btnElement) {
-  const tab = appState.getActiveTab();
-  if (!tab || !tab.history || tab.history.length === 0) return;
-
-  let menu = document.getElementById('history-menu');
-  if (!menu) {
-    menu = document.createElement('div');
-    menu.id = 'history-menu';
-    document.body.appendChild(menu);
-  }
-
-  menu.replaceChildren(); // 中身をリセット
-
-  const currentIndex = tab.historyIndex;
-  let historyItems = [];
-
-  // 履歴をリスト化（戻る時は新しい順、進む時は古い順が見やすい）
-  if (direction === -1) {
-    for (let i = currentIndex - 1; i >= 0; i--) {
-      historyItems.push({ index: i, path: tab.history[i] });
-    }
-  } else {
-    for (let i = currentIndex + 1; i < tab.history.length; i++) {
-      historyItems.push({ index: i, path: tab.history[i] });
-    }
-  }
-
-  if (historyItems.length === 0) return;
-
-  historyItems.forEach(item => {
-    const menuItem = document.createElement('div');
-    menuItem.className = 'context-menu-item';
-
-    // お気に入りに登録されているかチェック
-    const fav = appState.favorites.find(f => f.path === item.path);
-    const { displayName, iconHtml, iconClass } = resolvePathDisplay(fav, item.path);
-
-    menuItem.innerHTML = `
-      <span class="menu-icon ${iconClass} menu-item-icon">${iconHtml}</span>
-      <span class="menu-item-text">${displayName}</span>
-    `;
-    menuItem.title = item.path; // ホバーでフルパス表示
-
-    // 履歴クリック時の移動処理
-    menuItem.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const offset = item.index - tab.historyIndex; // 目的のインデックスまでの差分を計算
-      navigateHistory(offset);
-      menu.classList.remove('show');
-    });
-
-    menu.appendChild(menuItem);
-  });
-
-  // メニューの位置をボタンの下に設定
-  const btnRect = btnElement.getBoundingClientRect();
-  menu.style.left = `${btnRect.left}px`;
-  menu.style.top = `${btnRect.bottom + 4}px`;
-  menu.classList.add('show');
 }
 
 // ============================================================================
@@ -1690,97 +1589,6 @@ initDirTreeDnd(uiManager.elements.dirTree, {
 
 initResizers();
 
-export function updateThumbnailSize() {
-  const slider = uiManager?.elements?.thumbnailSizeSlider;
-  if (!slider) return;
-  const size = parseFloat(slider.value) || 120;
-  document.body.style.setProperty('--thumbnail-size', `${size}px`);
-
-  const tooltip = document.getElementById('thumbnail-slider-tooltip');
-  if (tooltip && slider) {
-    const min = parseFloat(slider.min) || 100;
-    const max = parseFloat(slider.max) || 500;
-    const percent = (size - min) / (max - min);
-    const thumbWidth = 12;
-    // thumb is offset by percent across the track width
-    const offset = percent * ((slider.offsetWidth || 100) - thumbWidth) + (thumbWidth / 2);
-    tooltip.textContent = `${Math.round(size)}px`;
-    tooltip.style.left = `${offset}px`;
-  }
-}
-
-/**
- * サムネイルサイズ変更スライダーのイベントリスナーを設定します。
- * スライダーのドラッグ中、CSS変数更新とツールチップ追従は即座に同期的反映しつつ、
- * 仮想グリッド全体の再計算（updateVirtualGrid）を requestAnimationFrame でスロットリングし、
- * 連続ドラッグ時の描画負荷スパイクとカクつきを防止します。
- * @param {HTMLInputElement} slider - スライダー要素
- * @param {Object} [options={}] - コールバックおよび設定オプション
- * @returns {{ cleanup: () => void, triggerPendingUpdate: () => void }}
- */
-export function setupThumbnailSliderEvents(slider, options = {}) {
-  if (!slider || typeof slider.addEventListener !== 'function') {
-    return { cleanup: () => {}, triggerPendingUpdate: () => {} };
-  }
-
-  const onUpdateSize = options.onUpdateSize || updateThumbnailSize;
-  const onUpdateGrid = options.onUpdateGrid || (() => {
-    if (typeof uiManager?.updateVirtualGrid === 'function') {
-      uiManager.updateVirtualGrid(true);
-    }
-  });
-  const onSaveSetting = options.onSaveSetting || ((val) => {
-    setSetting('thumbnailScale', val);
-  });
-
-  let sliderRafId = null;
-
-  const onInput = () => {
-    // 1. CSS変数およびツールチップ位置の更新は即座に同期実行（追従性確保）
-    onUpdateSize();
-
-    // 2. 仮想グリッド全体の再計算は rAF でスロットリング（1フレーム1回）
-    if (sliderRafId === null) {
-      sliderRafId = requestAnimationFrame(() => {
-        sliderRafId = null;
-        onUpdateGrid();
-      });
-    }
-  };
-
-  const onChange = (e) => {
-    // ドラッグ完了時、未処理の rAF があればキャンセルして即時確定
-    if (sliderRafId !== null) {
-      cancelAnimationFrame(sliderRafId);
-      sliderRafId = null;
-      onUpdateGrid();
-    }
-    const val = (e && e.target && e.target.value !== undefined) ? e.target.value : slider.value;
-    onSaveSetting(val);
-  };
-
-  slider.addEventListener('input', onInput);
-  slider.addEventListener('change', onChange);
-
-  return {
-    cleanup: () => {
-      if (sliderRafId !== null) {
-        cancelAnimationFrame(sliderRafId);
-        sliderRafId = null;
-      }
-      slider.removeEventListener('input', onInput);
-      slider.removeEventListener('change', onChange);
-    },
-    triggerPendingUpdate: () => {
-      if (sliderRafId !== null) {
-        cancelAnimationFrame(sliderRafId);
-        sliderRafId = null;
-        onUpdateGrid();
-      }
-    }
-  };
-}
-
 if (uiManager?.elements?.thumbnailSizeSlider && typeof uiManager.elements.thumbnailSizeSlider.addEventListener === 'function') {
   setupThumbnailSliderEvents(uiManager.elements.thumbnailSizeSlider);
 }
@@ -2257,94 +2065,6 @@ document.addEventListener('contextmenu', (e) => {
 
 // (handleTreeNavigation is modularized into renderer-folder-tree.js)
 
-/**
- * 検索バーのイベントリスナーを設定します。
- * 日本語IME入力（全角/漢字変換）中の未確定文字列による不要な検索トリガーを保留し、
- * 変換確定時（compositionend）または非IME入力のデバウンス完了時にスマートに検索を実行します。
- * @param {HTMLInputElement} searchBar - 検索入力要素
- * @param {Object} [options={}] - コールバックおよび設定オプション
- * @returns {{ isComposing: () => boolean, cleanup: () => void }}
- */
-export function setupSearchBarEvents(searchBar, options = {}) {
-  if (!searchBar) return { isComposing: () => false, cleanup: () => {} };
-
-  const searchDelay = typeof options.searchDelay === 'number' ? options.searchDelay : (CONFIG.SEARCH_DELAY || 300);
-  const onSearch = options.onSearch || ((query) => {
-    appState.searchQuery = query;
-    scheduleRefresh(true);
-  });
-  const updateIndicator = options.updateIndicator || (() => {});
-  const clearBtn = options.clearBtn || (uiManager?.elements?.searchClearBtn);
-
-  let isComposing = false;
-
-  const onCompositionStart = () => {
-    isComposing = true;
-  };
-
-  const onCompositionEnd = (e) => {
-    isComposing = false;
-    updateIndicator();
-    const query = (e.target && typeof e.target.value === 'string') ? e.target.value : searchBar.value;
-    onSearch(query);
-  };
-
-  const onInputImmediate = () => {
-    updateIndicator();
-  };
-
-  const debouncedSearch = debounce((e) => {
-    // IME変換確定前（未確定のかな入力や変換候補選択中）は検索を保留
-    if (isComposing) return;
-    const query = (e.target && typeof e.target.value === 'string') ? e.target.value : searchBar.value;
-    onSearch(query);
-  }, searchDelay);
-
-  const onKeydown = (e) => {
-    if (e.key === 'Escape' || e.keyCode === 27) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (clearBtn) {
-        clearBtn.click();
-      }
-      searchBar.blur();
-    }
-  };
-
-  searchBar.addEventListener('compositionstart', onCompositionStart);
-  searchBar.addEventListener('compositionend', onCompositionEnd);
-  searchBar.addEventListener('input', onInputImmediate);
-  searchBar.addEventListener('input', debouncedSearch);
-  searchBar.addEventListener('keydown', onKeydown);
-
-  return {
-    isComposing: () => isComposing,
-    cleanup: () => {
-      searchBar.removeEventListener('compositionstart', onCompositionStart);
-      searchBar.removeEventListener('compositionend', onCompositionEnd);
-      searchBar.removeEventListener('input', onInputImmediate);
-      searchBar.removeEventListener('input', debouncedSearch);
-      searchBar.removeEventListener('keydown', onKeydown);
-    }
-  };
-}
-
-/**
- * 「上のフォルダへ」ボタン (#nav-up-btn) のツールチップおよびクリックハンドラを初期化する。
- * @param {HTMLButtonElement|null} upBtn
- */
-export function initNavUpButton(upBtn) {
-  if (!upBtn) return;
-  uiManager.bindTooltip(upBtn, '上のフォルダへ', {
-    isDisabled: () => upBtn.disabled
-  });
-  upBtn.addEventListener('click', async () => {
-    if (upBtn.disabled) return;
-    uiManager.hideCustomTooltip();
-    await navigateUp();
-  });
-}
-
 // ============================================================================
 // 5. Application Initialization
 // ============================================================================
@@ -2447,58 +2167,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   renderFavorites();
 
-  const setupNavButtonEvents = (btnId, direction, tooltipText) => {
-    const btn = document.getElementById(btnId);
-    if (!btn) return;
+  initNav({
+    refreshFileList,
+    expandTreeToPath,
+    saveTabsState,
+    getTabNameForPath
+  });
 
-    let pressTimer;
-    let isLongPressed = false;
-
-    uiManager.bindTooltip(btn, tooltipText, {
-      isDisabled: () => btn.disabled
-    });
-
-    btn.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!btn.disabled) showHistoryMenu(e, direction, btn);
-    });
-
-    btn.addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || btn.disabled) return;
-      isLongPressed = false;
-      pressTimer = setTimeout(() => {
-        isLongPressed = true;
-        showHistoryMenu(e, direction, btn);
-      }, 300);
-    });
-
-    btn.addEventListener('mouseup', (e) => {
-      if (e.button !== 0 || btn.disabled) return;
-      clearTimeout(pressTimer);
-    });
-
-    btn.addEventListener('mouseleave', () => {
-      clearTimeout(pressTimer);
-    });
-
-    btn.addEventListener('click', (e) => {
-      if (btn.disabled) return;
-      uiManager.hideCustomTooltip();
-      if (isLongPressed) {
-        // 長押し完了後のクリックイベントをここで完全に握りつぶし、メニュー非表示を回避する
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        isLongPressed = false; // フラグをリセット
-      } else {
-        // 短いクリックの場合は通常の移動
-        navigateHistory(direction);
-      }
-    });
-  };
-
-  setupNavButtonEvents('nav-back-btn', -1, '戻る');
+    setupNavButtonEvents('nav-back-btn', -1, '戻る');
   setupNavButtonEvents('nav-forward-btn', 1, '進む');
   initNavUpButton(document.getElementById('nav-up-btn'));
 
@@ -3650,148 +3326,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-let smartFoldersDelegated = false;
-
-function createSmartFolderNode(f) {
-  const template = document.getElementById('smart-folder-template');
-  const clone = template.content.cloneNode(true);
-  const item = clone.querySelector('.smart-folder-item');
-  item.dataset.id = f.id;
-
-  const iconSpan = clone.querySelector('.smart-folder-icon');
-  if (f.icon && ICON_SVGS && ICON_SVGS[f.icon]) {
-    iconSpan.innerHTML = ICON_SVGS[f.icon];
-    iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
-  } else if (f.icon && f.icon.startsWith('FAV_')) {
-    iconSpan.innerHTML = UIManager.ICONS[f.icon] || UIManager.ICONS['FAV_STAR'];
-    iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
-  } else {
-    iconSpan.className = `smart-folder-icon icon-color-${f.color || 'default'}`;
-    iconSpan.innerHTML = f.icon || UIManager.ICONS.FAV_STAR;
-  }
-
-  const nameSpan = clone.querySelector('.folder-name');
-  nameSpan.textContent = f.name;
-
-  return item;
-}
-
-/**
- * スマートフォルダの件数を取得してUIに反映する非同期関数
- */
-window.debouncedUpdateSmartFolderCounts = debounce(updateSmartFolderCountsUI, 500);
-
-async function updateSmartFolderCountsUI() {
-  if (!window.veloceAPI.getSmartFolderCounts) return;
-  try {
-    const rules = appState.smartFolders || [];
-    const counts = await window.veloceAPI.getSmartFolderCounts(rules);
-    const list = document.getElementById('smart-folders-list');
-    if (!list) return;
-    const items = list.querySelectorAll('.smart-folder-item');
-    items.forEach(item => {
-      const id = item.dataset.id;
-      const countSpan = item.querySelector('.smart-folder-count');
-      if (id && countSpan) {
-        if (counts[id] !== undefined) {
-          countSpan.textContent = Number(counts[id]).toLocaleString();
-          countSpan.classList.add('show');
-        } else {
-          countSpan.classList.remove('show');
-        }
-      }
-    });
-  } catch (e) {
-    console.error('Failed to update smart folder counts:', e);
-  }
-}
-
-/**
- * スマートフォルダのUI初期化とイベント設定を行います
- */
 function initSmartFolders() {
-  const container = document.getElementById('smart-folders-list');
-  if (!container) return;
-
-  const fragment = document.createDocumentFragment();
-  const folders = appState.smartFolders || [];
-
-  folders.forEach(f => {
-    fragment.appendChild(createSmartFolderNode(f));
+  return initSmartFolderModule({
+    getTabNameForPath,
+    saveTabsState,
+    refreshFileList,
+    getContextMenuManager: () => contextMenuManager
   });
-
-  // 1回のReflowでDOMツリーを更新
-  container.replaceChildren(fragment);
-  updateSmartFolderCountsUI();
-
-  // イベント委譲 (Event Delegation) は1回だけ設定
-  if (!smartFoldersDelegated) {
-    smartFoldersDelegated = true;
-
-    container.addEventListener('click', async (e) => {
-      const item = e.target.closest('.smart-folder-item');
-      if (!item) return;
-
-      // 選択状態の更新（スマートフォルダはタブと状態が合わなくなるため選択状態を付与しない）
-      const prevSmartSelected = container.querySelector('.smart-folder-item.selected');
-      if (prevSmartSelected) prevSmartSelected.classList.remove('selected');
-
-      // ツリー側の選択状態を解除
-      const prevTreeSelected = document.querySelector('#dir-tree .tree-item.selected');
-      if (prevTreeSelected) prevTreeSelected.classList.remove('selected');
-
-      const fId = item.dataset.id;
-      const f = appState.smartFolders.find(x => x.id === fId);
-      if (!f) return;
-
-      const path = `smart://${f.id}`;
-      appState.selection.clear();
-      appState.selectedIndex = -1;
-      uiManager.updateSelectionUI();
-
-      if (window.veloceAPI.loadDirectory) {
-        const activeTab = appState.tabs[appState.activeTabIndex];
-        if (activeTab) {
-          activeTab.path = path;
-          activeTab.name = getTabNameForPath(path, appState.favorites);
-          activeTab.scrollTop = 0;
-          appState.currentDirectory = path;
-          setSetting('currentDirectory', appState.currentDirectory);
-          uiManager.renderTabs();
-          saveTabsState(appState, uiManager);
-
-          refreshFileList(true);
-        }
-      }
-    });
-
-    const section = document.getElementById('smart-folders-section');
-    if (section) {
-      section.addEventListener('contextmenu', (e) => {
-        const item = e.target.closest('.smart-folder-item');
-        if (item) {
-          // アイテム上での右クリック
-          e.preventDefault();
-          e.stopPropagation();
-
-          const fId = item.dataset.id;
-          const f = appState.smartFolders.find(x => x.id === fId);
-          if (!f) return;
-
-          contextMenuManager.show('smart-folder', {
-            targetSmartFolderId: f.id,
-            targetFolder: { path: `smart://${f.id}`, name: f.name }
-          }, e.clientX, e.clientY);
-        } else {
-          // セクション余白での右クリック
-          e.preventDefault();
-          e.stopPropagation();
-
-          contextMenuManager.show('smart-folder-background', {}, e.clientX, e.clientY);
-        }
-      });
-    }
-  }
 }
 
 // (Undo logic performUndo is modularized into renderer-file-ops.js)

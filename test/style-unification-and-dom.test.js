@@ -72,9 +72,10 @@ describe('Style Unification and DOM Optimization Tests', () => {
 
   it('verifies renderer-ui.js uses diff-tag-empty class and optimized height guards', () => {
     const code = fs.readFileSync(rendererUiJsPath, 'utf-8');
+    const diffCode = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-diff.js'), 'utf-8');
 
-    // diff-tag-empty クラスが使用されていること
-    expect(code).toContain('<span class="diff-tag-empty">なし</span>');
+    // diff-tag-empty クラスが使用されていること（renderer-diff.js に委譲）
+    expect(diffCode).toContain('<span class="diff-tag-empty">なし</span>');
 
     // 仮想スクロールスペーサーとファイル行で数値キャッシュ比較ガードが使用されていること
     expect(code).toContain('topSpacer._cachedHeight !== topSpacerHeight');
@@ -84,6 +85,8 @@ describe('Style Unification and DOM Optimization Tests', () => {
     // style="..." が存在しないこと
     const inlineStyleMatches = code.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
     expect(inlineStyleMatches).toBeNull();
+    const diffInlineStyleMatches = diffCode.match(/\bstyle\s*=\s*["'][^"']*["']/gi);
+    expect(diffInlineStyleMatches).toBeNull();
   });
 
   it('verifies renderer.js, renderer-inspector.js and renderer-dialogs.js have zero inline style attributes and use optimized DOM access', () => {

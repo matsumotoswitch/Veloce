@@ -4,6 +4,7 @@ import path from 'path';
 
 describe('Smart Folder Pure Cache Load & Self-Healing Logic', () => {
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
+  const smartFolderRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/smart_folder.rs'), 'utf-8');
   const preloadJsContent = fs.readFileSync(path.resolve(__dirname, '../src/common/preload.js'), 'utf-8');
   const rendererJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer.js'), 'utf-8');
 
@@ -36,8 +37,8 @@ describe('Smart Folder Pure Cache Load & Self-Healing Logic', () => {
     });
 
     it('should use database indexes by removing unary plus from ORDER BY c.mtime in smart folder queries', () => {
-      expect(mainRsContent).toContain('ORDER BY c.mtime');
-      expect(mainRsContent).not.toContain('ORDER BY +c.mtime');
+      expect(smartFolderRsContent).toContain('ORDER BY c.mtime');
+      expect(smartFolderRsContent).not.toContain('ORDER BY +c.mtime');
     });
   });
 

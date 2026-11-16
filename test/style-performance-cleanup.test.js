@@ -12,10 +12,13 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
   const dndJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-dnd.js'), 'utf-8');
   const contextMenuJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-context-menu.js'), 'utf-8');
   const rendererUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-ui.js'), 'utf-8');
+  const rendererDiffJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-diff.js'), 'utf-8');
   const viewerJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer/viewer.js'), 'utf-8');
+  const viewerUiJsContent = fs.readFileSync(path.resolve(__dirname, '../src/viewer/viewer-ui.js'), 'utf-8');
   const thumbnailsJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-thumbnails.js'), 'utf-8');
   const bookmarksJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-bookmarks.js'), 'utf-8');
   const folderTreeJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-folder-tree.js'), 'utf-8');
+  const navJsContent = fs.readFileSync(path.resolve(__dirname, '../src/renderer/renderer-nav.js'), 'utf-8');
   const mainRsContent = fs.readFileSync(path.resolve(__dirname, '../src-tauri/src/main.rs'), 'utf-8');
 
   describe('1. Color Tokens & CSS Variables', () => {
@@ -94,10 +97,10 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(contextMenuJsContent).not.toContain('<span style="text-align: left; white-space: nowrap;">');
     });
 
-    it('should use CSS classes for diff modal containers in renderer-ui.js', () => {
-      expect(rendererUiJsContent).toContain('class="diff-pane-container"');
-      expect(rendererUiJsContent).toContain('class="diff-pane-col"');
-      expect(rendererUiJsContent).not.toContain('<div style="display: flex; gap: 15px; margin-bottom: 15px;">');
+    it('should use CSS classes for diff modal containers in renderer-ui.js / renderer-diff.js', () => {
+      expect(rendererDiffJsContent).toContain('class="diff-pane-container"');
+      expect(rendererDiffJsContent).toContain('class="diff-pane-col"');
+      expect(rendererDiffJsContent).not.toContain('<div style="display: flex; gap: 15px; margin-bottom: 15px;">');
     });
 
     it('should use CSS classes for list spacers in renderer-ui.js', () => {
@@ -205,7 +208,7 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(folderTreeJsContent).toContain('dirTreeEl.replaceChildren(ul);');
       expect(bookmarksJsContent).toContain('container.replaceChildren();');
       expect(folderTreeJsContent).toContain('childrenUl.replaceChildren();');
-      expect(rendererJsContent).toContain('menu.replaceChildren();');
+      expect(navJsContent).toContain('menu.replaceChildren();');
       expect(bookmarksJsContent).toContain('bookmarkOverflowMenu.replaceChildren();');
       expect(rendererJsContent).toContain('tabListMenu.replaceChildren();');
 
@@ -222,9 +225,9 @@ describe('Style & Performance Cleanups (AGENTS.md & Code Quality)', () => {
       expect(inspectorJsContent).toContain('sec2.copyWrapper.replaceChildren();');
       expect(inspectorJsContent).toContain('secEl.subLabel.replaceChildren();');
 
-      // viewer.js
+      // viewer.js / viewer-ui.js
       expect(viewerJsContent).not.toMatch(/innerHTML\s*=\s*['"]['"]/);
-      expect(viewerJsContent).toContain('contentEl.replaceChildren(fragment);');
+      expect(viewerUiJsContent).toContain('contentEl.replaceChildren(fragment);');
     });
   });
 
