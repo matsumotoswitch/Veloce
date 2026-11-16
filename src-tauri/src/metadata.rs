@@ -259,6 +259,9 @@ pub(crate) fn commit_pending_metadata_batch(
     Ok(pending_rows.len())
 }
 
+/// Stealth 抽出仕様バージョン。抽出ロジック・対応仕様を変更した場合はこの値をインクリメントして過去キャッシュを自己修復させる。
+pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 1;
+
 pub(crate) fn get_full_metadata_for_path_with_stat_inner(
     file_path: &str,
     mtime_millis: u64,
@@ -295,7 +298,10 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                         let can_have_alpha_stealth = lower_path.ends_with(".png") || lower_path.ends_with(".webp");
                         // 過去の解析でアルファチャンネルからの抽出に失敗し "None" かつプロンプト空でキャッシュされた場合、
                         // 最新のデコード仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
-                        let needs_stealth_retry = cached_meta.metadata_source == "None" && cached_meta.prompt.is_empty() && can_have_alpha_stealth;
+                        let needs_stealth_retry = cached_meta.metadata_source == "None"
+                            && cached_meta.prompt.is_empty()
+                            && can_have_alpha_stealth
+                            && cached_meta.params.get("stealthSchema").and_then(|v| v.as_u64()) != Some(STEALTH_SCHEMA_VERSION);
                         // 旧バージョンの音声タグ解析（拡張タグ・TXXX 未対応時）のキャッシュをオンデマンドで最新化する
                         let needs_audio_reparse = crate::audio::is_audio_path(file_path)
                             && cached_meta.params.get("tagSchema").and_then(|v| v.as_u64()) != Some(2);
@@ -737,6 +743,13 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
             prompt = comment_string.to_string();
         } else if !comment_string.is_empty() && !comment_string.contains("Steps: ") {
             negative_prompt = comment_string.to_string();
+        }
+    }
+
+    let is_png_or_webp = lower_path.ends_with(".png") || lower_path.ends_with(".webp");
+    if is_png_or_webp && metadata_source == "None" && prompt.trim().is_empty() {
+        if let serde_json::Value::Object(ref mut map) = params {
+            map.insert("stealthSchema".to_string(), serde_json::json!(STEALTH_SCHEMA_VERSION));
         }
     }
 
@@ -2952,5 +2965,147 @@ mod tests {
             String::from_utf8_lossy(webp_meta.get("Software").unwrap()),
             "Stable Diffusion WebUI"
         );
+    }
+
+    /// プロンプトを持たない PNG / WebP 画像における stealthSchema マーカー付与と
+    /// 2回目以降のキャッシュ即時早期リターン、および旧レガシーキャッシュ（マーカー無し）の自己修復テスト
+    #[test]
+    fn test_promptless_image_stealth_schema_caching_and_repair() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = db_conn.get().unwrap();
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT '',
+                    metadata_source TEXT DEFAULT ''
+                )",
+                [],
+            )
+            .unwrap();
+        }
+
+        // 1. プロンプトを持たない 1x1 PNG（metadata_source == "None"）
+        let promptless_png = temp_dir.path().join("promptless.png");
+        std::fs::write(&promptless_png, crate::audio::test_fixtures::SAMPLE_PNG_1X1).unwrap();
+        let file_path = promptless_png.to_str().unwrap();
+        let file_size = crate::audio::test_fixtures::SAMPLE_PNG_1X1.len() as u64;
+
+        // 初回取得: キャッシュ未存在のためフル解析が実行され、stealthSchema: 1 が付与されて DB に保存される
+        let (meta1, _, _, row1) = get_full_metadata_for_path_with_stat_inner(
+            file_path, 1000, 1000, file_size, &db_conn, true,
+        );
+        assert_eq!(meta1.metadata_source, "None");
+        assert!(meta1.prompt.is_empty());
+        assert_eq!(
+            meta1.params.get("stealthSchema").and_then(|v| v.as_u64()),
+            Some(STEALTH_SCHEMA_VERSION),
+            "フル解析完了時に stealthSchema が params に付与されること"
+        );
+        assert!(row1.is_some(), "初回は新規キャッシュ行が生成されること");
+
+        // 2回目取得: stealthSchema == 1 が存在するため needs_stealth_retry が false となり、
+        // キャッシュから即座に早期リターンされること（row == None）
+        let (meta2, _, _, row2) = get_full_metadata_for_path_with_stat_inner(
+            file_path, 1000, 1000, file_size, &db_conn, true,
+        );
+        assert_eq!(meta2.metadata_source, "None");
+        assert!(meta2.prompt.is_empty());
+        assert_eq!(
+            meta2.params.get("stealthSchema").and_then(|v| v.as_u64()),
+            Some(STEALTH_SCHEMA_VERSION)
+        );
+        assert!(row2.is_none(), "2回目はキャッシュから早期リターンし、再解析・再保存が行われないこと");
+
+        // 2. stealthSchema マーカーを持たない過去のキャッシュ（自己修復が必要なレガシーキャッシュ行）のテスト
+        let legacy_png = temp_dir.path().join("legacy.png");
+        std::fs::write(&legacy_png, crate::audio::test_fixtures::SAMPLE_PNG_1X1).unwrap();
+        let legacy_path = legacy_png.to_str().unwrap();
+        let legacy_size = crate::audio::test_fixtures::SAMPLE_PNG_1X1.len() as i64;
+        let legacy_hash = crate::utils::hash_path_mtime_hex(legacy_path, 2000);
+        {
+            let conn = db_conn.get().unwrap();
+            let legacy_meta = serde_json::to_string(&FullMetadata {
+                path: legacy_path.to_string(),
+                width: 1,
+                height: 1,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                params: serde_json::json!({}),
+                source: String::new(),
+                metadata_source: "None".to_string(),
+            })
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, metadata_source) VALUES (?, ?, 1, 1, ?, ?, 2000, 2000, 0, 'None')",
+                rusqlite::params![legacy_hash, legacy_meta, legacy_path, legacy_size],
+            )
+            .unwrap();
+        }
+
+        // 初回取得: stealthSchema が無いため needs_stealth_retry が true となり再解析が走る
+        let (re_parsed, _, _, row_reparsed) = get_full_metadata_for_path_with_stat_inner(
+            legacy_path, 2000, 2000, legacy_size as u64, &db_conn, true,
+        );
+        assert_eq!(
+            re_parsed.params.get("stealthSchema").and_then(|v| v.as_u64()),
+            Some(STEALTH_SCHEMA_VERSION),
+            "再解析時に stealthSchema が自己修復で付与されること"
+        );
+        assert!(row_reparsed.is_some(), "再解析が行われ、キャッシュが更新されること");
+
+        // 2回目取得: 再解析により stealthSchema: 1 が DB に保存されたため、2回目は早期リターンすること
+        let (cached_repaired, _, _, row_cached) = get_full_metadata_for_path_with_stat_inner(
+            legacy_path, 2000, 2000, legacy_size as u64, &db_conn, true,
+        );
+        assert_eq!(
+            cached_repaired.params.get("stealthSchema").and_then(|v| v.as_u64()),
+            Some(STEALTH_SCHEMA_VERSION)
+        );
+        assert!(row_cached.is_none(), "自己修復後はキャッシュから即時早期リターンすること");
+
+        // 3. プロンプトを持つ通常の画像は従来通りキャッシュから早期リターンすること
+        let prompt_png = temp_dir.path().join("has_prompt.png");
+        std::fs::write(&prompt_png, crate::audio::test_fixtures::SAMPLE_PNG_1X1).unwrap();
+        let prompt_path = prompt_png.to_str().unwrap();
+        let prompt_hash = crate::utils::hash_path_mtime_hex(prompt_path, 3000);
+        {
+            let conn = db_conn.get().unwrap();
+            let prompt_meta = serde_json::to_string(&FullMetadata {
+                path: prompt_path.to_string(),
+                width: 1,
+                height: 1,
+                prompt: "1girl, solo, masterpiece".to_string(),
+                negative_prompt: "worst quality".to_string(),
+                params: serde_json::json!({}),
+                source: "NovelAI".to_string(),
+                metadata_source: "PNG Chunks".to_string(),
+            })
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, metadata_source) VALUES (?, ?, 1, 1, ?, ?, 3000, 3000, 0, 'PNG Chunks')",
+                rusqlite::params![prompt_hash, prompt_meta, prompt_path, legacy_size],
+            )
+            .unwrap();
+        }
+
+        let (meta_prompt, _, _, row_prompt) = get_full_metadata_for_path_with_stat_inner(
+            prompt_path, 3000, 3000, legacy_size as u64, &db_conn, true,
+        );
+        assert_eq!(meta_prompt.prompt, "1girl, solo, masterpiece");
+        assert!(row_prompt.is_none(), "プロンプトを持つ画像はキャッシュから即時早期リターンすること");
     }
 }
