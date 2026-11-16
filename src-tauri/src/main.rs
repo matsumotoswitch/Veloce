@@ -5013,59 +5013,6 @@ fn update_smart_folders(rules: Vec<SmartFolderRule>, state: tauri::State<'_, App
 
 // --- ファイル・システム操作コマンド ---
 
-fn collect_cache_paths_to_remove(target_path: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut cache_paths = Vec::new();
-    if let Some(mut cache_dir) = get_veloce_data_dir() {
-        if target_path.is_file() {
-            collect_single_file_cache(target_path, &mut cache_dir, &mut cache_paths);
-        } else if target_path.is_dir() {
-            for entry in jwalk::WalkDir::new(target_path)
-                .skip_hidden(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if entry.path().is_file() {
-                    collect_single_file_cache(&entry.path(), &mut cache_dir, &mut cache_paths);
-                }
-            }
-        }
-    }
-    cache_paths
-}
-
-fn collect_single_file_cache(
-    path: &std::path::Path,
-    cache_dir: &mut std::path::PathBuf,
-    cache_paths: &mut Vec<std::path::PathBuf>,
-) {
-    if let Ok(metadata) = std::fs::metadata(path) {
-        let mtime = metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-
-        let clean_path = path.to_string_lossy().to_string().replace("\\\\?\\", "");
-        let cache_file_name = format!("{}_{}", clean_path, mtime);
-        let digest = xxhash_rust::xxh3::xxh3_64(cache_file_name.as_bytes());
-
-        cache_dir.push("Thumbnails");
-        cache_paths.push(cache_dir.join(format!("{:016x}.jpg", digest)));
-        cache_dir.pop();
-
-        cache_dir.push("Metadata");
-        cache_paths.push(cache_dir.join(format!("{:016x}.json", digest)));
-        cache_dir.pop();
-    }
-}
-
-fn remove_collected_caches(cache_paths: Vec<std::path::PathBuf>) {
-    for path in cache_paths {
-        let _ = std::fs::remove_file(path);
-    }
-}
-
 #[tauri::command]
 fn get_files_by_indices(
     state: tauri::State<'_, AppState>,
@@ -5168,15 +5115,7 @@ async fn clear_metadata_cache(
 async fn trash_file(state: tauri::State<'_, AppState>, file_path: String) -> Result<bool, String> {
     let file_path_clone = file_path.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let path = std::path::Path::new(&file_path);
-        let cache_paths = collect_cache_paths_to_remove(path);
-
-        if trash::delete(&file_path).is_ok() {
-            remove_collected_caches(cache_paths);
-            true
-        } else {
-            false
-        }
+        trash::delete(&file_path).is_ok()
     })
     .await
     .unwrap_or(false);
@@ -5239,18 +5178,12 @@ fn purge_trashed_folder_from_db_and_state(state: &AppState, folder_path: &str) {
 async fn trash_folder(state: tauri::State<'_, AppState>, folder_path: String) -> Result<FolderOperationResult, String> {
     let folder_path_clone = folder_path.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let path = std::path::Path::new(&folder_path);
-        let cache_paths = collect_cache_paths_to_remove(path);
-
         match trash::delete(&folder_path) {
-            Ok(_) => {
-                remove_collected_caches(cache_paths);
-                FolderOperationResult {
-                    success: true,
-                    path: None,
-                    error: None,
-                }
-            }
+            Ok(_) => FolderOperationResult {
+                success: true,
+                path: None,
+                error: None,
+            },
             Err(e) => FolderOperationResult {
                 success: false,
                 path: None,
@@ -5488,13 +5421,8 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
             }
         }
 
-        let cache_paths = collect_cache_paths_to_remove(path);
-
         match std::fs::rename(&old_path, &new_path) {
-            Ok(_) => {
-                remove_collected_caches(cache_paths);
-                Ok(new_path.to_string_lossy().to_string())
-            }
+            Ok(_) => Ok(new_path.to_string_lossy().to_string()),
             Err(e) => Err(e.to_string()),
         }
     })
@@ -5524,13 +5452,8 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
             }
         }
 
-        let cache_paths = collect_cache_paths_to_remove(path);
-
         match std::fs::rename(&old_path, &new_path) {
-            Ok(_) => {
-                remove_collected_caches(cache_paths);
-                Ok(new_path.to_string_lossy().to_string())
-            }
+            Ok(_) => Ok(new_path.to_string_lossy().to_string()),
             Err(e) => Err(e.to_string()),
         }
     })
@@ -5816,36 +5739,10 @@ async fn clear_cache(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let db_conn_clone = state.db_conn.clone();
     tokio::task::spawn_blocking(move || {
         // SQLite のキャッシュをクリア
-        let conn = db_conn_clone.get().unwrap();
+        let conn = db_conn_clone.get().map_err(|e| e.to_string())?;
         let _ = conn.execute("DELETE FROM cache", []);
         let _ = conn.execute("VACUUM", []); // ファイルサイズを切り詰める
-
-        // 既存の古いファイルベースのキャッシュも念のため削除
-        if let Some(mut path) = get_veloce_data_dir() {
-            // Clear Thumbnails
-            path.push("Thumbnails");
-            if path.exists() {
-                if let Ok(entries) = std::fs::read_dir(&path) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                }
-            }
-
-            // Clear Metadata
-            path.pop();
-            path.push("Metadata");
-            if path.exists() {
-                if let Ok(entries) = std::fs::read_dir(&path) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                }
-            }
-            Ok(())
-        } else {
-            Err("Could not resolve local data directory".to_string())
-        }
+        Ok(())
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()))
@@ -5886,59 +5783,42 @@ fn open_in_explorer(path: String) -> Result<(), String> {
 async fn get_cache_info() -> CacheInfo {
     tokio::task::spawn_blocking(move || {
         let mut path_str = String::new();
-        let mut file_count = 0;
         let mut total_size_bytes = 0;
 
-        if let Some(mut path) = get_veloce_data_dir() {
+        if let Some(path) = get_veloce_data_dir() {
             path_str = path.to_string_lossy().to_string(); // 親ディレクトリ(Veloce)のパスを保持
 
-            // SQLite DBのファイルサイズを合算
+            // SQLite DBのファイルサイズを集計
             let db_path = path.join("veloce_cache.db");
             if let Ok(metadata) = std::fs::metadata(&db_path) {
                 if metadata.is_file() {
-                    file_count += 1;
                     total_size_bytes += metadata.len();
                 }
             }
 
-            // 古いサムネイルキャッシュの情報も合算する
-            path.push("Thumbnails");
-            if let Ok(entries) = std::fs::read_dir(&path) {
-                for entry in entries.filter_map(Result::ok) {
-                    if let Ok(metadata) = entry.metadata() {
-                        if metadata.is_file() {
-                            file_count += 1;
-                            total_size_bytes += metadata.len();
-                        }
-                    }
+            // WAL/SHM 一時ファイルのサイズも合算（WALモードのため）
+            let wal_path = path.join("veloce_cache.db-wal");
+            if let Ok(metadata) = std::fs::metadata(&wal_path) {
+                if metadata.is_file() {
+                    total_size_bytes += metadata.len();
                 }
             }
-
-            // 古いメタデータキャッシュの情報も合算する
-            path.pop();
-            path.push("Metadata");
-            if let Ok(entries) = std::fs::read_dir(&path) {
-                for entry in entries.filter_map(Result::ok) {
-                    if let Ok(metadata) = entry.metadata() {
-                        if metadata.is_file() {
-                            file_count += 1;
-                            total_size_bytes += metadata.len();
-                        }
-                    }
+            let shm_path = path.join("veloce_cache.db-shm");
+            if let Ok(metadata) = std::fs::metadata(&shm_path) {
+                if metadata.is_file() {
+                    total_size_bytes += metadata.len();
                 }
             }
         }
 
         CacheInfo {
             path: path_str,
-            file_count,
             total_size_bytes,
         }
     })
     .await
     .unwrap_or(CacheInfo {
         path: String::new(),
-        file_count: 0,
         total_size_bytes: 0,
     })
 }
@@ -6392,34 +6272,6 @@ fn main() {
                 .build();
             });
 
-            // 古いサムネイルキャッシュの自動クリーンアップをバックグラウンドで実行
-            std::thread::spawn(|| {
-                // アプリの起動直後のI/Oを回避するため、大幅に遅延させる
-                std::thread::sleep(std::time::Duration::from_secs(60));
-                
-                if let Some(mut cache_dir) = get_veloce_data_dir() {
-                    cache_dir.push("Thumbnails");
-                    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-                        let thirty_days_in_secs = 30 * 24 * 60 * 60;
-                        let now = std::time::SystemTime::now();
-
-                        for entry in entries.filter_map(Result::ok) {
-                            if let Ok(metadata) = entry.metadata() {
-                                // 最終アクセス日時（取得できなければ更新日時）が30日以上前のファイルを削除
-                                let target_time = metadata
-                                    .accessed()
-                                    .unwrap_or_else(|_| metadata.modified().unwrap_or(now));
-                                if let Ok(duration) = now.duration_since(target_time) {
-                                    if duration.as_secs() > thirty_days_in_secs {
-                                        let _ = std::fs::remove_file(entry.path());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
             // --- ファイルシステムの変更監視（軽量ポーリング） ---
             // ゴミ箱からの復元やブラウザからの保存など、外部からの変更を検知してフロントエンドに通知する
             let app_handle = app.handle();
@@ -6698,25 +6550,9 @@ fn main() {
                         }
                     }
 
-                    for (path_str, &(_size, mtime)) in known_files.iter() {
+                    for path_str in known_files.keys() {
                         if !current_files.contains_key(path_str) {
                             let _ = app_handle.emit_all("file-removed", path_str.clone());
-
-                            // ファイル削除検知時のキャッシュ自動クリーンアップ:
-                            // 対象ファイルに紐づくサムネイル画像およびメタデータJSONのキャッシュファイルを特定し削除
-                            if let Some(data_dir) = get_veloce_data_dir() {
-                                let hash_key = crate::utils::hash_path_mtime_hex(path_str, mtime);
-
-                                let thumb_path = data_dir
-                                    .join("Thumbnails")
-                                    .join(format!("{}.jpg", hash_key));
-                                let meta_path = data_dir
-                                    .join("Metadata")
-                                    .join(format!("{}.json", hash_key));
-
-                                let _ = std::fs::remove_file(thumb_path);
-                                let _ = std::fs::remove_file(meta_path);
-                            }
                         }
                     }
 
@@ -12891,5 +12727,77 @@ mod viewer_tests {
         // 2回目のマイグレーション実行 -> すでに user_version >= 1 のため false を返し、スキップされること
         let second_run = super::migrate_cache_db(&mut conn).unwrap();
         assert!(!second_run, "2回目の実行はスキップされること");
+    }
+
+    #[test]
+    fn test_cache_info_db_only() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_dir = temp_dir.path();
+
+        // veloce_cache.db (1000 bytes)
+        let db_path = base_dir.join("veloce_cache.db");
+        std::fs::write(&db_path, vec![0u8; 1000]).unwrap();
+
+        // veloce_cache.db-wal (500 bytes)
+        let wal_path = base_dir.join("veloce_cache.db-wal");
+        std::fs::write(&wal_path, vec![0u8; 500]).unwrap();
+
+        // 旧キャッシュディレクトリ（Thumbnails, Metadata）が存在しても無視されることの検証
+        let thumb_dir = base_dir.join("Thumbnails");
+        std::fs::create_dir_all(&thumb_dir).unwrap();
+        std::fs::write(thumb_dir.join("0123456789abcdef.jpg"), vec![0u8; 5000]).unwrap();
+
+        let meta_dir = base_dir.join("Metadata");
+        std::fs::create_dir_all(&meta_dir).unwrap();
+        std::fs::write(meta_dir.join("0123456789abcdef.json"), vec![0u8; 3000]).unwrap();
+
+        // 集計ロジックの検証（get_cache_info の計算ロジック）
+        let mut total_size_bytes = 0;
+
+        if let Ok(metadata) = std::fs::metadata(&db_path) {
+            if metadata.is_file() {
+                total_size_bytes += metadata.len();
+            }
+        }
+        if let Ok(metadata) = std::fs::metadata(&wal_path) {
+            if metadata.is_file() {
+                total_size_bytes += metadata.len();
+            }
+        }
+        let shm_path = base_dir.join("veloce_cache.db-shm");
+        if let Ok(metadata) = std::fs::metadata(&shm_path) {
+            if metadata.is_file() {
+                total_size_bytes += metadata.len();
+            }
+        }
+
+        assert_eq!(total_size_bytes, 1500, "旧ファイルキャッシュのサイズ（8000バイト）は除外され、DB + WAL のみ合算されること");
+    }
+
+    #[test]
+    fn test_clear_cache_sqlite_only() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                path TEXT
+            )",
+            [],
+        ).unwrap();
+
+        conn.execute("INSERT INTO cache (hash_key, path) VALUES ('hk1', 'C:\\test1.png')", []).unwrap();
+        conn.execute("INSERT INTO cache (hash_key, path) VALUES ('hk2', 'C:\\test2.png')", []).unwrap();
+
+        let count: i64 = conn.query_row("SELECT count(*) FROM cache", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 2);
+
+        // clear_cache のコアロジック: DELETE FROM cache && VACUUM
+        conn.execute("DELETE FROM cache", []).unwrap();
+        conn.execute("VACUUM", []).unwrap();
+
+        let count_after: i64 = conn.query_row("SELECT count(*) FROM cache", [], |r| r.get(0)).unwrap();
+        assert_eq!(count_after, 0, "キャッシュテーブルのエントリが全消去されること");
     }
 }

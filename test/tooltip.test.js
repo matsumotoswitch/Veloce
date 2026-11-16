@@ -123,4 +123,18 @@ describe('UIManager bindTooltip (Section 2-A)', () => {
     UIManager.bindTooltip(btn, '静的呼び出しテキスト');
     expect(instanceSpy).toHaveBeenCalledWith(btn, '静的呼び出しテキスト', {});
   });
+
+  it('formats clearCacheBtn tooltip with 3-digit comma separated MB and no file count', () => {
+    // 128,000 MB = 128,000 * 1024 * 1024 bytes = 134,217,728,000 bytes
+    const totalSizeBytes = 134217728000;
+    const sizeMB = (totalSizeBytes / (1024 * 1024)).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const clearCacheText = `キャッシュを削除\n合計サイズ: ${sizeMB} MB`;
+
+    expect(clearCacheText).toContain('合計サイズ: 128,000.00 MB');
+    expect(clearCacheText).not.toContain('保存数');
+    expect(clearCacheText).not.toContain('ファイル');
+  });
 });

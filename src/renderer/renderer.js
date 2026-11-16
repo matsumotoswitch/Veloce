@@ -3044,8 +3044,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (window.veloceAPI.getCacheInfo) {
           const info = await window.veloceAPI.getCacheInfo();
           if (info) {
-            const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toFixed(2);
-            clearCacheText = `キャッシュを削除\n保存数: ${info.fileCount.toLocaleString()}ファイル\n合計サイズ: ${sizeMB} MB`;
+            const sizeMB = (info.totalSizeBytes / (1024 * 1024)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            clearCacheText = `キャッシュを削除\n合計サイズ: ${sizeMB} MB`;
             if (uiManager.isTooltipVisible) {
               uiManager.showCustomTooltip(clearCacheText, uiManager.lastMouseX, uiManager.lastMouseY);
             }

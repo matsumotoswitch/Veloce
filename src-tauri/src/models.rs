@@ -182,7 +182,6 @@ pub struct SmartFolderItem {
 #[serde(rename_all = "camelCase")]
 pub struct CacheInfo {
     pub path: String,
-    pub file_count: usize,
     pub total_size_bytes: u64,
 }
 
@@ -273,5 +272,22 @@ mod tests {
         let legacy_json = r#"{"name":"legacy.png","ext":".png","path":"C:\\test\\legacy.png","size":100,"mtime":1,"ctime":1,"hasThumbnailCache":false,"hasMetadataCache":true}"#;
         let legacy_deserialized: ImageFile = serde_json::from_str(legacy_json).expect("Legacy JSON deserialization failed");
         assert_eq!(legacy_deserialized.name, "legacy.png");
+    }
+
+    #[test]
+    fn test_cache_info_serde() {
+        let info = CacheInfo {
+            path: "C:\\Cache".to_string(),
+            total_size_bytes: 10485760,
+        };
+
+        let json_str = serde_json::to_string(&info).expect("CacheInfo JSON serialization failed");
+        assert!(json_str.contains("\"path\":\"C:\\\\Cache\""));
+        assert!(json_str.contains("\"totalSizeBytes\":10485760"));
+        assert!(!json_str.contains("fileCount"), "fileCount がシリアライズに含まれないこと");
+
+        let deserialized: CacheInfo = serde_json::from_str(&json_str).expect("CacheInfo JSON deserialization failed");
+        assert_eq!(deserialized.path, "C:\\Cache");
+        assert_eq!(deserialized.total_size_bytes, 10485760);
     }
 }
