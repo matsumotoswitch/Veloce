@@ -460,7 +460,8 @@ html.viewer-html,
 }
 
 #video-volume-btn,
-#video-mute-btn {
+#video-mute-btn,
+#video-play-mode-btn {
   background: transparent;
   border: none;
   color: var(--text-color);
@@ -475,12 +476,14 @@ html.viewer-html,
 }
 
 #video-volume-btn:hover,
-#video-mute-btn:hover {
+#video-mute-btn:hover,
+#video-play-mode-btn:hover {
   background-color: var(--accent-subtle);
 }
 
 #video-volume-btn svg,
-#video-mute-btn svg {
+#video-mute-btn svg,
+#video-play-mode-btn svg {
   stroke: currentColor;
   fill: none;
 }

@@ -366,7 +366,7 @@ describe('MP3 Audio Support', () => {
       localStorage.clear();
     });
 
-    it('creates <audio>, auto-plays without loop, uses placeholder on missing cover, and discards on navigation', async () => {
+    it('creates <audio>, auto-plays with default loop (repeat), uses placeholder on missing cover, and discards on navigation', async () => {
       await import('../src/common/settings-store.js');
       const { loadImage, getActivePlaybackMedia } = await import('../src/viewer/viewer.js');
       const { viewerState } = await import('../src/viewer/viewer-state.js');
@@ -380,7 +380,7 @@ describe('MP3 Audio Support', () => {
       const audio1 = getActivePlaybackMedia();
       expect(audio1).not.toBeNull();
       expect(audio1.tagName).toBe('AUDIO');
-      expect(audio1.loop).toBe(false);
+      expect(audio1.loop).toBe(true);
       expect(audio1.autoplay).toBe(true);
       expect(audio1.src).toContain('19876');
       expect(audio1.src).toContain('track1.mp3');

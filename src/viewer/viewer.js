@@ -124,6 +124,74 @@ export function applyVolumeSettingsToMedia(media, defaultMutedIfUnset = false) {
   media.muted = getSavedViewerMuted(defaultMutedIfUnset);
 }
 
+export const PLAY_MODES = {
+  STOP: 'stop',
+  REPEAT: 'repeat',
+  AUTO_NEXT: 'auto_next',
+};
+
+export const PLAY_MODE_ORDER = [PLAY_MODES.STOP, PLAY_MODES.REPEAT, PLAY_MODES.AUTO_NEXT];
+
+export const PLAY_MODE_INFO = {
+  [PLAY_MODES.STOP]: {
+    label: '停止',
+    icon: '<svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg>',
+  },
+  [PLAY_MODES.REPEAT]: {
+    label: 'リピート',
+    icon: '<svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg>',
+  },
+  [PLAY_MODES.AUTO_NEXT]: {
+    label: '自動送り',
+    icon: '<svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" x2="19" y1="5" y2="19"></line></svg>',
+  },
+};
+
+const VIEWER_PLAY_MODE_VIDEO_KEY = 'viewerPlayModeVideo';
+const VIEWER_PLAY_MODE_AUDIO_KEY = 'viewerPlayModeAudio';
+
+let playModeBtnElement = null;
+
+/**
+ * 指定メディア種別（'video' または 'audio'）の保存された再生モードを取得する。
+ * 未設定時または不正値時は既定値の 'repeat' を返す。
+ * @param {'video'|'audio'} [mediaType='video']
+ * @returns {'stop'|'repeat'|'auto_next'}
+ */
+export function getSavedViewerPlayMode(mediaType = 'video') {
+  const key = (mediaType === 'audio') ? VIEWER_PLAY_MODE_AUDIO_KEY : VIEWER_PLAY_MODE_VIDEO_KEY;
+  const raw = readViewerSetting(key);
+  if (raw === PLAY_MODES.STOP || raw === PLAY_MODES.REPEAT || raw === PLAY_MODES.AUTO_NEXT) {
+    return raw;
+  }
+  return PLAY_MODES.REPEAT;
+}
+
+/**
+ * 指定メディア種別（'video' または 'audio'）の再生モードを永続化する。
+ * @param {'video'|'audio'} mediaType
+ * @param {'stop'|'repeat'|'auto_next'} mode
+ */
+export function saveViewerPlayMode(mediaType, mode) {
+  const key = (mediaType === 'audio') ? VIEWER_PLAY_MODE_AUDIO_KEY : VIEWER_PLAY_MODE_VIDEO_KEY;
+  const validMode = (mode === PLAY_MODES.STOP || mode === PLAY_MODES.REPEAT || mode === PLAY_MODES.AUTO_NEXT)
+    ? mode
+    : PLAY_MODES.REPEAT;
+  writeViewerSetting(key, validMode);
+}
+
+/**
+ * 対象メディア要素へ保存済みの再生モード設定（loopフラグ）を反映する。
+ * @param {HTMLMediaElement} media
+ * @param {'video'|'audio'} [mediaType]
+ */
+export function applyPlayModeToMedia(media, mediaType) {
+  if (!media) return;
+  const type = mediaType || (media.tagName === 'AUDIO' ? 'audio' : 'video');
+  const mode = getSavedViewerPlayMode(type);
+  media.loop = (mode === PLAY_MODES.REPEAT);
+}
+
 function isAudioPlaceholderMedia(media) {
   if (!media) return false;
   if (media.classList && media.classList.contains('audio-placeholder')) return true;
@@ -255,6 +323,41 @@ function isCurrentlyDisplayingAudioPlaceholder() {
   if (!isCurrentlyDisplayingAudio()) return false;
   const imgEl = currentlyVisibleImg || currentViewerImg || (viewerUI && viewerUI.elements && viewerUI.elements.viewerImg) || document.getElementById('viewer-img');
   return isAudioPlaceholderMedia(imgEl);
+}
+
+/**
+ * 再生モード切替ボタンのアイコンおよびタイトルを現在のメディア種別のモードに同期する。
+ */
+export function updatePlayModeButtonUI() {
+  if (!playModeBtnElement) return;
+  const mediaType = isCurrentlyDisplayingAudio() ? 'audio' : 'video';
+  const mode = getSavedViewerPlayMode(mediaType);
+  const info = PLAY_MODE_INFO[mode] || PLAY_MODE_INFO[PLAY_MODES.REPEAT];
+  playModeBtnElement.innerHTML = info.icon;
+  playModeBtnElement.title = `再生モード：${info.label}`;
+}
+
+/**
+ * 現在のメディア種別に応じた再生モードを 停止 → リピート → 自動送り の順に循環切替する。
+ * @returns {'stop'|'repeat'|'auto_next'} 切替後の再生モード
+ */
+export function cycleViewerPlayMode() {
+  const mediaType = isCurrentlyDisplayingAudio() ? 'audio' : 'video';
+  const currentMode = getSavedViewerPlayMode(mediaType);
+  const currentIndex = PLAY_MODE_ORDER.indexOf(currentMode);
+  const nextMode = PLAY_MODE_ORDER[(currentIndex + 1) % PLAY_MODE_ORDER.length];
+  saveViewerPlayMode(mediaType, nextMode);
+  updatePlayModeButtonUI();
+
+  const activeMedia = getActivePlaybackMedia();
+  if (activeMedia) {
+    activeMedia.loop = (nextMode === PLAY_MODES.REPEAT);
+  }
+
+  const info = PLAY_MODE_INFO[nextMode] || PLAY_MODE_INFO[PLAY_MODES.REPEAT];
+  const toastFn = (typeof window !== 'undefined' && typeof window.showToast === 'function') ? window.showToast : showToast;
+  toastFn(`再生モード：${info.label}`);
+  return nextMode;
 }
 
 /**
@@ -1479,10 +1582,15 @@ let imageLoadSequence = 0;       // 非同期ロード競合防止用
  */
 function swapImageElement(newImg, sequenceId) {
   if (currentViewerImg === newImg) {
+    if (newImg && newImg.tagName === 'VIDEO') {
+      applyPlayModeToMedia(newImg, 'video');
+      applyVolumeSettingsToMedia(newImg, true);
+    }
     if (!isViewerWindowShown && window.veloceAPI && window.veloceAPI.showWindow) {
       window.veloceAPI.showWindow();
       isViewerWindowShown = true;
     }
+    updatePlayModeButtonUI();
     return;
   }
   
@@ -1548,7 +1656,7 @@ function swapImageElement(newImg, sequenceId) {
       const audioPath = newImg.dataset.audioPath;
       const audioEl = document.createElement('audio');
       audioEl.autoplay = true;
-      audioEl.loop = false;
+      applyPlayModeToMedia(audioEl, 'audio');
       audioEl.tabIndex = -1;
       applyVolumeSettingsToMedia(audioEl, false);
       const baseSrc = (window.veloceAPI && window.veloceAPI.convertFileSrc) ? window.veloceAPI.convertFileSrc(audioPath) : '';
@@ -1565,6 +1673,7 @@ function swapImageElement(newImg, sequenceId) {
   };
 
   if (newImg.tagName === 'VIDEO') {
+    applyPlayModeToMedia(newImg, 'video');
     applyVolumeSettingsToMedia(newImg, true);
     // 再訪時やループ遷移時、動画を確実に先頭から再生する
     try {
@@ -1614,6 +1723,7 @@ function swapImageElement(newImg, sequenceId) {
       videoSeekBarContainer.style.display = 'none';
     }
   }
+  updatePlayModeButtonUI();
 }
 
 async function loadImage() {
@@ -1666,7 +1776,7 @@ async function loadImage() {
       if (isVideo) {
         targetImg = document.createElement('video');
         targetImg.autoplay = true;
-        targetImg.loop = true;
+        applyPlayModeToMedia(targetImg, 'video');
         applyVolumeSettingsToMedia(targetImg, true);
         // フォーカスを受け取らないようにし、window.focus 誘発による ignoreNextClick 誤爆を防ぐ
         targetImg.tabIndex = -1;
@@ -1742,7 +1852,7 @@ async function preloadAdjacentImages() {
         if (isVideoFile(path)) {
           img = document.createElement('video');
           img.autoplay = true;
-          img.loop = true;
+          applyPlayModeToMedia(img, 'video');
           applyVolumeSettingsToMedia(img, true);
           // フォーカスを受け取らないようにし、window.focus 誘発による ignoreNextClick 誤爆を防ぐ
           img.tabIndex = -1;
@@ -2552,6 +2662,17 @@ function ensureVideoSeekBarContainer() {
   const actionsContainer = document.createElement('div');
   actionsContainer.id = 'video-controls-actions';
 
+  const playModeBtn = document.createElement('button');
+  playModeBtn.id = 'video-play-mode-btn';
+  playModeBtn.type = 'button';
+  playModeBtnElement = playModeBtn;
+  updatePlayModeButtonUI();
+
+  playModeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    cycleViewerPlayMode();
+  });
+
   const volumeWrapper = document.createElement('div');
   volumeWrapper.id = 'video-volume-btn-wrapper';
 
@@ -2591,6 +2712,7 @@ function ensureVideoSeekBarContainer() {
   volumePopup.appendChild(muteBtn);
   volumeWrapper.appendChild(volumeBtn);
   volumeWrapper.appendChild(volumePopup);
+  actionsContainer.appendChild(playModeBtn);
   actionsContainer.appendChild(volumeWrapper);
 
   videoSeekBarContainer.appendChild(playBtn);
@@ -2636,13 +2758,6 @@ function ensureVideoSeekBarContainer() {
   }, true);
 
   document.addEventListener('pause', (e) => {
-    const activeMedia = getActivePlaybackMedia();
-    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === activeMedia) {
-      videoSeekBarContainer.updatePlayStateIcon();
-    }
-  }, true);
-
-  document.addEventListener('ended', (e) => {
     const activeMedia = getActivePlaybackMedia();
     if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none' && e.target === activeMedia) {
       videoSeekBarContainer.updatePlayStateIcon();
@@ -2784,6 +2899,8 @@ function ensureVideoSeekBarContainer() {
     }
   };
 
+  videoSeekBarContainer.updatePlayModeUI = updatePlayModeButtonUI;
+
   return videoSeekBarContainer;
 }
 
@@ -2803,6 +2920,9 @@ function setVideoSeekBarVisibility(visible) {
   }
   if (videoSeekBarContainer.updateVolumeControls) {
     videoSeekBarContainer.updateVolumeControls();
+  }
+  if (videoSeekBarContainer.updatePlayModeUI) {
+    videoSeekBarContainer.updatePlayModeUI();
   }
   if (videoSeekBarContainer.updateProgress) {
     videoSeekBarContainer.updateProgress();
@@ -2838,7 +2958,31 @@ if (typeof window !== 'undefined') {
   window.showNext = showNext;
   window.showPrev = showPrev;
   window.handleWheel = handleWheel;
+  window.PLAY_MODES = PLAY_MODES;
+  window.getSavedViewerPlayMode = getSavedViewerPlayMode;
+  window.saveViewerPlayMode = saveViewerPlayMode;
+  window.applyPlayModeToMedia = applyPlayModeToMedia;
+  window.cycleViewerPlayMode = cycleViewerPlayMode;
+  window.updatePlayModeButtonUI = updatePlayModeButtonUI;
 }
+
+document.addEventListener('ended', (e) => {
+  const activeMedia = getActivePlaybackMedia();
+  if (e.target === activeMedia) {
+    if (videoSeekBarContainer && videoSeekBarContainer.style.display !== 'none') {
+      videoSeekBarContainer.updatePlayStateIcon();
+    }
+
+    const mediaType = isCurrentlyDisplayingAudio() ? 'audio' : 'video';
+    const mode = getSavedViewerPlayMode(mediaType);
+    if (mode === PLAY_MODES.AUTO_NEXT) {
+      // リストの最後のファイルでは進まない（ラップしない）
+      if (viewerState.currentIndex < viewerState.totalImages - 1) {
+        showNext();
+      }
+    }
+  }
+}, true);
 
 window.addEventListener('beforeunload', () => {
   if (typeof dragRafId !== 'undefined' && dragRafId) {
