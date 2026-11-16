@@ -336,6 +336,7 @@ fn load_directory(
     let app_clone = window.app_handle();
     let db_conn_clone = state.db_conn.clone();
     let db_conn_purge = state.db_conn.clone();
+    let settings_db_clone = state.settings_db_conn.clone();
     let is_smart_target = target_path.starts_with("smart://");
     let mut ratings_map_opt = if is_smart_target {
         Some(state.ratings.read().clone())
@@ -543,41 +544,24 @@ fn load_directory(
                         path_clone, t_smart_start.elapsed().as_millis(), total_count);
 
                     // --- 非同期バックグラウンドパージフェーズ（Self-Healing）---
-                    // 画面表示後、裏側の非同期タスクで残りの全件（約33,800件）を静かに存在確認し、
+                    // 画面表示後、裏側の非同期タスクで残りの全件を静かに存在確認し、
                     // 外部で削除された消失ファイルを自動パージする
                     let db_pool = db_conn_sf.clone();
+                    let settings_pool_purge = settings_db_clone.clone();
                     let app_handle_for_purge = app_clone.clone();
                     let head_missing_to_purge = head_missing;
                     let remaining_paths = all_paths_for_bg_purge;
                     let purge_start_epoch = current_thumbnail_batch_epoch();
+                    let smart_uri_for_purge = path_clone.clone();
 
                     tauri::async_runtime::spawn(async move {
-                        let mut missing_for_db = head_missing_to_purge;
-
-                        if !remaining_paths.is_empty() {
-                            // 200件ごとのチャンクで走査し、タブ切り替え・フォルダ移動（世代更新）を検知した時点で
-                            // 即刻ループを打ち切って Rayon スレッドプールとI/Oを新タブに完全解放する
-                            for chunk in remaining_paths.chunks(200) {
-                                if current_thumbnail_batch_epoch() != purge_start_epoch {
-                                    return;
-                                }
-                                use rayon::prelude::*;
-                                let chunk_missing: Vec<String> = chunk
-                                    .into_par_iter()
-                                    .filter(|path| {
-                                        let clean = strip_unc_prefix(path).unwrap_or(path);
-                                        !std::path::Path::new(clean).is_file()
-                                    })
-                                    .cloned()
-                                    .collect();
-                                missing_for_db.extend(chunk_missing);
-                            }
-                        }
-
+                        // 1. 先頭200件の同期チェックで見つかった消失ファイルのパージ（毎回必ず実行）
+                        let missing_for_db = head_missing_to_purge;
                         if !missing_for_db.is_empty() {
                             let missing_for_db_clone = missing_for_db.clone();
+                            let db_pool_head = db_pool.clone();
                             let purged = tokio::task::spawn_blocking(move || {
-                                if let Ok(mut conn) = db_pool.get() {
+                                if let Ok(mut conn) = db_pool_head.get() {
                                     purge_missing_files_from_cache(&mut conn, &missing_for_db_clone).unwrap_or(0)
                                 } else {
                                     0
@@ -594,6 +578,125 @@ fn load_directory(
                                 let _ = app_handle_for_purge.emit_all("smart-folder-purged", ());
                             }
                         }
+
+                        // 2. 残りの全件スイープ（前回の完了から一定間隔が経過している場合のみ実行）
+                        if remaining_paths.is_empty() {
+                            return;
+                        }
+
+                        let purge_setting_key = format!("smart_purge_last_run:{}", smart_uri_for_purge);
+                        let settings_pool_read = settings_pool_purge.clone();
+                        let key_for_read = purge_setting_key.clone();
+
+                        let last_run_ms: Option<u64> = tokio::task::spawn_blocking(move || {
+                            if let Ok(conn) = settings_pool_read.get() {
+                                let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1").ok()?;
+                                stmt.query_row(rusqlite::params![&key_for_read], |row| {
+                                    let val: String = row.get(0)?;
+                                    Ok(val.parse::<u64>().ok())
+                                }).ok().flatten()
+                            } else {
+                                None
+                            }
+                        }).await.unwrap_or(None);
+
+                        let current_time_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+
+                        if !should_run_smart_purge(last_run_ms, current_time_ms, SMART_PURGE_MIN_INTERVAL_MS) {
+                            return;
+                        }
+
+                        // 実行中の負荷を抑制: 最大2スレッドのRayonプールを使用し、チャンク間に150msの待機を入れる
+                        let sweep_pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(2)
+                            .build()
+                            .ok()
+                            .map(std::sync::Arc::new);
+
+                        let mut sweep_missing = Vec::new();
+
+                        for (i, chunk) in remaining_paths.chunks(200).enumerate() {
+                            if current_thumbnail_batch_epoch() != purge_start_epoch {
+                                // 世代交代（フォルダ移動・タブ切り替え）を検知した時点で即時中断（完了時刻は記録しない）
+                                return;
+                            }
+
+                            if i > 0 {
+                                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                if current_thumbnail_batch_epoch() != purge_start_epoch {
+                                    return;
+                                }
+                            }
+
+                            let chunk_vec: Vec<String> = chunk.to_vec();
+                            let pool_clone = sweep_pool.clone();
+                            let chunk_missing: Vec<String> = tokio::task::spawn_blocking(move || {
+                                if let Some(pool) = pool_clone {
+                                    pool.install(|| {
+                                        use rayon::prelude::*;
+                                        chunk_vec
+                                            .into_par_iter()
+                                            .filter(|path| {
+                                                let clean = strip_unc_prefix(path).unwrap_or(path);
+                                                !std::path::Path::new(clean).is_file()
+                                            })
+                                            .collect()
+                                    })
+                                } else {
+                                    chunk_vec
+                                        .into_iter()
+                                        .filter(|path| {
+                                            let clean = strip_unc_prefix(path).unwrap_or(path);
+                                            !std::path::Path::new(clean).is_file()
+                                        })
+                                        .collect()
+                                }
+                            }).await.unwrap_or_default();
+
+                            sweep_missing.extend(chunk_missing);
+                        }
+
+                        if !sweep_missing.is_empty() {
+                            let sweep_missing_clone = sweep_missing.clone();
+                            let db_pool_sweep = db_pool.clone();
+                            let purged = tokio::task::spawn_blocking(move || {
+                                if let Ok(mut conn) = db_pool_sweep.get() {
+                                    purge_missing_files_from_cache(&mut conn, &sweep_missing_clone).unwrap_or(0)
+                                } else {
+                                    0
+                                }
+                            }).await.unwrap_or(0);
+
+                            if purged > 0 {
+                                if let Some(state) = app_handle_for_purge.try_state::<AppState>() {
+                                    let mut r_lock = state.ratings.write();
+                                    for p in &sweep_missing {
+                                        r_lock.remove(p);
+                                    }
+                                }
+                                let _ = app_handle_for_purge.emit_all("smart-folder-purged", ());
+                            }
+                        }
+
+                        // 全件スイープが途中で中断されず最後まで完了した場合のみ、完了時刻を app_settings に記録
+                        let finish_time_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let settings_pool_save = settings_pool_purge.clone();
+                        let key_for_save = purge_setting_key;
+                        tokio::task::spawn_blocking(move || {
+                            if let Ok(conn) = settings_pool_save.get() {
+                                let _ = conn.execute(
+                                    "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+                                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                                    rusqlite::params![&key_for_save, &finish_time_ms.to_string()],
+                                );
+                            }
+                        });
                     });
 
                     return;

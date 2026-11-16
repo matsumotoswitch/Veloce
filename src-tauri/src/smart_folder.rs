@@ -9,6 +9,32 @@ use crate::models::{ImageFile, SmartFolderItem, SmartFolderRule};
 use crate::state::AppState;
 use crate::utils::normalize_unc_path;
 
+/// スマートフォルダの全件バックグラウンドパージの最小実行間隔（24時間相当 = 86,400,000ms）
+pub const SMART_PURGE_MIN_INTERVAL_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// スマートフォルダの全件バックグラウンドパージを実行すべきかを判定する純粋関数
+///
+/// - `last_run_ms`: 前回完了時の Unix タイムスタンプ（ミリ秒）。None の場合は初回実行とみなす。
+/// - `current_time_ms`: 現在の Unix タイムスタンプ（ミリ秒）。
+/// - `min_interval_ms`: パージ実行の最小インターバル（ミリ秒）。
+pub fn should_run_smart_purge(
+    last_run_ms: Option<u64>,
+    current_time_ms: u64,
+    min_interval_ms: u64,
+) -> bool {
+    match last_run_ms {
+        None => true,
+        Some(last) => {
+            if current_time_ms < last {
+                // システム時計の巻き戻り等が発生した場合は安全側に倒して実行
+                true
+            } else {
+                current_time_ms - last >= min_interval_ms
+            }
+        }
+    }
+}
+
 pub(crate) fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageFile {
     let p = std::path::Path::new(&item.path);
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
@@ -1543,5 +1569,27 @@ mod tests {
         let items = query_smart_folder_image_files(&rule, &db_conn, None, true, None);
         assert_eq!(items.len(), 1, "フォールバッククエリで正常にアイテムが取得されること");
         assert_eq!(items[0].name, "fallback.png");
+    }
+
+    #[test]
+    fn test_should_run_smart_purge_interval_logic() {
+        let interval = SMART_PURGE_MIN_INTERVAL_MS;
+        let now = 1_700_000_000_000u64;
+
+        // 1. 記録なし (None) -> 実行
+        assert!(should_run_smart_purge(None, now, interval), "記録なしの場合はパージを実行すること");
+
+        // 2. 間隔内 -> スキップ
+        assert!(!should_run_smart_purge(Some(now - 1000), now, interval), "1秒前（間隔内）はスキップすること");
+        assert!(!should_run_smart_purge(Some(now - (interval - 1)), now, interval), "間隔満了直前（1ms前）はスキップすること");
+
+        // 3. ちょうど間隔経過 -> 実行
+        assert!(should_run_smart_purge(Some(now - interval), now, interval), "ちょうど間隔経過時は実行すること");
+
+        // 4. 間隔経過 -> 実行
+        assert!(should_run_smart_purge(Some(now - (interval + 1000)), now, interval), "間隔超過時は実行すること");
+
+        // 5. 時計の巻き戻り（未来タイムスタンプ） -> 安全側に倒して実行
+        assert!(should_run_smart_purge(Some(now + 10_000), now, interval), "未来時刻検知時は安全側に倒して実行すること");
     }
 }

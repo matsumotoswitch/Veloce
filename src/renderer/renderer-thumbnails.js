@@ -1184,10 +1184,13 @@ export class ThumbnailQueueManager {
                   if (this._preloadFetchId !== currentFetchId) return;
                   if (items && items.length > 0) {
                     appState.preloadCursor = fetchOffset + items.length;
-                    this.preloadQueue.push(...items.map(f => ({
-                      filePath: f.path,
-                      skipDbCheck: !f.hasThumbnailCache
-                    })));
+                    const uncached = items.filter(f => !f.hasThumbnailCache);
+                    if (uncached.length > 0) {
+                      this.preloadQueue.push(...uncached.map(f => ({
+                        filePath: f.path,
+                        skipDbCheck: f.hasThumbnailCache === false
+                      })));
+                    }
                   } else {
                     appState.preloadCursor = fetchOffset + fetchLimit;
                   }
@@ -1278,6 +1281,7 @@ export class ThumbnailQueueManager {
           this.preloadQueue.length === 0 && 
           this.activeTasks.size === 0 && 
           isPreloadAllFinished) {
+        appState.isPreloadRunning = false;
         if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
           window.debouncedUpdateSmartFolderCounts();
         }
