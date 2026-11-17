@@ -2104,20 +2104,17 @@ pub(crate) fn trash_files_batch_inner(state: &AppState, paths: Vec<String>) -> R
 }
 
 #[tauri::command]
-async fn trash_files_batch(state: tauri::State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>, String> {
+async fn trash_files_batch(app: tauri::AppHandle, paths: Vec<String>) -> Result<Vec<String>, String> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
 
-    let paths_clone = paths.clone();
-    let succeeded = tokio::task::spawn_blocking(move || {
-        trash_files_blocking(paths_clone)
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        trash_files_batch_inner(&state, paths)
     })
     .await
-    .map_err(|e| e.to_string())?;
-
-    purge_trashed_files_from_db_and_state(&state, &succeeded);
-    Ok(succeeded)
+    .map_err(|e| e.to_string())?
 }
 
 /// フォルダ削除成功時に、SQLite の `ratings` / `cache` テーブルおよびメモリ上の `state.ratings` から
