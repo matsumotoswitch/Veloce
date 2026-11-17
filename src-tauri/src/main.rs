@@ -813,19 +813,35 @@ fn load_directory(
                     for chunk in hash_keys.chunks(900) {
                         let placeholders = vec!["?"; chunk.len()].join(",");
                         let query = format!(
-                            "SELECT hash_key FROM cache WHERE hash_key IN ({}) AND thumbnail IS NOT NULL",
+                            "SELECT hash_key, (thumbnail IS NOT NULL), (metadata IS NOT NULL), width, height, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache WHERE hash_key IN ({})",
                             placeholders
                         );
                         if let Ok(mut stmt) = conn.prepare(&query) {
                             let params: Vec<&dyn rusqlite::ToSql> =
                                 chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
                             if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-                                row.get::<_, String>(0)
+                                let hash_key: String = row.get(0)?;
+                                let has_thumbnail: bool = row.get(1)?;
+                                let has_metadata: bool = row.get(2)?;
+                                let width: u32 = row.get::<_, Option<u32>>(3).unwrap_or_default().unwrap_or(0);
+                                let height: u32 = row.get::<_, Option<u32>>(4).unwrap_or_default().unwrap_or(0);
+                                let prompt: String = row.get::<_, Option<String>>(5).unwrap_or_default().unwrap_or_default();
+                                let negative_prompt: String = row.get::<_, Option<String>>(6).unwrap_or_default().unwrap_or_default();
+                                let source: String = row.get::<_, Option<String>>(7).unwrap_or_default().unwrap_or_default();
+                                Ok((hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source))
                             }) {
                                 for row in rows.flatten() {
-                                    if let Some(&idx) = hash_to_idx.get(&row) {
-                                        if let Some(f) = files.get_mut(idx) {
-                                            std::sync::Arc::make_mut(f).has_thumbnail_cache = true;
+                                    let (hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source) = row;
+                                    if let Some(&idx) = hash_to_idx.get(&hash_key) {
+                                        if let Some(f_arc) = files.get_mut(idx) {
+                                            let f = std::sync::Arc::make_mut(f_arc);
+                                            f.has_thumbnail_cache = has_thumbnail;
+                                            if has_metadata {
+                                                f.width = width;
+                                                f.height = height;
+                                                f.unified_search_text = format!("{} {} {} {}", f.name, prompt, negative_prompt, source).to_lowercase();
+                                                f.meta_loaded = true;
+                                            }
                                         }
                                     }
                                 }
@@ -962,13 +978,9 @@ fn load_directory(
 
                     {
                         let mut all_files_lock = state.all_files.write();
-                        let mut filtered_files_lock = state.filtered_files.write();
-
-                        // Filtered files are updated efficiently using a sorted list of updates for O(N + M log N) without HashMap
-                        let mut chunk_updates: Vec<(String, std::sync::Arc<ImageFile>)> = Vec::with_capacity(metadata_results.len());
+                        let mut filtered_updates = Vec::with_capacity(metadata_results.len());
 
                         for (idx, path, full_meta, meta_mtime, meta_size) in metadata_results {
-                            let mut new_arc: Option<std::sync::Arc<ImageFile>> = None;
                             if let Some(f_arc) = all_files_lock.get_mut(idx) {
                                 if f_arc.path == path {
                                     let f = std::sync::Arc::make_mut(f_arc);
@@ -982,21 +994,21 @@ fn load_directory(
                                     if f.size == 0 { f.size = meta_size; }
                                     if f.mtime == 0 { f.mtime = meta_mtime / 1000; }
                                     f.meta_loaded = true;
-                                    new_arc = Some(f_arc.clone());
+                                    filtered_updates.push((path, f_arc.clone()));
                                 }
                             }
-                            
-                            if let Some(arc) = new_arc {
-                                chunk_updates.push((path, arc));
-                            }
                         }
+                        drop(all_files_lock);
 
-                        chunk_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-                        if !chunk_updates.is_empty() {
-                            for f_arc in filtered_files_lock.iter_mut() {
-                                if let Ok(update_idx) = chunk_updates.binary_search_by(|(p, _)| p.cmp(&f_arc.path)) {
-                                    *f_arc = chunk_updates[update_idx].1.clone();
+                        if !filtered_updates.is_empty() {
+                            let filt_idx_lock = state.path_to_filtered_idx.read();
+                            let mut filtered_files_lock = state.filtered_files.write();
+                            for (path, arc) in filtered_updates {
+                                let clean = path.replace("\\\\?\\", "");
+                                if let Some(&filt_idx) = filt_idx_lock.get(&path).or_else(|| filt_idx_lock.get(&clean)) {
+                                    if let Some(f_arc) = filtered_files_lock.get_mut(filt_idx) {
+                                        *f_arc = arc;
+                                    }
                                 }
                             }
                         }
@@ -1549,47 +1561,50 @@ async fn get_file_by_index(
     Ok(lock.get(index).cloned())
 }
 
-/// メタデータ読み込み結果をRust側のSource of Truthに反映する（HashMapによるO(N + M)一括更新）
+/// メタデータ読み込み結果をRust側のSource of Truthに反映する（path_to_all_idx / path_to_filtered_idx によるO(1)一括更新）
 #[tauri::command]
 fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<FullMetadata>) {
     if updates.is_empty() {
         return;
     }
 
-    let update_map: std::collections::HashMap<&str, &FullMetadata> = updates
-        .iter()
-        .map(|meta| (meta.path.as_str(), meta))
-        .collect();
-
     {
+        let all_idx = state.path_to_all_idx.read();
         let mut all_files = state.all_files.write();
-        for f_arc in all_files.iter_mut() {
-            if let Some(meta) = update_map.get(f_arc.path.as_str()) {
-                let file = std::sync::Arc::make_mut(f_arc);
-                file.width = meta.width;
-                file.height = meta.height;
-                file.prompt = meta.prompt.clone();
-                file.negative_prompt = meta.negative_prompt.clone();
-                file.source = meta.source.clone();
-                file.search_text = extract_searchable_text(&meta.params);
-                file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
-                file.meta_loaded = true;
+        for meta in &updates {
+            let clean = meta.path.replace("\\\\?\\", "");
+            if let Some(&idx) = all_idx.get(&meta.path).or_else(|| all_idx.get(&clean)) {
+                if let Some(f_arc) = all_files.get_mut(idx) {
+                    let file = std::sync::Arc::make_mut(f_arc);
+                    file.width = meta.width;
+                    file.height = meta.height;
+                    file.prompt = meta.prompt.clone();
+                    file.negative_prompt = meta.negative_prompt.clone();
+                    file.source = meta.source.clone();
+                    file.search_text = extract_searchable_text(&meta.params);
+                    file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
+                    file.meta_loaded = true;
+                }
             }
         }
     }
     {
+        let filt_idx = state.path_to_filtered_idx.read();
         let mut filtered = state.filtered_files.write();
-        for f_arc in filtered.iter_mut() {
-            if let Some(meta) = update_map.get(f_arc.path.as_str()) {
-                let file = std::sync::Arc::make_mut(f_arc);
-                file.width = meta.width;
-                file.height = meta.height;
-                file.prompt = meta.prompt.clone();
-                file.negative_prompt = meta.negative_prompt.clone();
-                file.source = meta.source.clone();
-                file.search_text = extract_searchable_text(&meta.params);
-                file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
-                file.meta_loaded = true;
+        for meta in &updates {
+            let clean = meta.path.replace("\\\\?\\", "");
+            if let Some(&idx) = filt_idx.get(&meta.path).or_else(|| filt_idx.get(&clean)) {
+                if let Some(f_arc) = filtered.get_mut(idx) {
+                    let file = std::sync::Arc::make_mut(f_arc);
+                    file.width = meta.width;
+                    file.height = meta.height;
+                    file.prompt = meta.prompt.clone();
+                    file.negative_prompt = meta.negative_prompt.clone();
+                    file.source = meta.source.clone();
+                    file.search_text = extract_searchable_text(&meta.params);
+                    file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
+                    file.meta_loaded = true;
+                }
             }
         }
     }
@@ -4030,6 +4045,314 @@ mod viewer_tests {
         assert_eq!(all_files[1].height, 1024);
         assert_eq!(all_files[1].prompt, "masterpiece, 1girl");
         assert_eq!(all_files[1].source, "NovelAI");
+    }
+
+    #[test]
+    fn test_load_directory_cached_metadata_hydration() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO cache (hash_key, thumbnail, metadata, width, height, searchable_prompt, searchable_negative_prompt, searchable_source)
+             VALUES ('hash1', X'89504E47', '{\"prompt\":\"1girl\"}', 1920, 1080, '1girl, smile', 'worst quality', 'NovelAI')",
+            [],
+        ).unwrap();
+
+        let mut files = vec![
+            std::sync::Arc::new(ImageFile {
+                name: "pic1.png".to_string(),
+                ext: ".png".into(),
+                path: "C:\\images\\pic1.png".to_string(),
+                size: 1000,
+                mtime: 100,
+                ctime: 100,
+                has_thumbnail_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: Default::default(),
+            }),
+            std::sync::Arc::new(ImageFile {
+                name: "pic2.png".to_string(),
+                ext: ".png".into(),
+                path: "C:\\images\\pic2.png".to_string(),
+                size: 2000,
+                mtime: 200,
+                ctime: 200,
+                has_thumbnail_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: Default::default(),
+            }),
+        ];
+
+        let mut hash_to_idx = std::collections::HashMap::new();
+        hash_to_idx.insert("hash1".to_string(), 0);
+        hash_to_idx.insert("hash2".to_string(), 1);
+
+        for (hash_key, &idx) in &hash_to_idx {
+            if let Some(f) = files.get_mut(idx) {
+                std::sync::Arc::make_mut(f).hash_key = compact_str::CompactString::new(hash_key);
+            }
+        }
+
+        let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
+        for chunk in hash_keys.chunks(900) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let query = format!(
+                "SELECT hash_key, (thumbnail IS NOT NULL), (metadata IS NOT NULL), width, height, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache WHERE hash_key IN ({})",
+                placeholders
+            );
+            if let Ok(mut stmt) = conn.prepare(&query) {
+                let params: Vec<&dyn rusqlite::ToSql> =
+                    chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                    let hash_key: String = row.get(0)?;
+                    let has_thumbnail: bool = row.get(1)?;
+                    let has_metadata: bool = row.get(2)?;
+                    let width: u32 = row.get::<_, Option<u32>>(3).unwrap_or_default().unwrap_or(0);
+                    let height: u32 = row.get::<_, Option<u32>>(4).unwrap_or_default().unwrap_or(0);
+                    let prompt: String = row.get::<_, Option<String>>(5).unwrap_or_default().unwrap_or_default();
+                    let negative_prompt: String = row.get::<_, Option<String>>(6).unwrap_or_default().unwrap_or_default();
+                    let source: String = row.get::<_, Option<String>>(7).unwrap_or_default().unwrap_or_default();
+                    Ok((hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source))
+                }) {
+                    for row in rows.flatten() {
+                        let (hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source) = row;
+                        if let Some(&idx) = hash_to_idx.get(&hash_key) {
+                            if let Some(f_arc) = files.get_mut(idx) {
+                                let f = std::sync::Arc::make_mut(f_arc);
+                                f.has_thumbnail_cache = has_thumbnail;
+                                if has_metadata {
+                                    f.width = width;
+                                    f.height = height;
+                                    f.unified_search_text = format!("{} {} {} {}", f.name, prompt, negative_prompt, source).to_lowercase();
+                                    f.meta_loaded = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // キャッシュあり（pic1.png）
+        assert!(files[0].has_thumbnail_cache);
+        assert!(files[0].meta_loaded);
+        assert_eq!(files[0].width, 1920);
+        assert_eq!(files[0].height, 1080);
+        assert_eq!(files[0].prompt, "");
+        assert_eq!(files[0].negative_prompt, "");
+        assert_eq!(files[0].source, "");
+        assert_eq!(files[0].unified_search_text, "pic1.png 1girl, smile worst quality novelai");
+
+        // キャッシュなし（pic2.png）
+        assert!(!files[1].has_thumbnail_cache);
+        assert!(!files[1].meta_loaded);
+        assert_eq!(files[1].width, 0);
+        assert_eq!(files[1].height, 0);
+        assert_eq!(files[1].unified_search_text, "");
+    }
+
+    #[test]
+    fn test_indexed_metadata_update_matches_sequential_scan() {
+        let make_file = |name: &str, path: &str| {
+            std::sync::Arc::new(ImageFile {
+                name: name.to_string(),
+                ext: ".png".into(),
+                path: path.to_string(),
+                size: 100,
+                mtime: 100,
+                ctime: 100,
+                has_thumbnail_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: Default::default(),
+            })
+        };
+
+        let initial_all = vec![
+            make_file("1.png", r"C:\img\1.png"),
+            make_file("2.png", r"\\?\C:\img\2.png"),
+            make_file("3.png", r"C:\img\3.png"),
+        ];
+        let initial_filtered = vec![
+            initial_all[1].clone(), // 2.png
+            initial_all[2].clone(), // 3.png
+        ];
+
+        let updates = vec![
+            FullMetadata {
+                path: r"C:\img\2.png".to_string(), // UNC prefix なしで渡されるケース
+                prompt: "prompt 2".to_string(),
+                negative_prompt: "neg 2".to_string(),
+                width: 800,
+                height: 600,
+                params: serde_json::Value::String("steps: 20".to_string()),
+                source: "NovelAI".to_string(),
+                metadata_source: String::new(),
+            },
+            FullMetadata {
+                path: r"C:\img\3.png".to_string(),
+                prompt: "prompt 3".to_string(),
+                negative_prompt: "neg 3".to_string(),
+                width: 1024,
+                height: 1024,
+                params: serde_json::Value::Null,
+                source: "ComfyUI".to_string(),
+                metadata_source: String::new(),
+            },
+        ];
+
+        // 1. 従来の線形走査版による更新
+        let mut scan_all = initial_all.clone();
+        let mut scan_filtered = initial_filtered.clone();
+        {
+            let update_map: std::collections::HashMap<&str, &FullMetadata> = updates
+                .iter()
+                .map(|m| (m.path.as_str(), m))
+                .collect();
+
+            for f_arc in scan_all.iter_mut() {
+                let clean = f_arc.path.replace(r"\\?\", "");
+                if let Some(meta) = update_map.get(f_arc.path.as_str()).or_else(|| update_map.get(clean.as_str())) {
+                    let file = std::sync::Arc::make_mut(f_arc);
+                    file.width = meta.width;
+                    file.height = meta.height;
+                    file.prompt = meta.prompt.clone();
+                    file.negative_prompt = meta.negative_prompt.clone();
+                    file.source = meta.source.clone();
+                    file.search_text = extract_searchable_text(&meta.params);
+                    file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
+                    file.meta_loaded = true;
+                }
+            }
+
+            for f_arc in scan_filtered.iter_mut() {
+                let clean = f_arc.path.replace(r"\\?\", "");
+                if let Some(meta) = update_map.get(f_arc.path.as_str()).or_else(|| update_map.get(clean.as_str())) {
+                    let file = std::sync::Arc::make_mut(f_arc);
+                    file.width = meta.width;
+                    file.height = meta.height;
+                    file.prompt = meta.prompt.clone();
+                    file.negative_prompt = meta.negative_prompt.clone();
+                    file.source = meta.source.clone();
+                    file.search_text = extract_searchable_text(&meta.params);
+                    file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
+                    file.meta_loaded = true;
+                }
+            }
+        }
+
+        // 2. 新しい O(1) インデックス参照版による更新
+        let mut idx_all = initial_all.clone();
+        let mut idx_filtered = initial_filtered.clone();
+        let (db_tx, _) = tokio::sync::mpsc::channel(1);
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        let state = AppState::new(pool.clone(), pool, false, db_tx, 0, "test_token".to_string());
+        state.rebuild_all_indices(&idx_all);
+        state.rebuild_filtered_indices(&idx_filtered);
+
+        {
+            let all_idx = state.path_to_all_idx.read();
+            for meta in &updates {
+                let clean = meta.path.replace(r"\\?\", "");
+                if let Some(&i) = all_idx.get(&meta.path).or_else(|| all_idx.get(&clean)) {
+                    if let Some(f_arc) = idx_all.get_mut(i) {
+                        let file = std::sync::Arc::make_mut(f_arc);
+                        file.width = meta.width;
+                        file.height = meta.height;
+                        file.prompt = meta.prompt.clone();
+                        file.negative_prompt = meta.negative_prompt.clone();
+                        file.source = meta.source.clone();
+                        file.search_text = extract_searchable_text(&meta.params);
+                        file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
+                        file.meta_loaded = true;
+                    }
+                }
+            }
+        }
+        {
+            let filt_idx = state.path_to_filtered_idx.read();
+            for meta in &updates {
+                let clean = meta.path.replace(r"\\?\", "");
+                if let Some(&i) = filt_idx.get(&meta.path).or_else(|| filt_idx.get(&clean)) {
+                    if let Some(f_arc) = idx_filtered.get_mut(i) {
+                        let file = std::sync::Arc::make_mut(f_arc);
+                        file.width = meta.width;
+                        file.height = meta.height;
+                        file.prompt = meta.prompt.clone();
+                        file.negative_prompt = meta.negative_prompt.clone();
+                        file.source = meta.source.clone();
+                        file.search_text = extract_searchable_text(&meta.params);
+                        file.unified_search_text = format!("{} {} {} {} {}", file.name, file.prompt, file.negative_prompt, file.source, file.search_text).to_lowercase();
+                        file.meta_loaded = true;
+                    }
+                }
+            }
+        }
+
+        // 両者の結果が完全に一致することを検証
+        assert_eq!(scan_all.len(), idx_all.len());
+        for i in 0..scan_all.len() {
+            assert_eq!(scan_all[i].width, idx_all[i].width);
+            assert_eq!(scan_all[i].height, idx_all[i].height);
+            assert_eq!(scan_all[i].prompt, idx_all[i].prompt);
+            assert_eq!(scan_all[i].negative_prompt, idx_all[i].negative_prompt);
+            assert_eq!(scan_all[i].source, idx_all[i].source);
+            assert_eq!(scan_all[i].search_text, idx_all[i].search_text);
+            assert_eq!(scan_all[i].unified_search_text, idx_all[i].unified_search_text);
+            assert_eq!(scan_all[i].meta_loaded, idx_all[i].meta_loaded);
+        }
+
+        assert_eq!(scan_filtered.len(), idx_filtered.len());
+        for i in 0..scan_filtered.len() {
+            assert_eq!(scan_filtered[i].width, idx_filtered[i].width);
+            assert_eq!(scan_filtered[i].height, idx_filtered[i].height);
+            assert_eq!(scan_filtered[i].prompt, idx_filtered[i].prompt);
+            assert_eq!(scan_filtered[i].negative_prompt, idx_filtered[i].negative_prompt);
+            assert_eq!(scan_filtered[i].source, idx_filtered[i].source);
+            assert_eq!(scan_filtered[i].search_text, idx_filtered[i].search_text);
+            assert_eq!(scan_filtered[i].unified_search_text, idx_filtered[i].unified_search_text);
+            assert_eq!(scan_filtered[i].meta_loaded, idx_filtered[i].meta_loaded);
+        }
     }
 
     #[test]
