@@ -47,6 +47,15 @@ pub struct ImageFile {
     pub hash_key: CompactString,
 }
 
+/// サブフォルダ列挙ペイロード
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubfolderItem {
+    pub name: String,
+    pub path: String,
+    pub has_children: bool,
+}
+
 /// ディレクトリ読み込み中のチャンク分割配信ペイロード
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]

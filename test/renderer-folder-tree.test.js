@@ -81,6 +81,62 @@ describe('Renderer Folder Tree Controller (renderer-folder-tree.js)', () => {
       expect(childrenUl.classList.contains('collapsed')).toBe(true);
       expect(toggle.classList.contains('expanded')).toBe(false);
     });
+
+    it('should skip grandchild check when hasChildren boolean is provided', async () => {
+      // sub1 は子あり (hasChildren: true)、sub2 は子なし (hasChildren: false)
+      window.veloceAPI.getFolders.mockResolvedValueOnce([
+        { name: 'sub1', path: 'C:\\folder1\\sub1', hasChildren: true },
+        { name: 'sub2', path: 'C:\\folder1\\sub2', hasChildren: false }
+      ]);
+
+      const node = createTreeNode({ name: 'folder1', path: 'C:\\folder1' });
+      const itemDiv = node.querySelector('.tree-item');
+      await itemDiv.expandNode();
+
+      // 親フォルダの展開で getFolders は 1 回だけ呼ばれる（孫確認の追加呼び出しはスキップ）
+      expect(window.veloceAPI.getFolders).toHaveBeenCalledTimes(1);
+      expect(window.veloceAPI.getFolders).toHaveBeenCalledWith('C:\\folder1');
+
+      const childrenUl = node.querySelector('.tree-children');
+      const child1Toggle = childrenUl.children[0].querySelector('.tree-toggle');
+      const child2Toggle = childrenUl.children[1].querySelector('.tree-toggle');
+
+      // hasChildren: true はトグルアイコンが表示されたまま
+      expect(child1Toggle.classList.contains('tree-toggle-hidden')).toBe(false);
+      // hasChildren: false はトグルアイコンが非表示化される
+      expect(child2Toggle.classList.contains('tree-toggle-hidden')).toBe(true);
+    });
+
+    it('should fallback to grandchild getFolders check when hasChildren is undefined', async () => {
+      // hasChildren プロパティがないレガシー/フォールバック形式
+      window.veloceAPI.getFolders
+        .mockResolvedValueOnce([
+          { name: 'sub1', path: 'C:\\folder1\\sub1' },
+          { name: 'sub2', path: 'C:\\folder1\\sub2' }
+        ])
+        .mockResolvedValueOnce([{ name: 'grandchild', path: 'C:\\folder1\\sub1\\grandchild' }]) // sub1 has children
+        .mockResolvedValueOnce([]); // sub2 has no children
+
+      const node = createTreeNode({ name: 'folder1', path: 'C:\\folder1' });
+      const itemDiv = node.querySelector('.tree-item');
+      await itemDiv.expandNode();
+      // 非同期の then コールバックの完了を待機
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // 各サブフォルダに対して孫確認の getFolders が非同期呼び出しされる
+      expect(window.veloceAPI.getFolders).toHaveBeenCalledWith('C:\\folder1');
+      expect(window.veloceAPI.getFolders).toHaveBeenCalledWith('C:\\folder1\\sub1');
+      expect(window.veloceAPI.getFolders).toHaveBeenCalledWith('C:\\folder1\\sub2');
+
+      const childrenUl = node.querySelector('.tree-children');
+      const child1Toggle = childrenUl.children[0].querySelector('.tree-toggle');
+      const child2Toggle = childrenUl.children[1].querySelector('.tree-toggle');
+
+      // sub1 は孫がいるのでトグル表示
+      expect(child1Toggle.classList.contains('tree-toggle-hidden')).toBe(false);
+      // sub2 は孫が空なのでトグル非表示
+      expect(child2Toggle.classList.contains('tree-toggle-hidden')).toBe(true);
+    });
   });
 
   describe('scrollTreeItemIntoView', () => {

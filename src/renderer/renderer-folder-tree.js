@@ -122,12 +122,20 @@ export function createTreeNode(folder, isRoot = false) {
         const childNode = createTreeNode(subFolder);
         childrenUl.appendChild(childNode);
 
-        window.veloceAPI.getFolders(subFolder.path).then(grandChildren => {
-          if (grandChildren && grandChildren.length === 0) {
+        if (typeof subFolder.hasChildren === 'boolean') {
+          if (!subFolder.hasChildren) {
             const childToggle = childNode.querySelector('.tree-toggle');
             if (childToggle) childToggle.classList.add('tree-toggle-hidden');
           }
-        }).catch(err => console.error('Failed to check subfolders:', err));
+        } else {
+          // Rustコマンド以外のフォールバック環境（テストモック等）向けに孫フォルダの有無を確認
+          window.veloceAPI.getFolders(subFolder.path).then(grandChildren => {
+            if (grandChildren && grandChildren.length === 0) {
+              const childToggle = childNode.querySelector('.tree-toggle');
+              if (childToggle) childToggle.classList.add('tree-toggle-hidden');
+            }
+          }).catch(err => console.error('Failed to check subfolders:', err));
+        }
       });
       isLoaded = true;
     }

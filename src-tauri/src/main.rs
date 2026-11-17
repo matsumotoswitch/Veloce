@@ -322,6 +322,66 @@ fn path_exists(path: String) -> bool {
     path_obj.exists() && path_obj.is_dir()
 }
 
+/// 指定ディレクトリ直下のサブフォルダ一覧を高速取得する。
+/// std::fs::read_dir と DirEntry::file_type() を使用してディレクトリのみを抽出し、
+/// 各サブフォルダに子ディレクトリが存在するか（has_children）も同時に判定する。
+#[tauri::command]
+fn get_subfolders(dir_path: String) -> Result<Vec<models::SubfolderItem>, String> {
+    if dir_path == "PC" || dir_path.starts_with("smart://") {
+        return Ok(Vec::new());
+    }
+
+    let clean_dir = crate::utils::normalize_unc_path(&dir_path).replace('/', "\\");
+    let path = std::path::Path::new(&clean_dir);
+    let read_dir = match std::fs::read_dir(path) {
+        Ok(rd) => rd,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    let mut subfolders = Vec::new();
+
+    for entry_res in read_dir {
+        let entry = match entry_res {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if file_type.is_dir() {
+            let sub_path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+
+            // 子ディレクトリが1つ以上存在するか判定（1つ見つかった時点で早期打ち切り）
+            let mut has_children = false;
+            if let Ok(child_rd) = std::fs::read_dir(&sub_path) {
+                for child_res in child_rd {
+                    if let Ok(child_entry) = child_res {
+                        if let Ok(cft) = child_entry.file_type() {
+                            if cft.is_dir() {
+                                has_children = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let path_str = sub_path.to_string_lossy().into_owned().replace('/', "\\");
+            subfolders.push(models::SubfolderItem {
+                name,
+                path: path_str,
+                has_children,
+            });
+        }
+    }
+
+    subfolders.sort_unstable_by(|a, b| crate::utils::natural_cmp(&a.name, &b.name));
+
+    Ok(subfolders)
+}
+
 
 
 /// 指定されたディレクトリスキャンまたはスマートフォルダ検索をバックグラウンドスレッドで開始する
@@ -2993,6 +3053,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_drives,
             path_exists,
+            get_subfolders,
             load_directory,
             set_view_params,
             sync_ratings,
@@ -6943,5 +7004,65 @@ mod viewer_tests {
             let r2: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", rusqlite::params![&path2], |r| r.get(0)).unwrap();
             assert_eq!(r2, 4);
         }
+    }
+
+    #[test]
+    fn test_get_subfolders() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // 構造作成:
+        // root/
+        //   root_file.txt
+        //   sub_a/ (空)
+        //   sub_b/
+        //     child_dir/
+        //   sub_c/
+        //     file_only.txt
+        //   sub_10/
+        //   sub_2/
+
+        std::fs::write(root.join("root_file.txt"), b"root").unwrap();
+        std::fs::create_dir(root.join("sub_a")).unwrap();
+
+        std::fs::create_dir(root.join("sub_b")).unwrap();
+        std::fs::create_dir(root.join("sub_b").join("child_dir")).unwrap();
+
+        std::fs::create_dir(root.join("sub_c")).unwrap();
+        std::fs::write(root.join("sub_c").join("file_only.txt"), b"child").unwrap();
+
+        std::fs::create_dir(root.join("sub_10")).unwrap();
+        std::fs::create_dir(root.join("sub_2")).unwrap();
+
+        let subfolders = get_subfolders(root.to_string_lossy().to_string()).unwrap();
+
+        // ファイル除外の確認: 5つのフォルダのみ
+        assert_eq!(subfolders.len(), 5);
+
+        // 自然順ソートの確認: sub_2 が sub_10 より先に来る
+        assert_eq!(subfolders[0].name, "sub_2");
+        assert_eq!(subfolders[0].has_children, false);
+
+        assert_eq!(subfolders[1].name, "sub_10");
+        assert_eq!(subfolders[1].has_children, false);
+
+        assert_eq!(subfolders[2].name, "sub_a");
+        assert_eq!(subfolders[2].has_children, false);
+
+        assert_eq!(subfolders[3].name, "sub_b");
+        assert_eq!(subfolders[3].has_children, true);
+
+        assert_eq!(subfolders[4].name, "sub_c");
+        assert_eq!(subfolders[4].has_children, false);
+
+        // 仮想パスや存在しないパスの耐性確認
+        let pc_subfolders = get_subfolders("PC".to_string()).unwrap();
+        assert!(pc_subfolders.is_empty());
+
+        let smart_subfolders = get_subfolders("smart://rating/5".to_string()).unwrap();
+        assert!(smart_subfolders.is_empty());
+
+        let non_existent = get_subfolders("Z:\\path_that_does_not_exist_12345".to_string()).unwrap();
+        assert!(non_existent.is_empty());
     }
 }

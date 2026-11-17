@@ -165,22 +165,31 @@ window.veloceAPI = {
   notifyFilesBatch: (changedFiles, removedPaths) => invoke('notify_files_batch', { changedFiles, removedPaths }),
   /**
    * 指定されたパス内のサブフォルダのリストを取得します。
-   * @param {string} path - 調査するディレクトリのパス。
-   * @returns {Promise<Array<object>>} サブフォルダ情報のリスト。
+   * Rust側の高速コマンド get_subfolders を優先し、ディレクトリのみ抽出＋子ディレクトリ有無を返却します。
+   * @param {string} dirPath - 調査するディレクトリのパス。
+   * @returns {Promise<Array<{name: string, path: string, hasChildren?: boolean}>>} サブフォルダ情報のリスト。
    */
   getFolders: async (dirPath) => {
-    const { fs } = window.__TAURI__;
     try {
-      const entries = await fs.readDir(dirPath);
-      // Tauri v1では、ディレクトリの場合のみ children プロパティが（空でも）付与されます
-      const folders = entries
-        .filter(entry => entry.children !== undefined)
-        .map(entry => ({ name: entry.name, path: entry.path }));
-      
-      folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-      return folders;
-    } catch (error) {
-      console.warn("Failed to get folders:", error);
+      return await invoke('get_subfolders', { dirPath });
+    } catch (_err) {
+      // get_subfolders 未登録環境やテストモック用のフォールバック
+      const { fs } = (typeof window !== 'undefined' && window.__TAURI__) || {};
+      if (fs && typeof fs.readDir === 'function') {
+        try {
+          const entries = await fs.readDir(dirPath);
+          // Tauri v1では、ディレクトリの場合のみ children プロパティが（空でも）付与されます
+          const folders = entries
+            .filter(entry => entry.children !== undefined)
+            .map(entry => ({ name: entry.name, path: entry.path }));
+          
+          folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+          return folders;
+        } catch (error) {
+          console.warn("Failed to get folders via readDir fallback:", error);
+          return [];
+        }
+      }
       return [];
     }
   },
