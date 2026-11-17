@@ -267,23 +267,42 @@ export async function deleteSelectedFiles(callbacks = fileOpsCallbacks) {
     uiManager.updateSelectionUI();
     if (callbacks.clearMetadataUI) callbacks.clearMetadataUI();
 
-    let trashedCount = 0;
     const total = pathsToDelete.length;
     uiManager.showToast(`${total}件のアイテムをゴミ箱に移動中...`, 0, 'file-trash', 'warning');
 
-    for (const path of pathsToDelete) {
-      try {
-        const success = await window.veloceAPI.trashFile(path);
-        if (success) {
-          trashedCount++;
-          await window.veloceAPI.notifyFileRemoved(path);
+    let succeededPaths = [];
+    try {
+      if (typeof window.veloceAPI.trashFilesBatch === 'function') {
+        succeededPaths = await window.veloceAPI.trashFilesBatch(pathsToDelete);
+      } else {
+        // フォールバック（未対応環境/レガシーモック用）
+        for (const path of pathsToDelete) {
+          try {
+            const success = await window.veloceAPI.trashFile(path);
+            if (success) succeededPaths.push(path);
+          } catch (err) {
+            console.error('Failed to trash file:', err);
+          }
         }
-      } catch (err) {
-        console.error('Failed to trash file:', err);
       }
+    } catch (err) {
+      console.error('Failed to trash files batch:', err);
     }
 
+    const trashedCount = Array.isArray(succeededPaths) ? succeededPaths.length : 0;
+
     if (trashedCount > 0) {
+      try {
+        if (typeof window.veloceAPI.notifyFilesBatch === 'function') {
+          await window.veloceAPI.notifyFilesBatch([], succeededPaths);
+        } else {
+          for (const path of succeededPaths) {
+            await window.veloceAPI.notifyFileRemoved(path);
+          }
+        }
+      } catch (notifyErr) {
+        console.error('Failed to notify files batch removal:', notifyErr);
+      }
       uiManager.showToast(`${trashedCount}件のアイテムをゴミ箱に移動しました`, 3000, 'file-trash', 'warning');
       if (callbacks.scheduleRefresh) callbacks.scheduleRefresh();
     } else {

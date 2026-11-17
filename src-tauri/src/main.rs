@@ -1879,6 +1879,89 @@ async fn trash_file(state: tauri::State<'_, AppState>, file_path: String) -> Res
     Ok(result)
 }
 
+/// 複数ファイルをゴミ箱へ一括移動する（同期処理）。
+/// trash::delete_all を優先実行し、失敗時は存在するファイルのみ個別にフォールバックして成功したパス一覧を返す。
+fn trash_files_blocking(paths: Vec<String>) -> Vec<String> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+
+    if trash::delete_all(&paths).is_ok() {
+        paths
+    } else {
+        let mut ok_paths = Vec::new();
+        for p in paths {
+            let path_obj = std::path::Path::new(&p);
+            if path_obj.exists() {
+                if trash::delete(&p).is_ok() {
+                    ok_paths.push(p);
+                }
+            }
+        }
+        ok_paths
+    }
+}
+
+/// ゴミ箱移動に成功したパスの DB（ratings, cache）およびメモリ内 ratings を一括でパージする
+fn purge_trashed_files_from_db_and_state(state: &AppState, succeeded: &[String]) {
+    if succeeded.is_empty() {
+        return;
+    }
+
+    if let Ok(mut conn) = state.db_conn.get() {
+        if let Ok(tx) = conn.transaction() {
+            {
+                let mut stmt_ratings = tx.prepare_cached("DELETE FROM ratings WHERE path = ?1 OR path = ?2").ok();
+                let mut stmt_cache = tx.prepare_cached("DELETE FROM cache WHERE path = ?1 COLLATE NOCASE OR path = ?2 COLLATE NOCASE").ok();
+                for p in succeeded {
+                    let clean_path = normalize_unc_path(p).replace('/', "\\");
+                    if let Some(ref mut stmt) = stmt_ratings {
+                        let _ = stmt.execute(rusqlite::params![p, &clean_path]);
+                    }
+                    if let Some(ref mut stmt) = stmt_cache {
+                        let _ = stmt.execute(rusqlite::params![p, &clean_path]);
+                    }
+                }
+            }
+            let _ = tx.commit();
+        }
+    }
+
+    let mut ratings = state.ratings.write();
+    for p in succeeded {
+        let clean_path = normalize_unc_path(p).replace('/', "\\");
+        ratings.remove(p);
+        ratings.remove(&clean_path);
+    }
+}
+
+pub(crate) fn trash_files_batch_inner(state: &AppState, paths: Vec<String>) -> Result<Vec<String>, String> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let succeeded = trash_files_blocking(paths);
+    purge_trashed_files_from_db_and_state(state, &succeeded);
+    Ok(succeeded)
+}
+
+#[tauri::command]
+async fn trash_files_batch(state: tauri::State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>, String> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let paths_clone = paths.clone();
+    let succeeded = tokio::task::spawn_blocking(move || {
+        trash_files_blocking(paths_clone)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    purge_trashed_files_from_db_and_state(&state, &succeeded);
+    Ok(succeeded)
+}
+
 /// フォルダ削除成功時に、SQLite の `ratings` / `cache` テーブルおよびメモリ上の `state.ratings` から
 /// 対象フォルダ配下のエントリのみをワイルドカードエスケープ付きで安全に削除する
 fn purge_trashed_folder_from_db_and_state(state: &AppState, folder_path: &str) {
@@ -3083,6 +3166,7 @@ fn main() {
             show_window,
             arrange_viewers,
             trash_file,
+            trash_files_batch,
             trash_folder,
             copy_image_to_clipboard,
             get_license_text,
@@ -7064,5 +7148,69 @@ mod viewer_tests {
 
         let non_existent = get_subfolders("Z:\\path_that_does_not_exist_12345".to_string()).unwrap();
         assert!(non_existent.is_empty());
+    }
+
+    #[test]
+    fn test_trash_files_batch_success_and_missing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        let file1 = root.join("file1.txt");
+        let file2 = root.join("file2.txt");
+        let missing_file = root.join("missing_file.txt");
+
+        std::fs::write(&file1, b"hello 1").unwrap();
+        std::fs::write(&file2, b"hello 2").unwrap();
+
+        let path1_str = file1.to_string_lossy().to_string();
+        let path2_str = file2.to_string_lossy().to_string();
+        let missing_str = missing_file.to_string_lossy().to_string();
+
+        let state = create_test_app_state(&root.to_string_lossy());
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, 5)", rusqlite::params![&path1_str]).unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, 3)", rusqlite::params![&path2_str]).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, path) VALUES ('h1', ?1)", rusqlite::params![&path1_str]).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, path) VALUES ('h2', ?1)", rusqlite::params![&path2_str]).unwrap();
+        }
+        {
+            let mut ratings = state.ratings.write();
+            ratings.insert(path1_str.clone(), 5);
+            ratings.insert(path2_str.clone(), 3);
+        }
+
+        // バッチ削除呼び出し（存在しないパスを含む）
+        let paths = vec![path1_str.clone(), missing_str.clone(), path2_str.clone()];
+        let result = trash_files_batch_inner(&state, paths);
+        assert!(result.is_ok());
+
+        let succeeded = result.unwrap();
+        // 存在した2ファイルのみが返り、存在しないパスは含まれない
+        assert!(succeeded.contains(&path1_str));
+        assert!(succeeded.contains(&path2_str));
+        assert!(!succeeded.contains(&missing_str));
+
+        // ファイルが削除されていること
+        assert!(!file1.exists());
+        assert!(!file2.exists());
+
+        // ratings, cache から削除されていること
+        {
+            let conn = state.db_conn.get().unwrap();
+            let r1_count: i64 = conn.query_row("SELECT COUNT(*) FROM ratings WHERE path = ?1", rusqlite::params![&path1_str], |r| r.get(0)).unwrap();
+            assert_eq!(r1_count, 0);
+            let c1_count: i64 = conn.query_row("SELECT COUNT(*) FROM cache WHERE path = ?1", rusqlite::params![&path1_str], |r| r.get(0)).unwrap();
+            assert_eq!(c1_count, 0);
+        }
+        {
+            let ratings = state.ratings.read();
+            assert!(!ratings.contains_key(&path1_str));
+            assert!(!ratings.contains_key(&path2_str));
+        }
+
+        // 空リストの呼び出し
+        let empty_result = trash_files_batch_inner(&state, Vec::new()).unwrap();
+        assert!(empty_result.is_empty());
     }
 }

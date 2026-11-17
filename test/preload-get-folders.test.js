@@ -75,3 +75,24 @@ describe('preload getFolders', () => {
   });
 });
 
+describe('preload trashFilesBatch', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('should call trash_files_batch via invoke', async () => {
+    const invokeMock = vi.fn().mockResolvedValue(['C:\\test\\file1.png']);
+    window.__TAURI__ = {
+      invoke: invokeMock,
+      event: { listen: vi.fn() },
+      window: { appWindow: {} }
+    };
+
+    await import('../src/common/preload.js');
+
+    const result = await window.veloceAPI.trashFilesBatch(['C:\\test\\file1.png']);
+    expect(invokeMock).toHaveBeenCalledWith('trash_files_batch', { paths: ['C:\\test\\file1.png'] });
+    expect(result).toEqual(['C:\\test\\file1.png']);
+  });
+});
+

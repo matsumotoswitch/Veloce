@@ -25,6 +25,7 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
       trashFolder: vi.fn().mockResolvedValue({ success: true }),
       renameFile: vi.fn().mockResolvedValue({ success: true, path: 'C:\\test\\dir\\new.png' }),
       trashFile: vi.fn().mockResolvedValue(true),
+      trashFilesBatch: vi.fn().mockImplementation(async (paths) => [...paths]),
       getFileByIndex: vi.fn().mockImplementation(async (idx) => ({
         path: `C:\\test\\dir\\file${idx}.png`,
         name: `file${idx}.png`
@@ -34,6 +35,7 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
       ),
       notifyFileChanged: vi.fn().mockResolvedValue(undefined),
       notifyFileRemoved: vi.fn().mockResolvedValue(undefined),
+      notifyFilesBatch: vi.fn().mockResolvedValue(undefined),
       clearMetadataCache: vi.fn().mockResolvedValue(undefined),
       moveOrCopyFile: vi.fn().mockResolvedValue({ success: true })
     };
@@ -130,17 +132,68 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
   });
 
   describe('deleteSelectedFiles', () => {
-    it('should delete all selected files and clear selection', async () => {
+    it('should delete all selected files via trashFilesBatch and notifyFilesBatch once', async () => {
       appState.selection.add(0);
       appState.selection.add(1);
       const scheduleRefresh = vi.fn();
       const clearMetadataUI = vi.fn();
 
       await deleteSelectedFiles({ scheduleRefresh, clearMetadataUI });
-      expect(window.veloceAPI.trashFile).toHaveBeenCalledTimes(2);
+      expect(window.veloceAPI.trashFilesBatch).toHaveBeenCalledTimes(1);
+      expect(window.veloceAPI.trashFilesBatch).toHaveBeenCalledWith([
+        'C:\\test\\dir\\file0.png',
+        'C:\\test\\dir\\file1.png'
+      ]);
+      expect(window.veloceAPI.notifyFilesBatch).toHaveBeenCalledTimes(1);
+      expect(window.veloceAPI.notifyFilesBatch).toHaveBeenCalledWith([], [
+        'C:\\test\\dir\\file0.png',
+        'C:\\test\\dir\\file1.png'
+      ]);
+      expect(window.veloceAPI.trashFile).not.toHaveBeenCalled();
+      expect(window.veloceAPI.notifyFileRemoved).not.toHaveBeenCalled();
       expect(appState.selection.size).toBe(0);
       expect(clearMetadataUI).toHaveBeenCalled();
       expect(scheduleRefresh).toHaveBeenCalled();
+      expect(uiManager.showToast).toHaveBeenCalledWith('2件のアイテムをゴミ箱に移動しました', 3000, 'file-trash', 'warning');
+    });
+
+    it('should notify only succeeded paths if partial failure occurs', async () => {
+      appState.selection.add(0);
+      appState.selection.add(1);
+      // file0.png のみ成功
+      window.veloceAPI.trashFilesBatch.mockResolvedValueOnce(['C:\\test\\dir\\file0.png']);
+      const scheduleRefresh = vi.fn();
+
+      await deleteSelectedFiles({ scheduleRefresh });
+      expect(window.veloceAPI.trashFilesBatch).toHaveBeenCalledTimes(1);
+      expect(window.veloceAPI.notifyFilesBatch).toHaveBeenCalledWith([], ['C:\\test\\dir\\file0.png']);
+      expect(uiManager.showToast).toHaveBeenCalledWith('1件のアイテムをゴミ箱に移動しました', 3000, 'file-trash', 'warning');
+      expect(scheduleRefresh).toHaveBeenCalled();
+    });
+
+    it('should fallback to single trashFile and notifyFileRemoved when batch API is not available', async () => {
+      appState.selection.add(0);
+      appState.selection.add(1);
+      delete window.veloceAPI.trashFilesBatch;
+      delete window.veloceAPI.notifyFilesBatch;
+      const scheduleRefresh = vi.fn();
+
+      await deleteSelectedFiles({ scheduleRefresh });
+      expect(window.veloceAPI.trashFile).toHaveBeenCalledTimes(2);
+      expect(window.veloceAPI.notifyFileRemoved).toHaveBeenCalledTimes(2);
+      expect(scheduleRefresh).toHaveBeenCalled();
+      expect(uiManager.showToast).toHaveBeenCalledWith('2件のアイテムをゴミ箱に移動しました', 3000, 'file-trash', 'warning');
+    });
+
+    it('should show failure toast and avoid refresh when all files fail', async () => {
+      appState.selection.add(0);
+      window.veloceAPI.trashFilesBatch.mockResolvedValueOnce([]);
+      const scheduleRefresh = vi.fn();
+
+      await deleteSelectedFiles({ scheduleRefresh });
+      expect(window.veloceAPI.notifyFilesBatch).not.toHaveBeenCalled();
+      expect(scheduleRefresh).not.toHaveBeenCalled();
+      expect(uiManager.showToast).toHaveBeenCalledWith('ゴミ箱への移動に失敗しました', 3000, 'file-trash', 'warning');
     });
   });
 

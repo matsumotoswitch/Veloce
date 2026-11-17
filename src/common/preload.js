@@ -43,6 +43,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(x: number, y: number) => Promise<void>} moveViewerWindow
  * @property {(filePath: string) => Promise<void>} copyImageToClipboard
  * @property {(filePath: string) => Promise<boolean>} trashFile
+ * @property {(paths: string[]) => Promise<string[]>} trashFilesBatch
  * @property {(callback: (payload: any) => void) => void} onFileChanged
  * @property {(callback: (payload: string) => void) => void} onFileRemoved
  * @property {(callback: () => void) => void} onDirectoryChanged
@@ -300,6 +301,12 @@ window.veloceAPI = {
    * @returns {Promise<boolean>} 成功したかどうか。
    */
   trashFile: (filePath) => invoke('trash_file', { filePath }),
+  /**
+   * 複数のファイルを一括でゴミ箱に移動するようメインプロセスに要求します。
+   * @param {string[]} paths - ゴミ箱に移動するファイルのパス配列。
+   * @returns {Promise<string[]>} ゴミ箱への移動に成功したパスの配列。
+   */
+  trashFilesBatch: (paths) => invoke('trash_files_batch', { paths }),
   /**
    * ファイルが追加または更新されたときの通知を受け取ります。
    */
