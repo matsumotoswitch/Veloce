@@ -114,7 +114,7 @@ export function initTabHandlers(ctx) {
 
     if (window.veloceAPI.loadDirectory) {
       if (window.veloceAPI.setViewParams) {
-        await appState.setViewParams();
+        await appState.setViewParams(true);
       }
       appState.currentDirectory = tab.path;
       setSetting('currentDirectory', appState.currentDirectory);
@@ -252,7 +252,7 @@ export function initTabHandlers(ctx) {
           updateNavButtons();
           
           if (window.veloceAPI.setViewParams) {
-            await appState.setViewParams();
+            await appState.setViewParams(true);
           }
 
           appState.savedScrollTopGrid = nextTab.scrollTop || 0;

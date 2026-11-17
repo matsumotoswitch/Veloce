@@ -235,9 +235,9 @@ async function refreshFileList(showToast = false) {
   try {
     appState.pushHistory(appState.currentDirectory);
     updateNavButtons();
-    // Rust側のバックグラウンド処理をキックする（直前の最新ソート設定を反映）
+    // Rust側のバックグラウンド処理をキックする（直前の最新ソート設定を保存のみ反映、再ソートはload_directoryに委ねる）
     if (window.veloceAPI && window.veloceAPI.setViewParams) {
-      await appState.setViewParams();
+      await appState.setViewParams(true);
     }
     // スマートフォルダ読み込み時にメモリ上の ratings が空の場合は念のため最新を再取得
     if (appState.currentDirectory.startsWith('smart://') && (!appState.ratings || Object.keys(appState.ratings).length === 0)) {
@@ -1091,7 +1091,7 @@ const menuReloadFolder = createMenuItem('フォルダを再読み込み', UIMana
         await refreshFileList(true);
       } else if (window.veloceAPI && window.veloceAPI.loadDirectory) {
         if (window.veloceAPI.setViewParams) {
-          await appState.setViewParams();
+          await appState.setViewParams(true);
         }
         await window.veloceAPI.loadDirectory(currentTab.path);
       }
@@ -1560,9 +1560,6 @@ uiManager.elements.dirTree.addEventListener('click', async (e) => {
 
   const path = itemDiv.dataset.path;
   if (window.veloceAPI.loadDirectory) {
-    if (window.veloceAPI.setViewParams) {
-      await appState.setViewParams();
-    }
     // アクティブなタブの内容を更新する
     const activeTab = appState.tabs[appState.activeTabIndex];
     if (activeTab) {
@@ -2174,9 +2171,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   initBookmarkEvents({
     onNavigate: async (path, name) => {
       if (window.veloceAPI.loadDirectory) {
-        if (window.veloceAPI.setViewParams) {
-          await appState.setViewParams();
-        }
         const activeTab = appState.tabs[appState.activeTabIndex];
         if (activeTab) {
           activeTab.path = path;
@@ -2870,9 +2864,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       uiManager.updateSelectionUI();
 
       if (window.veloceAPI.loadDirectory) {
-        if (window.veloceAPI.setViewParams) {
-          await appState.setViewParams();
-        }
         const activeTab = appState.tabs[appState.activeTabIndex];
         if (activeTab) {
           activeTab.path = path;
@@ -3233,7 +3224,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // 起動時のディレクトリ読み込み前にソート条件をバックエンドへ同期させ、initialChunkが正しくソートされるようにする
     if (window.veloceAPI.setViewParams) {
-      await appState.setViewParams();
+      await appState.setViewParams(true);
     }
     window.veloceAPI.loadDirectory(currentTab.path);
 

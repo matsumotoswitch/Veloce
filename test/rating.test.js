@@ -33,7 +33,11 @@ describe('Rating Feature', () => {
     const count = await appState.setViewParams();
     
     expect(count).toBe(100);
-    expect(window.veloceAPI.setViewParams).toHaveBeenCalledWith('name', true, '', 3, 'lte');
+    expect(window.veloceAPI.setViewParams).toHaveBeenCalledWith('name', true, '', 3, 'lte', false);
+
+    // skipSort = true の場合は第6引数に true が渡されること
+    await appState.setViewParams(true);
+    expect(window.veloceAPI.setViewParams).toHaveBeenCalledWith('name', true, '', 3, 'lte', true);
   });
   
   it('should handle rating assignment correctly (mock simulation)', async () => {

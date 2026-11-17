@@ -352,16 +352,19 @@ class AppState {
 
   /**
    * Rust側のSource of Truthにソート・検索条件を送信し、フィルタリング後の件数を取得します。
+   * @param {boolean} [skipSort=false] - true の場合、再ソートを行わずパラメータの保存のみを行う（ディレクトリ移動直前等）
    * @returns {Promise<number>} フィルタリング後の件数
    */
-  async setViewParams() {
+  async setViewParams(skipSort = false) {
     if (window.veloceAPI && window.veloceAPI.setViewParams) {
       try {
         const totalCount = await window.veloceAPI.setViewParams(
           this.sortConfig.key, this.sortConfig.asc, this.searchQuery,
-          this.ratingFilterVal, this.ratingFilterOp
+          this.ratingFilterVal, this.ratingFilterOp, skipSort
         );
-        this.totalCount = totalCount;
+        if (!skipSort) {
+          this.totalCount = totalCount;
+        }
       } catch (err) {
         console.error('Failed to set view params:', err);
       }

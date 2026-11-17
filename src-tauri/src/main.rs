@@ -1499,12 +1499,17 @@ fn set_view_params(
     search_query: String,
     rating_filter_val: u8,
     rating_filter_op: String,
+    skip_sort: Option<bool>,
 ) -> usize {
     *state.sort_config.write() = SortConfig { key: sort_key, asc };
     *state.search_query.write() = search_query;
     *state.rating_filter_val.lock() = rating_filter_val;
     *state.rating_filter_op.lock() = rating_filter_op;
-    apply_filters_and_sort(Some(&app), &state)
+    if skip_sort.unwrap_or(false) {
+        state.filtered_files.read().len()
+    } else {
+        apply_filters_and_sort(Some(&app), &state)
+    }
 }
 
 /// 仮想スクロール用: 指定範囲のImageFileをスライスして返す
@@ -4353,6 +4358,93 @@ mod viewer_tests {
             assert_eq!(scan_filtered[i].unified_search_text, idx_filtered[i].unified_search_text);
             assert_eq!(scan_filtered[i].meta_loaded, idx_filtered[i].meta_loaded);
         }
+    }
+
+    #[test]
+    fn test_set_view_params_skip_sort() {
+        let (db_tx, _) = tokio::sync::mpsc::channel(1);
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        let state = AppState::new(pool.clone(), pool, false, db_tx, 0, "test_token".to_string());
+
+        let files = vec![
+            std::sync::Arc::new(ImageFile {
+                name: "b.png".to_string(),
+                ext: ".png".into(),
+                path: "C:\\images\\b.png".to_string(),
+                size: 200,
+                mtime: 200,
+                ctime: 200,
+                has_thumbnail_cache: false,
+                width: 100,
+                height: 100,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: "b.png".to_string(),
+                hash_key: Default::default(),
+            }),
+            std::sync::Arc::new(ImageFile {
+                name: "a.png".to_string(),
+                ext: ".png".into(),
+                path: "C:\\images\\a.png".to_string(),
+                size: 100,
+                mtime: 100,
+                ctime: 100,
+                has_thumbnail_cache: false,
+                width: 200,
+                height: 200,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: "a.png".to_string(),
+                hash_key: Default::default(),
+            }),
+        ];
+
+        *state.all_files.write() = files.clone();
+        *state.filtered_files.write() = files.clone();
+        state.rebuild_all_indices(&files);
+        state.rebuild_filtered_indices(&files);
+
+        // 1. skip_sort = true 相当の処理: state の設定値のみが更新され、filtered_files は再ソートされず不変であること
+        let sort_key = "name".to_string();
+        let asc = true;
+        let search_query = "a.png".to_string();
+        let rating_filter_val = 3;
+        let rating_filter_op = "gte".to_string();
+
+        state.ratings.write().insert("C:\\images\\a.png".to_string(), 4);
+
+        *state.sort_config.write() = SortConfig { key: sort_key.clone(), asc };
+        *state.search_query.write() = search_query.clone();
+        *state.rating_filter_val.lock() = rating_filter_val;
+        *state.rating_filter_op.lock() = rating_filter_op.clone();
+
+        // skip_sort 時は filtered_files は変化しない（b.png, a.png の順のまま）
+        let initial_filtered = state.filtered_files.read().clone();
+        assert_eq!(initial_filtered[0].name, "b.png");
+        assert_eq!(initial_filtered[1].name, "a.png");
+
+        assert_eq!(state.sort_config.read().key, "name");
+        assert_eq!(state.sort_config.read().asc, true);
+        assert_eq!(*state.search_query.read(), "a.png");
+        assert_eq!(*state.rating_filter_val.lock(), 3);
+        assert_eq!(*state.rating_filter_op.lock(), "gte");
+
+        // 2. apply_filters_and_sort を実行した場合（skip_sort = false 時）、ソートおよびフィルタが反映されること
+        let count = apply_filters_and_sort(None, &state);
+        let updated_filtered = state.filtered_files.read().clone();
+        // search_query = "a.png" により a.png のみ抽出される
+        assert_eq!(count, 1);
+        assert_eq!(updated_filtered.len(), 1);
+        assert_eq!(updated_filtered[0].name, "a.png");
     }
 
     #[test]

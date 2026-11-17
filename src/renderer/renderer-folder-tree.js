@@ -328,9 +328,6 @@ export async function handleTreeNavigation(key, callbacks = treeCallbacks) {
 
     const path = item.dataset.path;
     if (window.veloceAPI.loadDirectory) {
-      if (window.veloceAPI.setViewParams) {
-        await appState.setViewParams();
-      }
       const activeTab = appState.tabs[appState.activeTabIndex];
       if (activeTab && activeTab.path !== path) {
         activeTab.path = path;
