@@ -1275,6 +1275,7 @@ export async function updateMetadataOverlay() {
   if (!contentEl) return;
 
   const filePath = viewerState.currentImagePath;
+  const currentIndex = viewerState.currentIndex;
   if (!filePath) {
     contentEl.innerHTML = '<div class="viewer-meta-empty">画像が選択されていません</div>';
     return;
@@ -1288,7 +1289,10 @@ export async function updateMetadataOverlay() {
     if (window.veloceAPI && window.veloceAPI.parseMetadata) {
       rawMeta = await window.veloceAPI.parseMetadata(filePath);
     }
-    if (seq !== currentMetadataSeq) return; // シーケンス不一致の破棄
+    // シーケンス不一致または取得完了時に現行index/パスが移動していた場合は抑制
+    if (seq !== currentMetadataSeq || viewerState.currentIndex !== currentIndex || viewerState.currentImagePath !== filePath) {
+      return;
+    }
 
     const meta = rawMeta || {};
     const filename = filePath.split(/[/\\]/).pop();

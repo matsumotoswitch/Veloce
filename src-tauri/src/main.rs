@@ -398,13 +398,21 @@ fn load_directory(
     let db_conn_purge = state.db_conn.clone();
     let settings_db_clone = state.settings_db_conn.clone();
     let is_smart_target = target_path.starts_with("smart://");
-    let mut ratings_map_opt = if is_smart_target {
+    let smart_folders_clone = state.smart_folders.read().clone();
+    let current_sort = state.sort_config.read().clone();
+
+    let target_folder_id = if is_smart_target {
+        target_path.replace("smart://", "")
+    } else {
+        String::new()
+    };
+    let rule_exists = is_smart_target && smart_folders_clone.iter().any(|r| r.id == target_folder_id);
+
+    let mut ratings_map_opt = if is_smart_target && (current_sort.key == "rating" || !rule_exists) {
         Some(state.ratings.read().clone())
     } else {
         None
     };
-    let smart_folders_clone = state.smart_folders.read().clone();
-    let current_sort = state.sort_config.read().clone();
 
     // 旧フォルダ向けに実行中のサムネイル一括生成へ打ち切りを通知する
     advance_thumbnail_batch_epoch();
@@ -899,7 +907,7 @@ fn load_directory(
                                             if has_metadata {
                                                 f.width = width;
                                                 f.height = height;
-                                                f.unified_search_text = format!("{} {} {} {}", f.name, prompt, negative_prompt, source).to_lowercase();
+                                                f.unified_search_text = format!("{} {} {} {}", f.name.to_lowercase(), prompt, negative_prompt, source);
                                                 f.meta_loaded = true;
                                             }
                                         }
@@ -7212,5 +7220,68 @@ mod viewer_tests {
         // 空リストの呼び出し
         let empty_result = trash_files_batch_inner(&state, Vec::new()).unwrap();
         assert!(empty_result.is_empty());
+    }
+
+    #[test]
+    fn test_smart_folder_ratings_clone_conditions() {
+        let state = create_test_app_state("C:\\test");
+        let path1 = "C:\\test\\a.png".to_string();
+        let path2 = "C:\\test\\b.png".to_string();
+
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute("INSERT INTO cache (hash_key, path, mtime) VALUES ('h1', ?1, 1000)", rusqlite::params![&path1]).unwrap();
+            conn.execute("INSERT INTO cache (hash_key, path, mtime) VALUES ('h2', ?1, 2000)", rusqlite::params![&path2]).unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, 5)", rusqlite::params![&path1]).unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, 3)", rusqlite::params![&path2]).unwrap();
+        }
+        {
+            let mut r = state.ratings.write();
+            r.insert(path1.clone(), 5);
+            r.insert(path2.clone(), 3);
+        }
+
+        // 定義済みルールを 1 つ登録
+        let defined_rule = crate::models::SmartFolderRule {
+            id: "custom_rule_1".to_string(),
+            name: "Custom 1".to_string(),
+            conditions: vec![],
+            match_type: "all".to_string(),
+        };
+        state.smart_folders.write().push(defined_rule);
+
+        let smart_folders = state.smart_folders.read().clone();
+
+        // 1. ルール未定義の旧形式スマートフォルダ（smart://rating/5 や未登録ID）
+        // -> ソートキーが name でも ratings_map_opt がクローンされること
+        let target_unregistered = "smart://rating/5";
+        let target_id = target_unregistered.replace("smart://", "");
+        let rule_exists = smart_folders.iter().any(|r| r.id == target_id);
+        assert!(!rule_exists);
+
+        *state.sort_config.write() = crate::models::SortConfig { key: "name".to_string(), asc: true };
+        let current_sort = state.sort_config.read().clone();
+        let should_clone_unregistered = target_unregistered.starts_with("smart://")
+            && (current_sort.key == "rating" || !rule_exists);
+        assert!(should_clone_unregistered, "ルール未登録スマートフォルダではソートキーに関係なくクローンされること");
+
+        // 2. ルールあり＋rating ソート
+        let target_registered = "smart://custom_rule_1";
+        let reg_id = target_registered.replace("smart://", "");
+        let reg_rule_exists = smart_folders.iter().any(|r| r.id == reg_id);
+        assert!(reg_rule_exists);
+
+        *state.sort_config.write() = crate::models::SortConfig { key: "rating".to_string(), asc: false };
+        let sort_rating = state.sort_config.read().clone();
+        let should_clone_rating_sort = target_registered.starts_with("smart://")
+            && (sort_rating.key == "rating" || !reg_rule_exists);
+        assert!(should_clone_rating_sort, "ルール登録済みでも rating ソート時はクローンされること");
+
+        // 3. ルールあり＋name ソート（不要なクローンの抑制）
+        *state.sort_config.write() = crate::models::SortConfig { key: "name".to_string(), asc: true };
+        let sort_name = state.sort_config.read().clone();
+        let should_clone_name_sort = target_registered.starts_with("smart://")
+            && (sort_name.key == "rating" || !reg_rule_exists);
+        assert!(!should_clone_name_sort, "ルール登録済みかつ rating 以外のソートではクローンが抑制されること");
     }
 }

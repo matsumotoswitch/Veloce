@@ -12,6 +12,44 @@ use crate::apply_filters_and_sort;
 use compact_str::format_compact;
 use tauri::Manager;
 
+#[inline]
+fn dir_entry_file_type_kind(entry: &std::fs::DirEntry) -> (bool, bool) {
+    match entry.file_type() {
+        Ok(ft) => {
+            if ft.is_symlink() {
+                if let Ok(meta) = entry.metadata() {
+                    (meta.is_file(), meta.is_dir())
+                } else {
+                    (false, false)
+                }
+            } else {
+                (ft.is_file(), ft.is_dir())
+            }
+        }
+        Err(_) => {
+            if let Ok(meta) = entry.metadata() {
+                (meta.is_file(), meta.is_dir())
+            } else {
+                (false, false)
+            }
+        }
+    }
+}
+
+#[inline]
+fn dir_entry_is_dir(entry: &std::fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(ft) => {
+            if ft.is_symlink() {
+                entry.metadata().map(|m| m.is_dir()).unwrap_or(false)
+            } else {
+                ft.is_dir()
+            }
+        }
+        Err(_) => entry.metadata().map(|m| m.is_dir()).unwrap_or(false),
+    }
+}
+
 /// 監視対象ディレクトリ内のメディアファイル（`is_listed_media_extension` 準拠）とサブフォルダ一覧を収集する
 /// 初期構築と定期再スキャンの双方から共有し、拡張子判定の不一致による誤削除検知を防ぐ
 pub(crate) fn collect_watcher_dir_snapshot(
@@ -24,9 +62,10 @@ pub(crate) fn collect_watcher_dir_snapshot(
     let mut folders = std::collections::HashSet::new();
     if let Ok(entries) = std::fs::read_dir(dir_path) {
         for entry in entries.filter_map(Result::ok) {
+            let (is_file, is_dir) = dir_entry_file_type_kind(&entry);
             let p = entry.path();
             let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
-            if p.is_file() {
+            if is_file {
                 if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                     let ext_lower = ext.to_lowercase();
                     if is_listed_media_extension(&ext_lower) {
@@ -36,7 +75,7 @@ pub(crate) fn collect_watcher_dir_snapshot(
                         }
                     }
                 }
-            } else if p.is_dir() {
+            } else if is_dir {
                 folders.insert(clean_p);
             }
         }
@@ -68,14 +107,16 @@ pub(crate) fn notify_files_batch_inner(
                 remove_set.insert(clean);
             }
             all_files.retain(|f| !remove_set.contains(&f.path));
-            if !changed_files.is_empty() {
-                state.rebuild_all_indices(&all_files);
-            }
+            // 削除ありの場合: retain 直後の1回目の rebuild_all_indices は配置の正確性のために実行
+            state.rebuild_all_indices(&all_files);
         }
 
         if !changed_files.is_empty() {
-            let mut new_idx_map = std::collections::HashMap::with_capacity(changed_files.len());
+            let mut added_items: Vec<(usize, std::sync::Arc<ImageFile>)> = Vec::new();
+            let mut updated_items: Vec<(String, std::sync::Arc<ImageFile>, usize)> = Vec::new();
+
             {
+                let mut new_idx_map = std::collections::HashMap::with_capacity(changed_files.len());
                 let existing_idx_map = state.path_to_all_idx.read();
                 for mut file in changed_files {
                     let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
@@ -92,19 +133,66 @@ pub(crate) fn notify_files_batch_inner(
                                 file.width = existing.width;
                                 file.height = existing.height;
                             }
-                            *existing = std::sync::Arc::new(file);
+                            let old_path = existing.path.clone();
+                            let arc_f = std::sync::Arc::new(file);
+                            *existing = std::sync::Arc::clone(&arc_f);
+                            updated_items.push((old_path, arc_f, idx));
                             continue;
                         }
                     }
 
                     let new_idx = all_files.len();
-                    all_files.push(std::sync::Arc::new(file));
+                    let arc_f = std::sync::Arc::new(file);
+                    all_files.push(std::sync::Arc::clone(&arc_f));
                     new_idx_map.insert(clean, new_idx);
+                    added_items.push((new_idx, arc_f));
                 }
-            } // existing_idx_map の読み取りロックを明示的に解放してから rebuild_all_indices を実行
-        }
+            } // existing_idx_map の読み取りロックを明示的に解放
 
-        state.rebuild_all_indices(&all_files);
+            // 全件再構築を行わず、追加分・置換分の差分更新を実行
+            if !added_items.is_empty() || !updated_items.is_empty() {
+                let mut all_map = state.path_to_all_idx.write();
+                let mut mtime_map = state.path_to_mtime.write();
+
+                for (idx, f) in added_items {
+                    all_map.insert(f.path.clone(), idx);
+                    let norm = crate::utils::normalize_unc_path(&f.path);
+                    if norm != f.path {
+                        let norm_str = norm.into_owned();
+                        all_map.insert(norm_str.clone(), idx);
+                        mtime_map.insert(norm_str, f.mtime);
+                    }
+                    mtime_map.insert(f.path.clone(), f.mtime);
+                }
+
+                for (old_path, f, idx) in updated_items {
+                    if old_path != f.path {
+                        all_map.remove(&old_path);
+                        let old_norm = crate::utils::normalize_unc_path(&old_path);
+                        if old_norm != old_path {
+                            all_map.remove(old_norm.as_ref());
+                            mtime_map.remove(old_norm.as_ref());
+                        }
+                        mtime_map.remove(&old_path);
+
+                        all_map.insert(f.path.clone(), idx);
+                        let new_norm = crate::utils::normalize_unc_path(&f.path);
+                        if new_norm != f.path {
+                            let norm_str = new_norm.into_owned();
+                            all_map.insert(norm_str.clone(), idx);
+                            mtime_map.insert(norm_str, f.mtime);
+                        }
+                        mtime_map.insert(f.path.clone(), f.mtime);
+                    } else {
+                        mtime_map.insert(f.path.clone(), f.mtime);
+                        let norm = crate::utils::normalize_unc_path(&f.path);
+                        if norm != f.path {
+                            mtime_map.insert(norm.into_owned(), f.mtime);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     apply_filters_and_sort(app, state)
@@ -293,9 +381,8 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
                     if let Some(ref parent) = parent_dir {
                         if let Ok(entries) = std::fs::read_dir(parent) {
                             for entry in entries.filter_map(Result::ok) {
-                                let p = entry.path();
-                                if p.is_dir() {
-                                    let clean_p = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
+                                if dir_entry_is_dir(&entry) {
+                                    let clean_p = entry.path().to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
                                     known_folders.insert(clean_p);
                                 }
                             }
@@ -400,9 +487,8 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
                 if let Some(ref parent) = parent_dir {
                     if let Ok(entries) = std::fs::read_dir(parent) {
                         for entry in entries.filter_map(Result::ok) {
-                            let p = entry.path();
-                            if p.is_dir() {
-                                let path_str = p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
+                            if dir_entry_is_dir(&entry) {
+                                let path_str = entry.path().to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
                                 current_folders.insert(path_str.clone());
                                 if !known_folders.contains(&path_str) {
                                     folder_changed = true;
@@ -778,4 +864,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_notify_files_batch_incremental_index_consistency() {
+        let state = create_test_app_state("C:\\test");
+
+        let make_file = |path: &str, mtime: u64| ImageFile {
+            name: path.split('\\').last().unwrap().to_string(),
+            ext: ".png".into(),
+            path: path.to_string(),
+            size: 1024,
+            mtime,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            width: 100,
+            height: 100,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: true,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: "hk".into(),
+        };
+
+        // 初期状態: \\?\ 形式を含むファイルセット
+        let f1 = make_file(r"\\?\C:\test\img1.png", 1000);
+        let f2 = make_file(r"\\?\C:\test\img2.png", 2000);
+        let f3 = make_file(r"C:\test\img3.png", 3000);
+
+        {
+            let mut all = state.all_files.write();
+            all.push(std::sync::Arc::new(f1));
+            all.push(std::sync::Arc::new(f2));
+            all.push(std::sync::Arc::new(f3));
+            state.rebuild_all_indices(&all);
+        }
+
+        let assert_maps_match_rebuild = |st: &AppState| {
+            let expected_state = create_test_app_state("C:\\test");
+            let current_all = st.all_files.read().clone();
+            expected_state.rebuild_all_indices(&current_all);
+
+            let act_all = st.path_to_all_idx.read().clone();
+            let exp_all = expected_state.path_to_all_idx.read().clone();
+            assert_eq!(act_all, exp_all, "path_to_all_idx が全再構築結果と完全一致すること");
+
+            let act_mtime = st.path_to_mtime.read().clone();
+            let exp_mtime = expected_state.path_to_mtime.read().clone();
+            assert_eq!(act_mtime, exp_mtime, "path_to_mtime が全再構築結果と完全一致すること");
+        };
+
+        // 初期状態の一致確認
+        assert_maps_match_rebuild(&state);
+
+        // ケース1: 変更のみ（file2 の mtime を 2500 に更新）
+        let f2_mod = make_file(r"\\?\C:\test\img2.png", 2500);
+        notify_files_batch_inner(None, &state, vec![f2_mod], Vec::new());
+        assert_maps_match_rebuild(&state);
+
+        // ケース2: 削除のみ（file3 を削除）
+        notify_files_batch_inner(None, &state, Vec::new(), vec![r"C:\test\img3.png".to_string()]);
+        assert_maps_match_rebuild(&state);
+
+        // ケース3: 削除＋置換（mtime変更）＋追加の混在バッチ（\\?\ 含む）
+        let f2_mod2 = make_file(r"\\?\C:\test\img2.png", 2800);
+        let f4_new = make_file(r"\\?\C:\test\img4.png", 4000);
+        let f5_new = make_file(r"C:\test\img5.png", 5000);
+        notify_files_batch_inner(
+            None,
+            &state,
+            vec![f2_mod2, f4_new, f5_new],
+            vec![r"\\?\C:\test\img1.png".to_string()],
+        );
+        assert_maps_match_rebuild(&state);
+    }
 }

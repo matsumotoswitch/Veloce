@@ -144,9 +144,12 @@ const CONFIG = {
   CHUNK_SIZE: 100,        // 一度にDOMに追加する要素数（描画負荷軽減）
   SEARCH_DELAY: 300,      // 検索入力時の反映デバウンス時間(ms)
   REFRESH_DELAY: 100,     // リフレッシュ処理の遅延時間(ms)
+  SELECT_METADATA_DELAY: 40, // 選択変更時のインスペクター更新デバウンス(ms)
   GRID_GAP: 8,            // サムネイルグリッドの隙間(px)
   GRID_PADDING: 8         // サムネイルグリッドのパディング(px)
 };
+
+let _inspectorDebounceTimer = null;
 
 // ----------------------------------------------------
 // UI State & Global DOM Elements
@@ -609,12 +612,32 @@ export async function selectImage(index, event = null) {
     }
   }
 
-  // インスペクターの更新 (IPC呼び出しをUI更新後に遅延させてキーボード移動の遅延をなくす)
+  // インスペクターの更新 (短時間の連続移動を30〜50msでデバウンスし、不要なIPCを間引く)
+  if (_inspectorDebounceTimer) {
+    clearTimeout(_inspectorDebounceTimer);
+    _inspectorDebounceTimer = null;
+  }
+
   if (appState.selection.size > 1) {
     renderMultipleSelectionSummary();
   } else {
-    const file = await window.veloceAPI.getFileByIndex(index);
-    if (file) renderMetadata(file);
+    const targetIndex = index;
+    _inspectorDebounceTimer = setTimeout(async () => {
+      _inspectorDebounceTimer = null;
+      if (appState.selectedIndex !== targetIndex || appState.selection.size !== 1) {
+        return;
+      }
+      try {
+        const file = await window.veloceAPI.getFileByIndex(targetIndex);
+        // await 完了時点で選択がすでに別の index に移っていたら renderMetadata を呼ばない
+        if (appState.selectedIndex !== targetIndex || appState.selection.size !== 1) {
+          return;
+        }
+        if (file) renderMetadata(file);
+      } catch (err) {
+        console.error('Failed to get file for inspector:', err);
+      }
+    }, CONFIG.SELECT_METADATA_DELAY);
   }
 }
 
