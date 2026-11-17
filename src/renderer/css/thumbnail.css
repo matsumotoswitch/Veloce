@@ -135,4 +135,4 @@ img.thumbnail-img.loading {
   background: var(--accent-color);
   transition: width 0.3s var(--transition-fast), opacity 0.5s ease;
 }
-
+

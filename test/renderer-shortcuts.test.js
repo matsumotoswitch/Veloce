@@ -65,8 +65,16 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
         if (idx === 1) return { path: '/path/to/1.jpg', name: '1.jpg' };
         return null;
       }),
+      getFilesByIndices: vi.fn().mockImplementation(async (indices) => {
+        return indices.map(idx => {
+          if (idx === 0) return { path: '/path/to/0.jpg', name: '0.jpg' };
+          if (idx === 1) return { path: '/path/to/1.jpg', name: '1.jpg' };
+          return null;
+        }).filter(Boolean);
+      }),
       copyImageToClipboard: vi.fn(),
-      setRating: vi.fn(),
+      setRating: vi.fn().mockResolvedValue(1),
+      setRatingsBatch: vi.fn().mockResolvedValue(1),
       arrangeViewers: vi.fn(),
       trashFile: vi.fn().mockResolvedValue(true),
       notifyFileRemoved: vi.fn(),
@@ -242,15 +250,60 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       expect(window.veloceAPI.renameFile).toHaveBeenCalled();
     });
 
-    it('should set rating on 0-5 keys', async () => {
+    it('should set rating on 0-5 keys using getFilesByIndices and setRatingsBatch', async () => {
       appState.selectedIndex = 0;
       appState.selection.add(0);
 
       const event = new window.KeyboardEvent('keydown', { key: '5', cancelable: true });
       await globalKeydownHandler(event);
 
+      expect(window.veloceAPI.getFilesByIndices).toHaveBeenCalledWith([0]);
+      expect(window.veloceAPI.setRatingsBatch).toHaveBeenCalledWith([
+        { path: '/path/to/0.jpg', rating: 5 }
+      ]);
+    });
+
+    it('should batch update rating for multiple selected items on 0-5 keys', async () => {
+      appState.selection.add(0);
+      appState.selection.add(1);
+
+      const event = new window.KeyboardEvent('keydown', { key: '4', cancelable: true });
+      await globalKeydownHandler(event);
+
+      expect(window.veloceAPI.getFilesByIndices).toHaveBeenCalledWith([0, 1]);
+      expect(window.veloceAPI.setRatingsBatch).toHaveBeenCalledWith([
+        { path: '/path/to/0.jpg', rating: 4 },
+        { path: '/path/to/1.jpg', rating: 4 }
+      ]);
+    });
+
+    it('should toggle rating back to 0 when all selected items have the same rating', async () => {
+      appState.selection.add(0);
+      appState.selection.add(1);
+      appState.ratings['/path/to/0.jpg'] = 3;
+      appState.ratings['/path/to/1.jpg'] = 3;
+
+      const event = new window.KeyboardEvent('keydown', { key: '3', cancelable: true });
+      await globalKeydownHandler(event);
+
+      expect(window.veloceAPI.setRatingsBatch).toHaveBeenCalledWith([
+        { path: '/path/to/0.jpg', rating: 0 },
+        { path: '/path/to/1.jpg', rating: 0 }
+      ]);
+    });
+
+    it('should fallback to getFileByIndex and setRating if batch APIs are missing', async () => {
+      delete window.veloceAPI.getFilesByIndices;
+      delete window.veloceAPI.setRatingsBatch;
+
+      appState.selectedIndex = 0;
+      appState.selection.add(0);
+
+      const event = new window.KeyboardEvent('keydown', { key: '2', cancelable: true });
+      await globalKeydownHandler(event);
+
       expect(window.veloceAPI.getFileByIndex).toHaveBeenCalledWith(0);
-      expect(window.veloceAPI.setRating).toHaveBeenCalledWith('/path/to/0.jpg', 5);
+      expect(window.veloceAPI.setRating).toHaveBeenCalledWith('/path/to/0.jpg', 2);
     });
 
     it('should call hideCustomTooltip (via refreshFileList) on F5', async () => {
@@ -469,7 +522,9 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       await globalKeydownHandler(event);
 
       expect(window.veloceAPI.getFileByIndex).not.toHaveBeenCalled();
+      expect(window.veloceAPI.getFilesByIndices).not.toHaveBeenCalled();
       expect(window.veloceAPI.setRating).not.toHaveBeenCalled();
+      expect(window.veloceAPI.setRatingsBatch).not.toHaveBeenCalled();
     });
 
     it('guards against Delete key when dialog-overlay is open', async () => {

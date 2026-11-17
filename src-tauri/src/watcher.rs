@@ -74,30 +74,34 @@ pub(crate) fn notify_files_batch_inner(
         }
 
         if !changed_files.is_empty() {
-            let mut local_idx_map = state.path_to_all_idx.read().clone();
-            for mut file in changed_files {
-                let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
-                file.path = clean.clone();
-                if file.hash_key.is_empty() {
-                    file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime).into();
-                }
-
-                if let Some(&idx) = local_idx_map.get(&clean) {
-                    if let Some(existing) = all_files.get_mut(idx) {
-                        // 既存の幅・高さが取得済みで、通知された値が 0 の場合は既存の寸法を維持する
-                        if file.width == 0 && file.height == 0 && (existing.width > 0 || existing.height > 0) {
-                            file.width = existing.width;
-                            file.height = existing.height;
-                        }
-                        *existing = std::sync::Arc::new(file);
-                        continue;
+            let mut new_idx_map = std::collections::HashMap::with_capacity(changed_files.len());
+            {
+                let existing_idx_map = state.path_to_all_idx.read();
+                for mut file in changed_files {
+                    let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
+                    file.path = clean.clone();
+                    if file.hash_key.is_empty() {
+                        file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime).into();
                     }
-                }
 
-                let new_idx = all_files.len();
-                all_files.push(std::sync::Arc::new(file));
-                local_idx_map.insert(clean, new_idx);
-            }
+                    let existing_opt = new_idx_map.get(&clean).copied().or_else(|| existing_idx_map.get(&clean).copied());
+                    if let Some(idx) = existing_opt {
+                        if let Some(existing) = all_files.get_mut(idx) {
+                            // 既存の幅・高さが取得済みで、通知された値が 0 の場合は既存の寸法を維持する
+                            if file.width == 0 && file.height == 0 && (existing.width > 0 || existing.height > 0) {
+                                file.width = existing.width;
+                                file.height = existing.height;
+                            }
+                            *existing = std::sync::Arc::new(file);
+                            continue;
+                        }
+                    }
+
+                    let new_idx = all_files.len();
+                    all_files.push(std::sync::Arc::new(file));
+                    new_idx_map.insert(clean, new_idx);
+                }
+            } // existing_idx_map の読み取りロックを明示的に解放してから rebuild_all_indices を実行
         }
 
         state.rebuild_all_indices(&all_files);
@@ -569,6 +573,167 @@ mod tests {
 
         assert_eq!(app_state.path_to_all_idx.read().get("C:\\images\\new_pic.png").copied(), None, "削除後にインデックスから消去されること");
         assert_eq!(app_state.get_mtime("C:\\images\\new_pic.png"), None);
+    }
+
+    #[test]
+    fn test_notify_files_batch_existing_new_and_duplicate_new_paths() {
+        let app_state = create_test_app_state("C:\\images");
+
+        let existing1 = ImageFile {
+            name: "existing1.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\images\\existing1.png".to_string(),
+            size: 1000,
+            mtime: 1700000010,
+            ctime: 1700000000,
+            has_thumbnail_cache: true,
+            width: 1024,
+            height: 768,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: Default::default(),
+        };
+        let existing2 = ImageFile {
+            name: "existing2.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\images\\existing2.png".to_string(),
+            size: 2000,
+            mtime: 1700000020,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            width: 800,
+            height: 600,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: Default::default(),
+        };
+
+        {
+            let mut all = app_state.all_files.write();
+            all.push(std::sync::Arc::new(existing1));
+            all.push(std::sync::Arc::new(existing2));
+            app_state.rebuild_all_indices(&all);
+        }
+
+        // 1. 既存パスの更新: existing1.png (サイズ 1500, width=0, height=0 -> 寸法維持)
+        let update_existing1 = ImageFile {
+            name: "existing1.png".to_string(),
+            ext: ".png".into(),
+            path: "C:/images/existing1.png".to_string(), // スラッシュ区切り
+            size: 1500,
+            mtime: 1700000050,
+            ctime: 1700000000,
+            has_thumbnail_cache: true,
+            width: 0,
+            height: 0,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: Default::default(),
+        };
+        // 2. 新規パスの追加: new_a.png
+        let new_a = ImageFile {
+            name: "new_a.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\images\\new_a.png".to_string(),
+            size: 3000,
+            mtime: 1700000060,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            width: 1920,
+            height: 1080,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: Default::default(),
+        };
+        // 3. 同一バッチ内での新規パス重複: new_a.png (サイズ 3500, width=0, height=0 -> 先行の寸法 1920x1080 を維持)
+        let dup_new_a = ImageFile {
+            name: "new_a.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\images\\new_a.png".to_string(),
+            size: 3500,
+            mtime: 1700000070,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            width: 0,
+            height: 0,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: Default::default(),
+        };
+        // 4. もう一つの新規パス: new_b.png
+        let new_b = ImageFile {
+            name: "new_b.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\images\\new_b.png".to_string(),
+            size: 4000,
+            mtime: 1700000080,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            width: 1280,
+            height: 720,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: false,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: Default::default(),
+        };
+
+        // 削除対象: existing2.png
+        let removed_paths = vec!["C:/images/existing2.png".to_string()];
+        let changed_files = vec![update_existing1, new_a, dup_new_a, new_b];
+
+        let count = notify_files_batch_inner(None, &app_state, changed_files, removed_paths);
+        assert_eq!(count, 3, "削除1件、既存更新1件、新規追加2件（重複は1件に集約）で合計3件となること");
+
+        let all = app_state.all_files.read();
+        assert_eq!(all.len(), 3);
+
+        // 0: existing1 (更新され、寸法維持)
+        assert_eq!(all[0].path, "C:\\images\\existing1.png");
+        assert_eq!(all[0].size, 1500);
+        assert_eq!(all[0].width, 1024);
+        assert_eq!(all[0].height, 768);
+
+        // 1: new_a (重複更新され、先行の寸法維持、サイズ 3500)
+        assert_eq!(all[1].path, "C:\\images\\new_a.png");
+        assert_eq!(all[1].size, 3500);
+        assert_eq!(all[1].width, 1920);
+        assert_eq!(all[1].height, 1080);
+
+        // 2: new_b
+        assert_eq!(all[2].path, "C:\\images\\new_b.png");
+        assert_eq!(all[2].size, 4000);
+        assert_eq!(all[2].width, 1280);
+        assert_eq!(all[2].height, 720);
+
+        // インデックス検証
+        let idx_map = app_state.path_to_all_idx.read();
+        assert_eq!(idx_map.get("C:\\images\\existing1.png").copied(), Some(0));
+        assert_eq!(idx_map.get("C:\\images\\new_a.png").copied(), Some(1));
+        assert_eq!(idx_map.get("C:\\images\\new_b.png").copied(), Some(2));
+        assert_eq!(idx_map.get("C:\\images\\existing2.png").copied(), None);
     }
 
 

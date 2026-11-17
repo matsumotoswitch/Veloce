@@ -12,8 +12,10 @@ use lofty::mpeg::MpegFile;
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, TagExt};
+use std::collections::{HashMap, VecDeque};
 use std::io::BufReader;
 use std::path::Path;
+use std::sync::{Arc, LazyLock};
 
 /// 音声ファイルから抽出したメタデータ情報
 #[derive(Debug, Clone, Default)]
@@ -129,6 +131,138 @@ pub fn parse_audio_metadata(path: &str) -> AudioMetadata {
 /// プロパティ計算（フレーム走査）を抑制してタグ領域のみを解析する。
 pub fn extract_audio_cover(path: &str) -> Option<Vec<u8>> {
     parse_audio_metadata_internal(path, false, true).cover_bytes
+}
+
+/// 音声カバー抽出キャッシュのキー
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AudioCoverKey {
+    pub path: String,
+    pub mtime: u64,
+    pub file_size: u64,
+}
+
+/// 音声カバー画像のインメモリ LRU キャッシュ構造体
+pub struct AudioCoverCache {
+    max_entries: usize,
+    max_bytes: usize,
+    total_bytes: usize,
+    entries: HashMap<AudioCoverKey, Arc<Vec<u8>>>,
+    order: VecDeque<AudioCoverKey>,
+}
+
+pub const DEFAULT_AUDIO_COVER_CACHE_MAX_ENTRIES: usize = 128;
+pub const DEFAULT_AUDIO_COVER_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024; // 64 MB
+
+impl AudioCoverCache {
+    pub fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            max_entries,
+            max_bytes,
+            total_bytes: 0,
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    /// キャッシュからカバー画像を取得する（ヒット時は LRU 順序を更新）
+    pub fn get(&mut self, key: &AudioCoverKey) -> Option<Arc<Vec<u8>>> {
+        if let Some(val) = self.entries.get(key) {
+            if let Some(pos) = self.order.iter().position(|k| k == key) {
+                let k = self.order.remove(pos).unwrap();
+                self.order.push_back(k);
+            }
+            return Some(Arc::clone(val));
+        }
+        None
+    }
+
+    /// カバー画像をキャッシュに挿入し、上限超過時は古いものから順に追い出す
+    pub fn insert(&mut self, key: AudioCoverKey, bytes: Vec<u8>) -> Arc<Vec<u8>> {
+        let arc_bytes = Arc::new(bytes);
+        let item_size = arc_bytes.len();
+
+        // 1エントリだけで最大バイト数を超える場合はキャッシュせずそのまま返却
+        if item_size > self.max_bytes {
+            return arc_bytes;
+        }
+
+        if let Some(old) = self.entries.insert(key.clone(), Arc::clone(&arc_bytes)) {
+            self.total_bytes = self.total_bytes.saturating_sub(old.len());
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                self.order.remove(pos);
+            }
+        }
+        self.total_bytes += item_size;
+        self.order.push_back(key);
+
+        while self.entries.len() > self.max_entries || self.total_bytes > self.max_bytes {
+            if let Some(oldest_key) = self.order.pop_front() {
+                if let Some(removed) = self.entries.remove(&oldest_key) {
+                    self.total_bytes = self.total_bytes.saturating_sub(removed.len());
+                }
+            } else {
+                break;
+            }
+        }
+
+        arc_bytes
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn total_bytes(&self) -> usize {
+        self.total_bytes
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+        self.total_bytes = 0;
+    }
+}
+
+pub static AUDIO_COVER_CACHE: LazyLock<parking_lot::Mutex<AudioCoverCache>> = LazyLock::new(|| {
+    parking_lot::Mutex::new(AudioCoverCache::new(
+        DEFAULT_AUDIO_COVER_CACHE_MAX_ENTRIES,
+        DEFAULT_AUDIO_COVER_CACHE_MAX_BYTES,
+    ))
+});
+
+/// キャッシュ付きで埋め込みカバー画像を高速抽出する（HTTP 配信・ビューアー向け）。
+/// (パス, mtime, ファイルサイズ) をキーとしてインメモリ LRU キャッシュに保持し、
+/// カバー無しの場合はキャッシュせず None を返す。
+pub fn extract_audio_cover_cached(path: &str) -> Option<Arc<Vec<u8>>> {
+    if !is_audio_path(path) {
+        return None;
+    }
+
+    let meta = std::fs::metadata(path).ok()?;
+    let file_size = meta.len();
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let key = AudioCoverKey {
+        path: path.to_string(),
+        mtime,
+        file_size,
+    };
+
+    if let Some(cached) = AUDIO_COVER_CACHE.lock().get(&key) {
+        return Some(cached);
+    }
+
+    let extracted = extract_audio_cover(path)?;
+    Some(AUDIO_COVER_CACHE.lock().insert(key, extracted))
 }
 
 fn assign_if_nonempty(slot: &mut Option<String>, value: Option<&str>) {
@@ -703,5 +837,130 @@ mod tests {
         assert_eq!(format_duration(9.2), "0:09");
         assert_eq!(format_duration(125.4), "2:05");
         assert_eq!(format_duration(3661.0), "1:01:01");
+    }
+
+    #[test]
+    fn test_audio_cover_cache_hit_miss_and_eviction() {
+        let mut cache = AudioCoverCache::new(2, 100); // 最大2件、最大100バイト
+
+        let key1 = AudioCoverKey {
+            path: "C:\\audio\\song1.mp3".to_string(),
+            mtime: 1000,
+            file_size: 5000,
+        };
+        let key2 = AudioCoverKey {
+            path: "C:\\audio\\song2.mp3".to_string(),
+            mtime: 2000,
+            file_size: 6000,
+        };
+
+        // 1. 未登録時はミス
+        assert!(cache.get(&key1).is_none());
+
+        // 2. 登録後は同一キーでヒット
+        let data1 = vec![1, 2, 3, 4, 5]; // 5 bytes
+        cache.insert(key1.clone(), data1.clone());
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.total_bytes(), 5);
+
+        let hit1 = cache.get(&key1);
+        assert!(hit1.is_some());
+        assert_eq!(&*hit1.unwrap(), &data1);
+
+        // 3. mtime が変わったキーはミスすること
+        let key1_modified = AudioCoverKey {
+            path: "C:\\audio\\song1.mp3".to_string(),
+            mtime: 1500, // modified
+            file_size: 5000,
+        };
+        assert!(cache.get(&key1_modified).is_none());
+
+        // file_size が変わったキーもミスすること
+        let key1_resized = AudioCoverKey {
+            path: "C:\\audio\\song1.mp3".to_string(),
+            mtime: 1000,
+            file_size: 5001,
+        };
+        assert!(cache.get(&key1_resized).is_none());
+
+        // 4. 2件目を登録（上限2件内）
+        let data2 = vec![6, 7, 8]; // 3 bytes
+        cache.insert(key2.clone(), data2.clone());
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.total_bytes(), 8);
+        assert!(cache.get(&key1).is_some());
+        assert!(cache.get(&key2).is_some());
+
+        // 5. 件数超過による古いエントリの削除（LRU）
+        // key1 を参照したので、key2 の方が古い
+        let _ = cache.get(&key1);
+        let key3 = AudioCoverKey {
+            path: "C:\\audio\\song3.mp3".to_string(),
+            mtime: 3000,
+            file_size: 7000,
+        };
+        let data3 = vec![9, 10]; // 2 bytes
+        cache.insert(key3.clone(), data3.clone());
+
+        assert_eq!(cache.len(), 2, "最大件数2を超えないこと");
+        assert!(cache.get(&key2).is_none(), "最古の key2 が追い出されていること");
+        assert!(cache.get(&key1).is_some(), "参照された key1 は保持されていること");
+        assert!(cache.get(&key3).is_some(), "新規追加された key3 は存在すること");
+
+        // 6. バイト数上限（max_bytes = 50）超過による追い出し
+        let mut byte_limited_cache = AudioCoverCache::new(10, 50); // 最大10件だが最大50バイト
+        let big_key1 = AudioCoverKey { path: "a".into(), mtime: 1, file_size: 1 };
+        let big_key2 = AudioCoverKey { path: "b".into(), mtime: 2, file_size: 2 };
+        let big_data1 = vec![0u8; 30]; // 30 bytes
+        let big_data2 = vec![0u8; 30]; // 30 bytes (合計 60 bytes > 50 bytes)
+
+        byte_limited_cache.insert(big_key1.clone(), big_data1);
+        assert_eq!(byte_limited_cache.len(), 1);
+        assert_eq!(byte_limited_cache.total_bytes(), 30);
+
+        byte_limited_cache.insert(big_key2.clone(), big_data2);
+        assert_eq!(byte_limited_cache.len(), 1, "合計バイト数超過により古いエントリが追い出されること");
+        assert_eq!(byte_limited_cache.total_bytes(), 30);
+        assert!(byte_limited_cache.get(&big_key1).is_none());
+        assert!(byte_limited_cache.get(&big_key2).is_some());
+    }
+
+    #[test]
+    fn test_extract_audio_cover_cached_integration() {
+        let dir = tempdir().unwrap();
+        let tagged_path = dir.path().join("tagged.mp3");
+        let tagless_path = dir.path().join("tagless.mp3");
+
+        let sample_png = test_fixtures::SAMPLE_PNG_1X1;
+        let tagged_bytes = test_fixtures::build_id3v24_mp3_with_txxx_tags(
+            "2026-11-17",
+            "Cached Song",
+            "Cached Artist",
+            "Cached Album",
+            "Lyrics",
+            "Comment",
+            sample_png,
+            20,
+        );
+        let tagless_bytes = test_fixtures::build_mpeg_frames(50);
+
+        fs::write(&tagged_path, &tagged_bytes).unwrap();
+        fs::write(&tagless_path, &tagless_bytes).unwrap();
+
+        let tagged_str = tagged_path.to_string_lossy().to_string();
+        let tagless_str = tagless_path.to_string_lossy().to_string();
+
+        // 1. カバー付き: 1回目は抽出してキャッシュ、2回目はキャッシュヒット
+        let cover1 = extract_audio_cover_cached(&tagged_str);
+        assert!(cover1.is_some());
+        assert_eq!(&*cover1.unwrap(), sample_png);
+
+        let cover2 = extract_audio_cover_cached(&tagged_str);
+        assert!(cover2.is_some());
+        assert_eq!(&*cover2.unwrap(), sample_png);
+
+        // 2. カバー無し: None であり、キャッシュされない
+        let no_cover1 = extract_audio_cover_cached(&tagless_str);
+        assert!(no_cover1.is_none());
     }
 }

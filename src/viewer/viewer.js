@@ -465,6 +465,26 @@ window.addEventListener('DOMContentLoaded', async () => {
           if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
         }
       });
+      listen('ratings-batch-changed', (event) => {
+        const entries = event.payload;
+        if (!Array.isArray(entries)) return;
+        let shouldUpdate = false;
+        for (const item of entries) {
+          const { path, rating } = item || {};
+          if (!path) continue;
+          if (rating === 0 || viewerRatings[path] === rating) {
+            delete viewerRatings[path];
+          } else {
+            viewerRatings[path] = rating;
+          }
+          if (viewerState.currentImagePath === path) {
+            shouldUpdate = true;
+          }
+        }
+        if (shouldUpdate && typeof updateRatingDisplay === 'function') {
+          updateRatingDisplay();
+        }
+      });
       listen('viewers-arranged', () => {
         viewerState.isImmersiveArranged = true;
         resetZoomAndFit();
@@ -1771,6 +1791,7 @@ window.addEventListener('keydown', async (e) => {
 
 // --- 拡大縮小率の表示更新 ---
 function updateScaleDisplay() {
+  if (typeof document === 'undefined') return;
   const scaleDisplay = document.getElementById('window-scale-display');
   const controls = document.getElementById('window-controls');
   if (!scaleDisplay || !controls) return;

@@ -390,7 +390,7 @@ pub fn start_local_video_server(
                                 return;
                             }
 
-                            if let Some(cover_bytes) = crate::audio::extract_audio_cover(&path_str) {
+                            if let Some(cover_bytes) = crate::audio::extract_audio_cover_cached(&path_str) {
                                 let mimetype = if cover_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
                                     "image/png"
                                 } else {
@@ -404,7 +404,7 @@ pub fn start_local_video_server(
                                 headers.push_str(conn_header);
                                 headers.push_str(&format!("Content-Length: {}\r\n\r\n", cover_bytes.len()));
                                 if reader.get_mut().write_all(headers.as_bytes()).is_err()
-                                    || reader.get_mut().write_all(&cover_bytes).is_err()
+                                    || reader.get_mut().write_all(&cover_bytes[..]).is_err()
                                     || reader.get_mut().flush().is_err()
                                 {
                                     return;

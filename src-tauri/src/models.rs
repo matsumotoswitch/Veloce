@@ -73,6 +73,14 @@ pub struct SortConfig {
     pub asc: bool,
 }
 
+/// サムネイルプリロード用の軽量射影アイテム
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreloadItem {
+    pub path: String,
+    pub has_thumbnail_cache: bool,
+}
+
 /// メタデータ一括解析進捗ペイロード
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]

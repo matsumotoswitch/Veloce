@@ -1172,13 +1172,16 @@ export class ThumbnailQueueManager {
           appState.isPreloadRunning = true;
           if (!appState.isFetchingPreload) {
             appState.isFetchingPreload = true;
-            if (typeof window.veloceAPI?.getItems === 'function') {
+            const fetchFn = typeof window.veloceAPI?.getPreloadItems === 'function'
+              ? window.veloceAPI.getPreloadItems
+              : window.veloceAPI?.getItems;
+            if (typeof fetchFn === 'function') {
               const fetchLimit = this._preloadWrapped
                 ? Math.min(50, Math.max(0, (this._preloadAnchor || 0) - appState.preloadCursor))
                 : 50;
               const fetchOffset = appState.preloadCursor;
               const currentFetchId = ++this._preloadFetchId;
-              const fetchPromise = window.veloceAPI.getItems(fetchOffset, fetchLimit);
+              const fetchPromise = fetchFn(fetchOffset, fetchLimit);
               if (fetchPromise && typeof fetchPromise.then === 'function') {
                 fetchPromise.then(items => {
                   if (this._preloadFetchId !== currentFetchId) return;
@@ -1196,7 +1199,7 @@ export class ThumbnailQueueManager {
                   }
                 }).catch(err => {
                   if (this._preloadFetchId !== currentFetchId) return;
-                  console.warn("Preload getItems failed:", err);
+                  console.warn("Preload items fetch failed:", err);
                   appState.preloadCursor = fetchOffset + fetchLimit;
                 }).finally(() => {
                   if (this._preloadFetchId === currentFetchId) {

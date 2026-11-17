@@ -1125,8 +1125,7 @@ fn sync_ratings(
     apply_filters_and_sort(None, &state)
 }
 
-#[tauri::command]
-fn get_all_ratings(state: tauri::State<'_, AppState>) -> std::collections::HashMap<String, u8> {
+pub(crate) fn get_all_ratings_inner(state: &AppState) -> std::collections::HashMap<String, u8> {
     {
         let memory_ratings = state.ratings.read();
         if !memory_ratings.is_empty() {
@@ -1152,6 +1151,11 @@ fn get_all_ratings(state: tauri::State<'_, AppState>) -> std::collections::HashM
     }
 
     std::collections::HashMap::new()
+}
+
+#[tauri::command]
+fn get_all_ratings(state: tauri::State<'_, AppState>) -> std::collections::HashMap<String, u8> {
+    get_all_ratings_inner(&state)
 }
 
 #[tauri::command]
@@ -1232,6 +1236,84 @@ fn set_rating(
     rating: u8,
 ) -> usize {
     set_rating_inner(Some(&app), &state, path, rating)
+}
+
+/// 複数ファイルのレーティングを一括更新してデータベースおよびメモリ上の状態に反映する。
+pub(crate) fn set_ratings_batch_inner(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    entries: Vec<RatingPayload>,
+) -> usize {
+    if entries.is_empty() {
+        return state.filtered_files.read().len();
+    }
+
+    let mut normalized_entries: Vec<RatingPayload> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let clean_path = crate::utils::normalize_unc_path(&entry.path).replace('/', "\\");
+        normalized_entries.push(RatingPayload {
+            path: clean_path,
+            rating: entry.rating,
+        });
+    }
+
+    // 1. SQLite 一括永続化 (トランザクション + prepared statements)
+    if let Ok(mut conn) = state.db_conn.get() {
+        if let Ok(tx) = conn.transaction() {
+            {
+                let mut del_stmt = tx.prepare_cached("DELETE FROM ratings WHERE path = ?1").ok();
+                let mut ins_stmt = tx.prepare_cached("INSERT OR REPLACE INTO ratings (path, rating) VALUES (?1, ?2)").ok();
+                for entry in &normalized_entries {
+                    if entry.rating == 0 {
+                        if let Some(ref mut stmt) = del_stmt {
+                            let _ = stmt.execute(rusqlite::params![&entry.path]);
+                        }
+                    } else {
+                        if let Some(ref mut stmt) = ins_stmt {
+                            let _ = stmt.execute(rusqlite::params![&entry.path, entry.rating]);
+                        }
+                    }
+                }
+            }
+            let _ = tx.commit();
+        }
+    }
+
+    // 2. メモリ上 ratings の一括更新
+    {
+        let mut lock = state.ratings.write();
+        for entry in &normalized_entries {
+            if entry.rating == 0 {
+                lock.remove(&entry.path);
+            } else {
+                lock.insert(entry.path.clone(), entry.rating);
+            }
+        }
+    }
+
+    // 3. イベント通知 (バッチ全体で1回に集約)
+    if let Some(app_handle) = app {
+        let _ = app_handle.emit_all("ratings-batch-changed", &normalized_entries);
+    }
+
+    // 4. 必要時の再ソート・フィルタ適用
+    let rating_filter_active = *state.rating_filter_val.lock() > 0;
+    let sort_by_rating = state.sort_config.read().key == "rating";
+    if rating_filter_active || sort_by_rating {
+        apply_filters_and_sort(app, state)
+    } else {
+        state.filtered_files.read().len()
+    }
+}
+
+/// 複数ファイルのレーティングを一括更新してデータベースおよびメモリ上の状態に反映する。
+#[tauri::command]
+fn set_ratings_batch(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    entries: Vec<RatingPayload>,
+) -> usize {
+    set_ratings_batch_inner(Some(&app), &state, entries)
 }
 
 pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
@@ -1426,6 +1508,35 @@ async fn get_items(
         return Ok(Vec::new());
     }
     Ok(lock[offset..end].to_vec())
+}
+
+pub(crate) fn get_preload_items_inner(
+    state: &AppState,
+    offset: usize,
+    limit: usize,
+) -> Vec<PreloadItem> {
+    let lock = state.filtered_files.read();
+    if offset >= lock.len() {
+        return Vec::new();
+    }
+    let end = std::cmp::min(offset + limit, lock.len());
+    lock[offset..end]
+        .iter()
+        .map(|f| PreloadItem {
+            path: f.path.clone(),
+            has_thumbnail_cache: f.has_thumbnail_cache,
+        })
+        .collect()
+}
+
+/// サムネイルプリロード用: 指定範囲の path と hasThumbnailCache のみを射影して返す超軽量コマンド
+#[tauri::command]
+async fn get_preload_items(
+    state: tauri::State<'_, AppState>,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<PreloadItem>, String> {
+    Ok(get_preload_items_inner(&state, offset, limit))
 }
 
 /// selectImage用: 単一のImageFileを取得
@@ -2867,7 +2978,9 @@ fn main() {
             sync_ratings,
             thumbnail::save_thumbnail,
             set_rating,
+            set_ratings_batch,
             get_items,
+            get_preload_items,
             get_file_by_index,
             update_metadata_in_state,
             get_video_server_port,
@@ -6281,5 +6394,139 @@ mod viewer_tests {
 
         let count_after: i64 = conn.query_row("SELECT count(*) FROM cache", [], |r| r.get(0)).unwrap();
         assert_eq!(count_after, 0, "キャッシュテーブルのエントリが全消去されること");
+    }
+
+    #[test]
+    fn test_get_preload_items_projection_and_bounds() {
+        let state = create_test_app_state("C:/test");
+        let files: Vec<std::sync::Arc<ImageFile>> = (0..10)
+            .map(|i| {
+                std::sync::Arc::new(ImageFile {
+                    name: format!("img_{}.png", i),
+                    ext: compact_str::format_compact!(".png"),
+                    path: format!("C:/test/img_{}.png", i),
+                    size: 1024 * (i + 1) as u64,
+                    mtime: 1700000000 + i as u64,
+                    ctime: 1700000000,
+                    has_thumbnail_cache: i % 2 == 0,
+                    width: 1920,
+                    height: 1080,
+                    prompt: "masterpiece, 1girl, highly detailed background, dynamic angle, best quality".to_string(),
+                    negative_prompt: "lowres, bad anatomy, bad hands, text, error, missing fingers".to_string(),
+                    source: "NovelAI".to_string(),
+                    meta_loaded: true,
+                    search_text: "search text".to_string(),
+                    unified_search_text: "unified text".to_string(),
+                    hash_key: compact_str::format_compact!("hash_{}", i),
+                })
+            })
+            .collect();
+
+        *state.filtered_files.write() = files;
+
+        // 1. 範囲指定 (offset: 0, limit: 3) で path と has_thumbnail_cache のみが射影されること
+        let items = get_preload_items_inner(&state, 0, 3);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].path, "C:/test/img_0.png");
+        assert!(items[0].has_thumbnail_cache);
+        assert_eq!(items[1].path, "C:/test/img_1.png");
+        assert!(!items[1].has_thumbnail_cache);
+        assert_eq!(items[2].path, "C:/test/img_2.png");
+        assert!(items[2].has_thumbnail_cache);
+
+        // 2. 中間範囲 (offset: 4, limit: 2)
+        let items_mid = get_preload_items_inner(&state, 4, 2);
+        assert_eq!(items_mid.len(), 2);
+        assert_eq!(items_mid[0].path, "C:/test/img_4.png");
+        assert!(items_mid[0].has_thumbnail_cache);
+        assert_eq!(items_mid[1].path, "C:/test/img_5.png");
+        assert!(!items_mid[1].has_thumbnail_cache);
+
+        // 3. 末尾クランプ (offset: 8, limit: 5) -> 8, 9 の2件のみ返却
+        let items_end = get_preload_items_inner(&state, 8, 5);
+        assert_eq!(items_end.len(), 2);
+        assert_eq!(items_end[0].path, "C:/test/img_8.png");
+        assert_eq!(items_end[1].path, "C:/test/img_9.png");
+
+        // 4. 範囲外 (offset: 10, limit: 5) -> 空リスト返却
+        let items_oob = get_preload_items_inner(&state, 10, 5);
+        assert!(items_oob.is_empty());
+        let items_oob2 = get_preload_items_inner(&state, 100, 5);
+        assert!(items_oob2.is_empty());
+    }
+
+    #[test]
+    fn test_set_ratings_batch_multiple_paths_mixed_values_and_reload() {
+        let state = create_test_app_state("C:\\test_batch_rating");
+
+        let path1 = "C:\\test_batch_rating\\file1.png".to_string();
+        let path2 = "C:\\test_batch_rating\\file2.png".to_string();
+        let path3 = "C:\\test_batch_rating\\file3.png".to_string();
+        let path4 = "C:\\test_batch_rating\\file4.png".to_string();
+
+        // 1. 混在するレーティング（5, 3, 1, 0）を一括設定
+        let entries = vec![
+            RatingPayload { path: path1.clone(), rating: 5 },
+            RatingPayload { path: path2.clone(), rating: 3 },
+            RatingPayload { path: path3.clone(), rating: 1 },
+            RatingPayload { path: path4.clone(), rating: 0 },
+        ];
+
+        let count = set_ratings_batch_inner(None, &state, entries);
+        assert_eq!(count, 0);
+
+        // メモリ上の state.ratings の検証
+        {
+            let ratings = state.ratings.read();
+            assert_eq!(ratings.get(&path1), Some(&5));
+            assert_eq!(ratings.get(&path2), Some(&3));
+            assert_eq!(ratings.get(&path3), Some(&1));
+            assert_eq!(ratings.get(&path4), None, "rating 0 はメモリ上に登録されないこと");
+        }
+
+        // SQLite DB 永続化の検証
+        {
+            let conn = state.db_conn.get().unwrap();
+            let r1: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", rusqlite::params![&path1], |r| r.get(0)).unwrap();
+            assert_eq!(r1, 5);
+            let r2: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", rusqlite::params![&path2], |r| r.get(0)).unwrap();
+            assert_eq!(r2, 3);
+            let r3: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", rusqlite::params![&path3], |r| r.get(0)).unwrap();
+            assert_eq!(r3, 1);
+            let r4_exists: i64 = conn.query_row("SELECT COUNT(*) FROM ratings WHERE path = ?1", rusqlite::params![&path4], |r| r.get(0)).unwrap();
+            assert_eq!(r4_exists, 0, "rating 0 はDBに存在しないこと");
+        }
+
+        // 2. 永続化後の再読み込み検証（メモリを一旦クリアして SQLite から再ロード）
+        {
+            state.ratings.write().clear();
+            assert!(state.ratings.read().is_empty());
+            let reloaded = get_all_ratings_inner(&state);
+            assert_eq!(reloaded.get(&path1), Some(&5));
+            assert_eq!(reloaded.get(&path2), Some(&3));
+            assert_eq!(reloaded.get(&path3), Some(&1));
+            assert_eq!(reloaded.get(&path4), None);
+        }
+
+        // 3. 既存の値を 0 で解除、別の値を更新する追加バッチ
+        let update_entries = vec![
+            RatingPayload { path: path1.clone(), rating: 0 },
+            RatingPayload { path: path2.clone(), rating: 4 },
+        ];
+        set_ratings_batch_inner(None, &state, update_entries);
+
+        {
+            let ratings = state.ratings.read();
+            assert_eq!(ratings.get(&path1), None, "0 に更新されたファイルがメモリから削除されること");
+            assert_eq!(ratings.get(&path2), Some(&4), "4 に更新されること");
+            assert_eq!(ratings.get(&path3), Some(&1), "バッチに含まれないファイルが維持されること");
+        }
+        {
+            let conn = state.db_conn.get().unwrap();
+            let count_deleted: i64 = conn.query_row("SELECT COUNT(*) FROM ratings WHERE path = ?1", rusqlite::params![&path1], |r| r.get(0)).unwrap();
+            assert_eq!(count_deleted, 0, "DBからも削除されること");
+            let r2: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", rusqlite::params![&path2], |r| r.get(0)).unwrap();
+            assert_eq!(r2, 4);
+        }
     }
 }

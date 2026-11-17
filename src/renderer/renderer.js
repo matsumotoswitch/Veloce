@@ -131,7 +131,9 @@ export {
   initSmartFolders,
   updateNavButtons,
   navigateUp,
-  initNavUpButton
+  initNavUpButton,
+  scheduleRefresh,
+  _internalScheduleRefresh
 };
 
 // 開発者ツールショートカット (F12, Ctrl+Shift+I 等) の無効化
@@ -379,17 +381,24 @@ export function applyRatingUI(path, rating, isOptimistic = false) {
 }
 
 let pendingRefreshResetScroll = false;
+let pendingRefreshResetPreload = false;
 
 const _internalScheduleRefresh = debounce(async () => {
-  const shouldReset = pendingRefreshResetScroll;
+  const shouldResetScroll = pendingRefreshResetScroll;
+  const shouldResetPreload = pendingRefreshResetPreload;
   pendingRefreshResetScroll = false;
-  appState.preloadCursor = 0;
-  if (window.thumbnailManager) {
-    window.thumbnailManager._preloadAnchor = 0;
-    window.thumbnailManager._preloadWrapped = false;
+  pendingRefreshResetPreload = false;
+
+  if (shouldResetPreload) {
+    appState.preloadCursor = 0;
+    if (window.thumbnailManager) {
+      window.thumbnailManager._preloadAnchor = 0;
+      window.thumbnailManager._preloadWrapped = false;
+    }
   }
+
   await appState.setViewParams();
-  uiManager.renderAll(shouldReset);
+  uiManager.renderAll(shouldResetScroll);
   uiManager.updateSelectionUI();
   if (appState.selectedIndex === -1) {
     clearMetadataUI();
@@ -402,12 +411,33 @@ const _internalScheduleRefresh = debounce(async () => {
   }
 }, CONFIG.REFRESH_DELAY);
 
-const scheduleRefresh = (resetScroll = false) => {
-  if (resetScroll === true) {
+/**
+ * リフレッシュをスケジュールする
+ * @param {boolean|{resetScroll?: boolean, resetPreload?: boolean}} [resetScrollOrOptions=false]
+ * @param {boolean} [resetPreload=true] - プリロード進捗をリセットするかどうか（表示定義変更時は true、ウォッチャー更新時は false）
+ */
+const scheduleRefresh = (resetScrollOrOptions = false, resetPreload = true) => {
+  let shouldResetScroll = false;
+  let shouldResetPreload = true;
+
+  if (typeof resetScrollOrOptions === 'object' && resetScrollOrOptions !== null) {
+    shouldResetScroll = resetScrollOrOptions.resetScroll === true;
+    shouldResetPreload = resetScrollOrOptions.resetPreload !== false;
+  } else {
+    shouldResetScroll = resetScrollOrOptions === true;
+    shouldResetPreload = resetPreload !== false;
+  }
+
+  if (shouldResetScroll) {
     pendingRefreshResetScroll = true;
+  }
+  if (shouldResetPreload) {
+    pendingRefreshResetPreload = true;
   }
   _internalScheduleRefresh();
 };
+
+window.scheduleRefresh = scheduleRefresh;
 
 initFileOps({
   refreshFileList,
@@ -1802,10 +1832,13 @@ export const globalKeydownHandler = async (e) => {
       e.preventDefault();
       const rating = parseInt(e.key, 10);
 
-      // 並列でファイル情報を取得
-      const files = (await Promise.all(
-        targetIndices.map(idx => window.veloceAPI.getFileByIndex(idx))
-      )).filter(Boolean);
+      // バッチでファイル情報を一括取得
+      const files = ((window.veloceAPI && typeof window.veloceAPI.getFilesByIndices === 'function')
+        ? await window.veloceAPI.getFilesByIndices(targetIndices)
+        : (window.veloceAPI && typeof window.veloceAPI.getFileByIndex === 'function'
+            ? await Promise.all(targetIndices.map(idx => window.veloceAPI.getFileByIndex(idx)))
+            : [])
+      ).filter(Boolean);
 
       if (files.length > 0) {
         const allHaveSameRating = files.every(f => (appState.ratings[f.path] || 0) === rating);
@@ -1816,8 +1849,11 @@ export const globalKeydownHandler = async (e) => {
           applyRatingUI(file.path, newRating, true);
         }
 
-        // 2. バックエンドへ並列非同期で永続化保存
-        if (window.veloceAPI.setRating) {
+        // 2. バックエンドへバッチ非同期で永続化保存
+        if (window.veloceAPI && typeof window.veloceAPI.setRatingsBatch === 'function') {
+          const entries = files.map(file => ({ path: file.path, rating: newRating }));
+          await window.veloceAPI.setRatingsBatch(entries);
+        } else if (window.veloceAPI && typeof window.veloceAPI.setRating === 'function') {
           await Promise.all(files.map(file => window.veloceAPI.setRating(file.path, newRating)));
         }
       }
@@ -3216,6 +3252,17 @@ window.addEventListener('DOMContentLoaded', async () => {
       applyRatingUI(path, rating, false);
     });
   }
+  if (window.veloceAPI.onRatingsBatchChanged) {
+    window.veloceAPI.onRatingsBatchChanged((entries) => {
+      if (Array.isArray(entries)) {
+        for (const item of entries) {
+          if (item && item.path) {
+            applyRatingUI(item.path, item.rating, false);
+          }
+        }
+      }
+    });
+  }
 
   if (window.veloceAPI.onFileChanged || window.veloceAPI.onFileRemoved) {
     const WATCHER_BATCH_WINDOW_MS = 40;
@@ -3256,7 +3303,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           }
         }
       }
-      scheduleRefresh();
+      scheduleRefresh({ resetScroll: false, resetPreload: false });
       if (typeof window.debouncedUpdateSmartFolderCounts === 'function') {
         window.debouncedUpdateSmartFolderCounts();
       }

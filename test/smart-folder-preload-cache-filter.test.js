@@ -162,4 +162,30 @@ describe('Smart Folder Thumbnail Preload Cache Filter', () => {
     expect(tm.completedCount).toBe(0);
     expect(progressBar.style.width).toBe('');
   });
+
+  it('window.veloceAPI.getPreloadItems が存在する場合は getItems ではなく getPreloadItems が優先して呼び出されること', async () => {
+    const mockPreloadFiles = [
+      { path: 'C:/images/preload_1.png', hasThumbnailCache: true },
+      { path: 'C:/images/preload_2.png', hasThumbnailCache: false },
+    ];
+
+    appState.totalCount = 2;
+    appState.preloadCursor = 0;
+    tm._preloadAnchor = 0;
+    tm._preloadWrapped = false;
+
+    window.veloceAPI.getItems = vi.fn().mockResolvedValue([]);
+    window.veloceAPI.getPreloadItems = vi.fn().mockResolvedValue(mockPreloadFiles);
+
+    tm.processNext();
+
+    await vi.waitFor(() => {
+      expect(appState.preloadCursor).toBe(2);
+    });
+
+    // getPreloadItems が呼ばれ、getItems は呼ばれないこと
+    expect(window.veloceAPI.getPreloadItems).toHaveBeenCalledWith(0, 50);
+    expect(window.veloceAPI.getItems).not.toHaveBeenCalled();
+    expect(appState.preloadCursor).toBe(2);
+  });
 });

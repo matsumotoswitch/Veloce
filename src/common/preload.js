@@ -17,7 +17,10 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {() => Promise<Object<string, number>>} getAllRatings
  * @property {(ratings: Object<string, number>) => Promise<void>} migrateRatings
  * @property {() => Promise<Object<string, number>>} getSmartFolderCounts
+ * @property {(path: string, rating: number) => Promise<number>} setRating
+ * @property {(entries: Array<{path: string, rating: number}>) => Promise<number>} setRatingsBatch
  * @property {(offset: number, limit: number) => Promise<Array<import('./renderer-state.js').ImageFile>>} getItems
+ * @property {(offset: number, limit: number) => Promise<Array<{path: string, hasThumbnailCache: boolean}>>} getPreloadItems
  * @property {(index: number) => Promise<import('./renderer-state.js').ImageFile|null>} getFileByIndex
  * @property {(updates: any[]) => Promise<void>} updateMetadataInState
  * @property {(path: string, width: number, height: number) => Promise<void>} updateFileDimensions
@@ -44,6 +47,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(callback: (payload: string) => void) => void} onFileRemoved
  * @property {(callback: () => void) => void} onDirectoryChanged
  * @property {(callback: (payload: {path: string, rating: number}) => void) => void} onRatingChanged
+ * @property {(callback: (payload: Array<{path: string, rating: number}>) => void) => void} onRatingsBatchChanged
  * @property {(parentDir: string, folderName: string) => Promise<{success: boolean, path?: string, error?: string}>} createFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
@@ -112,6 +116,12 @@ window.veloceAPI = {
   getVideoServerPort: () => invoke('get_video_server_port'),
   getVideoServerToken: () => invoke('get_video_server_token'),
   setRating: (path, rating) => invoke('set_rating', { path, rating }),
+  /**
+   * 複数ファイルのレーティングを一括保存する
+   * @param {Array<{path: string, rating: number}>} entries
+   * @returns {Promise<number>}
+   */
+  setRatingsBatch: (entries) => invoke('set_ratings_batch', { entries }),
   initSettings: (entriesFromLocalstorage) => invoke('init_settings', { entriesFromLocalstorage }),
   getSetting: (key) => invoke('get_setting', { key }),
   setSetting: (key, value) => invoke('set_setting', { key, value }),
@@ -122,6 +132,10 @@ window.veloceAPI = {
    * 仮想スクロール用: 指定範囲のImageFileをRustから取得する
    */
   getItems: (offset, limit) => invoke('get_items', { offset, limit }),
+  /**
+   * サムネイルプリロード用: 指定範囲の path と hasThumbnailCache のみを軽量取得する
+   */
+  getPreloadItems: (offset, limit) => invoke('get_preload_items', { offset, limit }),
   /**
    * selectImage用: 指定インデックスの単一ImageFileを取得
    */
@@ -293,6 +307,10 @@ window.veloceAPI = {
    * レーティングが変更されたときの通知を受け取ります。
    */
   onRatingChanged: (callback) => listen('rating-changed', (event) => callback(event.payload)),
+  /**
+   * 複数ファイルのレーティングが一括変更されたときの通知を受け取ります。
+   */
+  onRatingsBatchChanged: (callback) => listen('ratings-batch-changed', (event) => callback(event.payload)),
   /**
    * フォルダを作成するようメインプロセスに要求します。
    * @param {string} parentDir - 親ディレクトリのパス。
