@@ -322,11 +322,10 @@ fn path_exists(path: String) -> bool {
     path_obj.exists() && path_obj.is_dir()
 }
 
-/// 指定ディレクトリ直下のサブフォルダ一覧を高速取得する。
+/// 指定ディレクトリ直下のサブフォルダ一覧を取得する同期実装。
 /// std::fs::read_dir と DirEntry::file_type() を使用してディレクトリのみを抽出し、
 /// 各サブフォルダに子ディレクトリが存在するか（has_children）も同時に判定する。
-#[tauri::command]
-fn get_subfolders(dir_path: String) -> Result<Vec<models::SubfolderItem>, String> {
+fn get_subfolders_inner(dir_path: String) -> Result<Vec<models::SubfolderItem>, String> {
     if dir_path == "PC" || dir_path.starts_with("smart://") {
         return Ok(Vec::new());
     }
@@ -382,7 +381,115 @@ fn get_subfolders(dir_path: String) -> Result<Vec<models::SubfolderItem>, String
     Ok(subfolders)
 }
 
+/// 指定ディレクトリ直下のサブフォルダ一覧をバックグラウンドスレッドで取得する。
+#[tauri::command]
+async fn get_subfolders(dir_path: String) -> Result<Vec<models::SubfolderItem>, String> {
+    tokio::task::spawn_blocking(move || get_subfolders_inner(dir_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
 
+/// 指定ディレクトリ直下のメディアファイルを `std::fs::read_dir` + `rayon` で並列収集する。
+/// Windows では `DirEntry::file_type()` と `DirEntry::metadata()` が列挙時の `WIN32_FIND_DATA` を
+/// そのまま参照するため、通常ファイルに対する追加の stat システムコールを発行せずにメタデータを取得できる。
+pub(crate) fn scan_directory_media_entries(dir_path: &str) -> Vec<std::sync::Arc<ImageFile>> {
+    use rayon::prelude::*;
+
+    let target_entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(dir_path) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+        Err(_) => Vec::new(),
+    };
+
+    target_entries
+        .into_par_iter()
+        .filter_map(|entry| {
+            let file_name_os = entry.file_name();
+            // 1. 拡張子を先に判定して非対象ファイルを即時除外（不要な file_type / metadata 処理を抑制）
+            let ext = std::path::Path::new(&file_name_os)
+                .extension()
+                .and_then(|s| s.to_str())?;
+            let ext_lower = ext.to_lowercase();
+            if !is_listed_media_extension(&ext_lower) {
+                return None;
+            }
+
+            // 2. DirEntry::file_type() で種別判定し、シンボリックリンクの場合のみリンク先確認へフォールバック
+            let file_type = entry.file_type().ok()?;
+            let p = entry.path();
+            if !(file_type.is_file() || (file_type.is_symlink() && p.is_file())) {
+                return None;
+            }
+
+            // 3. 対象メディアファイルに対してのみメタデータ（サイズ・日時）を列挙データから取得
+            let metadata = entry.metadata().ok()?;
+            let size = metadata.len();
+            let mtime = metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let ctime = metadata
+                .created()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+
+            let file_name = file_name_os.to_string_lossy().into_owned();
+            let full_path = p.to_string_lossy().into_owned();
+            let clean_path = full_path.replace("\\\\?\\", "");
+
+            Some(ImageFile {
+                name: file_name,
+                ext: format_compact!(".{}", ext_lower),
+                path: clean_path,
+                size,
+                mtime,
+                ctime,
+                has_thumbnail_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: CompactString::default(),
+            })
+        })
+        .map(std::sync::Arc::new)
+        .collect()
+}
+
+
+
+/// バックグラウンドメタデータ解析タスクの世代カウンタ。
+/// `load_directory` の開始ごとにインクリメントされ、リロードや短時間の同一フォルダ再訪時に
+/// 旧世代のバックグラウンドタスクが新世代タスクと二重起動・DB書き込み競合するのを防ぐ。
+static METADATA_BG_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// 現在のバックグラウンドメタデータ解析の世代番号を返す。
+pub(crate) fn current_metadata_bg_epoch() -> u64 {
+    METADATA_BG_EPOCH.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// バックグラウンドメタデータ解析の世代を進め、新しい世代番号を返す。
+pub(crate) fn advance_metadata_bg_epoch() -> u64 {
+    METADATA_BG_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1
+}
+
+/// バックグラウンドメタデータ解析タスクが処理を継続すべきかを判定する。
+/// 自身の世代が最新世代と一致し、かつ現在のディレクトリが対象パスと一致する場合のみ `true` を返す。
+pub(crate) fn should_continue_metadata_bg_task(
+    task_epoch: u64,
+    latest_epoch: u64,
+    current_dir: &str,
+    target_path: &str,
+) -> bool {
+    task_epoch == latest_epoch && current_dir == target_path
+}
 
 /// 指定されたディレクトリスキャンまたはスマートフォルダ検索をバックグラウンドスレッドで開始する
 /// 走査結果はソートおよびサムネイルキャッシュ一括照会を経て、イベント `dir-load-progress` / `dir-load-complete` でフロントエンドへストリーミング通知される
@@ -414,8 +521,9 @@ fn load_directory(
         None
     };
 
-    // 旧フォルダ向けに実行中のサムネイル一括生成へ打ち切りを通知する
+    // 旧フォルダ向けに実行中のサムネイル一括生成およびバックグラウンドメタデータ解析へ打ち切りを通知する
     advance_thumbnail_batch_epoch();
+    let metadata_bg_epoch = advance_metadata_bg_epoch();
 
     // ディレクトリ変更時にRust側の状態をリセット
     state.all_files.write().clear();
@@ -800,58 +908,7 @@ fn load_directory(
                 }
                 (valid_files, missing)
             } else {
-                let target_entries: Vec<_> = jwalk::WalkDir::new(&path_for_spawn)
-                    .max_depth(1)
-                    .skip_hidden(false)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                    .collect();
-
-                let normal_files: Vec<std::sync::Arc<ImageFile>> = target_entries
-                    .into_par_iter()
-                    .filter_map(|entry| {
-                        let p = entry.path();
-                        // 1. 拡張子を先に判定して非対象ファイルを即時除外（不要な stat システムコールをゼロに抑制）
-                        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                            let ext_lower = ext.to_lowercase();
-                            if is_listed_media_extension(&ext_lower) {
-                                // 2. jwalk がディレクトリスキャン時に取得済みの file_type を使用（ディスク追加 stat を回避）
-                                if entry.file_type.is_file() || (entry.file_type.is_symlink() && p.is_file()) {
-                                    // 3. 対象画像ファイルに対してのみメタデータ（サイズ・日時）を1回だけ取得
-                                    if let Ok(metadata) = entry.metadata() {
-                                        let size = metadata.len();
-                                        let mtime = metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                        let ctime = metadata.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                                        
-                                        let file_name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                                        let full_path = p.to_string_lossy().into_owned();
-                                        let clean_path = full_path.replace("\\\\?\\", "");
-
-                                        return Some(ImageFile {
-                                            name: file_name,
-                                            ext: format_compact!(".{}", ext_lower),
-                                            path: clean_path,
-                                            size,
-                                            mtime,
-                                            ctime,
-                                            has_thumbnail_cache: false,
-                                            width: 0,
-                                            height: 0,
-                                            prompt: String::new(),
-                                            negative_prompt: String::new(),
-                                            source: String::new(),
-                                            meta_loaded: false,
-                                            search_text: String::new(),
-                                            unified_search_text: String::new(),
-                                            hash_key: CompactString::default(),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        None
-                    })
-                    .map(std::sync::Arc::new).collect::<Vec<std::sync::Arc<ImageFile>>>();
+                let normal_files = scan_directory_media_entries(&path_for_spawn);
                 (normal_files, Vec::new())
             };
 
@@ -990,9 +1047,21 @@ fn load_directory(
             // メタデータ全件解析タスクの開始を 800ms 遅延させる
             tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
-            // 未解析パスのみを抽出し、インデックスマップを構築する（O(N²) → O(N) 化）
+            // (a) 遅延明けに paths_to_process を構築する前に世代およびカレントディレクトリを検証
             let paths_to_process = {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
+                    let should_continue = {
+                        let cur_dir = state.current_dir.read();
+                        should_continue_metadata_bg_task(
+                            metadata_bg_epoch,
+                            current_metadata_bg_epoch(),
+                            &cur_dir,
+                            &path_for_bg,
+                        )
+                    };
+                    if !should_continue {
+                        return;
+                    }
                     let lock = state.all_files.read();
                     lock.iter().enumerate().filter_map(|(i, f)| {
                         if !f.meta_loaded {
@@ -1015,7 +1084,17 @@ fn load_directory(
 
             for chunk in paths_to_process.chunks(METADATA_CHUNK_SIZE) {
                 if let Some(state) = app_for_bg.try_state::<AppState>() {
-                    if *state.current_dir.read() != path_for_bg {
+                    // (b) 各チャンクの処理前に世代およびカレントディレクトリを検証（旧世代なら DB 書き込み前に終了）
+                    let should_continue = {
+                        let cur_dir = state.current_dir.read();
+                        should_continue_metadata_bg_task(
+                            metadata_bg_epoch,
+                            current_metadata_bg_epoch(),
+                            &cur_dir,
+                            &path_for_bg,
+                        )
+                    };
+                    if !should_continue {
                         break;
                     }
 
@@ -1029,6 +1108,11 @@ fn load_directory(
                             (idx, p, meta, fetched_mtime, fetched_size, row)
                         }).collect();
 
+                        // パース完了時点で世代が進んでいた場合は DB 書き込みを行わずに打ち切る
+                        if current_metadata_bg_epoch() != metadata_bg_epoch {
+                            return Vec::new();
+                        }
+
                         // チャンク内の新規パース結果を1つのSQLiteトランザクションでまとめてコミット（ロック競合排除）
                         let mut pending_rows = Vec::new();
                         let mut res = Vec::with_capacity(results.len());
@@ -1041,6 +1125,19 @@ fn load_directory(
                         let _ = commit_pending_metadata_batch(&db_conn_clone, &pending_rows);
                         res
                     }).await.unwrap_or_default();
+
+                    let still_valid = {
+                        let cur_dir = state.current_dir.read();
+                        should_continue_metadata_bg_task(
+                            metadata_bg_epoch,
+                            current_metadata_bg_epoch(),
+                            &cur_dir,
+                            &path_for_bg,
+                        )
+                    };
+                    if !still_valid {
+                        break;
+                    }
 
                     processed_count += metadata_results.len();
 
@@ -1309,13 +1406,17 @@ fn set_rating_inner(
 }
 
 #[tauri::command]
-fn set_rating(
+async fn set_rating(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     path: String,
     rating: u8,
-) -> usize {
-    set_rating_inner(Some(&app), &state, path, rating)
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        set_rating_inner(Some(&app), &state, path, rating)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// 複数ファイルのレーティングを一括更新してデータベースおよびメモリ上の状態に反映する。
@@ -1388,12 +1489,16 @@ pub(crate) fn set_ratings_batch_inner(
 
 /// 複数ファイルのレーティングを一括更新してデータベースおよびメモリ上の状態に反映する。
 #[tauri::command]
-fn set_ratings_batch(
+async fn set_ratings_batch(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     entries: Vec<RatingPayload>,
-) -> usize {
-    set_ratings_batch_inner(Some(&app), &state, entries)
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        set_ratings_batch_inner(Some(&app), &state, entries)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
@@ -1557,27 +1662,72 @@ pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &App
     total
 }
 
-/// JS側からソート条件・検索クエリを受け取り、Rust側でフィルタリングとソートを実行する
+/// 世代番号付きでソート条件・検索クエリ・レーティングフィルタを反映し、必要に応じてフィルタリングとソートを実行する。
+/// `view_params_mutex` で直列化した上で、その時点の最新世代（`view_params_epoch`）の呼び出しのみが
+/// 状態を上書きする。古い世代の呼び出しは状態を書き換えず、現在の `filtered_files` 件数を返却する。
+pub(crate) fn set_view_params_inner(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    epoch: u64,
+    sort_key: String,
+    asc: bool,
+    search_query: String,
+    rating_filter_val: u8,
+    rating_filter_op: String,
+    skip_sort: bool,
+) -> usize {
+    let _guard = state.view_params_mutex.lock();
+    let latest_epoch = state.view_params_epoch.load(std::sync::atomic::Ordering::SeqCst);
+    if epoch < latest_epoch {
+        return state.filtered_files.read().len();
+    }
+
+    *state.sort_config.write() = SortConfig { key: sort_key, asc };
+    *state.search_query.write() = search_query;
+    *state.rating_filter_val.lock() = rating_filter_val;
+    *state.rating_filter_op.lock() = rating_filter_op;
+    if skip_sort {
+        state.filtered_files.read().len()
+    } else {
+        apply_filters_and_sort(app, state)
+    }
+}
+
+/// JS側からソート条件・検索クエリを受け取り、Rust側でフィルタリングとソートをバックグラウンドスレッドで実行する
 #[tauri::command]
-fn set_view_params(
+async fn set_view_params(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     sort_key: String,
     asc: bool,
     search_query: String,
     rating_filter_val: u8,
     rating_filter_op: String,
     skip_sort: Option<bool>,
-) -> usize {
-    *state.sort_config.write() = SortConfig { key: sort_key, asc };
-    *state.search_query.write() = search_query;
-    *state.rating_filter_val.lock() = rating_filter_val;
-    *state.rating_filter_op.lock() = rating_filter_op;
-    if skip_sort.unwrap_or(false) {
-        state.filtered_files.read().len()
-    } else {
-        apply_filters_and_sort(Some(&app), &state)
-    }
+) -> Result<usize, String> {
+    let epoch = {
+        let state = app.state::<AppState>();
+        state
+            .view_params_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    };
+    let skip = skip_sort.unwrap_or(false);
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        set_view_params_inner(
+            Some(&app),
+            &state,
+            epoch,
+            sort_key,
+            asc,
+            search_query,
+            rating_filter_val,
+            rating_filter_op,
+            skip,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// 仮想スクロール用: 指定範囲のImageFileをスライスして返す
@@ -3031,6 +3181,8 @@ fn main() {
             ratings: parking_lot::RwLock::new(std::collections::HashMap::new()),
             rating_filter_val: parking_lot::Mutex::new(0),
             rating_filter_op: parking_lot::Mutex::new("gte".to_string()),
+            view_params_epoch: std::sync::atomic::AtomicU64::new(0),
+            view_params_mutex: parking_lot::Mutex::new(()),
             db_conn,
             settings_db_conn,
             settings_db_existed: parking_lot::Mutex::new(settings_db_existed),
@@ -3257,6 +3409,8 @@ pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState
         ratings: parking_lot::RwLock::new(std::collections::HashMap::new()),
         rating_filter_val: parking_lot::Mutex::new(0),
         rating_filter_op: parking_lot::Mutex::new("gte".to_string()),
+        view_params_epoch: std::sync::atomic::AtomicU64::new(0),
+        view_params_mutex: parking_lot::Mutex::new(()),
         db_conn: db_conn.clone(),
         settings_db_conn: db_conn,
         settings_db_existed: parking_lot::Mutex::new(true),
@@ -3759,42 +3913,38 @@ mod viewer_tests {
     }
 
     #[test]
-    fn test_jwalk_directory_reading() {
+    fn test_read_dir_directory_reading() {
         use std::fs;
         let temp_dir = tempfile::tempdir().unwrap();
-        let file1 = temp_dir.path().join("a.jpg");
-        let file2 = temp_dir.path().join("b.png");
-        fs::write(&file1, "dummy").unwrap();
-        fs::write(&file2, "dummy").unwrap();
+        let root = temp_dir.path();
+        let file1 = root.join("a.jpg");
+        let file2 = root.join("b.png");
+        let hidden_file = root.join(".hidden.webp");
+        let ignored_txt = root.join("note.txt");
+        let sub_dir = root.join("sub_folder.png");
+        fs::write(&file1, b"jpeg_dummy").unwrap();
+        fs::write(&file2, b"png_dummy_data").unwrap();
+        fs::write(&hidden_file, b"hidden_webp").unwrap();
+        fs::write(&ignored_txt, b"ignore").unwrap();
+        fs::create_dir(&sub_dir).unwrap();
+        fs::write(sub_dir.join("nested.png"), b"nested").unwrap();
 
-        let target_entries: Vec<_> = jwalk::WalkDir::new(temp_dir.path())
-            .max_depth(1)
-            .skip_hidden(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .collect();
+        let entries = scan_directory_media_entries(&root.to_string_lossy());
 
-        // One for the directory itself, two for the files
-        assert_eq!(target_entries.len(), 3);
-        
-        let count_files = target_entries.iter().filter(|e| e.path().is_file()).count();
-        assert_eq!(count_files, 2);
+        // 直下の対象メディア（隠しファイル含む）3件のみが収集され、非対象拡張子・サブフォルダ・ネストファイルは除外されること
+        assert_eq!(entries.len(), 3);
+        let mut names: Vec<String> = entries.iter().map(|f| f.name.clone()).collect();
+        names.sort();
+        assert_eq!(names, vec![".hidden.webp", "a.jpg", "b.png"]);
 
-        // entry.file_type.is_file() によるシステムコール削減ロジックの検証
-        let optimized_files: Vec<_> = target_entries
-            .iter()
-            .filter(|e| {
-                let p = e.path();
-                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                    let ext_lower = ext.to_lowercase();
-                    if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png") {
-                        return e.file_type.is_file();
-                    }
-                }
-                false
-            })
-            .collect();
-        assert_eq!(optimized_files.len(), 2, "追加statなしで対象画像2件が正確に検出されること");
+        let file2_entry = entries.iter().find(|f| f.name == "b.png").unwrap();
+        assert_eq!(file2_entry.ext, ".png");
+        assert_eq!(file2_entry.size, 14);
+        assert!(file2_entry.mtime > 0);
+
+        // 存在しないディレクトリでもエラーにならず空ベクタを返すこと
+        let missing = scan_directory_media_entries("Z:\\veloce_non_existent_dir_99999");
+        assert!(missing.is_empty());
     }
 
     #[test]
@@ -6459,9 +6609,9 @@ mod viewer_tests {
 
     /// [Phase 9-2] JPEG APP1 (`http://ns.adobe.com/xap/1.0/\0`) および WebP `XMP ` チャンクからのメタデータ抽出テスト
 
-    /// [Phase 9-4] ローカル HTTP サーバーのサムネイル GET における同一 TCP 接続 `keep-alive` 連続応答テスト
+    /// ローカル HTTP サーバーのサムネイル GET が `Connection: close` で 1 接続 1 リクエスト完結することの検証テスト
     #[test]
-    fn test_local_server_thumbnail_keep_alive() {
+    fn test_local_server_thumbnail_connection_close() {
         use std::io::{BufRead, BufReader, Read, Write};
         use std::net::TcpStream;
         use std::time::Duration;
@@ -6469,9 +6619,9 @@ mod viewer_tests {
         let (db_tx, _db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
         let state = create_test_app_state("C:\\");
         let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let test_token = "keep_alive_token_789";
+        let test_token = "close_conn_token_789";
 
-        let cached_path = "C:\\test\\keep_alive_thumb.png";
+        let cached_path = "C:\\test\\close_conn_thumb.png";
         let mtime = 77777u64;
         let hash_key = crate::utils::hash_path_mtime_hex(cached_path, mtime);
         let dummy_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46, 0xFF, 0xD9];
@@ -6491,11 +6641,11 @@ mod viewer_tests {
             test_token.to_string(),
         );
 
-        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        let mut reader = BufReader::new(stream);
+        let stream1 = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream1.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut reader1 = BufReader::new(stream1);
 
-        // 1回目: Connection: keep-alive でキャッシュ済みサムネイルを要求 -> 200 OK + Connection: keep-alive
+        // 1回目: クライアントが Connection: keep-alive を送っても、サーバーは Connection: close で応答して切断する
         let req1 = format!(
             "GET /?path={}&mtime={}&thumb=1&hash={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: keep-alive\r\n\r\n",
             urlencoding::encode(cached_path),
@@ -6504,17 +6654,18 @@ mod viewer_tests {
             test_token,
             port
         );
-        reader.get_mut().write_all(req1.as_bytes()).unwrap();
+        reader1.get_mut().write_all(req1.as_bytes()).unwrap();
 
         let mut status1 = String::new();
-        reader.read_line(&mut status1).unwrap();
+        reader1.read_line(&mut status1).unwrap();
         assert!(status1.starts_with("HTTP/1.1 200 OK"));
 
         let mut content_len1 = 0usize;
+        let mut saw_connection_close = false;
         let mut saw_keep_alive = false;
         loop {
             let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
+            reader1.read_line(&mut line).unwrap();
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 break;
@@ -6522,31 +6673,61 @@ mod viewer_tests {
             let lower = trimmed.to_ascii_lowercase();
             if lower.starts_with("content-length:") {
                 content_len1 = lower["content-length:".len()..].trim().parse().unwrap();
-            } else if lower.starts_with("connection:") && lower.contains("keep-alive") {
+            } else if lower.starts_with("connection:") {
+                if lower.contains("close") {
+                    saw_connection_close = true;
+                }
+                if lower.contains("keep-alive") {
+                    saw_keep_alive = true;
+                }
+            } else if lower.starts_with("keep-alive:") {
                 saw_keep_alive = true;
             }
         }
-        assert!(saw_keep_alive, "keep-alive ヘッダが返却されること");
+        assert!(saw_connection_close, "Connection: close ヘッダが返却されること");
+        assert!(!saw_keep_alive, "Keep-Alive ヘッダが返却されないこと");
         assert_eq!(content_len1, dummy_jpeg.len());
         let mut body1 = vec![0u8; content_len1];
-        reader.read_exact(&mut body1).unwrap();
+        reader1.read_exact(&mut body1).unwrap();
         assert_eq!(body1, dummy_jpeg);
 
-        // 2回目: 同じ TCP ストリームを再利用して 2 件目のサムネイル GET（未キャッシュ -> 404）を送信
+        // 1リクエスト応答後に接続が閉じられていること（EOF = 0 バイト読み取り）
+        let mut trailing = [0u8; 1];
+        let eof_read = reader1.read(&mut trailing).unwrap_or(0);
+        assert_eq!(eof_read, 0, "1 リクエスト完了後にサーバー側で接続が閉じられること");
+
+        // 2回目: 新規 TCP 接続で未キャッシュサムネイル GET（404）を要求しても Connection: close で正常応答すること
+        let stream2 = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream2.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut reader2 = BufReader::new(stream2);
         let req2 = format!(
             "GET /?path={}&mtime=1&thumb=1&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
             urlencoding::encode("C:\\test\\missing_second.png"),
             test_token,
             port
         );
-        reader.get_mut().write_all(req2.as_bytes()).unwrap();
+        reader2.get_mut().write_all(req2.as_bytes()).unwrap();
 
         let mut status2 = String::new();
-        reader.read_line(&mut status2).unwrap();
+        reader2.read_line(&mut status2).unwrap();
         assert!(
             status2.starts_with("HTTP/1.1 404 Not Found"),
-            "同一 TCP 接続上の 2 回目のリクエストも再接続なしで正常に応答されること"
+            "新規 TCP 接続上の 2 回目のリクエストも正常に 404 応答されること"
         );
+        let mut saw_close2 = false;
+        loop {
+            let mut line = String::new();
+            reader2.read_line(&mut line).unwrap();
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.starts_with("connection:") && lower.contains("close") {
+                saw_close2 = true;
+            }
+        }
+        assert!(saw_close2, "404 応答でも Connection: close が返却されること");
     }
 
     #[test]
@@ -7126,7 +7307,7 @@ mod viewer_tests {
         std::fs::create_dir(root.join("sub_10")).unwrap();
         std::fs::create_dir(root.join("sub_2")).unwrap();
 
-        let subfolders = get_subfolders(root.to_string_lossy().to_string()).unwrap();
+        let subfolders = get_subfolders_inner(root.to_string_lossy().to_string()).unwrap();
 
         // ファイル除外の確認: 5つのフォルダのみ
         assert_eq!(subfolders.len(), 5);
@@ -7148,13 +7329,13 @@ mod viewer_tests {
         assert_eq!(subfolders[4].has_children, false);
 
         // 仮想パスや存在しないパスの耐性確認
-        let pc_subfolders = get_subfolders("PC".to_string()).unwrap();
+        let pc_subfolders = get_subfolders_inner("PC".to_string()).unwrap();
         assert!(pc_subfolders.is_empty());
 
-        let smart_subfolders = get_subfolders("smart://rating/5".to_string()).unwrap();
+        let smart_subfolders = get_subfolders_inner("smart://rating/5".to_string()).unwrap();
         assert!(smart_subfolders.is_empty());
 
-        let non_existent = get_subfolders("Z:\\path_that_does_not_exist_12345".to_string()).unwrap();
+        let non_existent = get_subfolders_inner("Z:\\path_that_does_not_exist_12345".to_string()).unwrap();
         assert!(non_existent.is_empty());
     }
 
@@ -7283,5 +7464,160 @@ mod viewer_tests {
         let should_clone_name_sort = target_registered.starts_with("smart://")
             && (sort_name.key == "rating" || !reg_rule_exists);
         assert!(!should_clone_name_sort, "ルール登録済みかつ rating 以外のソートではクローンが抑制されること");
+    }
+
+    #[test]
+    fn test_set_view_params_generation_latest_wins() {
+        use std::sync::atomic::Ordering;
+        use std::sync::{Arc, Barrier};
+
+        let make_file = |name: &str, size: u64, search: &str| {
+            Arc::new(ImageFile {
+                name: name.to_string(),
+                ext: compact_str::CompactString::new(".png"),
+                path: format!("C:\\test\\{}", name),
+                size,
+                mtime: size * 10,
+                ctime: size * 10,
+                has_thumbnail_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: format!("{} {}", name, search).to_lowercase(),
+                hash_key: compact_str::CompactString::default(),
+            })
+        };
+
+        let state = Arc::new(create_test_app_state("C:\\test"));
+        let files = vec![
+            make_file("a.png", 100, "alpha"),
+            make_file("b.png", 300, "beta"),
+            make_file("c.png", 200, "alpha"),
+        ];
+        *state.all_files.write() = files.clone();
+        state.rebuild_all_indices(&files);
+
+        // 1. 連続採番後に古い世代が後から到達しても、最新世代（epoch 3）の状態を上書きしないこと
+        let epoch1 = state.view_params_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        let epoch2 = state.view_params_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        let epoch3 = state.view_params_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        assert_eq!((epoch1, epoch2, epoch3), (1, 2, 3));
+
+        // 最新世代 (epoch 3: size 降順, "alpha" で絞込 -> c.png(200), a.png(100)) が先に実行
+        let count3 = set_view_params_inner(
+            None,
+            &state,
+            epoch3,
+            "size".to_string(),
+            false,
+            "alpha".to_string(),
+            0,
+            "gte".to_string(),
+            false,
+        );
+        assert_eq!(count3, 2);
+
+        // 古い世代 (epoch 1: name 昇順, 検索なし -> 3件) が遅延実行されても state を上書きしない
+        let count1 = set_view_params_inner(
+            None,
+            &state,
+            epoch1,
+            "name".to_string(),
+            true,
+            "".to_string(),
+            0,
+            "gte".to_string(),
+            false,
+        );
+        assert_eq!(count1, 2, "古い世代は現在の filtered 件数を返して終了すること");
+
+        // 古い世代 (epoch 2: size 昇順, "beta" -> 1件) も state を上書きしない
+        let count2 = set_view_params_inner(
+            None,
+            &state,
+            epoch2,
+            "size".to_string(),
+            true,
+            "beta".to_string(),
+            0,
+            "gte".to_string(),
+            false,
+        );
+        assert_eq!(count2, 2);
+
+        assert_eq!(state.sort_config.read().key, "size");
+        assert_eq!(state.sort_config.read().asc, false);
+        assert_eq!(*state.search_query.read(), "alpha");
+        let names: Vec<String> = state.filtered_files.read().iter().map(|f| f.name.clone()).collect();
+        assert_eq!(names, vec!["c.png", "a.png"]);
+
+        // 2. 複数スレッドから同時に実行されても直列化され、最後に採番された世代の条件が最終的に残ること
+        let barrier = Arc::new(Barrier::new(3));
+        let e_old = state.view_params_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        let e_mid = state.view_params_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        let e_last = state.view_params_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+
+        let s1 = Arc::clone(&state);
+        let b1 = Arc::clone(&barrier);
+        let t1 = std::thread::spawn(move || {
+            b1.wait();
+            set_view_params_inner(None, &s1, e_old, "name".to_string(), true, "beta".to_string(), 0, "gte".to_string(), false)
+        });
+
+        let s2 = Arc::clone(&state);
+        let b2 = Arc::clone(&barrier);
+        let t2 = std::thread::spawn(move || {
+            b2.wait();
+            set_view_params_inner(None, &s2, e_mid, "size".to_string(), false, "alpha".to_string(), 0, "gte".to_string(), false)
+        });
+
+        let s3 = Arc::clone(&state);
+        let b3 = Arc::clone(&barrier);
+        let t3 = std::thread::spawn(move || {
+            b3.wait();
+            set_view_params_inner(None, &s3, e_last, "size".to_string(), true, "".to_string(), 0, "gte".to_string(), false)
+        });
+
+        let _ = t1.join().unwrap();
+        let _ = t2.join().unwrap();
+        let _ = t3.join().unwrap();
+
+        assert_eq!(state.sort_config.read().key, "size");
+        assert_eq!(state.sort_config.read().asc, true);
+        assert_eq!(*state.search_query.read(), "");
+        let final_names: Vec<String> = state.filtered_files.read().iter().map(|f| f.name.clone()).collect();
+        assert_eq!(final_names, vec!["a.png", "c.png", "b.png"]);
+    }
+
+    #[test]
+    fn test_metadata_bg_epoch_and_should_continue() {
+        let ep1 = advance_metadata_bg_epoch();
+        assert_eq!(current_metadata_bg_epoch(), ep1);
+        assert!(
+            should_continue_metadata_bg_task(ep1, current_metadata_bg_epoch(), "C:\\folder_a", "C:\\folder_a"),
+            "最新世代かつ同一ディレクトリであれば継続すること"
+        );
+
+        // 異なるディレクトリへ移動した場合は中断されること
+        assert!(
+            !should_continue_metadata_bg_task(ep1, current_metadata_bg_epoch(), "C:\\folder_b", "C:\\folder_a"),
+            "カレントディレクトリが変化した場合は中断すること"
+        );
+
+        // リロードや A -> B -> A 再訪で同一ディレクトリに戻っても、世代が進んでいれば旧タスクは中断されること
+        let ep2 = advance_metadata_bg_epoch();
+        assert!(ep2 > ep1);
+        assert!(
+            !should_continue_metadata_bg_task(ep1, ep2, "C:\\folder_a", "C:\\folder_a"),
+            "同一フォルダへの再訪・リロード時、旧世代タスクは継続しないこと"
+        );
+        assert!(
+            should_continue_metadata_bg_task(ep2, ep2, "C:\\folder_a", "C:\\folder_a"),
+            "新世代タスクのみが継続すること"
+        );
     }
 }

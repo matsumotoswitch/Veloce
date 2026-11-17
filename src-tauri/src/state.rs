@@ -4,6 +4,7 @@
 //! O(1) 逆引きインデックスを管理する `AppState` 構造体の定義。
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use parking_lot::{Mutex, RwLock};
 use crate::models::{DbMsg, ImageFile, SmartFolderRule, SortConfig};
@@ -29,6 +30,8 @@ pub struct AppState {
     pub ratings: RwLock<HashMap<String, u8>>,
     pub rating_filter_val: Mutex<u8>,
     pub rating_filter_op: Mutex<String>,
+    pub view_params_epoch: AtomicU64,
+    pub view_params_mutex: Mutex<()>,
     pub db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     pub settings_db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     pub settings_db_existed: Mutex<bool>,
@@ -65,6 +68,8 @@ impl AppState {
             ratings: RwLock::new(HashMap::new()),
             rating_filter_val: Mutex::new(0),
             rating_filter_op: Mutex::new("gte".to_string()),
+            view_params_epoch: AtomicU64::new(0),
+            view_params_mutex: Mutex::new(()),
             db_conn,
             settings_db_conn,
             settings_db_existed: Mutex::new(settings_db_existed),

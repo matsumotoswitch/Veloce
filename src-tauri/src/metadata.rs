@@ -1154,6 +1154,44 @@ pub(crate) fn parse_tiff_ifd(exif_data: &[u8]) -> std::collections::HashMap<Stri
     results
 }
 
+/// 8bit PNG を `zune_png::PngDecoder` でデコードし、`image::open().into_rgba8()` と同一の
+/// RGBA8 連続バッファ（幅・高さ・`width * height * 4` バイト）として返す。
+/// 非対応カラー空間やデコード失敗時は `None` を返し、呼び出し元で `image::open` へフォールバックさせる。
+pub(crate) fn decode_png_rgba8_with_zune(path: &str) -> Option<(usize, usize, Vec<u8>)> {
+    let file_bytes = std::fs::read(path).ok()?;
+    let options = zune_core::options::DecoderOptions::default().png_set_strip_to_8bit(true);
+    let mut decoder = zune_png::PngDecoder::new_with_options(&file_bytes, options);
+    let raw_pixels = decoder.decode_raw().ok()?;
+    let (width, height) = decoder.get_dimensions()?;
+    let pixel_count = width.checked_mul(height)?;
+    let expected_rgba_len = pixel_count.checked_mul(4)?;
+
+    match decoder.get_colorspace() {
+        Some(zune_core::colorspace::ColorSpace::RGBA) => {
+            if raw_pixels.len() == expected_rgba_len {
+                Some((width, height, raw_pixels))
+            } else {
+                None
+            }
+        }
+        Some(zune_core::colorspace::ColorSpace::LumaA) => {
+            if raw_pixels.len() == pixel_count.checked_mul(2)? {
+                let mut rgba = Vec::with_capacity(expected_rgba_len);
+                for px in raw_pixels.chunks_exact(2) {
+                    rgba.push(px[0]);
+                    rgba.push(px[0]);
+                    rgba.push(px[0]);
+                    rgba.push(px[1]);
+                }
+                Some((width, height, rgba))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn extract_stealth_pnginfo_with_type(path: &str) -> Option<(String, &'static str)> {
     let lower_path = path.to_lowercase();
     let is_png = lower_path.ends_with(".png");
@@ -1163,9 +1201,10 @@ pub(crate) fn extract_stealth_pnginfo_with_type(path: &str) -> Option<(String, &
     }
 
     // 1. PNGヘッダーの事前検査:
-    // IHDRチャンクのcolor_typeを先頭30バイトのみ読み込んで判定。
+    // IHDRチャンクの bit_depth と color_type を先頭30バイトのみ読み込んで判定。
     // アルファチャンネルを持たないカラータイプ（RGB=2, Grayscale=0, Palette=3等）は
-    // Stealth PNGInfoの埋め込み対象外のため、image::openによる巨大フルデコードを即座にスキップ
+    // Stealth PNGInfoの埋め込み対象外のため、フルデコードを即座にスキップする。
+    let mut png_is_8bit = false;
     if is_png {
         if let Ok(mut file) = std::fs::File::open(path) {
             use std::io::Read;
@@ -1173,10 +1212,12 @@ pub(crate) fn extract_stealth_pnginfo_with_type(path: &str) -> Option<(String, &
             if let Ok(n) = file.read(&mut header) {
                 if n >= 26 && &header[0..8] == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
                     if &header[12..16] == b"IHDR" {
+                        let bit_depth = header[24];
                         let color_type = header[25];
                         if color_type != 6 && color_type != 4 {
                             return None;
                         }
+                        png_is_8bit = bit_depth == 8;
                     }
                 }
             }
@@ -1208,11 +1249,23 @@ pub(crate) fn extract_stealth_pnginfo_with_type(path: &str) -> Option<(String, &
     use flate2::read::GzDecoder;
     use std::io::Read;
 
-    let img = image::open(path).ok()?.into_rgba8();
-    let width = img.width() as usize;
-    let height = img.height() as usize;
+    // 8bit PNG の場合は SIMD 最適化された zune-png を優先し、失敗時および非 8bit PNG / WebP は image::open へフォールバック
+    let (width, height, raw) = if is_png && png_is_8bit {
+        if let Some(decoded) = decode_png_rgba8_with_zune(path) {
+            decoded
+        } else {
+            let img = image::open(path).ok()?.into_rgba8();
+            let w = img.width() as usize;
+            let h = img.height() as usize;
+            (w, h, img.into_raw())
+        }
+    } else {
+        let img = image::open(path).ok()?.into_rgba8();
+        let w = img.width() as usize;
+        let h = img.height() as usize;
+        (w, h, img.into_raw())
+    };
     let total_pixels = width * height;
-    let raw = img.into_raw();
 
     // 署名（15バイト）+ 長さ（4バイト）= 19バイト = 152ビット
     if total_pixels < 152 || raw.len() < total_pixels * 4 {
@@ -2093,6 +2146,61 @@ mod tests {
         let _ = std::fs::remove_file(&test_file);
 
         assert_eq!(result.as_deref(), Some(sample_prompt), "Stealth PNGInfo からプロンプトが正確に解凍・抽出されること");
+    }
+
+    #[test]
+    fn test_stealth_pnginfo_8bit_rgba_png_zune_matches_image_open() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let sample_prompt = r#"{"prompt":"1girl, twilight sky, zune_png_stealth_check","steps":28}"#;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(sample_prompt.as_bytes()).unwrap();
+        let compressed_payload = encoder.finish().unwrap();
+
+        let mut payload_bytes = Vec::new();
+        payload_bytes.extend_from_slice(b"stealth_pngcomp");
+        payload_bytes.extend_from_slice(&((compressed_payload.len() * 8) as u32).to_be_bytes());
+        payload_bytes.extend_from_slice(&compressed_payload);
+
+        let mut bits = Vec::with_capacity(payload_bytes.len() * 8);
+        for b in payload_bytes {
+            for i in 0..8 {
+                bits.push((b >> (7 - i)) & 1);
+            }
+        }
+
+        let width = 64u32;
+        let height = 64u32;
+        let mut img = image::RgbaImage::new(width, height);
+        let mut bit_idx = 0;
+        for x in 0..width {
+            for y in 0..height {
+                let bit = if bit_idx < bits.len() { bits[bit_idx] } else { 0 };
+                bit_idx += 1;
+                img.put_pixel(x, y, image::Rgba([(x % 256) as u8, (y % 256) as u8, 180, 254 | bit]));
+            }
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("zune_8bit_rgba_stealth.png");
+        img.save(&test_file).unwrap();
+        let test_path = test_file.to_string_lossy().to_string();
+
+        // 1. zune-png のデコード結果が image::open().into_rgba8() と全画素バイト単位で完全一致すること
+        let (zw, zh, zraw) = decode_png_rgba8_with_zune(&test_path)
+            .expect("8bit RGBA PNG は zune-png 経路でデコードできること");
+        let fallback_img = image::open(&test_path).unwrap().into_rgba8();
+        assert_eq!((zw as u32, zh as u32), fallback_img.dimensions());
+        assert_eq!(zraw, fallback_img.into_raw());
+
+        // 2. 新経路を通る extract_stealth_pnginfo_with_type で同一の埋め込み文字列が抽出できること
+        let extracted = extract_stealth_pnginfo_with_type(&test_path);
+        assert_eq!(
+            extracted,
+            Some((sample_prompt.to_string(), "Stealth PNGInfo (Compressed)"))
+        );
     }
 
     #[test]

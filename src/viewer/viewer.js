@@ -1130,9 +1130,11 @@ async function preloadAdjacentImages() {
         let img;
         if (isVideoFile(path)) {
           img = document.createElement('video');
-          img.autoplay = true;
           applyPlayModeToMedia(img, 'video');
           applyVolumeSettingsToMedia(img, true);
+          // 先読み用要素ではメタデータのみ取得し、表示前のバックグラウンド再生およびストリーム競合を防止する
+          img.autoplay = false;
+          img.preload = 'metadata';
           // フォーカスを受け取らないようにし、window.focus 誘発による ignoreNextClick 誤爆を防ぐ
           img.tabIndex = -1;
           img.src = url;

@@ -200,34 +200,50 @@ pub(crate) fn notify_files_batch_inner(
 
 /// ファイルウォッチャーから通知されたファイル変更をRust側のSource of Truthに反映する
 #[tauri::command]
-pub(crate) fn notify_file_changed(
+pub(crate) async fn notify_file_changed(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     file: ImageFile,
-) -> usize {
-    notify_files_batch_inner(Some(&app), &state, vec![file], Vec::new())
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        notify_files_batch_inner(Some(&app), &state, vec![file], Vec::new())
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// ファイルウォッチャーから通知されたファイル削除をRust側のSource of Truthに反映する
 #[tauri::command]
-pub(crate) fn notify_file_removed(
+pub(crate) async fn notify_file_removed(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     path: String,
-) -> usize {
-    notify_files_batch_inner(Some(&app), &state, Vec::new(), vec![path])
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        notify_files_batch_inner(Some(&app), &state, Vec::new(), vec![path])
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// ファイルウォッチャーから通知された複数のファイル追加・変更・削除を一括で反映する
 #[tauri::command]
-pub(crate) fn notify_files_batch(
+pub(crate) async fn notify_files_batch(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     changed_files: Vec<ImageFile>,
     removed_paths: Vec<String>,
-) -> usize {
-    notify_files_batch_inner(Some(&app), &state, changed_files, removed_paths)
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        notify_files_batch_inner(Some(&app), &state, changed_files, removed_paths)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
+
+/// アイドル時の安全網となる定期差分スキャンを発火させる `idle_cycles` 閾値。
+/// `poll_timeout_ms` は先頭2サイクルが 500ms、以降が 1000ms のため、15 で約 15 秒間隔となる。
+pub(crate) const WATCHER_PERIODIC_SCAN_IDLE_CYCLES: u32 = 15;
 
 /// ファイルシステムの変更監視（軽量ポーリング）スレッドを起動する。
 /// ゴミ箱からの復元やブラウザからの保存など、外部からの変更を検知してフロントエンドに通知する。
@@ -331,8 +347,8 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
                 }
 
                 // Windows NTFS ではディレクトリ mtime が更新されず、かつ notify のイベントが欠落する場合があるため、
-                // idle_cycles が 2 以上（約1.5〜2秒経過）になったら定期スキャンとして強制的に差分検査を実行する。
-                let is_periodic_scan = idle_cycles >= 2;
+                // リアルタイムイベント・mtime 変化がない状態が続いた場合の安全網として約15秒ごとに定期差分検査を実行する。
+                let is_periodic_scan = idle_cycles >= WATCHER_PERIODIC_SCAN_IDLE_CYCLES;
 
                 if !dir_changed && !rx_ready && !is_periodic_scan {
                     idle_cycles = idle_cycles.saturating_add(1);
@@ -532,16 +548,18 @@ mod tests {
 
     #[test]
     fn test_file_watcher_periodic_scan_and_path_normalization() {
-        // 1. idle_cycles フォールバック判定ロジックの検証
-        let idle_cycles_0 = 0u32;
-        let idle_cycles_1 = 1u32;
-        let idle_cycles_2 = 2u32;
-        let idle_cycles_5 = 5u32;
-
-        assert_eq!(idle_cycles_0 >= 2, false);
-        assert_eq!(idle_cycles_1 >= 2, false);
-        assert_eq!(idle_cycles_2 >= 2, true, "idle_cycles >= 2 で定期スキャンが発火すること");
-        assert_eq!(idle_cycles_5 >= 2, true);
+        // 1. idle_cycles フォールバック判定ロジックの検証（約15秒間隔）
+        assert_eq!(WATCHER_PERIODIC_SCAN_IDLE_CYCLES, 15);
+        assert_eq!(0u32 >= WATCHER_PERIODIC_SCAN_IDLE_CYCLES, false);
+        assert_eq!(1u32 >= WATCHER_PERIODIC_SCAN_IDLE_CYCLES, false);
+        assert_eq!(2u32 >= WATCHER_PERIODIC_SCAN_IDLE_CYCLES, false);
+        assert_eq!(14u32 >= WATCHER_PERIODIC_SCAN_IDLE_CYCLES, false);
+        assert_eq!(
+            15u32 >= WATCHER_PERIODIC_SCAN_IDLE_CYCLES,
+            true,
+            "idle_cycles が閾値（約15秒相当）に達した時点で定期スキャンが発火すること"
+        );
+        assert_eq!(20u32 >= WATCHER_PERIODIC_SCAN_IDLE_CYCLES, true);
 
         // 2. パス正規化の一貫性検証
         let raw_unc_slash = "\\\\?\\C:/images/folder/test.png";

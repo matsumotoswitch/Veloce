@@ -637,10 +637,9 @@ pub(crate) fn get_smart_folder_paths(
     target_paths
 }
 
-#[tauri::command]
-pub(crate) fn get_smart_folder_counts(
+pub(crate) fn get_smart_folder_counts_inner(
     rules: Vec<SmartFolderRule>,
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
 ) -> std::collections::HashMap<String, usize> {
     let mut result = std::collections::HashMap::new();
 
@@ -693,6 +692,20 @@ pub(crate) fn get_smart_folder_counts(
     }
 
     result
+}
+
+#[tauri::command]
+pub(crate) async fn get_smart_folder_counts(
+    app: tauri::AppHandle,
+    rules: Vec<SmartFolderRule>,
+) -> Result<std::collections::HashMap<String, usize>, String> {
+    use tauri::Manager;
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        get_smart_folder_counts_inner(rules, &state)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

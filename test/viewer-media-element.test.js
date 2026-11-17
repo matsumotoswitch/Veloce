@@ -126,5 +126,37 @@ describe('Viewer Video & Media Element Lifecycle', () => {
       const cached = viewerState.preloadCache.get(0);
       expect(cached.img.tagName).toBe('VIDEO');
     });
+
+    it('should create preloaded <video> elements with autoplay=false and preload="metadata"', async () => {
+      const { loadImage } = await import('../src/viewer/viewer.js');
+      const { viewerState } = await import('../src/viewer/viewer-state.js');
+
+      const imagePath = 'C:\\images\\cover.png';
+      const nextVideoPath = 'C:\\media\\next_clip.mp4';
+      const prevVideoPath = 'C:\\media\\prev_clip.webm';
+      viewerState.currentImagePath = imagePath;
+      viewerState.currentIndex = 1;
+      viewerState.totalImages = 3;
+      viewerState.lastDirection = 1;
+      viewerState.paths = [prevVideoPath, imagePath, nextVideoPath];
+      viewerState.preloadCache.clear();
+
+      await loadImage();
+      // loadImage 内で非同期開始される preloadAdjacentImages の完了を待機
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(viewerState.preloadCache.has(2)).toBe(true);
+      const nextCached = viewerState.preloadCache.get(2);
+      expect(nextCached.img.tagName).toBe('VIDEO');
+      expect(nextCached.img.autoplay).toBe(false);
+      expect(nextCached.img.preload).toBe('metadata');
+      expect(nextCached.img.tabIndex).toBe(-1);
+
+      expect(viewerState.preloadCache.has(0)).toBe(true);
+      const prevCached = viewerState.preloadCache.get(0);
+      expect(prevCached.img.tagName).toBe('VIDEO');
+      expect(prevCached.img.autoplay).toBe(false);
+      expect(prevCached.img.preload).toBe('metadata');
+    });
   });
 });
