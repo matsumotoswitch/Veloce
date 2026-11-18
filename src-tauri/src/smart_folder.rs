@@ -125,6 +125,19 @@ pub(crate) fn escape_sql_like(input: &str) -> String {
     out
 }
 
+/// 前方一致の範囲比較（`c.path >= ? AND c.path < ?`）に用いる上限文字列を算出する。
+/// `base` の最終文字（通常は `\` または `/`）を Unicode スカラー値で 1 つ進めた文字列を返す
+/// （`\` → `]`、`/` → `0`）。空文字列または進められない文字の場合は `None` を返す。
+pub(crate) fn prefix_upper_bound(base: &str) -> Option<String> {
+    let mut chars = base.chars();
+    let last = chars.next_back()?;
+    let next_char = char::from_u32((last as u32).checked_add(1)?)?;
+    let mut upper = String::with_capacity(base.len() + 4);
+    upper.push_str(chars.as_str());
+    upper.push(next_char);
+    Some(upper)
+}
+
 /// スマートフォルダの検索条件（パス、拡張子、レーティング、サイズ、プロンプト全文検索等）から、
 /// SQLite 用の実行クエリ（SELECT / COUNT）およびバインドパラメータを動的に生成する（ソート条件・リミット指定対応）
 pub(crate) fn build_smart_folder_query_with_sort(
@@ -389,20 +402,35 @@ pub(crate) fn build_smart_folder_query_with_sort(
                 if !base_path.ends_with('\\') && !base_path.ends_with('/') {
                     base_path.push('\\');
                 }
-                let escaped_base = escape_sql_like(&base_path);
-                
+
                 if cond.operator == "under_folder" {
-                    clause = "c.path LIKE ? ESCAPE '\\'".to_string();
-                    params.push(rusqlite::types::Value::Text(format!("{}%", escaped_base)));
+                    if let Some(upper) = prefix_upper_bound(&base_path) {
+                        clause = "(c.path >= ? AND c.path < ?)".to_string();
+                        params.push(rusqlite::types::Value::Text(base_path));
+                        params.push(rusqlite::types::Value::Text(upper));
+                    } else {
+                        let escaped_base = escape_sql_like(&base_path);
+                        clause = "c.path LIKE ? ESCAPE '\\'".to_string();
+                        params.push(rusqlite::types::Value::Text(format!("{}%", escaped_base)));
+                    }
                 } else if cond.operator == "in_folder" {
-                    let base_like = format!("{}%", escaped_base);
+                    let escaped_base = escape_sql_like(&base_path);
                     let not_like_slash = format!("{}%/%", escaped_base);
                     let not_like_bslash = format!("{}%\\\\%", escaped_base);
-                    
-                    clause = "(c.path LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\')".to_string();
-                    params.push(rusqlite::types::Value::Text(base_like));
-                    params.push(rusqlite::types::Value::Text(not_like_slash));
-                    params.push(rusqlite::types::Value::Text(not_like_bslash));
+
+                    if let Some(upper) = prefix_upper_bound(&base_path) {
+                        clause = "(c.path >= ? AND c.path < ? AND c.path NOT LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\')".to_string();
+                        params.push(rusqlite::types::Value::Text(base_path));
+                        params.push(rusqlite::types::Value::Text(upper));
+                        params.push(rusqlite::types::Value::Text(not_like_slash));
+                        params.push(rusqlite::types::Value::Text(not_like_bslash));
+                    } else {
+                        let base_like = format!("{}%", escaped_base);
+                        clause = "(c.path LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\')".to_string();
+                        params.push(rusqlite::types::Value::Text(base_like));
+                        params.push(rusqlite::types::Value::Text(not_like_slash));
+                        params.push(rusqlite::types::Value::Text(not_like_bslash));
+                    }
                 } else { clause = "1=1".to_string(); }
             }
             _ => { clause = "1=1".to_string(); }
@@ -1096,7 +1124,7 @@ mod tests {
     /// PLAN.md Sec 5.2: パス条件（in_folder, under_folder）のSQL生成およびパラメータバインドテスト
     #[test]
     fn test_smart_folder_path_operators() {
-        // in_folder: 直下のみ (サブフォルダ除外)
+        // in_folder: 直下のみ (範囲条件 + サブフォルダ除外 NOT LIKE)
         let rule_in = SmartFolderRule {
             id: "path_in".to_string(),
             name: "直下".to_string(),
@@ -1110,10 +1138,18 @@ mod tests {
             ],
         };
         let (q_in, p_in) = build_smart_folder_query(&rule_in, false, false);
-        assert!(q_in.contains("c.path LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\'"), "直下パス判定のLIKE構文が含まれるべき: {}", q_in);
-        assert_eq!(p_in.len(), 3, "in_folder は3つのバインドパラメータを持つべき");
+        assert!(
+            q_in.contains("(c.path >= ? AND c.path < ? AND c.path NOT LIKE ? ESCAPE '\\' AND c.path NOT LIKE ? ESCAPE '\\')"),
+            "直下パス判定の範囲条件+NOT LIKE構文が含まれるべき: {}",
+            q_in
+        );
+        assert_eq!(p_in.len(), 4, "in_folder は4つのバインドパラメータを持つべき");
+        assert_eq!(p_in[0], rusqlite::types::Value::Text("C:\\photos\\".to_string()));
+        assert_eq!(p_in[1], rusqlite::types::Value::Text("C:\\photos]".to_string()));
+        assert_eq!(p_in[2], rusqlite::types::Value::Text("C:\\\\photos\\\\%/%".to_string()));
+        assert_eq!(p_in[3], rusqlite::types::Value::Text("C:\\\\photos\\\\%\\\\%".to_string()));
 
-        // under_folder: 配下すべて (サブフォルダ含む)
+        // under_folder: 配下すべて (サブフォルダ含む範囲条件)
         let rule_under = SmartFolderRule {
             id: "path_under".to_string(),
             name: "配下すべて".to_string(),
@@ -1127,8 +1163,206 @@ mod tests {
             ],
         };
         let (q_under, p_under) = build_smart_folder_query(&rule_under, false, false);
-        assert!(q_under.contains("c.path LIKE ? ESCAPE '\\'"), "under_folder パス判定が含まれるべき: {}", q_under);
-        assert_eq!(p_under.len(), 1, "under_folder は1つのバインドパラメータを持つべき");
+        assert!(
+            q_under.contains("(c.path >= ? AND c.path < ?)"),
+            "under_folder 範囲条件が含まれるべき: {}",
+            q_under
+        );
+        assert_eq!(p_under.len(), 2, "under_folder は2つのバインドパラメータを持つべき");
+        assert_eq!(p_under[0], rusqlite::types::Value::Text("C:\\photos\\".to_string()));
+        assert_eq!(p_under[1], rusqlite::types::Value::Text("C:\\photos]".to_string()));
+    }
+
+    #[test]
+    fn test_prefix_upper_bound() {
+        assert_eq!(prefix_upper_bound("e:\\pixiv\\"), Some("e:\\pixiv]".to_string()));
+        assert_eq!(prefix_upper_bound("e:\\"), Some("e:]".to_string()));
+        assert_eq!(prefix_upper_bound("e:/pixiv/"), Some("e:/pixiv0".to_string()));
+        assert_eq!(prefix_upper_bound("/"), Some("0".to_string()));
+        assert_eq!(prefix_upper_bound(""), None);
+    }
+
+    #[test]
+    fn test_smart_folder_path_range_behavior_equivalence() {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+
+        {
+            let conn = db_conn.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    path TEXT,
+                    metadata TEXT,
+                    thumbnail BLOB,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER,
+                    metadata_source TEXT DEFAULT ''
+                )",
+                [],
+            )
+            .unwrap();
+
+            let rows = [
+                ("h1", "e:\\pixiv\\direct1.png", 100),
+                ("h2", "e:\\pixiv\\direct2.jpg", 200),
+                ("h3", "e:\\pixiv\\sub\\nested1.png", 300),
+                ("h4", "e:\\pixiv\\sub\\deep\\nested2.png", 400),
+                // 前方一致が重なる兄弟フォルダ
+                ("h5", "e:\\pixiv2\\sibling.png", 500),
+                // 大小文字違い
+                ("h6", "E:\\PIXIV\\upper.png", 600),
+                ("h7", "e:\\Pixiv\\mixed.png", 700),
+                // LIKE ワイルドカード文字（%、_）を含むフォルダ配下と、ワイルドカード誤一致検証用の別フォルダ
+                ("h8", "e:\\art_100%\\direct_wc.png", 800),
+                ("h9", "e:\\art_100%\\sub\\nested_wc.png", 900),
+                ("h10", "e:\\artX100ZZZ\\deceptive.png", 1000),
+            ];
+            for (h, p, mt) in rows {
+                conn.execute(
+                    "INSERT INTO cache (hash_key, path, mtime) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![h, p, mt],
+                )
+                .unwrap();
+            }
+        }
+
+        let run_paths = |op: &str, val: &str| -> Vec<String> {
+            let rule = SmartFolderRule {
+                id: "equiv".to_string(),
+                name: "Equiv".to_string(),
+                match_type: "all".to_string(),
+                conditions: vec![SmartFolderCondition {
+                    r#type: "path".to_string(),
+                    operator: op.to_string(),
+                    value: val.to_string(),
+                }],
+            };
+            let mut got: Vec<String> = query_smart_folder_image_files(&rule, &db_conn, Some("mtime"), false, None)
+                .into_iter()
+                .map(|f| f.path.clone())
+                .collect();
+            got.sort();
+            got
+        };
+
+        // 1. under_folder ("e:\pixiv"): 直下 + 孫のみ。兄弟 e:\pixiv2\ や大小文字違いは除外
+        assert_eq!(
+            run_paths("under_folder", "e:\\pixiv"),
+            vec![
+                "e:\\pixiv\\direct1.png",
+                "e:\\pixiv\\direct2.jpg",
+                "e:\\pixiv\\sub\\deep\\nested2.png",
+                "e:\\pixiv\\sub\\nested1.png",
+            ]
+        );
+
+        // 2. in_folder ("e:\pixiv"): 直下のみ。孫・兄弟・大小文字違いは除外
+        assert_eq!(
+            run_paths("in_folder", "e:\\pixiv"),
+            vec![
+                "e:\\pixiv\\direct1.png",
+                "e:\\pixiv\\direct2.jpg",
+            ]
+        );
+
+        // 3. ワイルドカード文字（%, _）を含むフォルダでの under_folder / in_folder
+        assert_eq!(
+            run_paths("under_folder", "e:\\art_100%"),
+            vec![
+                "e:\\art_100%\\direct_wc.png",
+                "e:\\art_100%\\sub\\nested_wc.png",
+            ]
+        );
+        assert_eq!(
+            run_paths("in_folder", "e:\\art_100%"),
+            vec![
+                "e:\\art_100%\\direct_wc.png",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_smart_folder_under_folder_explain_query_plan() {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+
+        {
+            let mut conn = db_conn.get().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    metadata TEXT,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    path TEXT DEFAULT '',
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER,
+                    metadata_source TEXT DEFAULT ''
+                );
+                CREATE INDEX idx_cache_path ON cache (path);
+                CREATE INDEX idx_cache_mtime ON cache (mtime);
+                CREATE INDEX idx_cache_smart_cover_mtime ON cache (mtime DESC, path, size, ctime, width, height, hash_key);
+                CREATE INDEX idx_cache_smart_cover_mtime_v3 ON cache (mtime DESC, path, size, ctime, width, height, hash_key, (thumbnail IS NOT NULL));
+                CREATE INDEX idx_cache_last_accessed ON cache (last_accessed DESC);
+                CREATE INDEX idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height);",
+            )
+            .unwrap();
+
+            let tx = conn.transaction().unwrap();
+            {
+                let mut stmt = tx
+                    .prepare("INSERT INTO cache (hash_key, path, mtime, size, ctime, width, height) VALUES (?1, ?2, ?3, 1024, ?3, 832, 1216)")
+                    .unwrap();
+                for i in 0..20_000usize {
+                    let hk = format!("filler_{:05}", i);
+                    let path = format!("d:\\archive\\batch_{:02}\\img_{:05}.png", i % 50, i);
+                    stmt.execute(rusqlite::params![hk, path, i as i64]).unwrap();
+                }
+                for i in 0..3usize {
+                    let hk = format!("target_{}", i);
+                    let path = format!("e:\\pixiv\\target_{}.png", i);
+                    stmt.execute(rusqlite::params![hk, path, 30_000 + i as i64]).unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        }
+
+        let rule = SmartFolderRule {
+            id: "eqp_under".to_string(),
+            name: "EQP Under".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![SmartFolderCondition {
+                r#type: "path".to_string(),
+                operator: "under_folder".to_string(),
+                value: "e:\\pixiv".to_string(),
+            }],
+        };
+
+        let (query_str, params) = build_smart_folder_query_with_sort(&rule, false, false, Some("mtime"), false, None);
+        let conn = db_conn.get().unwrap();
+        let _like_guard = CaseSensitiveLikeGuard::new(&conn);
+        let eqp_sql = format!("EXPLAIN QUERY PLAN {}", query_str);
+        let mut stmt = conn.prepare(&eqp_sql).unwrap();
+        let details: Vec<String> = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, String>(3))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        println!("[EQP under_folder mtime DESC] {:?}", details);
+        assert!(
+            details.iter().any(|d| d.contains("SEARCH") && d.contains("path>") && d.contains("path<")),
+            "path 範囲による SEARCH が実行計画に現れるべき: {:?}",
+            details
+        );
     }
 
     /// PLAN.md Sec 5.2: 幅・高さ条件（>=, <=, ==）のSQL生成テスト
