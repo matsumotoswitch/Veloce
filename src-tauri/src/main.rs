@@ -715,6 +715,9 @@ fn load_directory(
                             initial_chunk,
                         },
                     );
+                    if let Some(state) = app_clone.try_state::<AppState>() {
+                        spawn_viewer_pool_once(&app_clone, &state);
+                    }
 
                     println!("[Veloce: PERF] Smart folder load for {} completed in {}ms (total files: {})",
                         path_clone, t_smart_start.elapsed().as_millis(), total_count);
@@ -1011,6 +1014,7 @@ fn load_directory(
                     initial_chunk,
                 },
             );
+            spawn_viewer_pool_once(&app_clone, &state);
         }
 
         // 消失したファイルが検出された場合、DBキャッシュおよびレーティングから非同期で自動クリーンアップ（Self-Healing）
@@ -1331,8 +1335,15 @@ pub(crate) fn get_all_ratings_inner(state: &AppState) -> std::collections::HashM
 }
 
 #[tauri::command]
-fn get_all_ratings(state: tauri::State<'_, AppState>) -> std::collections::HashMap<String, u8> {
-    get_all_ratings_inner(&state)
+async fn get_all_ratings(
+    app: tauri::AppHandle,
+) -> Result<std::collections::HashMap<String, u8>, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        get_all_ratings_inner(&state)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -3180,6 +3191,8 @@ fn main() {
             rating_filter_op: parking_lot::Mutex::new("gte".to_string()),
             view_params_epoch: std::sync::atomic::AtomicU64::new(0),
             view_params_mutex: parking_lot::Mutex::new(()),
+            viewer_pool_ready: std::sync::atomic::AtomicBool::new(false),
+            viewer_pool_spawned: std::sync::atomic::AtomicBool::new(false),
             db_conn,
             settings_db_conn,
             settings_db_existed: parking_lot::Mutex::new(settings_db_existed),
@@ -3230,26 +3243,7 @@ fn main() {
                     .build()?;
             }
 
-            // プール用の非表示ビューアウィンドウを遅延生成
-            // 起動時にメインウィンドウと同時にWebView2を2枚初期化するとCPU・ディスクI/Oが激しく競合するため、
-            // メイン画面の初回描画とディレクトリロードI/Oを最優先させ、わずかに遅延してバックグラウンドで準備する。
-            let app_handle_for_pool = app_handle.clone();
-            let data_dir_pool = data_dir.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(1500));
-                let _ = tauri::WindowBuilder::new(
-                    &app_handle_for_pool,
-                    "viewer_pool_0",
-                    tauri::WindowUrl::App("viewer.html".into()),
-                )
-                .title("Veloce Viewer")
-                .data_directory(data_dir_pool)
-                .visible(false)
-                .decorations(false)
-                .transparent(true)
-                .min_inner_size(300.0, 300.0)
-                .build();
-            });
+            // viewer_pool_0 はメイン画面の初回 directory-loaded 通知を契機に spawn_viewer_pool_once で一度だけ生成する
 
             // --- ファイルシステムの変更監視（軽量ポーリング） ---
             start_file_watcher(app.handle());
@@ -3318,6 +3312,7 @@ fn main() {
             thumbnail::get_cached_thumbnail_batch,
             thumbnail::precache_directory_recursively,
             get_viewer_image,
+            notify_viewer_pool_ready,
             open_viewer,
             debug_log,
             show_window,
@@ -3408,6 +3403,8 @@ pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState
         rating_filter_op: parking_lot::Mutex::new("gte".to_string()),
         view_params_epoch: std::sync::atomic::AtomicU64::new(0),
         view_params_mutex: parking_lot::Mutex::new(()),
+        viewer_pool_ready: std::sync::atomic::AtomicBool::new(false),
+        viewer_pool_spawned: std::sync::atomic::AtomicBool::new(false),
         db_conn: db_conn.clone(),
         settings_db_conn: db_conn,
         settings_db_existed: parking_lot::Mutex::new(true),

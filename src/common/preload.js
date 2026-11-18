@@ -31,6 +31,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(filePath: string) => Promise<string>} getThumbnail
  * @property {(filePath: string) => Promise<any>} parseMetadata
  * @property {(index: number) => Promise<{path: string, total: number}>} getViewerImage
+ * @property {() => Promise<void>} notifyViewerPoolReady
  * @property {(data: {currentIndex: number, width: number, height: number, monitorWidth: number, monitorHeight: number}) => Promise<void>} openViewer
  * @property {() => Promise<boolean>} isViewerMaximized
  * @property {() => Promise<boolean>} isViewerFullscreen
@@ -228,6 +229,10 @@ window.veloceAPI = {
    * @returns {Promise<object>} { path: string, total: number }
    */
   getViewerImage: (index) => invoke('get_viewer_image', { index }),
+  /**
+   * プールビューアーウィンドウの viewer-init-session リスナー登録完了を Rust 側へ通知します。
+   */
+  notifyViewerPoolReady: () => invoke('notify_viewer_pool_ready'),
   /**
    * 画像ビューアウィンドウを開くようメインプロセスに要求します。
    * @param {object} data - { currentIndex: number, width: number, height: number }

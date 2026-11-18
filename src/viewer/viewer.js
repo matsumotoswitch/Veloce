@@ -301,17 +301,151 @@ function initUnsharpFilter() {
 }
 initUnsharpFilter();
 
-window.addEventListener('DOMContentLoaded', async () => {
-    try {
-      if (window.veloceAPI && window.veloceAPI.getVideoServerPort) {
-        window.videoServerPort = await window.veloceAPI.getVideoServerPort();
-        if (window.veloceAPI.getVideoServerToken) {
-          window.videoServerToken = await window.veloceAPI.getVideoServerToken();
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to get video server port", e);
+/**
+ * viewer-init-session イベントのペイロードを viewerState へ反映する。
+ * 前後チャンク（chunk / chunkStart）が同梱されている場合は該当範囲を初期化し、
+ * 隣接パス解決のための get_viewer_image IPC 往復を省略する。
+ * チャンクを含まない旧形式ペイロードや数値ペイロードにも対応する。
+ * @param {number|{index?: number, path?: string|null, total?: number, chunkStart?: number, chunk?: string[]}} payload
+ */
+export function applyViewerInitSessionPayload(payload) {
+  let newIndex = 0;
+  let targetPath = null;
+  let total = 0;
+  let chunkStart = null;
+  let chunk = null;
+
+  if (typeof payload === 'number') {
+    newIndex = payload;
+  } else if (payload && typeof payload === 'object') {
+    newIndex = typeof payload.index === 'number' ? payload.index : 0;
+    targetPath = payload.path || null;
+    total = typeof payload.total === 'number' ? payload.total : 0;
+    if (Array.isArray(payload.chunk) && typeof payload.chunkStart === 'number') {
+      chunkStart = payload.chunkStart;
+      chunk = payload.chunk;
     }
+  }
+
+  viewerState.currentIndex = newIndex;
+  viewerState.isAlphaOverlayMode = false;
+  viewerState.originalSrc = null;
+  viewerState.overlayCache.clear();
+  viewerState.lastDirection = 1;
+  viewerState.paths = total > 0 ? new Array(total).fill(null) : null;
+  viewerState.currentImagePath = targetPath;
+  viewerState.totalImages = total;
+
+  if (viewerState.paths && chunk && chunkStart !== null) {
+    for (let i = 0; i < chunk.length; i++) {
+      const pos = chunkStart + i;
+      if (pos >= 0 && pos < viewerState.paths.length) {
+        viewerState.paths[pos] = chunk[i];
+      }
+    }
+  }
+  if (viewerState.paths && targetPath && viewerState.currentIndex >= 0 && viewerState.currentIndex < viewerState.paths.length) {
+    viewerState.paths[viewerState.currentIndex] = targetPath;
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+    function applyViewerInitialData() {
+      // IPC通信のラグを隠蔽するため、LocalStorageから初期データを取得して即座に描画を開始する
+      const initialDataJson = localStorage.getItem('viewerInitialData');
+      if (initialDataJson) {
+        try {
+          const initialData = JSON.parse(initialDataJson);
+          // indexが一致している場合のみ適用（別ウィンドウのstaleデータを防止）
+          if (typeof initialData.index !== 'number' || initialData.index === viewerState.currentIndex) {
+            viewerState.currentImagePath = initialData.path;
+            viewerState.totalImages = initialData.total;
+            if (typeof initialData.index === 'number') {
+              viewerState.currentIndex = initialData.index;
+            }
+            
+            if (!viewerState.paths || viewerState.paths.length !== initialData.total) {
+              viewerState.paths = new Array(initialData.total).fill(null);
+            }
+            // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
+            if (viewerState.paths && viewerState.currentIndex >= 0) {
+              viewerState.paths[viewerState.currentIndex] = initialData.path;
+            }
+            document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
+          }
+        } catch (e) {}
+        localStorage.removeItem('viewerInitialData');
+      }
+    }
+
+    const listen = (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen)
+      || (window.__TAURI__ && window.__TAURI__.tauri && window.__TAURI__.tauri.listen)
+      || (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.listen);
+    let serverInfoPromise = Promise.resolve();
+    let hasInitSessionReceived = false;
+
+    // プール再利用時のイベント取りこぼしを防ぐため、他の await より前に
+    // viewer-init-session および viewer-load-image リスナーを最優先で登録する
+    if (listen) {
+      await Promise.all([
+        listen('viewer-init-session', async (event) => {
+          hasInitSessionReceived = true;
+          await serverInfoPromise;
+
+          // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
+          const sessionTheme = (typeof window !== 'undefined' && window.SettingsStore
+            ? window.SettingsStore.getItem('theme')
+            : (typeof localStorage !== 'undefined' ? localStorage.getItem('theme') : null)) === 'light' ? 'light' : 'dark';
+          applyViewerTheme(sessionTheme);
+          cleanupCurrentImage();
+          clearPreloadCache();
+          applyViewerInitSessionPayload(event.payload);
+          applyViewerInitialData();
+
+          // リセット後、loadImageが確実に新しい画像をロード
+          await loadImage();
+        }),
+        listen('viewer-load-image', async (event) => {
+          await serverInfoPromise;
+          const newIndex = event.payload;
+          viewerState.currentIndex = parseInt(newIndex, 10);
+
+          // Single Window Mode (DOM Pool): clear cache and load new image
+          clearPreloadCache();
+          await loadImage();
+        }),
+      ]);
+    }
+
+    // リスナー登録完了を Rust 側へ通知（viewer_pool_0 の場合のみプール準備完了フラグが有効化される）
+    if (window.veloceAPI && window.veloceAPI.notifyViewerPoolReady) {
+      Promise.resolve(window.veloceAPI.notifyViewerPoolReady()).catch(() => {});
+    }
+
+    // ローカルメディアサーバーのポート番号・セッショントークンを並列取得する
+    serverInfoPromise = (async () => {
+      try {
+        if (window.veloceAPI) {
+          const portPromise = window.veloceAPI.getVideoServerPort
+            ? Promise.resolve(window.veloceAPI.getVideoServerPort())
+            : Promise.resolve(undefined);
+          const tokenPromise = window.veloceAPI.getVideoServerToken
+            ? Promise.resolve(window.veloceAPI.getVideoServerToken())
+            : Promise.resolve(undefined);
+          const [port, token] = await Promise.all([portPromise, tokenPromise]);
+          if (port !== undefined) {
+            window.videoServerPort = port;
+          }
+          if (token !== undefined) {
+            window.videoServerToken = token;
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to get video server port", e);
+      }
+    })();
+    await serverInfoPromise;
+
     const urlParams = new URLSearchParams(window.location.search);
     const indexParam = urlParams.get('index');
     if (indexParam !== null) {
@@ -319,69 +453,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ウィンドウが最大化されているかを非同期で確認しアイコンを更新する
-    window.veloceAPI.isViewerMaximized().then(isMax => {
-      if (isMax) {
-        const maxBtn = document.getElementById('window-max-btn');
-        if (maxBtn) maxBtn.innerHTML = ViewerUI.ICONS.RESTORE;
-      }
-    }).catch(() => {});
+    if (window.veloceAPI && window.veloceAPI.isViewerMaximized) {
+      window.veloceAPI.isViewerMaximized().then(isMax => {
+        if (isMax) {
+          const maxBtn = document.getElementById('window-max-btn');
+          if (maxBtn) maxBtn.innerHTML = ViewerUI.ICONS.RESTORE;
+        }
+      }).catch(() => {});
+    }
 
     if (window.veloceAPI && window.veloceAPI.getAllRatings) {
       window.veloceAPI.getAllRatings().then(ratings => {
         viewerRatings = ratings || {};
         if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
       }).catch(() => {});
-    }
-
-    if (window.__TAURI__) {
-      window.__TAURI__.event.listen('viewer-load-image', async (event) => {
-        const newIndex = event.payload;
-        viewerState.currentIndex = parseInt(newIndex, 10);
-        
-        // Single Window Mode (DOM Pool): clear cache and load new image
-        clearPreloadCache();
-        await loadImage();
-      });
-
-      // Window Poolパターン用の初期化セッションイベント
-      window.__TAURI__.event.listen('viewer-init-session', async (event) => {
-        const payload = event.payload;
-        let newIndex = 0;
-        let targetPath = null;
-        let total = 0;
-        if (typeof payload === 'number') {
-          newIndex = payload;
-        } else if (payload && typeof payload === 'object') {
-          newIndex = typeof payload.index === 'number' ? payload.index : 0;
-          targetPath = payload.path || null;
-          total = typeof payload.total === 'number' ? payload.total : 0;
-        }
-        viewerState.currentIndex = newIndex;
-        
-        // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
-        const sessionTheme = (typeof window !== 'undefined' && window.SettingsStore
-          ? window.SettingsStore.getItem('theme')
-          : (typeof localStorage !== 'undefined' ? localStorage.getItem('theme') : null)) === 'light' ? 'light' : 'dark';
-        applyViewerTheme(sessionTheme);
-        cleanupCurrentImage();
-        clearPreloadCache();
-        viewerState.isAlphaOverlayMode = false;
-        viewerState.originalSrc = null;
-        viewerState.overlayCache.clear();
-        viewerState.lastDirection = 1;
-        viewerState.paths = total > 0 ? new Array(total).fill(null) : null;
-        viewerState.currentImagePath = targetPath;
-        viewerState.totalImages = total;
-        if (viewerState.paths && targetPath && viewerState.currentIndex >= 0) {
-          viewerState.paths[viewerState.currentIndex] = targetPath;
-        }
-        
-        applyViewerInitialData();
-        
-        // リセット後、loadImageが確実に新しい画像をロード
-        await loadImage();
-      });
-
     }
 
     const pathsJson = localStorage.getItem('viewerPaths');
@@ -419,39 +504,11 @@ window.addEventListener('DOMContentLoaded', async () => {
       };
     }
 
-    function applyViewerInitialData() {
-      // IPC通信のラグを隠蔽するため、LocalStorageから初期データを取得して即座に描画を開始する
-      const initialDataJson = localStorage.getItem('viewerInitialData');
-      if (initialDataJson) {
-        try {
-          const initialData = JSON.parse(initialDataJson);
-          // indexが一致している場合のみ適用（別ウィンドウのstaleデータを防止）
-          if (typeof initialData.index !== 'number' || initialData.index === viewerState.currentIndex) {
-            viewerState.currentImagePath = initialData.path;
-            viewerState.totalImages = initialData.total;
-            if (typeof initialData.index === 'number') {
-              viewerState.currentIndex = initialData.index;
-            }
-            
-            if (!viewerState.paths || viewerState.paths.length !== initialData.total) {
-              viewerState.paths = new Array(initialData.total).fill(null);
-            }
-            // paths に格納しておくことで loadImage() → getImagePath() の冗長 IPC 往復を排除する (#6)
-            if (viewerState.paths && viewerState.currentIndex >= 0) {
-              viewerState.paths[viewerState.currentIndex] = initialData.path;
-            }
-            document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
-          }
-        } catch (e) {}
-        localStorage.removeItem('viewerInitialData');
-      }
+    if (!hasInitSessionReceived) {
+      applyViewerInitialData();
+      loadImage();
     }
 
-    applyViewerInitialData();
-    
-    loadImage();
-
-    const listen = (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen) || (window.__TAURI__ && window.__TAURI__.tauri && window.__TAURI__.tauri.listen) || (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.listen);
     if (listen) {
       listen('rating-changed', (event) => {
         const { path, rating } = event.payload || {};
@@ -870,6 +927,9 @@ function swapImageElement(newImg, sequenceId) {
       isViewerWindowShown = true;
     }
     updatePlayModeButtonUI();
+    if (sequenceId === imageLoadSequence) {
+      preloadAdjacentImages(sequenceId);
+    }
     return;
   }
   
@@ -905,8 +965,11 @@ function swapImageElement(newImg, sequenceId) {
   // ファイル移動・切り替え時は直前の音声再生を即座に停止・破棄する
   stopAndDiscardAudio();
 
+  let visibleApplied = false;
   const makeVisible = () => {
-    if (sequenceId !== imageLoadSequence) return;
+    if (visibleApplied || sequenceId !== imageLoadSequence) return;
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    visibleApplied = true;
     
     // Clean up the currently visible image since the new one is ready
     if (currentlyVisibleImg && currentlyVisibleImg !== newImg) {
@@ -948,6 +1011,11 @@ function swapImageElement(newImg, sequenceId) {
       if (typeof setVideoSeekBarVisibility === 'function') {
         setVideoSeekBarVisibility(shouldShowSeekBarForMedia(audioEl));
       }
+    }
+
+    // 表示用要素のデコード・表示確定後に隣接プリロードを開始し、初回描画との帯域競合を避ける
+    if (sequenceId === imageLoadSequence) {
+      preloadAdjacentImages(sequenceId);
     }
   };
 
@@ -1071,7 +1139,6 @@ async function loadImage() {
     }
 
     swapImageElement(targetImg, currentSeq);
-    preloadAdjacentImages();
     if (typeof updateRatingDisplay === 'function') updateRatingDisplay();
 
     if (viewerState.isAlphaOverlayMode && targetImg.tagName === 'IMG') {
@@ -1108,7 +1175,8 @@ if (typeof window !== 'undefined') {
   window.getPreloadDeltas = getPreloadDeltas;
 }
 
-async function preloadAdjacentImages() {
+async function preloadAdjacentImages(expectedSeq = null) {
+  if (expectedSeq !== null && expectedSeq !== imageLoadSequence) return;
   const total = viewerState.totalImages;
   if (total <= 1) return;
 
@@ -1123,8 +1191,12 @@ async function preloadAdjacentImages() {
   }
 
   await Promise.all(indicesToPreload.map(async (idx) => {
+    if (expectedSeq !== null && expectedSeq !== imageLoadSequence) return;
+    if (typeof window === 'undefined' || typeof document === 'undefined' || !window.veloceAPI || !window.veloceAPI.convertFileSrc) return;
     if (!viewerState.preloadCache.has(idx)) {
       const path = await getImagePath(idx);
+      if (expectedSeq !== null && expectedSeq !== imageLoadSequence) return;
+      if (typeof window === 'undefined' || typeof document === 'undefined' || !window.veloceAPI || !window.veloceAPI.convertFileSrc) return;
       if (path && !viewerState.preloadCache.has(idx)) {
         const url = getStreamUrl(path, window.veloceAPI.convertFileSrc(path));
         let img;
@@ -1153,6 +1225,8 @@ async function preloadAdjacentImages() {
       }
     }
   }));
+
+  if (expectedSeq !== null && expectedSeq !== imageLoadSequence) return;
 
   // 不要になった古いキャッシュ（現在地から離れたもの）を削除してメモリを節約
   for (const cachedIdx of viewerState.preloadCache.keys()) {

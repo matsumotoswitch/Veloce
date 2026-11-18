@@ -1,31 +1,130 @@
 use crate::models::ViewerImageResult;
 use crate::state::AppState;
 use crate::utils::get_veloce_data_dir;
+use std::sync::atomic::Ordering;
 use tauri::Manager;
 
+/// 指定インデックスの前後 ±32 件のパスチャンクと開始インデックスを抽出する
+pub fn build_viewer_chunk(paths: &[String], index: usize) -> (usize, Vec<String>) {
+    if paths.is_empty() {
+        return (0, Vec::new());
+    }
+    let clamped_index = std::cmp::min(index, paths.len() - 1);
+    let chunk_start = clamped_index.saturating_sub(32);
+    let chunk_end = std::cmp::min(paths.len(), clamped_index + 33);
+    (chunk_start, paths[chunk_start..chunk_end].to_vec())
+}
+
+/// viewer_pool_0 を再利用できる状態かを判定する
+/// プールウィンドウが存在し、JS 側のリスナー登録完了通知を受信済みかつ非表示の場合のみ true
+pub fn can_reuse_viewer_pool(pool_exists: bool, pool_is_visible: bool, pool_ready: bool) -> bool {
+    pool_exists && !pool_is_visible && pool_ready
+}
+
+/// ウィンドウラベルが viewer_pool_0 の場合のみプール準備完了フラグを立てる
+pub fn mark_viewer_pool_ready_for_label(state: &AppState, label: &str) -> bool {
+    if label == "viewer_pool_0" {
+        state.viewer_pool_ready.store(true, Ordering::Release);
+        true
+    } else {
+        false
+    }
+}
+
+/// ビューア側の viewer-init-session リスナー登録完了を Rust 側へ通知する
 #[tauri::command]
-pub fn get_viewer_image(
+pub fn notify_viewer_pool_ready(window: tauri::Window, state: tauri::State<'_, AppState>) {
+    mark_viewer_pool_ready_for_label(&state, window.label());
+}
+
+/// メインウィンドウの初回 directory-loaded 通知を契機に、非表示のビューアープールを一度だけ生成する
+/// 起動直後のメイン画面描画・ディレクトリ走査との WebView2 初期化競合を避けるため別スレッドで実行する
+pub fn spawn_viewer_pool_once(app: &tauri::AppHandle, state: &AppState) -> bool {
+    if state
+        .viewer_pool_spawned
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+
+    let app_handle_for_pool = app.clone();
+    let data_dir_pool = get_veloce_data_dir().unwrap_or_default();
+    std::thread::spawn(move || {
+        if app_handle_for_pool.get_window("viewer_pool_0").is_some() {
+            return;
+        }
+        let _ = tauri::WindowBuilder::new(
+            &app_handle_for_pool,
+            "viewer_pool_0",
+            tauri::WindowUrl::App("viewer.html".into()),
+        )
+        .title("Veloce Viewer")
+        .data_directory(data_dir_pool)
+        .visible(false)
+        .decorations(false)
+        .min_inner_size(300.0, 300.0)
+        .build();
+    });
+    true
+}
+
+/// 対象パスが image::image_dimensions で寸法をプローブすべき静止画像形式かを判定する
+/// 動画・音声ファイルでの不要なディスク読み込みと失敗フォールバックを回避する
+pub fn is_probeable_image_path(path: &str) -> bool {
+    if crate::audio::is_audio_path(path) {
+        return false;
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    matches!(
+        ext.as_deref(),
+        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "ico" | "tif" | "tiff")
+    )
+}
+
+/// open_viewer 開始時の初期ウィンドウ寸法を、引数または state.filtered_files から同期解決する
+pub fn resolve_initial_viewer_dimensions(
+    passed_width: u32,
+    passed_height: u32,
+    state: &AppState,
+    resolved_index: usize,
+) -> (u32, u32) {
+    if passed_width > 0 && passed_height > 0 {
+        return (passed_width, passed_height);
+    }
+    let filtered = state.filtered_files.read();
+    if let Some(entry) = filtered.get(resolved_index) {
+        if entry.width > 0 && entry.height > 0 {
+            return (entry.width, entry.height);
+        }
+    }
+    (0, 0)
+}
+
+#[tauri::command]
+pub async fn get_viewer_image(
     window: tauri::Window,
     state: tauri::State<'_, AppState>,
     index: usize,
-) -> Option<ViewerImageResult> {
+) -> Result<Option<ViewerImageResult>, String> {
     let label = window.label();
     let viewer_paths = state.viewer_paths.read();
     if let Some(paths) = viewer_paths.get(label) {
         if let Some(path) = paths.get(index) {
-            let chunk_start = index.saturating_sub(32);
-            let chunk_end = std::cmp::min(paths.len(), index + 33);
-            let chunk = paths[chunk_start..chunk_end].to_vec();
-            return Some(ViewerImageResult {
+            let (chunk_start, chunk) = build_viewer_chunk(paths, index);
+            return Ok(Some(ViewerImageResult {
                 path: path.clone(),
                 total: paths.len(),
                 index,
                 chunk_start,
                 chunk,
-            });
+            }));
         }
     }
-    None
+    Ok(None)
 }
 
 pub fn get_viewer_hash_str(target_path: Option<&String>) -> String {
@@ -67,14 +166,20 @@ pub async fn open_viewer(
         (target, resolved_idx, std::sync::Arc::clone(&paths))
     };
 
-    let mut win_width = width;
-    let mut win_height = height;
+    let (mut win_width, mut win_height) =
+        resolve_initial_viewer_dimensions(width, height, &state, resolved_index);
 
     if win_width == 0 || win_height == 0 {
         if let Some(path) = &target_path {
-            if let Ok(dims) = image::image_dimensions(path) {
-                win_width = dims.0;
-                win_height = dims.1;
+            if is_probeable_image_path(path) {
+                let path_for_probe = path.clone();
+                if let Ok(Some(dims)) =
+                    tokio::task::spawn_blocking(move || image::image_dimensions(&path_for_probe).ok())
+                        .await
+                {
+                    win_width = dims.0;
+                    win_height = dims.1;
+                }
             }
         }
     }
@@ -124,18 +229,25 @@ pub async fn open_viewer(
         return Ok(());
     }
 
-    // viewer_pool_0 が非表示であればそれを再利用する
+    // viewer_pool_0 が準備完了済みかつ非表示であれば再利用する
+    let pool_ready = state.viewer_pool_ready.load(Ordering::Acquire);
     if let Some(pool_win) = app.get_window("viewer_pool_0") {
-        if !pool_win.is_visible().unwrap_or(false) {
+        let pool_visible = pool_win.is_visible().unwrap_or(false);
+        if can_reuse_viewer_pool(true, pool_visible, pool_ready) {
             state.viewer_paths.write().insert("viewer_pool_0".to_string(), current_paths.clone());
             state.viewer_hashes.write().insert("viewer_pool_0".to_string(), hash_str.clone());
 
-            // JS側に新しい画像のロードを指示
+            let (chunk_start, chunk) = build_viewer_chunk(&current_paths, resolved_index);
+
+            // JS側に新しい画像のロードを指示（前後 ±32 件の初期チャンクを同梱し隣接パスIPC往復を削減）
             #[derive(Clone, serde::Serialize)]
+            #[serde(rename_all = "camelCase")]
             struct ViewerInitSessionPayload {
                 index: usize,
                 path: Option<String>,
                 total: usize,
+                chunk_start: usize,
+                chunk: Vec<String>,
             }
 
             let _ = pool_win.emit(
@@ -144,6 +256,8 @@ pub async fn open_viewer(
                     index: resolved_index,
                     path: target_path.clone(),
                     total: current_paths.len(),
+                    chunk_start,
+                    chunk,
                 },
             );
             
@@ -294,5 +408,103 @@ pub fn arrange_viewers(app: tauri::AppHandle, caller_window: tauri::Window) {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::ImageFile;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_can_reuse_viewer_pool_requires_ready_and_hidden() {
+        // プール未準備時はウィンドウが存在して非表示でもプール経路に入らない
+        assert!(!can_reuse_viewer_pool(true, false, false));
+        // プールウィンドウ非存在時は不可
+        assert!(!can_reuse_viewer_pool(false, false, true));
+        assert!(!can_reuse_viewer_pool(false, false, false));
+        // プールが表示中（使用中）の場合は不可（2枚目新規生成経路へ）
+        assert!(!can_reuse_viewer_pool(true, true, true));
+        // 存在・非表示・準備完了がすべて満たされた場合のみ再利用可能
+        assert!(can_reuse_viewer_pool(true, false, true));
+    }
+
+    #[test]
+    fn test_mark_viewer_pool_ready_for_label() {
+        let state = crate::create_test_app_state("C:\\test");
+        assert!(!state.viewer_pool_ready.load(Ordering::Acquire));
+
+        // 別ウィンドウからの通知ではフラグを立てない
+        assert!(!mark_viewer_pool_ready_for_label(&state, "main"));
+        assert!(!mark_viewer_pool_ready_for_label(&state, "viewer_12345_abc"));
+        assert!(!state.viewer_pool_ready.load(Ordering::Acquire));
+
+        // viewer_pool_0 からの通知でのみフラグが立つ
+        assert!(mark_viewer_pool_ready_for_label(&state, "viewer_pool_0"));
+        assert!(state.viewer_pool_ready.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn test_resolve_initial_viewer_dimensions_uses_filtered_files_fallback() {
+        let state = crate::create_test_app_state("C:\\test");
+        let entry = ImageFile {
+            name: "sample.png".to_string(),
+            ext: compact_str::CompactString::from("png"),
+            path: "C:\\test\\sample.png".to_string(),
+            size: 1024,
+            mtime: 1000,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            width: 1216,
+            height: 832,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: true,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: compact_str::CompactString::default(),
+        };
+        state.filtered_files.write().push(Arc::new(entry));
+
+        // 引数が正なら引数をそのまま使う
+        assert_eq!(resolve_initial_viewer_dimensions(800, 600, &state, 0), (800, 600));
+        // 引数が 0 の場合は state.filtered_files の解決済みエントリの寸法を使う
+        assert_eq!(resolve_initial_viewer_dimensions(0, 0, &state, 0), (1216, 832));
+        // 範囲外インデックスの場合は (0, 0)
+        assert_eq!(resolve_initial_viewer_dimensions(0, 0, &state, 99), (0, 0));
+    }
+
+    #[test]
+    fn test_is_probeable_image_path_skips_video_and_audio() {
+        assert!(is_probeable_image_path("C:\\a\\img.png"));
+        assert!(is_probeable_image_path("C:\\a\\img.JPG"));
+        assert!(is_probeable_image_path("C:\\a\\img.webp"));
+        assert!(!is_probeable_image_path("C:\\a\\clip.mp4"));
+        assert!(!is_probeable_image_path("C:\\a\\clip.webm"));
+        assert!(!is_probeable_image_path("C:\\a\\song.mp3"));
+        assert!(!is_probeable_image_path("C:\\a\\noext"));
+    }
+
+    #[test]
+    fn test_build_viewer_chunk_bounds() {
+        assert_eq!(build_viewer_chunk(&[], 0), (0, Vec::new()));
+
+        let paths: Vec<String> = (0..100).map(|i| format!("C:\\img\\{}.png", i)).collect();
+        let (start_head, chunk_head) = build_viewer_chunk(&paths, 5);
+        assert_eq!(start_head, 0);
+        assert_eq!(chunk_head.len(), 38); // 0..38 (5 + 33)
+        assert_eq!(chunk_head[5], "C:\\img\\5.png");
+
+        let (start_mid, chunk_mid) = build_viewer_chunk(&paths, 50);
+        assert_eq!(start_mid, 18); // 50 - 32
+        assert_eq!(chunk_mid.len(), 65); // 18..83
+        assert_eq!(chunk_mid[32], "C:\\img\\50.png");
+
+        let (start_tail, chunk_tail) = build_viewer_chunk(&paths, 99);
+        assert_eq!(start_tail, 67); // 99 - 32
+        assert_eq!(chunk_tail.len(), 33); // 67..100
+        assert_eq!(chunk_tail[32], "C:\\img\\99.png");
     }
 }

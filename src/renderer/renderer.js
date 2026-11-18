@@ -641,40 +641,32 @@ export async function selectImage(index, event = null) {
   }
 }
 
-async function openViewer(index, filePath = null) {
+function openViewer(index, filePath = null, width = 0, height = 0) {
   if (index < 0 && !filePath) return;
 
-  let targetFilePath = filePath;
-  let file = null;
+  const targetFilePath = filePath || null;
 
-  if (targetFilePath) {
-    file = await window.veloceAPI.getFileByIndex(index);
-    if (!file || file.path !== targetFilePath) {
-      file = { path: targetFilePath, width: 0, height: 0 };
-    }
-  } else {
-    file = await window.veloceAPI.getFileByIndex(index);
-    if (file) targetFilePath = file.path;
-  }
-
-  // IPC通信の遅延を回避するため、初期表示用のデータを LocalStorage に保存して直接渡す
+  // パスが判明している場合のみ、初期表示用のデータを LocalStorage に保存して直接渡す
+  // 未判明の場合でも Rust 側でインデックスからパスと寸法を解決し、ビューアーは ?index= と get_viewer_image で初期表示できる
   if (targetFilePath) {
     localStorage.setItem('viewerInitialData', JSON.stringify({
       path: targetFilePath,
       total: appState.totalCount,
       index: index
     }));
-
-    // パス配列はRust側にあるため転送不要
-    localStorage.removeItem('viewerPaths');
-    localStorage.removeItem('viewerStartIndex');
+  } else {
+    localStorage.removeItem('viewerInitialData');
   }
+
+  // パス配列はRust側にあるため転送不要
+  localStorage.removeItem('viewerPaths');
+  localStorage.removeItem('viewerStartIndex');
 
   window.veloceAPI.openViewer({
     currentIndex: index,
     filePath: targetFilePath,
-    width: file ? file.width : 0,
-    height: file ? file.height : 0,
+    width: width || 0,
+    height: height || 0,
     monitorWidth: window.screen.availWidth,
     monitorHeight: window.screen.availHeight
   });
