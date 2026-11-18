@@ -1,6 +1,6 @@
 # Veloce アプリケーション詳細仕様・機能定義書 (PLAN.md)
 
-本書は、AI生成画像に特化した超軽量・高速画像管理マネージャー＆ビューアー「Veloce」の、実際のソースコード構造および実装に基づいた正確な仕様書である。
+本書は、AI生成画像に特化した軽量・軽快な画像管理マネージャー＆ビューアー「Veloce」の、実際のソースコード構造および実装に基づいた正確な仕様書である。
 
 ---
 
@@ -9,21 +9,25 @@
 ### 1.1 技術スタック & コア最適化
 * **基本設計思想:** 確実にサムネイル表示が行われ、正常に動作することを大前提とした上で極限の速度を追求する。特定の破損ファイルや環境依存のAPI遅延によって処理が沈黙（ハングアップ）しないよう、タイムアウト制御やフェイルセーフを徹底した堅牢な基盤の上に最適化を構築する。
 * **バックエンド:** Rust (Tauri v1)
-  * **モジュール分離アーキテクチャ:** 保守性と凝集度を高めるため、ドメイン・責務ごとに8つのモジュールへ分割（`main.rs`, `audio.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）。
-    * `main.rs`: アプリケーション初期化、Tauri コマンドハンドラ、ファイル監視、DBマイグレーション統括
+  * **モジュール分離アーキテクチャ:** 保守性と凝集度を高めるため、ドメイン・責務ごとに12のモジュールへ分割（`main.rs`, `audio.rs`, `metadata.rs`, `models.rs`, `server.rs`, `settings.rs`, `smart_folder.rs`, `state.rs`, `thumbnail.rs`, `utils.rs`, `viewer.rs`, `watcher.rs`）。
+    * `main.rs`: アプリケーション初期化、Tauri コマンドハンドラ、ディレクトリ走査、DB初期化・マイグレーション・キャッシュ監査統括
     * `audio.rs`: `lofty` クレートを用いたMP3音声メタデータ（ID3タグ、再生時間、FFmpeg `TXXX` 拡張タグ）および埋め込みカバーアート（APIC）の抽出
+    * `metadata.rs`: PNG / WebP / JPEG のAI生成メタデータ解析、Stealth PNGInfo 抽出、検索テキスト構築、およびバッチDB保存
     * `models.rs`: 画像・音声メタデータ、スマートフォルダ定義、IPCリクエスト/レスポンスの型定義
-    * `server.rs`: ローカルHTTPストリーミングサーバー（動画・音声の2MBチャンクRange配信、MP3カバーアート配信、短時間keep-alive、およびサムネイルバイナリ直接保存）
+    * `server.rs`: ローカルHTTPストリーミングサーバー（動画・音声の2MBチャンクRange配信、MP3カバーアート `?cover=1` 配信、サムネイル配信・バイナリ直接保存、`Connection: close` 統一による1接続1リクエスト完結）
     * `settings.rs`: SQLite設定DB (`veloce_settings.db`) の管理、設定CRUDおよびWALチェックポイント
-    * `state.rs`: スレッドセーフなグローバル状態管理（`AppState`）、高速ハッシャーマップ
+    * `smart_folder.rs`: スマートフォルダの動的SQLクエリ構築、件数集計、ハイブリッド即時表示と消失ファイル自動パージ
+    * `state.rs`: スレッドセーフなグローバル状態管理（`AppState`）、逆引きインデックス、高速ハッシャーマップ、世代カウンタ管理
+    * `thumbnail.rs`: 画像・動画・音声カバーのサムネイル生成、並列バッチ生成・世代打ち切り、OSネイティブ/FFmpegフォールバック、SQLiteバッチ保存
     * `utils.rs`: パス正規化、ハッシュ生成、Windows APIバインディング等のユーティリティ
     * `viewer.rs`: 独立ビューアーウィンドウの生成・プール管理・前面化整列制御
+    * `watcher.rs`: OSネイティブのディレクトリ変更監視、定期差分スキャン、およびファイル追加・変更・削除バッチ同期
   * **高効率メモリ管理:** `mimalloc` (`MiMalloc`) をグローバルアロケータに指定し、長時間の画像処理における断片化とメモリ肥大化を徹底的に抑制。さらに `compact_str::CompactString` を採用し、`ImageFile` の `ext`（拡張子）や `hash_key`（xxh3 16進文字列）等の小文字列を24バイト以内スタックインライン化することで、数万件規模の走査時におけるヒープ割り当て数万回削減とヒープ断片化を防止。
   * **高効率並行同期:** バックエンド内部の排他制御において、標準の `std::sync::Mutex` / `RwLock` ではなく `parking_lot` クレートを採用。ロック構造体のメモリサイズ縮小、ポイズニング排除、スピンウェイトとOSフューテックスのハイブリッド制御によるロック競合オーバーヘッド削減を実現。
   * **小要素コレクション最適化:** `smallvec` クレートを導入し、要素数が少ないコレクションにおけるヒープアロケーションを回避してスタック領域を活用。
-  * **SIMD高速画像デコード:** JPEGおよびPNG画像の展開において、標準のデコーダーに代わり SIMD 最適化が施された `zune-jpeg`, `zune-png`, `zune-core` クレートを導入。画像キャッシュ生成パイプラインのCPU負荷を削減し、JPEGおよびPNGファイルのサムネイル生成および表示処理を高速化。
-  * **マルチスレッド処理:** `rayon` による並列ソート、および `tokio::task::spawn_blocking` によるI/Oバウンドな非同期タスク分離。
-  * **超高速ディレクトリ走査:** 標準の `std::fs::read_dir` ではなく `jwalk` クレートを採用し、並列処理による極めて高速なディレクトリツリー展開を実現。
+  * **SIMD高速画像デコード:** JPEGおよびPNG画像の展開において、標準のデコーダーに代わり SIMD 最適化が施された `zune-jpeg`, `zune-png`, `zune-core` クレートを導入。サムネイル生成および8ビットPNGのStealth PNGInfo解析のCPU負荷を削減し、デコード処理を高速化。
+  * **マルチスレッド処理とUIスレッド非ブロック化:** `rayon` による並列ソート・並列解析、および `async fn` + `tokio::task::spawn_blocking` によるI/O・ソート・DB処理のオフロード（`load_directory`, `get_subfolders`, `set_view_params`, `get_smart_folder_counts`, `set_rating`/`set_ratings_batch`, `notify_files_batch`, `trash_files_batch` 等）。連続呼び出しが生じる `set_view_params` では世代カウンタ（`view_params_epoch`）と直列化ミューテックスにより古い要求をスキップして順序逆転を防止。
+  * **高速ディレクトリ走査:** 単一フォルダ展開（`load_directory` / `get_subfolders`）では `std::fs::read_dir` と `rayon` を組み合わせ、Windows の列挙時データ（`WIN32_FIND_DATA`）を再利用することで追加の `stat` システムコールを回避。サブフォルダを含む再帰プリキャッシュ（`precache_directory_recursively`）では `jwalk` クレートによる並列探索を採用。
 * **データベース (キャッシュレイヤー):** SQLite (r2d2接続プール接続、最大16スレッド)
   * **高速化設定:** `journal_mode = WAL`, `synchronous = NORMAL`, `mmap_size = 268435456 (256MB)`, `cache_size = -4000 (4MB)`, `temp_store = MEMORY`, `busy_timeout = 5000` を指定し、16スレッドでのメモリ肥大化をOSメモリマッピングに逃がしつつロック競合を防止。
   * **インデックス設計:** パス検索用 `idx_cache_path`、更新日時用 `idx_cache_mtime`、アクセス日時用 `idx_cache_last_accessed`、レーティング用 `idx_ratings_rating` に加え、スマートフォルダ一覧取得をカバーする複合カバリングインデックス群（`idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)`、`idx_cache_smart_cover_mtime ON cache (mtime DESC, path, size, ctime, width, height, hash_key)`、`idx_cache_smart_cover_mtime_v3 ON cache (mtime DESC, path, size, ctime, width, height, hash_key, (thumbnail IS NOT NULL))`）を配備。
@@ -52,7 +56,11 @@
       * `renderer-file-ops.js`: ファイル/フォルダの名前変更、ゴミ箱移動、Undo（元に戻す）スタック管理、キャッシュ再構築
       * `renderer-inspector.js`: 右ペインのメタデータインスペクター表示、複数選択サマリー、タグコピー
       * `renderer-tabs.js`: タブの生成・切替・複製・閉塞、タブ状態の永続化
-      * `renderer-dialogs.js`: モーダルダイアログ（お気に入り編集、スマートフォルダ編集、差分比較Diff等）
+      * `renderer-nav.js`: アドレスバー編集、進む・戻る履歴、親フォルダ移動、履歴コンテキストメニュー
+      * `renderer-toolbar.js`: 検索バー、ソート選択ドロップダウン、表示モード切替、サムネイルサイズ・ツールバー制御
+      * `renderer-smart-folder.js`: スマートフォルダのツリー描画、件数更新、展開・選択・編集連携
+      * `renderer-diff.js`: 2枚の画像のプロンプト・生成パラメータ差分比較（Diffモーダル）
+      * `renderer-dialogs.js`: モーダルダイアログ（お気に入り編集、スマートフォルダ編集、各種確認ダイアログ等）
       * `renderer-dnd.js`: サムネイルやフォルダのドラッグ＆ドロップ移動・コピー、競合検出
       * `renderer-context-menu.js`: コンテキストメニュー構築・アニメーション
       * `renderer-help.js`: ヘルプ・ライセンスダイアログ表示
@@ -78,10 +86,10 @@
 ### 2.1 独立マルチビューアーウィンドウ
 * **ウィンドウ制御 (Window Pool):** メイン画面から完全に独立した子ウィンドウを展開。ウィンドウの都度生成・破棄によるWebView2の起動遅延やGC負荷を防止するため、既存の非表示ウィンドウを再利用する Window Pool パターンを採用。セッション開始時に `viewer-init-session` イベントでインデックス・パス・総件数を安全に同期して初期化。多重起動時はショートカット（`L` キー）でモニターの有効ワークエリアに合わせて**横一列に素早く自動整列**。
 * **Windows 8.1 前面化ハック:** 整列時、バックエンド側で別スレッドから `SetForegroundWindow` および `SetWindowPos (HWND_TOPMOST)` をミリ秒遅延させて呼び出し、古いOS特有のウィンドウフォーカス奪取問題を物理的に解決。
-* **メディア表示とフィルター処理:** 静止画像に加え動画（MP4等）および音声（MP3）の再生に対応し、メディア種別に応じた自然寸法（`videoWidth` / `naturalWidth`、カバーなし音声プレースホルダ時は仮想480×480）を正確に取得。音声ファイル表示時は埋め込みカバーアートまたはプレースホルダを表示しつつ `<audio>` 要素で自動再生し、コントロールバーを常時表示（縦型音量ポップアップおよび `Shift + ↑/↓`・`Shift + ←/→` キー操作による音量調整・ミュート解除・シークと設定永続化に対応）。拡大縮小、回転（左右90度）、水平・垂直反転、等倍（100%）表示、SVGフィルター定義（`feConvolveMatrix` によるアンシャープマスク）を用いた小数倍率拡大時の輪郭鮮鋭化に対応。なお、音声表示中は `U`（アンシャープマスク）と `A`（アルファチャンネル可視化）を無効化し、カバー画像未表示（プレースホルダ表示中）の音声では回転（`↑` / `↓`）および反転（`H` / `V`）も無効化して、登録されたカバー画像を表示中の音声でのみ回転・反転を有効化。
+* **メディア表示とフィルター処理:** 静止画像に加え動画（MP4等）および音声（MP3）の再生に対応し、メディア種別に応じた自然寸法（`videoWidth` / `naturalWidth`、カバーなし音声プレースホルダ時は仮想480×480）を正確に取得。音声ファイル表示時は埋め込みカバーアートまたはプレースホルダを表示しつつ `<audio>` 要素で自動再生し、コントロールバーを常時表示（縦型音量ポップアップ、再生モード切替ボタン［`停止` / `リピート` / `自動送り`、動画・音声それぞれ個別に永続化、自動送り時はリスト末尾で停止］、および `Shift + ↑/↓`・`Shift + ←/→` キー操作による音量調整・ミュート解除・シークと設定永続化に対応）。拡大縮小、回転（左右90度）、水平・垂直反転、等倍（100%）表示、SVGフィルター定義（`feConvolveMatrix` によるアンシャープマスク）を用いた小数倍率拡大時の輪郭鮮鋭化に対応。なお、音声表示中は `U`（アンシャープマスク）と `A`（アルファチャンネル可視化）を無効化し、カバー画像未表示（プレースホルダ表示中）の音声では回転（`↑` / `↓`）および反転（`H` / `V`）も無効化して、登録されたカバー画像を表示中の音声でのみ回転・反転を有効化。
 * **メタデータ表示オーバーレイ (`I` キー):** ビューアー画面上で `I` キーを押すことで、半透明のメタデータオーバーレイを呼び出してプロンプト・生成パラメータ詳細を確認・タグコピー可能（従来のPキーからIキーに一本化）。
-* **ダブルバッファリング（DOM Swap）描画:** ビューアーの画像切り替え時、直接 `src` を書き換えて発生するチラつきやデコード遅延を防ぐため、裏で非表示の `Image` オブジェクトに先行して画像をデコード（`onload` / `onerror` 待機）させ、完了した瞬間に `replaceChildren()` でコンテナごとDOMをすり替えるゼロ遅延レンダリング機構を実装。
-* **隣接画像プリロード並列化:** 表示中の画像の前後の隣接画像を `Promise.all` により並列プリフェッチ。ループ表示時のインデックス循環解決を含め、高速な画像切り替え時のレスポンスを確保。
+* **ダブルバッファリング（DOM Swap）描画:** ビューアーの画像切り替え時、直接 `src` を書き換えて発生するチラつきやデコード遅延を防ぐため、裏で非表示の `Image` オブジェクトに先行して画像をデコード（`onload` / `onerror` 待機）させ、完了したタイミングで `replaceChildren()` でコンテナごとDOMをすり替える描画機構を実装。
+* **隣接メディアの方向性プリロード:** 移動方向（順方向・逆方向）に応じた優先順（`getPreloadDeltas`）で隣接ファイルを `Promise.all` により並列プリフェッチし、ループ表示時のインデックス循環解決を含めて切り替え応答を確保。動画（MP4等）の先読み時は `<video>` を `autoplay = false`, `preload = "metadata"` に抑えてオフスクリーン再生やローカルHTTPストリームの帯域競合を回避し、実表示切替時（`swapImageElement`）に再生を開始する。
 
 ### 2.2 ファイルシステム & ドライブ検出
 * **ネイティブドライブ検出:** Windows APIの `GetLogicalDrives` を直接呼び出し、接続されている物理ドライブ（`A:\`〜`Z:\`）のビットマスクをミリ秒以下で検出して動的にツリーへ展開。
@@ -106,12 +114,12 @@
 画像バイナリを自前で解析し、主要なAI生成プログラミング形式を完全に網羅。
 1. **PNG形式:** `tEXt` / `zTXt` / `iTXt`（Zlib圧縮対応）チャンクから Description, Comment, parameters などを抽出。ComfyUIの `workflow` / `prompt` 構造のフォールバックも実装。
 2. **WebP / JPEG形式:** バイナリをメモリマップ（`memmap2`）で展開し、TIFF IFD構造（EXIF）および XMP（JPEG APP1 `http://ns.adobe.com/xap/1.0/` / WebP `XMP ` チャンク）をパースして `ImageDescription` や `UserComment`（UNICODE/ASCIIヘッダースキップ・XMLエンティティ展開処理付き）、`Software` を高速抽出。
-3. **Stealth形式 (隠しメタデータ):** EXIF等に痕跡がない場合、画像のアルファチャンネル（最下位ビット）から Column-Major Order (x -> y) でビットを抽出し、MSB first でバイト配列に変換。`stealth_pngcomp` (Gzip圧縮) および `stealth_pnginfo` (非圧縮) をデコードしてプロンプトを復元。抽出されたプロンプトやタグは `unified_search_text` にも統合され、メイン画面の検索バーやフィルタリングでヒット可能。
+3. **Stealth形式 (隠しメタデータ):** EXIF等に痕跡がない場合、画像のアルファチャンネル（最下位ビット）から Column-Major Order (x -> y) でビットを抽出し、MSB first でバイト配列に変換。`stealth_pngcomp` (Gzip圧縮) および `stealth_pnginfo` (非圧縮) をデコードしてプロンプトを復元。8ビットRGBA/Grayscale+Alpha PNG のデコードには `zune-png` を優先使用してフルデコード負荷を削減し、プロンプトを持たない PNG/WebP には `stealthSchema`（`STEALTH_SCHEMA_VERSION`）を記録して次回以降の無駄な再解析ループを防止。抽出されたプロンプトやタグは `unified_search_text` にも統合され、メイン画面の検索バーやフィルタリングでヒット可能。
 4. **NovelAI V4 / V4.5 特殊対応:** JSON内のマルチキャラクタープロンプト（`v4_prompt/caption/char_captions`）およびネガティブ側を自動パースし、フロントエンド側で `characterPrompts` 配列（`prompt`, `uc`）に再構造化して保持。
 5. **ランダマイザ（採用プロンプト）対応:** NovelAIの `||A|B||` 書式によるランダム抽選を検出。`Comment` 内の `actual_prompts` JSON構造から、ベースプロンプトおよび各キャラクタープロンプト・除外要素の「実際に採用された値」を抽出し `adoptedPrompt` として格納。抽選前プロンプト（ランダマイザ書式を含む）と採用後プロンプトの両方をインスペクター・ビューアーオーバーレイ・パラメータDiffモーダルに表示し、FTS5検索インデックスにも含める。
 6. **A1111 / WebUI形式フォールバック:** parameters 内の `Steps: ` 等の文字列パターンを検出し、自動的に `rawParameters` フィールドに格納してパース。
 7. **MP3音声メタデータ解析 (`lofty`):** ID3v2 / ID3v1 タグおよびオーディオプロパティからタイトル、アーティスト、アルバム、歌詞（`USLT` および FFmpeg 等が出力する `TXXX: USLT`）、コメント（`COMM` および `TXXX: comment`）、録音日時（`TDRC` 等を `yyyy/mm/dd hh:mm:ss` 書式に正規化）、再生時間、ならびに埋め込みカバー画像（`APIC` JPEG/PNG）を抽出。カバー画像は通常画像と同一のリサイズパイプラインを通じてSQLiteサムネイルキャッシュへ保存。タグ欠損や破損ファイルでもパニックせず安全に処理を継続。
-8. **情報ソース判定と表示:** メタデータの解析経路に応じた出処（`PNG Chunks`, `Alpha Channel`, `WebP EXIF`, `WebP XMP`, `JPEG EXIF`, `JPEG XMP`, `ID3`）を判定し、SQLite `cache` テーブルの `metadata_source` カラムに永続化。インスペクター・独立ビューアー・差分表示の「プロンプト」見出し横にサブラベルタグとして表示。アルファチャンネル（Stealth PNGInfo）検出時のみゴールド色（`--glow-gold`）で強調し、通常ソースは控えめな文字色（`opacity: 0.6`）で統一。
+8. **情報ソース判定と表示:** メタデータの解析経路に応じた出処（`PNG Chunks`, `Alpha Channel`, `WebP EXIF`, `JPEG EXIF`, `Audio Tags`, `None`）を判定し、SQLite `cache` テーブルの `metadata_source` カラムに永続化。インスペクター・独立ビューアー・差分表示の「プロンプト」見出し横にサブラベルタグとして表示。アルファチャンネル（Stealth PNGInfo）検出時のみゴールド色（`--glow-gold`）で強調し、通常ソースは控えめな文字色（`opacity: 0.6`）で統一。
 
 ### 3.2 フロントエンド・インスペクター & DOM Pool
 * **DOM Pool（要素の再利用）:** インスペクターに大量のプロンプトタグやパラメータを描画する際、メモリ解放（GC）によるガタつきを排除するため、`inspectorSectionPool` および `inspectorTagPool` を実装。画面更新時はDOM要素を一度も破棄せず、`display = 'none'` による非表示化と中身の `replaceChildren()` による書き換えだけで要素を高速に再利用。
@@ -127,17 +135,17 @@
 
 ### 4.1 ハイブリッド・サムネイル生成パイプライン
 サムネイル処理パイプラインは独立モジュール（`src/renderer/renderer-thumbnails.js`）として分離され、ブラウザネイティブの非同期デコードパイプラインと Rust バックエンドを組み合わせた往復バッチシステムとして稼働。
-1. **ファストパス表示:** ディレクトリ展開時、Rust側がSQLiteを検索し、すでにキャッシュが存在するファイルは `generate_thumbnail` IPC コマンドが返す Tauri Asset URL をそのまま画像の `src` に使用。
-2. **非同期バッチ生成とフェイルセーフ:** キャッシュが未生成の画像は、`ThumbnailWorkerPool` および `ThumbnailQueueManager`（バッチサイズ8）によって並列要求を制御しながら生成される。ブラウザの `createImageBitmap`（別スレッドデコード）や `HTMLImageElement` を活用し、Chromium 109環境で一部の非互換画像がハングアップするのを防ぐため、**5秒間の絶対タイムアウト機構**および**2秒間のデコードレース制御（`Promise.race`）**を組み込んでおり、タイムアウト・失敗時は即座に代替アイコンまたは Rust 側バックエンド処理へフォールバックしてキューの詰まりを防止する。さらに定期的なスタック検知タイマー（ドラッグ＆ドロップ中は誤検知防止のためガード付きでスキップ）が稼働し、不測の滞留タスクを自己修復する。
-3. **即時描画（Blob URL）とバイナリダイレクト保存:** サムネイル画像のデコード完了後、DOMの `src` にはメモリ効率の良い `Blob URL`（`URL.createObjectURL`）を即座に適用してUIに表示させる。同時に、Base64文字列への変換オーバーヘッドを回避するため、生成された生の画像 Blob をローカル HTTP サーバー（`http://127.0.0.1:{port}/save-thumbnail`）へダイレクトに POST 送信して SQLite へ高速保存する。HTTP サーバーが利用できない場合のみ Base64 IPC へ安全にフォールバックする。保存完了後、一時的なBlob URLは解放され、軽量な SQLite 経由のURLに差し替えられる。
-4. **Rust側サムネイル生成パイプラインのゼロコピー化と高速エンコード・デコード:** 事前キャッシュやキャッシュ監査、Workerフォールバック時のバックエンドサムネイル生成において、JPEG画像には `zune-jpeg`、PNG画像には `zune-png`（内部の `zune-inflate` による SIMD Deflate 展開・逆フィルタ処理）を採用し、CPU負荷の削減とデコード処理の高速化を実現。デコード済み `DynamicImage` からのピクセルバッファ取得を `to_rgba8()`（借用による原寸複製）から `into_rgba8()` / `into_rgb8()`（ムーブ）へ移行し、約4MBの重複メモリ確保・コピーを撤廃。アルファ付きサムネイルPNG出力時は `PngEncoder::new_with_quality(..., CompressionType::Fast, FilterType::Adaptive)` により高速圧縮エンコードを行い、リサイズ処理では `fast_image_resize::Resizer` を `thread_local!` でスレッドごとに再利用して作業バッファの頻繁な割り当て・解放を排除。
+1. **ファストパス表示（SQLite一括水和 & ローカルHTTP直参照）:** ディレクトリ展開時（`load_directory`）、Rust側が900件チャンクの `IN` クエリでSQLiteキャッシュを一括参照し、`has_thumbnail_cache`, `hash_key`, `width`, `height`, `unified_search_text`, `meta_loaded` をメモリ上のアイテムに水和する。サムネイルキャッシュ済みのファイルは追加IPCを経由せず、ローカルHTTPサーバーURL（`http://127.0.0.1:{port}/?path=...&mtime=...&thumb=1&hash=...&token=...`）をそのまま `src` へ設定して即時描画する。未キャッシュのメタデータについては世代管理（`METADATA_BG_EPOCH`）付きのバックグラウンドタスクで遅延補完し、フォルダ再訪や切替時の旧タスクの二重実行を防止。
+2. **Rust並列バッチ生成とフロントエンド・フェイルセーフ:** 未キャッシュの画像は、優先的に Rust 側の `generate_thumbnail_batch`（`rayon` による並列生成＋世代カウンタ `THUMBNAIL_BATCH_EPOCH` による切替時打ち切り＋単一トランザクション一括コミット）で生成し、必要に応じて `ThumbnailWorkerPool` / `ThumbnailQueueManager`（バッチサイズ8、ブラウザの `createImageBitmap` / `HTMLImageElement` デコード）と協調稼働する。Chromium 109環境で一部の非互換画像がハングアップするのを防ぐため、**5秒間の絶対タイムアウト機構**および**2秒間のデコードレース制御（`Promise.race`）**を組み込んでおり、タイムアウト・失敗時は即座に代替アイコンまたは Rust 側バックエンド処理へフォールバックしてキューの詰まりを防止する。さらに定期的なスタック検知タイマー（ドラッグ＆ドロップ中は誤検知防止のためガード付きでスキップ）が稼働し、不測の滞留タスクを自己修復する。
+3. **即時描画（Blob URL）とバイナリダイレクト保存:** フロントエンド側（Worker等）でサムネイル画像を生成した場合、DOMの `src` にはメモリ効率の良い `Blob URL`（`URL.createObjectURL`）を即座に適用してUIに表示させる。同時に、Base64文字列への変換オーバーヘッドを回避するため、生成された生の画像 Blob をローカル HTTP サーバー（`http://127.0.0.1:{port}/save-thumbnail`）へダイレクトに POST 送信して SQLite へ高速保存する。HTTP サーバーが利用できない場合のみ Base64 IPC へ安全にフォールバックする。保存完了後、一時的なBlob URLは解放され、軽量な SQLite 経由のURLに差し替えられる。
+4. **Rust側サムネイル生成パイプラインのゼロコピー化と高速エンコード・デコード:** 事前キャッシュやキャッシュ監査、バッチ生成・フォールバック時のバックエンドサムネイル生成において、JPEG画像には `zune-jpeg`、PNG画像には `zune-png`（内部の `zune-inflate` による SIMD Deflate 展開・逆フィルタ処理）を採用し、CPU負荷の削減とデコード処理の高速化を実現。デコード済み `DynamicImage` からのピクセルバッファ取得を `to_rgba8()`（借用による原寸複製）から `into_rgba8()` / `into_rgb8()`（ムーブ）へ移行し、約4MBの重複メモリ確保・コピーを撤廃。実質不透明なRGBA画像（Stealth PNGInfo埋め込みPNG等、`is_effectively_opaque_rgba` で判定）は JPEG として高速エンコードし、透過が必要なサムネイルPNG出力時は `PngEncoder::new_with_quality(..., CompressionType::Fast, FilterType::Adaptive)` を使用。リサイズ処理では `fast_image_resize::Resizer` を `thread_local!` でスレッドごとに再利用して作業バッファの頻繁な割り当て・解放を排除。
 5. **表示中アイテムの最優先探索・順次描画と即応枠（リザーブ）:** フォルダ表示やタブ切り替え時、画面内に表示されている可視アイテムのキャッシュサムネイルを最優先で探索・即時描画。キャッシュ未生成の可視アイテムに対しては作成中であることを示す視覚的エフェクト（パルス/シマーアニメーション）を画面内表示アイテムに優先適用し、非同期生成が完了したものから順次画面へ反映。また、高速スクロール時に画面外に通り過ぎた大量のアイテムがキューに溜まった場合でも、全8枠の並行実行枠のうち最大4枠を画面外アイテムに制限し、残りの4枠を「いま画面に表示されているアイテム」のための即応枠として常時予約。さらに動画サムネイル抽出（MP4）は専用枠（最大2枠）として分離し、動画処理による画像生成キューの滞留を防止。
 6. **キューの即時破棄（Abort）機構:** 別フォルダへの移動や「ソート順の変更」、および「**タブの切り替え**」が行われた際は、現在バックグラウンドで実行中・待機中のすべてのサムネイルタスクに対して世代管理（`generation`）と `AbortController` で即座に中断シグナルを発行しキューを破棄する。これにより、古い画面状態や非アクティブタブのタスクが、現在表示中のタブの処理をブロックする遅延を完全に防ぐ。
 7. **キャッシュ再構築の即時反映:** ユーザーが「選択項目のキャッシュ再構築」を実行した際、再生成された画像をブラウザのハードキャッシュを回避して即座に画面へ反映させるため、画像URLにキャッシュバスター（`&_cb=日時`）を付与し、画面のリロードなしで即座にUIをアップデートする。
 
 ### 4.2 動画・音声対応・ストリーミングサーバー
 * **ネイティブ動画・音声サムネイル抽出:** MP4動画ファイルのサムネイルを要求された場合、Windows環境では組み込みの `ffmpeg.exe`（存在する場合、非ウィンドウモード `CREATE_NO_WINDOW` で実行）または Windows ネイティブの `IShellItemImageFactory`（Shell API）を呼び出し、動画の1秒目のフレームからダイレクトにビットマップ（BGRA→RGBA変換）を抽出し、高速にPNGデータとしてフロントエンドに返却。MP3音声ファイルでは埋め込みカバー画像（APIC）を抽出して通常画像と同じリサイズ経路でサムネイル化し、カバー未収録時はMusicアイコンのSVGプレースホルダへフォールバック。
-* **ローカルHTTPメディアサーバー（短時間keep-alive対応）:** 大容量の動画（MP4）や音声（MP3、`Content-Type: audio/mpeg`）のスムーズな再生、およびMP3埋め込みカバー画像（`/audio-cover`）やサムネイルの高速配信のため、Rust側でランダムな空きポートと一意のセッショントークン（`?token=...`）を使って `TcpListener` をホストする軽量なHTTPサーバーが稼働。短時間HTTP keep-aliveにより連続リクエスト時の接続オーバーヘッドを削減。
+* **ローカルHTTPメディアサーバー（`Connection: close` 統一）:** 大容量の動画（MP4）や音声（MP3、`Content-Type: audio/mpeg`）のスムーズな再生、およびMP3埋め込みカバー画像（`?cover=1`）やサムネイル（`?thumb=1&hash=...`）の高速配信のため、Rust側でランダムな空きポートと一意のセッショントークン（`?token=...`）を使って `TcpListener` をホストする軽量なHTTPサーバーが稼働。すべての応答で `Connection: close` を統一し、1接続1リクエスト完結とすることで、WebView2側のアイドル接続保持によるワーカースレッド占有を回避。
 * **2MB制限チャンクストリーミング:** 動画・音声再生時、ブラウザ側からの `Range: bytes=...` ヘッダーを解析。バックエンド側でファイルのシーク位置（`SeekFrom::Start`）を調整し、**1回のリクエストに対する返却サイズを最大2MBに厳格に制限**して部分配信（`206 Partial Content`）を行うことで、大容量メディアでもメモリを圧迫せずに即時シーク・再生可能。
 * **イベント駆動型コントロールバーと縦型音量ポップアップ:** シークバーの位置更新はポーリング（`setInterval`）を排し、`<video>` / `<audio>` 要素の `timeupdate` イベント駆動方式を採用。また右端スピーカーボタンからWindows 8.1風の縦型音量スライダ＋ミュート切替ポップアップを開閉でき、音量・ミュート状態を設定ストアへ永続化。
 
@@ -179,10 +187,10 @@
 | **aspect_ratio** | `portrait` | 縦長画像判定公式: `(width * 100 < height * 95)` |
 | | `landscape` | 横長画像判定公式: `(width * 100 > height * 105)` |
 | | `square` | 正方形判定公式: `(width * 100 >= height * 95 AND width * 100 <= height * 105)` |
-| **path** | `in_folder` | 指定フォルダの**直下のみ**を対象とする判定:<br>`c.path LIKE ? AND c.path NOT LIKE ?/% AND c.path NOT LIKE ?\%` |
-| | `under_folder` | 指定フォルダの**配下すべて（サブフォルダ含む）**を対象:<br>`c.path LIKE ?%` |
+| **path** | `in_folder` | 指定フォルダの**直下のみ**を対象とする判定（B-Tree範囲条件＋階層除外）:<br>`(c.path >= ? AND c.path < ? AND c.path NOT LIKE ? ESCAPE '\' AND c.path NOT LIKE ? ESCAPE '\')`<br>※上限文字を算出できない境界ケースのみ従来の `LIKE ? ESCAPE '\'` へフォールバック |
+| | `under_folder` | 指定フォルダの**配下すべて（サブフォルダ含む）**を対象（`prefix_upper_bound` による B-Tree 範囲シーク）:<br>`(c.path >= ? AND c.path < ?)`<br>※上限文字を算出できない境界ケースのみ従来の `LIKE ? ESCAPE '\'` へフォールバック |
 
-* **ソート順とオプティマイザ制御:** スマートフォルダ一覧クエリの末尾には `ORDER BY +c.mtime DESC` を付与。単項プラス演算子（`+`）により、SQLiteのクエリオプティマイザが意図せず mtime インデックスを強制スキャンして結合効率を落とす事態を回避。
+* **ソート順とインデックス活用:** スマートフォルダ一覧クエリでは、数値系ソートキー（`mtime`, `ctime`, `size`, `width`, `height`）指定時に `ORDER BY c.{key} ASC/DESC` を付与。`name`, `rating`, `ratio` 等のソートでは SQL 側を `ORDER BY c.mtime DESC` に維持してカバリングインデックス（`idx_cache_smart_cover_mtime_v3`）を効かせ、主テーブルのフルスキャンを回避した上で Rust 側で並列ソートを実行。
 * **特殊組み込みID:** 条件が空の特殊フォルダとして、`fav_5`（星5）、`fav_4_plus`（星4以上）、`history`（`last_accessed` 降順の直近100件）のファストパスを完備。
 * **ハイブリッド即時表示と消失ファイルの自動パージ (Self-Healing):** スマートフォルダの読み込み時、全件に対する同期的ファイルチェックによる遅延を防ぐため、ソート後の先頭200件（初期ビューポート領域）のみを同期的に `is_file()` 判定して20〜30ms以内の即時描画を実現。残りの全アイテムはバックグラウンド（`tokio::task::spawn`）で非同期並列に存在確認を行い、エクスプローラー等で外部削除・移動された消失ファイルのキャッシュレコードを自動パージ（Self-Healing）。パージ完了時はフロントエンドへ `smart-folder-purged` イベントを発行し、総件数を自動同期。
 
@@ -196,8 +204,8 @@
 * **インテリジェント動作判定:** ドロップ先のドライブ（ルート）と移動元のドライブが同じであればデフォルト動作を「移動（`move`）」、異なるドライブ間であれば「コピー（`copy`）」に自動で切り替え（Ctrlキーで強制コピー、Shiftキーで強制移動）。
 
 ### 6.2 堅牢なファイルウォッチャー & キャッシュライフサイクル管理
-* **変更監視（イベント駆動＆適応型ポーリング）:** 外部のエクスプローラやブラウザからの画像保存、ゴミ箱からの復元等を検知するため、バックエンド側で `notify` クレートを活用した OS ネイティブのファイル変更監視（対象フォルダおよび親フォルダ）を稼働。安定状態では待機時間を1000ms、変更頻発時は500ms（100msのデバウンス付き）へと動的に適応制御し、不要なディスクI/Oを抑えつつ俊敏に変更を検知してフロントエンドに通知。
-* **自動クリーンアップ仕様:** ウォッチャーがファイルシステム上での「ファイル削除」を検知した際、あるいはユーザーがアプリ内からファイルをゴミ箱（`trash` クレート経由）に移動した際、そのファイルに関連付けられていた SQLite 内のサムネイルバイナリおよびメタデータキャッシュ、さらに古いファイルベースのキャッシュ（`Thumbnails/*.jpg`, `Metadata/*.json`）を**ハッシュキーベースでストレージから即座に自動完全削除**。不要な残滓を残さない自動クリーンアップ機構により、ディスク容量の浪費を防止。
+* **変更監視（イベント駆動＆定期セーフティネットスキャン）:** 外部のエクスプローラやブラウザからの画像保存、ゴミ箱からの復元等を検知するため、バックエンド側で `notify` クレートを活用した OS ネイティブのファイル変更監視（対象フォルダおよび親フォルダ）を稼働。リアルタイムイベントおよびディレクトリ `mtime` 変化時は即座に差分反映しつつ、アイドル時の取りこぼし補完用の定期再スキャン間隔は約15秒（`WATCHER_PERIODIC_SCAN_IDLE_CYCLES = 15`）に制御し、`DirEntry::file_type()` により追加 `stat` システムコールを抑止。ファイル追加・変更バッチ（`notify_files_batch_inner`）では削除なしの場合に `rebuild_all_indices` の全件再構築を省略し、差分挿入・更新のみで逆引きインデックスを整合維持。
+* **自動クリーンアップ仕様:** ウォッチャーがファイルシステム上での「ファイル削除」を検知した際、あるいはユーザーがアプリ内からファイルをゴミ箱（`trash` クレート経由、複数選択時は `trash_files_batch` + `notify_files_batch` で一括処理）に移動した際、そのファイルに関連付けられていた SQLite 内のサムネイルバイナリおよびメタデータキャッシュを**ハッシュキーベースでストレージから即座に自動削除**。不要な残滓を残さない自動クリーンアップ機構により、ディスク容量の浪費を防止。
 * **キャッシュの精査と修復 (`audit_cache`):**
   1. **整合性スキャン:** キャッシュ内の全レコードを走査し、実ファイルが存在しないレコードや、大文字小文字・UNCパス正規化による重複レコードをトランザクション内で一括削除。
   2. **プロパティ自動補完:** レコード内の幅・高さ・ファイルサイズ・mtime・ctime に欠落がある場合、ファイルメタデータやバイナリヘッダーから自動補完。
@@ -239,6 +247,7 @@
 * `Ctrl + A`: 現在のフォルダ内のすべての画像を全選択。
 * `Ctrl + F`: 検索キーワード入力欄に即座にフォーカス移動し全選択。
 * `Alt + ← / →`: フォルダ移動履歴の「戻る」 / 「進む」。
+* `Alt + ↑`: ひとつ上のフォルダへ移動。
 * `Ctrl + Tab` / `Ctrl + Shift + Tab`: 左右のタブへの高速切り替え。
 * `Esc`: モーダル、コンテキストメニュー、カスタム選択ドロップダウン、ヘルプ画面の安全なクローズ。
 * `矢印キー (↑↓←→)` / `PageUp` / `PageDown` / `Home` / `End`:
@@ -260,7 +269,7 @@
 * `L`: 開いているすべての独立ビューアーウィンドウを作業領域に合わせて横一列に自動整列。
 * `B`: ウィンドウ外枠（アクセントボーダー）および右上コントロール群の表示 / 非表示切り替え。
 * `I`: メタデータオーバーレイ（プロンプト・生成パラメータ詳細）の表示 / 非表示切り替え。
-* `S`: 動画・音声のコントロールバー（シークバー・音量調整）の表示 / 非表示切り替え。
+* `S`: 動画・音声のコントロールバー（シークバー・音量調整・再生モード）の表示 / 非表示切り替え。
 * `U`: 画像のシャープ表示（SVGアンシャープマスクフィルター） / 滑らか表示の切り替え（音声表示中は無効）。
 * `Delete`: 現在表示中の画像をゴミ箱へ移動し、自動的に次の画像を表示。
 * `Esc`: ビューアーウィンドウを閉じる（音量ポップアップ表示中はポップアップのみを閉じる）。
@@ -282,6 +291,6 @@
 ### 7.1 コードコメントとドキュメンテーション品質規範
 * **場当たり的・カジュアルなコメントの排除:** 不具合修正時の一時的なチケットIDや「〜対策」等の短絡的コメントは一切残さず、修正理由をブラウザのレンダリングパイプライン（Chromium 109 / WebView2 同期Reflow）、OS API（Windows 8.1 論理ドライブビットマスク）、非同期並行排他制御（`_runWithUpdateLock`）などの**客観的な技術的根拠・設計意図としてコメントに昇華**する方針を徹底。
 * **Rust / JS 双方向でのドキュメンテーション標準化:**
-  * **Rust (`src-tauri/src/`):** クレートレベル（`//!`）および各モジュール（`main.rs`, `audio.rs`, `models.rs`, `server.rs`, `settings.rs`, `state.rs`, `utils.rs`, `viewer.rs`）でmimalloc、SQLite WAL/mmap、xxh3_64、jwalk並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `save_thumbnail`, `parse_metadata`, `build_smart_folder_query` 等）および内部構造体・関数には `///` doc comments を完備。
-  * **JavaScript (`src/common/`, `src/renderer/`, `src/viewer/`):** `renderer-thumbnails.js`（Workerプール/タイムアウト/Blob URL即時描画）、`renderer-ui.js`（仮想スクロール/DOM Pool/排他ロック/ツールチップ・トースト基盤）、`viewer.js`（二重バッファリングDOM Swap/先行プリロード/Unsharp SVGフィルター）、`renderer-folder-tree.js`（ツリー走査/遅延展開）、`renderer-file-ops.js`（ファイル操作/Undo）、`renderer-bookmarks.js`（お気に入り管理）、`renderer-resizer.js`（ペインリサイズ）、`renderer.js`（ライフサイクル/グローバルショートカット統括）の各モジュールヘッダーおよび主要関数にJSDocと設計意図を網羅。
+  * **Rust (`src-tauri/src/`):** クレートレベル（`//!`）および各モジュール（`main.rs`, `audio.rs`, `metadata.rs`, `models.rs`, `server.rs`, `settings.rs`, `smart_folder.rs`, `state.rs`, `thumbnail.rs`, `utils.rs`, `viewer.rs`, `watcher.rs`）でmimalloc、SQLite WAL/mmap、xxh3_64、`read_dir` / `jwalk` 並列探索、2MBチャンク配信、Window Pool再利用などの基幹アーキテクチャを体系化。主要Tauriコマンド（`load_directory`, `open_viewer`, `generate_thumbnail_batch`, `parse_metadata`, `build_smart_folder_query_with_sort` 等）および内部構造体・関数には `///` doc comments を完備。
+  * **JavaScript (`src/common/`, `src/renderer/`, `src/viewer/`):** `renderer-thumbnails.js`（バッチ生成連携/Workerプール/タイムアウト/Blob URL即時描画）、`renderer-ui.js`（仮想スクロール/DOM Pool/排他ロック/ツールチップ・トースト基盤）、`viewer.js`（二重バッファリングDOM Swap/方向性プリロード/Unsharp SVGフィルター）、`renderer-folder-tree.js`（ツリー走査/遅延展開）、`renderer-nav.js`（履歴・アドレスバー）、`renderer-toolbar.js`（検索・ソート・表示制御）、`renderer-smart-folder.js`（スマートフォルダ連携）、`renderer-diff.js`（Diff比較）、`renderer-file-ops.js`（ファイル操作/Undo）、`renderer-bookmarks.js`（お気に入り管理）、`renderer-resizer.js`（ペインリサイズ）、`renderer.js`（ライフサイクル/グローバルショートカット統括）の各モジュールヘッダーおよび主要関数にJSDocと設計意図を網羅。
 * **過度な誇張表現・絵文字の厳禁:** コメント内であっても「一瞬」「神速」「爆速」等の過度な誇張表現や絵文字（⭐など）は使用せず、客観的で落ち着いた技術的表現を用いる。

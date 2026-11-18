@@ -233,9 +233,11 @@ export function toggleHelpOverlay(forceShow) {
     </div>
 
     <div id="help-viewer" class="help-tab-content">
-      <h3 class="help-group-title">画像切り替え</h3>
+      <h3 class="help-group-title">画像切り替え・再生操作</h3>
       <table class="help-table">
-        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>前の画像 / 次の画像を表示</td></tr>
+        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>前のファイル / 次のファイルを表示</td></tr>
+        <tr><td><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>再生位置を 5秒戻す / 5秒進める（動画・音声のみ）</td></tr>
+        <tr><td><kbd>Shift</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd></td><td>音量を 5% 上げる / 下げる（動画・音声のみ、ミュート中に↑で解除）</td></tr>
         <tr><td>左クリック / 右クリック</td><td>前の画像 / 次の画像を表示</td></tr>
         <tr><td>マウスホイール</td><td>上スクロールで前 / 下スクロールで次を表示</td></tr>
       </table>
@@ -265,7 +267,7 @@ export function toggleHelpOverlay(forceShow) {
         <tr><td><kbd>L</kbd></td><td>すべてのビューアーを横一列に整列</td></tr>
         <tr><td><kbd>B</kbd></td><td>ウィンドウ枠（ボーダー）・UIの表示切替</td></tr>
         <tr><td><kbd>I</kbd></td><td>メタデータオーバーレイの表示 / 非表示</td></tr>
-        <tr><td><kbd>S</kbd></td><td>動画のシークバーの表示 / 非表示</td></tr>
+        <tr><td><kbd>S</kbd></td><td>動画・音声のコントロールバー（シークバー・音量調整・再生モード）の表示 / 非表示</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>画像をゴミ箱に移動し、次の画像を表示</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>表示中の画像をクリップボードにコピー（テキスト選択中はテキストコピー）</td></tr>
         <tr><td><kbd>タグをクリック</kbd></td><td>（オーバーレイ時）プロンプトタグをコピー（<kbd>Ctrl</kbd> + クリックで追加コピー）</td></tr>

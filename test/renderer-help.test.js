@@ -166,6 +166,9 @@ describe('renderer-help.js', () => {
       expect(viewerContent.textContent).toContain('メタデータオーバーレイの表示 / 非表示');
       expect(viewerContent.textContent).toContain('アルファチャンネル可視化（メタデータ領域）の表示 / 非表示');
       expect(viewerContent.textContent).toContain('すべてのビューアーを横一列に整列');
+      expect(viewerContent.textContent).toContain('再生位置を 5秒戻す / 5秒進める');
+      expect(viewerContent.textContent).toContain('音量を 5% 上げる / 下げる');
+      expect(viewerContent.textContent).toContain('動画・音声のコントロールバー（シークバー・音量調整・再生モード）の表示 / 非表示');
       expect(viewerContent.innerHTML).toContain('<kbd>I</kbd>');
       expect(viewerContent.innerHTML).toContain('<kbd>A</kbd>');
       expect(viewerContent.innerHTML).toContain('<kbd>L</kbd>');
