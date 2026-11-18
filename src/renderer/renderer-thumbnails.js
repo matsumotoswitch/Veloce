@@ -1309,6 +1309,30 @@ export class ThumbnailQueueManager {
   async runBatchTask(items, isViewport = false) {
     const signal = this.abortController.signal;
     const paths = items.map(item => item.filePath);
+    // バッチ開始時点で既に dirty だったパスも記録しておく（書き込み完了前の内容で確定するのを防ぐ）
+    const initialDirtySet = new Set();
+    if (this._dirtyTasks) {
+      for (const item of items) {
+        if (this._dirtyTasks.has(item.filePath)) {
+          initialDirtySet.add(item.filePath);
+        }
+      }
+    }
+
+    const isItemDirty = (filePath) =>
+      initialDirtySet.has(filePath) || Boolean(this._dirtyTasks && this._dirtyTasks.has(filePath));
+
+    const requeueItemToPriority = (filePath) => {
+      if (this._dirtyTasks) this._dirtyTasks.delete(filePath);
+      this.activeTasks.delete(filePath);
+      if (this.activeBatchPaths) this.activeBatchPaths.delete(filePath);
+      if (!appState.thumbnailUrls.has(filePath) && !this.priorityQueueSet.has(filePath)) {
+        this.priorityQueueSet.add(filePath);
+        this.priorityQueue.push({ filePath, skipDbCheck: true });
+        return true;
+      }
+      return false;
+    };
 
     try {
       const results = await window.veloceAPI.generateThumbnailBatch(paths);
@@ -1333,14 +1357,18 @@ export class ThumbnailQueueManager {
         const filePath = item.filePath;
         const url = resultMap.get(filePath);
 
+        // file-changed により無効化されたアイテムは、成功確定・失敗フォールバックより優先して再キューする
+        if (isItemDirty(filePath)) {
+          if (requeueItemToPriority(filePath)) {
+            requeued = true;
+          }
+          continue;
+        }
+
         if (!url && cancelledSet.has(filePath)) {
           // Rust 側で旧世代として生成を打ち切られたアイテム: 生成処理は行われていないため、
           // Worker フォールバックではなく優先キューへ戻して再スケジュールする
-          this.activeTasks.delete(filePath);
-          if (this.activeBatchPaths) this.activeBatchPaths.delete(filePath);
-          if (!appState.thumbnailUrls.has(filePath) && !this.priorityQueueSet.has(filePath)) {
-            this.priorityQueueSet.add(filePath);
-            this.priorityQueue.push({ filePath, skipDbCheck: true });
+          if (requeueItemToPriority(filePath)) {
             requeued = true;
           }
           continue;
@@ -1400,13 +1428,32 @@ export class ThumbnailQueueManager {
     } catch (err) {
       if (signal.aborted) return;
       console.warn('[Thumbnail] Batch generation error, falling back to individual tasks:', err);
+      let catchRequeued = false;
       for (const item of items) {
-        if (this.activeBatchPaths) this.activeBatchPaths.delete(item.filePath);
-        if (!signal.aborted) {
-          this.runTask(item.filePath, false);
-        } else {
-          this.activeTasks.delete(item.filePath);
+        const filePath = item.filePath;
+        if (this.activeBatchPaths) this.activeBatchPaths.delete(filePath);
+        if (isItemDirty(filePath)) {
+          if (!signal.aborted) {
+            if (requeueItemToPriority(filePath)) {
+              catchRequeued = true;
+            }
+          } else {
+            if (this._dirtyTasks) this._dirtyTasks.delete(filePath);
+            this.activeTasks.delete(filePath);
+          }
+          continue;
         }
+        if (!signal.aborted) {
+          this.runTask(filePath, false);
+        } else {
+          this.activeTasks.delete(filePath);
+        }
+      }
+      if (catchRequeued && this.priorityQueue.length > 1) {
+        const viewportPaths = appState.viewportPathSet || new Set();
+        const visiblePaths = appState.visiblePathSet || new Set();
+        const getScore = (fp) => (viewportPaths.has(fp) ? 0 : (visiblePaths.has(fp) ? 1 : 2));
+        this.priorityQueue.sort((a, b) => getScore(a.filePath) - getScore(b.filePath));
       }
     } finally {
       // clear() によりコンテキストが切り替わった後に旧バッチが完了した場合、
@@ -1709,8 +1756,9 @@ window.resetThumbnailPreloader = resetThumbnailPreloader;
 // 画面に表示されている要素（_domByPath）を定期的に検査し、ロード中のままスタックしているか、
 // SVGフォールバックのエラー状態のまま放置されているサムネイルを検知して自動的に再キューする。
 export function checkThumbnailSelfHealing() {
-  if (window.appState && window.appState.dragState && window.appState.dragState.isAppDragging) return 0;
-  if (window.appState && window.appState.activeCenterPane !== 'grid') return 0;
+  const state = window.appState || appState;
+  if (state && state.dragState && state.dragState.isAppDragging) return 0;
+  if (state && state.activeCenterPane !== 'grid') return 0;
   if (!window.uiManager || !window.uiManager._domByPath || window.uiManager._domByPath.size === 0) return 0;
 
   const tm = window.thumbnailManager;
@@ -1720,7 +1768,7 @@ export function checkThumbnailSelfHealing() {
   if (tm.priorityQueue && tm.priorityQueue.length > 0) return 0;
 
   // 全可視サムネイルが既に正常URLを保持しており、かつ未解決タスクがないアイドル時はDOM走査をスキップ
-  const urls = window.appState && window.appState.thumbnailUrls;
+  const urls = (state && state.thumbnailUrls) || (appState && appState.thumbnailUrls);
   if (urls && (!tm.preloadQueue || tm.preloadQueue.length === 0) && tm.activeTasks && tm.activeTasks.size === 0) {
     let allHealthy = true;
     for (const path of window.uiManager._domByPath.keys()) {
@@ -1734,6 +1782,7 @@ export function checkThumbnailSelfHealing() {
   }
 
   let retryCount = 0;
+  const PLACEHOLDER_GIF_PREFIX = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP';
   for (const [path, wrapper] of window.uiManager._domByPath.entries()) {
     const img = wrapper.children[0];
     if (!img) continue;
@@ -1741,8 +1790,10 @@ export function checkThumbnailSelfHealing() {
     const isStuckLoading = img.classList.contains('loading');
     const isAudioPlaceholder = isAudioFile(path) && img.src === AUDIO_PLACEHOLDER_URL;
     const isSvgFallback = !isAudioPlaceholder && img.src && img.src.startsWith('data:image/svg+xml');
+    const hasRegisteredUrl = Boolean(urls && urls.has(path));
+    const isGifPlaceholder = !hasRegisteredUrl && Boolean(img.src && img.src.startsWith(PLACEHOLDER_GIF_PREFIX));
 
-    if (isStuckLoading || isSvgFallback) {
+    if (isStuckLoading || isSvgFallback || isGifPlaceholder) {
       if (!tm.activeTasks || !tm.activeTasks.has(path)) {
         if (window.appState && window.appState.thumbnailUrls) {
           window.appState.thumbnailUrls.delete(path);

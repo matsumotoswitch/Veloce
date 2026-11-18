@@ -1703,6 +1703,166 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
         expect(thumbnailState.totalBlobBytes).toBe(600 * 1024);
       });
     });
+
+    describe('External File Addition & Overwrite Thumbnail Reliability (Causes 1 & 2)', () => {
+      it('runBatchTask should not finalize URL for dirty items, should clear dirty flag, and should re-queue them', async () => {
+        let batchCallCount = 0;
+        let resolveFirstBatch;
+        window.veloceAPI.generateThumbnailBatch = vi.fn((paths) => {
+          batchCallCount++;
+          if (batchCallCount === 1) {
+            return new Promise((resolve) => {
+              resolveFirstBatch = resolve;
+            });
+          }
+          // 2回目の再キュー後のバッチでは書き込み完了後の新URLを返す
+          return Promise.resolve(paths.map(p => ({
+            path: p,
+            url: `http://127.0.0.1:12345/?path=${encodeURIComponent(p)}&mtime=2000&thumb=1&hash=fresh_hash`,
+            cancelled: false
+          })));
+        });
+
+        const dirtyPath = 'C:/test/writing_in_progress.png';
+        const cleanPath = 'C:/test/already_complete.png';
+        testAppState.viewportPathSet = new Set([dirtyPath, cleanPath]);
+        testAppState.visiblePathSet = new Set([dirtyPath, cleanPath]);
+
+        const updateDomSpy = vi.spyOn(manager, 'updateDOM');
+
+        // 1回目のバッチ開始
+        manager.enqueuePriorityBatch([dirtyPath, cleanPath], true);
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledTimes(1);
+        expect(manager.activeTasks.has(dirtyPath)).toBe(true);
+
+        // バッチ実行中に file-changed が到着し、remove() で _dirtyTasks に記録される
+        manager.remove(dirtyPath);
+        expect(manager._dirtyTasks.has(dirtyPath)).toBe(true);
+
+        // 1回目のバッチが（書き込み途中の古い内容で）成功URLを返して完了
+        resolveFirstBatch([
+          { path: dirtyPath, url: 'http://127.0.0.1:12345/?path=stale&mtime=1000&thumb=1&hash=stale_hash', cancelled: false },
+          { path: cleanPath, url: 'http://127.0.0.1:12345/?path=clean&mtime=1000&thumb=1&hash=clean_hash', cancelled: false }
+        ]);
+
+        // 2回目のバッチ予約が走る直前ではなく、完了後まで進める前に processNext を一時フックして中間状態も確認可能だが、
+        // ここでは2回目のバッチ解決まで待機して最終状態とコール履歴を検証する
+        await new Promise(r => setTimeout(r, 20));
+
+        // 1. cleanPath は1回目のURLで確定していること
+        expect(testAppState.thumbnailUrls.get(cleanPath)).toContain('clean_hash');
+        // 2. dirtyPath は1回目の古い stale_hash で updateDOM されておらず、再キュー後の2回目バッチの fresh_hash で確定していること
+        expect(updateDomSpy).not.toHaveBeenCalledWith(dirtyPath, expect.stringContaining('stale_hash'));
+        expect(testAppState.thumbnailUrls.get(dirtyPath)).toContain('fresh_hash');
+        // 3. _dirtyTasks フラグが消去されていること
+        expect(manager._dirtyTasks.has(dirtyPath)).toBe(false);
+        // 4. 再キューにより generateThumbnailBatch が dirtyPath に対して再実行されたこと
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenCalledTimes(2);
+        expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenNthCalledWith(2, [dirtyPath]);
+      });
+
+      it('checkThumbnailSelfHealing should detect elements stuck on 1x1 transparent GIF placeholder when URL is not registered', async () => {
+        const { checkThumbnailSelfHealing } = await import('../src/renderer/renderer-thumbnails.js');
+
+        const gifPlaceholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        const stuckBufferPath = 'C:/images/buffer_added.png';
+        const healthyPath = 'C:/images/healthy.png';
+
+        window.appState = testAppState;
+        testAppState.activeCenterPane = 'grid';
+        testAppState.dragState = { isAppDragging: false };
+        testAppState.thumbnailUrls.clear();
+        testAppState.thumbnailUrls.set(healthyPath, 'http://127.0.0.1:12345/?thumb=1&hash=ok');
+
+        const domMap = new Map();
+        // バッファ行で生成された要素: loading クラス無し、src は 1x1 透明 GIF、thumbnailUrls 未登録
+        domMap.set(stuckBufferPath, {
+          children: [{
+            src: gifPlaceholder,
+            classList: { contains: () => false }
+          }]
+        });
+        domMap.set(healthyPath, {
+          children: [{
+            src: 'http://127.0.0.1:12345/?thumb=1&hash=ok',
+            classList: { contains: () => false }
+          }]
+        });
+
+        window.uiManager = { _domByPath: domMap };
+        manager.clear();
+        window.thumbnailManager = manager;
+        const enqueueSpy = vi.spyOn(manager, 'enqueuePriority').mockImplementation(() => {});
+
+        const retried = checkThumbnailSelfHealing();
+        expect(retried).toBe(1);
+        expect(enqueueSpy).toHaveBeenCalledTimes(1);
+        expect(enqueueSpy).toHaveBeenCalledWith(stuckBufferPath);
+      });
+
+      it('updateVirtualGrid should enqueue buffer-row items without cached URL even when currentSrc already matches file.path and loading class is absent', async () => {
+        const { UIManager } = await import('../src/renderer/renderer-ui.js');
+        const { appState: realAppState } = await import('../src/renderer/renderer-state.js');
+
+        const gridContainer = document.createElement('div');
+        Object.defineProperty(gridContainer, 'clientWidth', { value: 500, configurable: true });
+        Object.defineProperty(gridContainer, 'clientHeight', { value: 100, configurable: true }); // visibleRowCount = 1 (visibleEndIndex = 5)
+        document.body.appendChild(gridContainer);
+
+        const ui = new UIManager(realAppState);
+        ui.elements.thumbnailGrid = gridContainer;
+        ui.elements.thumbnailSizeSlider = { value: '120' };
+
+        const files = [];
+        for (let i = 0; i < 12; i++) {
+          files.push({
+            path: `C:/test/buf_item_${i}.png`,
+            name: `buf_item_${i}.png`,
+            ext: '.png',
+            size: 1000,
+            mtime: 1000 + i,
+            width: 100,
+            height: 100,
+            hasThumbnailCache: false
+          });
+        }
+
+        realAppState.totalCount = files.length;
+        realAppState.thumbnailUrls.clear();
+        window.veloceAPI.getItems = vi.fn().mockResolvedValue(files);
+        ui.seedItemWindowCache(0, files, files.length);
+
+        const enqueueBatchSpy = vi.fn();
+        window.thumbnailManager = {
+          activeTasks: new Set(),
+          priorityQueueSet: new Set(),
+          enqueuePriorityBatch: enqueueBatchSpy,
+          purgeOutOfView: vi.fn(),
+          resetPreload: vi.fn(),
+          processNext: vi.fn()
+        };
+
+        // 1回目の描画で DOM と dataset.currentSrc を構築（バッファ行の要素 index=11 は loading クラスが付かない）
+        await ui.updateVirtualGrid(true);
+        const content = gridContainer.querySelector('.virtual-content');
+        const bufferWrapper = content.children[11]; // 画面外のバッファ行アイテム (11 > visibleEndIndex)
+        const bufferImg = bufferWrapper.children[0];
+
+        expect(bufferImg.dataset.currentSrc).toBe('C:/test/buf_item_11.png');
+        expect(bufferImg.classList.contains('loading')).toBe(false);
+        expect(realAppState.thumbnailUrls.has('C:/test/buf_item_11.png')).toBe(false);
+
+        // キューから一旦外れた（しかし thumbnailUrls は未登録の）状態で再度 updateVirtualGrid(true) を実行
+        enqueueBatchSpy.mockClear();
+        await ui.updateVirtualGrid(true);
+
+        expect(enqueueBatchSpy).toHaveBeenCalledTimes(1);
+        const enqueuedPaths = enqueueBatchSpy.mock.calls[0][0].map(item => item.filePath);
+        expect(enqueuedPaths).toContain('C:/test/buf_item_11.png');
+
+        gridContainer.remove();
+      });
+    });
   });
 });
 

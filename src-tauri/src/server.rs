@@ -430,20 +430,6 @@ pub fn start_local_video_server(
                                     }
                                 }
                             }
-
-                            // 3. パス直接一致でのフォールバック
-                            if cache_bytes.is_empty() && !path_str.is_empty() {
-                                let norm_unc = normalize_unc_path(&path_str).into_owned();
-                                let norm_back = norm_unc.replace('/', "\\");
-                                let norm_fwd = norm_unc.replace('\\', "/");
-                                if let Ok(mut stmt) = conn.prepare_cached(
-                                    "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
-                                ) {
-                                    if let Ok(thumb) = stmt.query_row([&path_str, &norm_unc, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
-                                        cache_bytes = thumb;
-                                    }
-                                }
-                            }
                         }
 
                         // 未キャッシュの場合、同期生成でHTTPスレッドをブロックせず即座に404を返す。

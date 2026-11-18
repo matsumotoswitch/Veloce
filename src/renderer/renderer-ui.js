@@ -1975,6 +1975,8 @@ class UIManager {
     }
 
     const filesToEnqueue = [];
+    const PLACEHOLDER_GIF_URL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    const tm = window.thumbnailManager;
 
     for (const i of loadOrder) {
       const file = items[i - startIndex];
@@ -1985,10 +1987,20 @@ class UIManager {
       const img = wrapper.children[0];
       if (!img) continue;
 
-      if (img.dataset.currentSrc !== file.path || img.classList.contains('loading')) {
+      const hasCachedUrl = appState.thumbnailUrls.has(file.path);
+      const canUseDbFastPath = !hasCachedUrl && Boolean(file.hasThumbnailCache && !(appState.rebuiltPaths && appState.rebuiltPaths.has(file.path)));
+      const isQueuedOrActive = Boolean(
+        tm && (
+          (tm.activeTasks && tm.activeTasks.has(file.path)) ||
+          (tm.priorityQueueSet && tm.priorityQueueSet.has(file.path))
+        )
+      );
+      const shouldEnqueue = !hasCachedUrl && !canUseDbFastPath && !isQueuedOrActive;
+
+      if (img.dataset.currentSrc !== file.path || img.classList.contains('loading') || shouldEnqueue) {
         img.dataset.currentSrc = file.path;
 
-        if (appState.thumbnailUrls.has(file.path)) {
+        if (hasCachedUrl) {
           const targetUrl = appState.thumbnailUrls.get(file.path);
           // O(1) LRU 更新: 参照されたエントリを Map 末尾（MRU）へ移動
           appState.thumbnailUrls.delete(file.path);
@@ -2045,7 +2057,7 @@ class UIManager {
             }
           }
           if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
-        } else if (file.hasThumbnailCache && !(appState.rebuiltPaths && appState.rebuiltPaths.has(file.path))) {
+        } else if (canUseDbFastPath) {
           const hashParam = file.hashKey ? `&hash=${encodeURIComponent(file.hashKey)}` : '';
           const tokenParam = window.videoServerToken ? `&token=${encodeURIComponent(window.videoServerToken)}` : '';
           const url = window.videoServerPort
@@ -2087,10 +2099,12 @@ class UIManager {
           }
           if (typeof window.markThumbnailCompleted === 'function') window.markThumbnailCompleted(file.path);
         } else {
-          img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+          if (img.src !== PLACEHOLDER_GIF_URL) {
+            img.src = PLACEHOLDER_GIF_URL;
+          }
           img.onload = null;
           img.onerror = null;
-          if (window.thumbnailManager) {
+          if (tm && shouldEnqueue) {
             filesToEnqueue.push({ filePath: file.path, skipDbCheck: true });
           }
         }

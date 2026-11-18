@@ -3335,6 +3335,10 @@ window.addEventListener('DOMContentLoaded', async () => {
           const wrapper = window.uiManager._domByPath.get(newFile.path);
           if (wrapper) {
             wrapper.dataset.filepath = ''; // 意図的に空にして updateVirtualGrid での再描画を強制する
+            const img = wrapper.children && wrapper.children[0];
+            if (img && img.dataset) {
+              img.dataset.currentSrc = '';
+            }
             window.uiManager._domByPath.delete(newFile.path);
           }
         }

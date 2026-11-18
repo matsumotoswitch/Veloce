@@ -10,29 +10,95 @@ use crate::models::DbMsg;
 use crate::state::AppState;
 use crate::utils::normalize_unc_path;
 
+/// 実ファイルのメタデータ（std::fs::metadata）から最新の mtime（ミリ秒）を取得し、
+/// 取得できた場合は state.path_to_mtime も最新値で同期する。
+/// stat に失敗した場合（削除済み・仮想パス等）のみ state.path_to_mtime の既存値をフォールバックとして返す。
+pub(crate) fn resolve_and_sync_file_mtime(state: &AppState, file_path: &str) -> Option<u64> {
+    let clean = file_path.replace("\\\\?\\", "").replace('/', "\\");
+    let disk_mtime = std::fs::metadata(file_path)
+        .or_else(|_| std::fs::metadata(&clean))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+
+    if let Some(mtime) = disk_mtime {
+        let mut mtime_lock = state.path_to_mtime.write();
+        mtime_lock.insert(clean.clone(), mtime);
+        if file_path != clean {
+            mtime_lock.insert(file_path.to_string(), mtime);
+        }
+        let norm = normalize_unc_path(&clean);
+        if norm != clean {
+            mtime_lock.insert(norm.into_owned(), mtime);
+        }
+        Some(mtime)
+    } else {
+        state.get_mtime(file_path)
+    }
+}
+
+/// 複数ファイルに対して実ファイルの最新 mtime を優先解決し、state.path_to_mtime を一括更新する。
+/// stat に失敗した場合のみ state.path_to_mtime の既存値をフォールバックとして使用する。
+/// `require_known_or_existing` が true の場合、stat もフォールバックも得られなかったパスは結果から除外する。
+pub(crate) fn resolve_and_sync_file_mtimes_batch(
+    state: &AppState,
+    file_paths: &[String],
+    require_known_or_existing: bool,
+) -> Vec<(String, u64)> {
+    let mut resolved = Vec::with_capacity(file_paths.len());
+    let mut updates: Vec<(String, String, u64)> = Vec::new();
+
+    for file_path in file_paths {
+        let clean = file_path.replace("\\\\?\\", "").replace('/', "\\");
+        let disk_mtime = std::fs::metadata(file_path)
+            .or_else(|_| std::fs::metadata(&clean))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64);
+
+        if let Some(mtime) = disk_mtime {
+            updates.push((file_path.clone(), clean, mtime));
+            resolved.push((file_path.clone(), mtime));
+        } else if let Some(mem_mtime) = state.get_mtime(file_path) {
+            resolved.push((file_path.clone(), mem_mtime));
+        } else if !require_known_or_existing {
+            resolved.push((file_path.clone(), 0));
+        }
+    }
+
+    if !updates.is_empty() {
+        let mut mtime_lock = state.path_to_mtime.write();
+        for (raw_path, clean, mtime) in updates {
+            mtime_lock.insert(clean.clone(), mtime);
+            if raw_path != clean {
+                mtime_lock.insert(raw_path, mtime);
+            }
+            let norm = normalize_unc_path(&clean);
+            if norm != clean {
+                mtime_lock.insert(norm.into_owned(), mtime);
+            }
+        }
+    }
+
+    resolved
+}
+
 #[tauri::command]
 pub(crate) async fn generate_thumbnail(
     state: tauri::State<'_, AppState>,
     file_path: String,
 ) -> Result<String, String> {
     let db_conn = state.db_conn.clone();
-    
-    // O(1) 高速逆引きインデックスから mtime を取得（なければディスクからフォールバック取得）
-    let mem_mtime = state.get_mtime(&file_path);
+    // 実ファイルの最新 mtime を優先取得して path_to_mtime も同期（stat失敗時のみメモリ値をフォールバック利用）
+    let mtime = resolve_and_sync_file_mtime(&state, &file_path).unwrap_or(0);
 
     let video_port = state.video_server_port;
     let video_token = state.video_server_token.clone();
     let url = tokio::task::spawn_blocking(move || {
         #[cfg(debug_assertions)]
         let t_start = std::time::Instant::now();
-        let mtime = mem_mtime.unwrap_or_else(|| {
-            std::fs::metadata(&file_path)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH)
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64
-        });
 
         let cache_bytes = generate_thumbnail_inner(&file_path, mtime, &db_conn);
 
@@ -144,24 +210,9 @@ pub(crate) async fn generate_thumbnail_batch(
     file_paths: Vec<String>,
 ) -> Result<Vec<ThumbnailResult>, String> {
     let db_conn = state.db_conn.clone();
-    
-    // Fast path: O(1) path_to_mtime lookup (なければディスクから取得)
-    let mut files_to_process = Vec::with_capacity(file_paths.len());
-    {
-        let mtime_lock = state.path_to_mtime.read();
-        for file_path in &file_paths {
-            let clean = file_path.replace("\\\\?\\", "");
-            let mtime = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)).copied().unwrap_or_else(|| {
-                std::fs::metadata(file_path)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH)
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64
-            });
-            files_to_process.push((file_path.clone(), mtime));
-        }
-    }
+
+    // 実ファイルの最新 mtime を優先取得して path_to_mtime も同期（stat 失敗時のみメモリ値をフォールバック利用）
+    let files_to_process = resolve_and_sync_file_mtimes_batch(&state, &file_paths, false);
 
     if files_to_process.is_empty() {
         return Ok(Vec::new());
@@ -194,17 +245,8 @@ pub(crate) async fn get_cached_thumbnail_batch(
 ) -> Result<Vec<ThumbnailResult>, String> {
     let db_conn = state.db_conn.clone();
 
-    // Fast path: O(1) path_to_mtime lookup (avoid O(N) HashMap rebuild)
-    let mut files_with_mtime: Vec<(String, u64)> = Vec::new();
-    {
-        let mtime_lock = state.path_to_mtime.read();
-        for file_path in &file_paths {
-            let clean = file_path.replace("\\\\?\\", "");
-            if let Some(&mtime) = mtime_lock.get(file_path).or_else(|| mtime_lock.get(&clean)) {
-                files_with_mtime.push((file_path.clone(), mtime));
-            }
-        }
-    }
+    // 実ファイルの最新 mtime を優先取得して path_to_mtime も同期（stat 失敗時のみメモリ値をフォールバック利用）
+    let files_with_mtime = resolve_and_sync_file_mtimes_batch(&state, &file_paths, true);
 
     if files_with_mtime.is_empty() {
         return Ok(Vec::new());
@@ -808,19 +850,6 @@ pub(crate) fn generate_thumbnail_compute_only(
                     }
                 }
             }
-
-            // 3. フォールバック: パス一致で検索
-            let norm_back = norm_unc.replace('/', "\\");
-            let norm_fwd = norm_unc.replace('\\', "/");
-            if let Ok(mut stmt) = conn.prepare_cached(
-                "SELECT thumbnail FROM cache WHERE (path = ? OR path = ? OR path = ? OR path = ?) AND thumbnail IS NOT NULL ORDER BY last_accessed DESC LIMIT 1"
-            ) {
-                if let Ok(thumb) = stmt.query_row([file_path, &norm_unc, &norm_back, &norm_fwd], |row| row.get::<_, Vec<u8>>(0)) {
-                    if !thumb.is_empty() {
-                        return (thumb, None);
-                    }
-                }
-            }
         }
     }
 
@@ -880,19 +909,8 @@ pub(crate) async fn save_thumbnail(
     file_path: String,
     b64_data: String,
 ) -> Result<String, String> {
-    // O(1) 高速逆引きインデックスから mtime を取得
-    let mem_mtime = state.get_mtime(&file_path);
-
-    let mtime = if let Some(mt) = mem_mtime {
-        mt
-    } else {
-        tokio::fs::metadata(&file_path).await
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::UNIX_EPOCH)
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    };
+    // 実ファイルの最新 mtime を優先取得して path_to_mtime も同期（stat 失敗時のみメモリ値をフォールバック利用）
+    let mtime = resolve_and_sync_file_mtime(&state, &file_path).unwrap_or(0);
 
     let clean_path = file_path.replace("\\\\?\\", "");
     let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
@@ -1148,17 +1166,23 @@ mod tests {
             let dummy_png: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 1, 2, 3];
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)",
-                rusqlite::params!["dummy_hash_different", dummy_png, "C:\\photos\\img1.png", 1000],
+                rusqlite::params!["dummy_hash_different", dummy_png.clone(), "C:\\photos\\img1.png", 1000],
+            ).unwrap();
+
+            let valid_mtime_hash = crate::utils::hash_path_mtime_hex("C:\\photos\\img2.png", 5000);
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)",
+                rusqlite::params![&valid_mtime_hash, dummy_png, "C:\\photos\\img2.png", 1000],
             ).unwrap();
         }
 
-        // mtime=0 や hash_key 不一致の状況でも、パス完全一致フォールバックによりサムネイルが即時返却されること
-        let res1 = super::generate_thumbnail_inner("C:\\photos\\img1.png", 0, &pool);
-        assert_eq!(res1, vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3]);
+        // mtime 由来 hash_key が一致しない旧レコード（dummy_hash_different）は、パスが一致しても返却せずキャッシュミスとなること
+        let res_stale_miss = super::generate_thumbnail_inner("C:\\photos\\img1.png", 0, &pool);
+        assert!(res_stale_miss.is_empty());
 
-        // スラッシュ区切りの場合でもフォールバックで正常に取得できること
-        let res2 = super::generate_thumbnail_inner("C:/photos/img1.png", 0, &pool);
-        assert_eq!(res2, vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3]);
+        // 同一 mtime に対して UNC プレフィックス有無などパス表記ゆれがある場合は、②の hash 変種でヒットすること
+        let res_variant_hit = super::generate_thumbnail_inner(r"\\?\C:\photos\img2.png", 5000, &pool);
+        assert_eq!(res_variant_hit, vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3]);
     }
 
 
@@ -1351,14 +1375,14 @@ mod tests {
         );
         assert_eq!(res_direct, vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "direct_hash でO(1)直撃取得できること");
 
-        // 2. 存在しない direct_hash の場合はフォールバックへ移行すること
+        // 2. 存在しない direct_hash かつ mtime 由来ハッシュも一致しない場合は、古いパス一致キャッシュを返さずミス（生成移行）となること
         let res_missing = generate_thumbnail_inner_with_hash(
             r"\\win81\share\img.png",
             999999,
             Some("non_existent_hash"),
             &db_conn,
         );
-        assert_eq!(res_missing, vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "direct_hash 失敗時でもパス一致でフォールバック取得できること");
+        assert!(res_missing.is_empty(), "direct_hash・mtimeハッシュ不一致時は古いパス一致行を返さずキャッシュミスとなること");
     }
 
 
@@ -1868,6 +1892,134 @@ mod tests {
         assert!(!stmt.exists([empty_thumb_hash]).unwrap(), "長さ0のBLOBは存在しないと判定されること");
         assert!(!stmt.exists([null_thumb_hash]).unwrap(), "NULLサムネイルは存在しないと判定されること");
         assert!(!stmt.exists(["non_existent_hash"]).unwrap(), "未登録キーは false");
+    }
+
+    #[test]
+    fn test_same_path_different_mtime_does_not_return_stale_thumbnail() {
+        use super::*;
+        use image::{Rgb, RgbImage};
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::new(manager).unwrap();
+        {
+            let conn = db_conn.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    path TEXT,
+                    thumbnail BLOB,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let img_path = temp_dir.path().join("overwrite_target.png");
+        let img_path_str = img_path.to_str().unwrap();
+        let clean_path = normalize_unc_path(img_path_str).into_owned();
+
+        let old_mtime = 1000u64;
+        let new_mtime = 2000u64;
+        let old_hash = crate::utils::hash_path_mtime_hex(&clean_path, old_mtime);
+        let new_hash = crate::utils::hash_path_mtime_hex(&clean_path, new_mtime);
+        let stale_thumb_bytes: Vec<u8> = b"STALE_OLD_THUMBNAIL_BYTES".to_vec();
+
+        {
+            let conn = db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, thumbnail, last_accessed) VALUES (?, ?, ?, ?)",
+                rusqlite::params![&old_hash, &clean_path, &stale_thumb_bytes, 100],
+            ).unwrap();
+        }
+
+        // 1. 実ファイル未作成状態で new_mtime を要求した場合、DB上の同一パス・旧mtime行を返さずキャッシュミス（空）になること
+        let (miss_bytes, miss_pending) = generate_thumbnail_compute_only(
+            img_path_str,
+            new_mtime,
+            Some(&new_hash),
+            &db_conn,
+        );
+        assert!(miss_bytes.is_empty(), "新しい mtime に対する取得が旧サムネイルを返さないこと");
+        assert!(miss_pending.is_none());
+
+        // 2. 実ファイルを作成（または上書き）した状態で new_mtime を要求した場合、旧行を返さず新規サムネイルを生成すること
+        let mut img = RgbImage::new(64, 64);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([20, 180, 90]);
+        }
+        img.save_with_format(&img_path, image::ImageFormat::Png).unwrap();
+
+        let (fresh_bytes, fresh_pending) = generate_thumbnail_compute_only(
+            img_path_str,
+            new_mtime,
+            Some(&new_hash),
+            &db_conn,
+        );
+        assert!(!fresh_bytes.is_empty(), "キャッシュミスから新しいサムネイルが生成されること");
+        assert_ne!(fresh_bytes, stale_thumb_bytes, "旧サムネイルバイト列ではないこと");
+        let pending = fresh_pending.expect("新規生成時は未コミット書き込み情報が返ること");
+        assert_eq!(pending.hash_key, new_hash, "新しい mtime 由来の hash_key で保存対象となること");
+    }
+
+    #[test]
+    fn test_batch_mtime_resolution_prefers_disk_over_stale_path_to_mtime() {
+        use super::*;
+        use image::{Rgb, RgbImage};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let img_path = temp_dir.path().join("fresh_written.jpg");
+        let img_path_str = img_path.to_str().unwrap().to_string();
+
+        let mut img = RgbImage::new(120, 90);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([200, 100, 50]);
+        }
+        img.save_with_format(&img_path, image::ImageFormat::Jpeg).unwrap();
+
+        let actual_disk_mtime = std::fs::metadata(&img_path)
+            .and_then(|m| m.modified())
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let state = crate::create_test_app_state(temp_dir.path().to_str().unwrap());
+        let stale_mtime = 12345u64;
+        assert_ne!(actual_disk_mtime, stale_mtime);
+
+        // ウォッチャーが書き込み開始時点の古い mtime を登録していた状態を再現
+        state.path_to_mtime.write().insert(img_path_str.clone(), stale_mtime);
+
+        // 存在しないパス（削除済み等）では path_to_mtime の値がフォールバックとして使われることも同時に検証
+        let deleted_path = "C:\\deleted\\missing_image.png".to_string();
+        state.path_to_mtime.write().insert(deleted_path.clone(), 77777u64);
+
+        let resolved = resolve_and_sync_file_mtimes_batch(
+            &state,
+            &[img_path_str.clone(), deleted_path.clone()],
+            false,
+        );
+
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0], (img_path_str.clone(), actual_disk_mtime), "実在ファイルは path_to_mtime の古い値ではなく実ファイルの mtime が採用されること");
+        assert_eq!(resolved[1], (deleted_path.clone(), 77777u64), "stat 失敗時のみ path_to_mtime の値がフォールバック採用されること");
+        assert_eq!(state.get_mtime(&img_path_str), Some(actual_disk_mtime), "解決後に state.path_to_mtime も最新のディスク mtime で更新されていること");
+
+        // バッチ生成を実行し、実ファイルの mtime から算出した hash_key が URL と DB に使われることを検証
+        let results = compute_thumbnail_batch(
+            vec![resolved[0].clone()],
+            &state.db_conn,
+            state.video_server_port,
+            &state.video_server_token,
+            &|| false,
+        );
+        assert_eq!(results.len(), 1);
+        let clean_path = normalize_unc_path(&img_path_str).into_owned();
+        let expected_fresh_hash = crate::utils::hash_path_mtime_hex(&clean_path, actual_disk_mtime);
+        let stale_hash = crate::utils::hash_path_mtime_hex(&clean_path, stale_mtime);
+        assert!(results[0].url.contains(&format!("hash={}", expected_fresh_hash)), "実ファイル mtime 由来の hash_key が URL に含まれること");
+        assert!(!results[0].url.contains(&stale_hash), "古い mtime 由来の hash_key は使われないこと");
     }
 
 }
