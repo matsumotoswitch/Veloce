@@ -127,4 +127,27 @@ describe('Undo Functionality', () => {
     expect(window.veloceAPI.notifyFileRemoved).toHaveBeenCalledWith('/dest/copied.png');
     expect(appState.undoStack.length).toBe(0);
   });
+
+  it('clears thumbnailUrls for both old and new paths when undoing RENAME_FILE', async () => {
+    appState.thumbnailUrls.set('/dir/old.png', 'blob:http://localhost/old');
+    appState.thumbnailUrls.set('/dir/new.png', 'blob:http://localhost/new');
+
+    const scheduleRefreshMock = vi.fn();
+
+    appState.undoStack.push({
+      type: 'RENAME_FILE',
+      oldPath: '/dir/old.png',
+      newPath: '/dir/new.png'
+    });
+
+    window.veloceAPI.renameFile.mockResolvedValue({ success: true, path: '/dir/old.png' });
+
+    await performUndo({ scheduleRefresh: scheduleRefreshMock });
+
+    expect(window.veloceAPI.renameFile).toHaveBeenCalledWith('/dir/new.png', 'old.png');
+    expect(appState.thumbnailUrls.has('/dir/old.png')).toBe(false);
+    expect(appState.thumbnailUrls.has('/dir/new.png')).toBe(false);
+    expect(scheduleRefreshMock).toHaveBeenCalled();
+    expect(appState.undoStack.length).toBe(0);
+  });
 });

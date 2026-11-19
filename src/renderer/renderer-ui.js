@@ -2082,7 +2082,9 @@ class UIManager {
               if (wrapper.dataset.filepath !== file.path) return;
               this.classList.remove('loading');
               wrapper.classList.remove('loading');
-              // URL失敗時はstale URLエントリを削除してから再生成キューに委譲する
+              // 404/破損URLでブラウザの壊れた画像アイコンが表示され続けるのを防ぐため、
+              // プレースホルダにリセットした上で再生成キューへ委譲する
+              this.src = PLACEHOLDER_GIF_URL;
               if (window.appState && window.appState.thumbnailUrls) {
                 window.appState.thumbnailUrls.delete(file.path);
               }

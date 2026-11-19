@@ -164,9 +164,12 @@ export async function renameSelectedFile(callbacks = fileOpsCallbacks) {
         // Rust側に変更を通知
         await window.veloceAPI.notifyFileChanged(file);
 
-        const oldUrl = appState.thumbnailUrls.get(oldPath);
-        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
-        appState.thumbnailUrls.delete(oldPath);
+        const pathsToClean = [oldPath, result.path].filter(Boolean);
+        for (const p of pathsToClean) {
+          const oldUrl = appState.thumbnailUrls.get(p);
+          if (oldUrl && oldUrl.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(oldUrl);
+          appState.thumbnailUrls.delete(p);
+        }
         resetThumbnailPreloader();
         if (callbacks.scheduleRefresh) callbacks.scheduleRefresh();
       } else {
@@ -369,9 +372,13 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
       if (result && result.success) {
         undoSucceeded = true;
         uiManager.showToast('ファイル名の変更を元に戻しました', 3000, 'undo', 'success');
-        const oldUrl = appState.thumbnailUrls.get(action.newPath);
-        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
-        appState.thumbnailUrls.delete(action.newPath);
+        const pathsToClean = [action.newPath, action.oldPath, result.path].filter(Boolean);
+        for (const p of pathsToClean) {
+          const oldUrl = appState.thumbnailUrls.get(p);
+          if (oldUrl && oldUrl.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(oldUrl);
+          appState.thumbnailUrls.delete(p);
+        }
+        resetThumbnailPreloader();
         if (callbacks.scheduleRefresh) callbacks.scheduleRefresh();
       } else {
         uiManager.showToast('元に戻す操作に失敗しました', 3000, 'undo', 'warning');

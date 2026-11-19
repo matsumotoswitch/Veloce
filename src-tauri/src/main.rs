@@ -2277,14 +2277,18 @@ pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) 
         if let Ok(mut stmt) = conn.prepare("SELECT mtime, hash_key FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE") {
             if let Ok(mut rows) = stmt.query(rusqlite::params![old_path, &old_clean]) {
                 if let Ok(Some(row)) = rows.next() {
-                    let mtime: u64 = row.get(0).unwrap_or(0);
+                    let db_mtime: u64 = row.get(0).unwrap_or(0);
                     let old_hash_key: String = row.get(1).unwrap_or_default();
+
+                    // 実ファイルの最新 mtime（ミリ秒）を優先し、DB キャッシュの mtime と hash_key を確実に同期
+                    let real_mtime = crate::thumbnail::resolve_and_sync_file_mtime(state, new_path).unwrap_or(0);
+                    let mtime = if real_mtime > 0 { real_mtime } else { db_mtime };
 
                     let new_hash_key = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
 
                     let _ = conn.execute(
-                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ? WHERE hash_key = ?",
-                        rusqlite::params![&new_clean, &new_hash_key, &old_hash_key],
+                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ?, mtime = ? WHERE hash_key = ?",
+                        rusqlite::params![&new_clean, &new_hash_key, mtime, &old_hash_key],
                     );
                 }
             }
@@ -2324,12 +2328,8 @@ pub fn sync_file_rename_in_state(state: &AppState, old_path: &str, new_path: &st
     let old_clean = normalize_unc_path(old_path).into_owned();
     let new_clean = normalize_unc_path(new_path).into_owned();
 
-    // 最新の mtime を取得（実ファイル優先、取得不可時は既存メモリ値）
-    let mtime = std::fs::metadata(new_path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
+    // 最新の mtime（ミリ秒）を取得（実ファイル優先、取得不可時は既存メモリ値にフォールバックし path_to_mtime も同期）
+    let mtime = crate::thumbnail::resolve_and_sync_file_mtime(state, new_path)
         .unwrap_or_else(|| state.get_mtime(old_path).unwrap_or(0));
 
     let new_hash_key = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
@@ -2455,11 +2455,11 @@ pub fn sync_file_move_in_state(state: &AppState, old_path: &str, new_path: &str)
             let s = m.len();
             let mt = m.modified().ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
+                .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
             let ct = m.created().ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
+                .map(|d| d.as_millis() as u64)
                 .unwrap_or(mt);
             (s, mt, ct)
         } else {
@@ -8492,5 +8492,105 @@ mod viewer_tests {
         assert_eq!(mtime_map.get("C:\\renamed_album\\b.png"), Some(&2000));
         assert_eq!(mtime_map.get("C:\\album\\sub\\a.png"), None);
         assert_eq!(mtime_map.get("C:\\album2\\c.png"), Some(&3000));
+    }
+
+    #[test]
+    fn test_sync_file_rename_and_undo_mtime_hash_consistency() {
+        use std::sync::Arc;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir_str = temp_dir.path().to_string_lossy().to_string();
+        let state = create_test_app_state(&temp_dir_str);
+
+        let orig_path = temp_dir.path().join("orig_image.png");
+        let renamed_path = temp_dir.path().join("renamed_image.png");
+
+        let orig_path_str = orig_path.to_string_lossy().to_string();
+        let renamed_path_str = renamed_path.to_string_lossy().to_string();
+
+        // ダミーの実ファイルを作成
+        std::fs::write(&orig_path, b"test image content").unwrap();
+
+        let real_mtime = crate::thumbnail::resolve_and_sync_file_mtime(&state, &orig_path_str).unwrap_or(0);
+        assert!(real_mtime >= 1_000_000_000_000, "実ファイルの mtime はミリ秒単位（>= 10^12）であること: {}", real_mtime);
+
+        let orig_hash = crate::utils::hash_path_mtime_hex(&orig_path_str, real_mtime);
+
+        // 1. 初期状態で DB cache にサムネイルと mtime を登録
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, mtime, thumbnail) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![&orig_hash, &orig_path_str, real_mtime, &[0x89u8, 0x50u8, 0x4Eu8, 0x47u8][..]],
+            ).unwrap();
+        }
+
+        // 2. state.all_files に登録
+        let img_file = Arc::new(ImageFile {
+            name: "orig_image.png".to_string(),
+            ext: ".png".into(),
+            path: orig_path_str.clone(),
+            size: 100,
+            mtime: real_mtime,
+            ctime: real_mtime,
+            has_thumbnail_cache: true,
+            width: 100,
+            height: 100,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "orig_image.png".to_string(),
+            hash_key: orig_hash.clone().into(),
+        });
+        {
+            let mut all_files = state.all_files.write();
+            all_files.push(Arc::clone(&img_file));
+        }
+        state.rebuild_all_indices(&state.all_files.read());
+        apply_filters_and_sort(None, &state);
+
+        // --- ステップ 1: リネーム実行 (orig -> renamed) ---
+        std::fs::rename(&orig_path, &renamed_path).unwrap();
+        sync_path_rename_in_db(&state, &orig_path_str, &renamed_path_str);
+        sync_file_rename_in_state(&state, &orig_path_str, &renamed_path_str);
+
+        // リネーム後の検証: state の mtime がミリ秒単位であり、DB cache の hash_key と一致すること
+        let renamed_file = state.all_files.read()[0].clone();
+        assert_eq!(renamed_file.path, renamed_path_str);
+        assert!(renamed_file.mtime >= 1_000_000_000_000, "リネーム後の state.mtime がミリ秒単位であること: {}", renamed_file.mtime);
+
+        {
+            let conn = state.db_conn.get().unwrap();
+            let db_hash: String = conn.query_row(
+                "SELECT hash_key FROM cache WHERE path = ?1 COLLATE NOCASE",
+                rusqlite::params![&renamed_path_str],
+                |row| row.get(0),
+            ).expect("リネーム後の cache レコードが存在すること");
+
+            assert_eq!(renamed_file.hash_key.as_str(), db_hash.as_str(), "state の hash_key と DB の hash_key が一致すること");
+        }
+
+        // --- ステップ 2: 元に戻す操作 (Undo: renamed -> orig) ---
+        std::fs::rename(&renamed_path, &orig_path).unwrap();
+        sync_path_rename_in_db(&state, &renamed_path_str, &orig_path_str);
+        sync_file_rename_in_state(&state, &renamed_path_str, &orig_path_str);
+
+        // Undo 後の検証: 元のパス・ミリ秒 mtime・元の hash_key で DB と state が完全一致すること
+        let restored_file = state.all_files.read()[0].clone();
+        assert_eq!(restored_file.path, orig_path_str);
+        assert!(restored_file.mtime >= 1_000_000_000_000, "Undo 後の state.mtime がミリ秒単位であること: {}", restored_file.mtime);
+
+        {
+            let conn = state.db_conn.get().unwrap();
+            let (db_hash, db_thumb): (String, Vec<u8>) = conn.query_row(
+                "SELECT hash_key, thumbnail FROM cache WHERE path = ?1 COLLATE NOCASE",
+                rusqlite::params![&orig_path_str],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).expect("Undo 後に元のパスの cache レコードが存在すること");
+
+            assert_eq!(restored_file.hash_key.as_str(), db_hash.as_str(), "Undo 後の state と DB の hash_key が完全に一致すること");
+            assert!(!db_thumb.is_empty(), "サムネイル BLOB が維持されていること");
+        }
     }
 }
