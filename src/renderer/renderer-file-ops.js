@@ -53,6 +53,49 @@ export function initFileOps(callbacks = {}) {
 }
 
 /**
+ * 単一ファイルのリネーム（またはUndo）時にフロントエンドの appState.ratings のキーを新パスへ移行する。
+ * @param {string} oldPath
+ * @param {string} newPath
+ */
+export function syncFileRatingOnRename(oldPath, newPath) {
+  if (!oldPath || !newPath || !appState || !appState.ratings) return;
+  const candidates = [oldPath, oldPath.replace(/\//g, '\\'), oldPath.replace(/\\/g, '/')];
+  let ratingVal;
+  for (const key of candidates) {
+    if (appState.ratings[key] !== undefined) {
+      ratingVal = appState.ratings[key];
+      delete appState.ratings[key];
+    }
+  }
+  if (ratingVal !== undefined) {
+    appState.ratings[newPath] = ratingVal;
+  }
+}
+
+/**
+ * フォルダのリネーム（またはUndo）時にフロントエンドの appState.ratings 内の配下パスを一括置換する。
+ * @param {string} oldFolderPath
+ * @param {string} newFolderPath
+ */
+export function syncFolderRatingsOnRename(oldFolderPath, newFolderPath) {
+  if (!oldFolderPath || !newFolderPath || !appState || !appState.ratings) return;
+  const keys = Object.keys(appState.ratings);
+  const updates = [];
+  for (const key of keys) {
+    if (isSameOrSubdirectory(key, oldFolderPath)) {
+      const newKey = replaceDirectoryPrefix(key, oldFolderPath, newFolderPath);
+      if (newKey !== key) {
+        updates.push([key, newKey, appState.ratings[key]]);
+      }
+    }
+  }
+  for (const [oldKey, newKey, val] of updates) {
+    delete appState.ratings[oldKey];
+    appState.ratings[newKey] = val;
+  }
+}
+
+/**
  * 選択中のフォルダの名前を変更します。
  * @param {Object} [callbacks=fileOpsCallbacks]
  */
@@ -80,6 +123,7 @@ export async function renameSelectedFolder(callbacks = fileOpsCallbacks) {
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
       fileOpsState.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
+      syncFolderRatingsOnRename(oldPath, result.path);
       callbacks.showNotification?.(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
         appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, oldPath, result.path);
@@ -152,6 +196,7 @@ export async function renameSelectedFile(callbacks = fileOpsCallbacks) {
       const result = await window.veloceAPI.renameFile(oldPath, newName);
       if (result && result.success) {
         fileOpsState.push({ type: 'RENAME_FILE', oldPath, newPath: result.path, oldName: file.name });
+        syncFileRatingOnRename(oldPath, result.path);
         uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
 
         const newExt = newName.includes('.') ? ('.' + newName.split('.').pop().toLowerCase()) : '';
@@ -356,6 +401,7 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
       const result = await window.veloceAPI.renameFolder(action.newPath, oldName);
       if (result && result.success) {
         undoSucceeded = true;
+        syncFolderRatingsOnRename(action.newPath, result.path || action.oldPath);
         uiManager.showToast('フォルダ名の変更を元に戻しました', 3000, 'undo', 'success');
         if (isSameOrSubdirectory(appState.currentDirectory, action.newPath)) {
           appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, action.newPath, action.oldPath);
@@ -371,6 +417,7 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
       const result = await window.veloceAPI.renameFile(action.newPath, oldName);
       if (result && result.success) {
         undoSucceeded = true;
+        syncFileRatingOnRename(action.newPath, result.path || action.oldPath);
         uiManager.showToast('ファイル名の変更を元に戻しました', 3000, 'undo', 'success');
         const pathsToClean = [action.newPath, action.oldPath, result.path].filter(Boolean);
         for (const p of pathsToClean) {

@@ -967,6 +967,9 @@ fn load_directory(
                                             if has_metadata {
                                                 f.width = width;
                                                 f.height = height;
+                                                f.prompt = prompt.clone();
+                                                f.negative_prompt = negative_prompt.clone();
+                                                f.source = source.clone();
                                                 f.unified_search_text = format!("{} {} {} {}", f.name.to_lowercase(), prompt, negative_prompt, source);
                                                 f.meta_loaded = true;
                                             }

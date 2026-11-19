@@ -1687,6 +1687,21 @@ export function handleViewerFileRenamed(oldPath, newPath) {
   // currentImagePath を新パスへ更新
   viewerState.currentImagePath = newPath;
 
+  // ビューアー内レーティングマップのキーを新パスへ移行
+  if (typeof viewerRatings === 'object' && viewerRatings !== null) {
+    const candidates = [oldPath, oldPath.replace(/\//g, '\\'), oldPath.replace(/\\/g, '/')];
+    let ratingVal;
+    for (const key of candidates) {
+      if (viewerRatings[key] !== undefined) {
+        ratingVal = viewerRatings[key];
+        delete viewerRatings[key];
+      }
+    }
+    if (ratingVal !== undefined) {
+      viewerRatings[newPath] = ratingVal;
+    }
+  }
+
   // タイトルバーおよびファイル名表示要素の更新（画像自体は切り替えない）
   if (typeof viewerState.currentIndex === 'number' && typeof viewerState.totalImages === 'number') {
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;

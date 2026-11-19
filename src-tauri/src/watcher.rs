@@ -151,6 +151,44 @@ pub(crate) fn notify_files_batch_inner(
                                 file.width = existing.width;
                                 file.height = existing.height;
                             }
+                            // IPC (notify_file_changed) 経由で JS から再送された ImageFile は
+                            // skip_serializing / serde(skip) により prompt や unified_search_text が空で届くため、
+                            // 同一 mtime（または meta_loaded 維持通知）の場合は既存の解析済みメタデータ・キャッシュ状態を保持する
+                            if file.mtime == 0 && existing.mtime > 0 {
+                                file.mtime = existing.mtime;
+                                file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime).into();
+                            }
+                            if file.mtime == existing.mtime || file.meta_loaded {
+                                if !file.has_thumbnail_cache && existing.has_thumbnail_cache {
+                                    file.has_thumbnail_cache = true;
+                                }
+                                if existing.meta_loaded {
+                                    if file.prompt.is_empty() && !existing.prompt.is_empty() {
+                                        file.prompt = existing.prompt.clone();
+                                    }
+                                    if file.negative_prompt.is_empty() && !existing.negative_prompt.is_empty() {
+                                        file.negative_prompt = existing.negative_prompt.clone();
+                                    }
+                                    if file.source.is_empty() && !existing.source.is_empty() {
+                                        file.source = existing.source.clone();
+                                    }
+                                    if file.search_text.is_empty() && !existing.search_text.is_empty() {
+                                        file.search_text = existing.search_text.clone();
+                                    }
+                                    file.meta_loaded = true;
+                                    if file.unified_search_text.is_empty() {
+                                        file.unified_search_text = format!(
+                                            "{} {} {} {} {}",
+                                            file.name,
+                                            file.prompt,
+                                            file.negative_prompt,
+                                            file.source,
+                                            file.search_text
+                                        )
+                                        .to_lowercase();
+                                    }
+                                }
+                            }
                             let old_path = existing.path.clone();
                             let arc_f = std::sync::Arc::new(file);
                             if !arc_f.meta_loaded {
@@ -1398,5 +1436,79 @@ mod tests {
             assert_eq!(mtimes.get(&p1), None, "削除されたファイルの mtime が除去されていること");
             assert_eq!(mtimes.get(&p2), Some(&5678), "他のファイルの mtime が維持されていること");
         }
+    }
+
+    #[test]
+    fn test_notify_files_batch_preserves_metadata_and_search_text_on_ipc_roundtrip() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir_str = temp_dir.path().to_str().unwrap();
+        let state = crate::create_test_app_state(temp_dir_str);
+
+        let p = temp_dir.path().join("renamed_card.png").to_str().unwrap().to_string();
+        let mtime = 1_700_000_000_000u64;
+        let hash = crate::utils::hash_path_mtime_hex(&p, mtime);
+
+        let existing_file = std::sync::Arc::new(ImageFile {
+            name: "renamed_card.png".to_string(),
+            ext: ".png".into(),
+            path: p.clone(),
+            size: 4096,
+            mtime,
+            ctime: mtime,
+            has_thumbnail_cache: true,
+            width: 512,
+            height: 768,
+            prompt: "1girl, christmas_outfit".to_string(),
+            negative_prompt: "lowres".to_string(),
+            source: "NovelAI".to_string(),
+            meta_loaded: true,
+            search_text: String::new(),
+            unified_search_text: "renamed_card.png 1girl, christmas_outfit lowres novelai ".to_string(),
+            hash_key: hash.into(),
+        });
+
+        {
+            let mut all_files = state.all_files.write();
+            all_files.push(existing_file);
+        }
+        state.rebuild_all_indices(&state.all_files.read());
+
+        // JS 側（getFileByIndex -> renameSelectedFile -> notifyFileChanged）で
+        // skip_serializing / serde(skip) フィールドが空になって再送されたペイロードを模擬
+        let ipc_roundtrip_file = ImageFile {
+            name: "renamed_card.png".to_string(),
+            ext: ".png".into(),
+            path: p.clone(),
+            size: 4096,
+            mtime,
+            ctime: mtime,
+            has_thumbnail_cache: false,
+            width: 512,
+            height: 768,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: true,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: Default::default(),
+        };
+
+        notify_files_batch_inner(None, &state, vec![ipc_roundtrip_file], Vec::new());
+
+        let all_files = state.all_files.read();
+        assert_eq!(all_files.len(), 1);
+        let updated = &all_files[0];
+        assert!(updated.has_thumbnail_cache, "has_thumbnail_cache が消失せず保持されること");
+        assert!(updated.meta_loaded, "meta_loaded が true のまま保持されること");
+        assert_eq!(updated.prompt, "1girl, christmas_outfit", "prompt が消失せず保持されること");
+        assert_eq!(updated.negative_prompt, "lowres", "negative_prompt が保持されること");
+        assert_eq!(updated.source, "NovelAI", "source が保持されること");
+        assert!(
+            updated.unified_search_text.contains("renamed_card.png")
+                && updated.unified_search_text.contains("christmas_outfit"),
+            "unified_search_text に新ファイル名とプロンプトの両方が維持されること: {}",
+            updated.unified_search_text
+        );
     }
 }

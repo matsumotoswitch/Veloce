@@ -93,7 +93,8 @@ import {
   renameSelectedFile,
   rebuildSelectedCache,
   deleteSelectedFiles,
-  performUndo
+  performUndo,
+  syncFolderRatingsOnRename
 } from './renderer-file-ops.js';
 import {
   initFolderTree,
@@ -762,6 +763,7 @@ const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager
     const result = await window.veloceAPI.renameFolder(oldPath, newName);
     if (result && result.success) {
       appState.undoStack.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
+      syncFolderRatingsOnRename(oldPath, result.path);
       showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
       if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
         appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, oldPath, result.path);

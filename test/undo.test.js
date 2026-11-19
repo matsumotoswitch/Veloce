@@ -128,9 +128,10 @@ describe('Undo Functionality', () => {
     expect(appState.undoStack.length).toBe(0);
   });
 
-  it('clears thumbnailUrls for both old and new paths when undoing RENAME_FILE', async () => {
+  it('clears thumbnailUrls for both old and new paths and restores ratings when undoing RENAME_FILE', async () => {
     appState.thumbnailUrls.set('/dir/old.png', 'blob:http://localhost/old');
     appState.thumbnailUrls.set('/dir/new.png', 'blob:http://localhost/new');
+    appState.ratings = { '/dir/new.png': 5 };
 
     const scheduleRefreshMock = vi.fn();
 
@@ -147,7 +148,30 @@ describe('Undo Functionality', () => {
     expect(window.veloceAPI.renameFile).toHaveBeenCalledWith('/dir/new.png', 'old.png');
     expect(appState.thumbnailUrls.has('/dir/old.png')).toBe(false);
     expect(appState.thumbnailUrls.has('/dir/new.png')).toBe(false);
+    expect(appState.ratings['/dir/old.png']).toBe(5);
+    expect(appState.ratings['/dir/new.png']).toBeUndefined();
     expect(scheduleRefreshMock).toHaveBeenCalled();
     expect(appState.undoStack.length).toBe(0);
+  });
+
+  it('migrates descendant ratings when undoing RENAME_FOLDER without touching sibling folder', async () => {
+    appState.ratings = {
+      'C:\\album_renamed\\sub\\a.png': 4,
+      'C:\\album_renamed2\\b.png': 3
+    };
+
+    appState.undoStack.push({
+      type: 'RENAME_FOLDER',
+      oldPath: 'C:\\album',
+      newPath: 'C:\\album_renamed'
+    });
+
+    window.veloceAPI.renameFolder.mockResolvedValue({ success: true, path: 'C:\\album' });
+
+    await performUndo();
+
+    expect(appState.ratings['C:\\album\\sub\\a.png']).toBe(4);
+    expect(appState.ratings['C:\\album_renamed\\sub\\a.png']).toBeUndefined();
+    expect(appState.ratings['C:\\album_renamed2\\b.png']).toBe(3);
   });
 });
