@@ -61,6 +61,7 @@ import {
   updateMetadataOverlay
 } from './viewer-ui.js';
 import { debounce, blockDevtoolsShortcuts, getStreamUrl, applyGlowEffect, isVideoFile, isAudioFile, getAudioCoverUrl, AUDIO_PLACEHOLDER_URL, formatDurationSeconds } from '../common/utils.js';
+import { isSameOrSubdirectory, replaceDirectoryPrefix } from '../common/path-utils.js';
 
 blockDevtoolsShortcuts();
 
@@ -85,6 +86,14 @@ const initialViewerTheme = (typeof window !== 'undefined' && window.SettingsStor
 applyViewerTheme(initialViewerTheme);
 
 let viewerRatings = {};
+
+export function getViewerRatings() {
+  return viewerRatings;
+}
+
+export function setViewerRatings(ratings) {
+  viewerRatings = ratings || {};
+}
 
 const CONFIG = {
   ZOOM_STEP: 1.1,         // マウスホイールでのズーム倍率
@@ -559,6 +568,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         const oldPath = payload.old_path || payload.oldPath;
         const newPath = payload.new_path || payload.newPath;
         handleViewerFileRenamed(oldPath, newPath);
+      });
+
+      listen('viewer-folder-renamed', (event) => {
+        const payload = event.payload || {};
+        const oldPath = payload.old_path || payload.oldPath;
+        const newPath = payload.new_path || payload.newPath;
+        handleViewerFolderRenamed(oldPath, newPath);
       });
 
       listen('viewer-list-updated', (event) => {
@@ -1718,8 +1734,90 @@ export function handleViewerFileRenamed(oldPath, newPath) {
 
   return true;
 }
+
+/**
+ * フォルダリネーム通知（viewer-folder-renamed）を受け取り、
+ * 旧フォルダ配下にある画像パス（paths, currentImagePath）、レーティングキー、
+ * および所属フォルダ情報を新フォルダプレフィックスへ追随させる。
+ * 表示中の画像自体の再読み込み（loadImage）は行わない。
+ *
+ * @param {string} oldFolderPath - 変更前のフォルダパス
+ * @param {string} newFolderPath - 変更後のフォルダパス
+ * @returns {boolean} 追随が行われた場合は true、対象外（配下にない等）の場合は false
+ */
+export function handleViewerFolderRenamed(oldFolderPath, newFolderPath) {
+  if (!oldFolderPath || !newFolderPath) return false;
+
+  let anyUpdated = false;
+
+  // 1. viewerState.paths の各要素のうち、旧フォルダ配下にあるものを境界意識でプレフィックス置換
+  if (Array.isArray(viewerState.paths)) {
+    for (let i = 0; i < viewerState.paths.length; i++) {
+      const p = viewerState.paths[i];
+      if (typeof p === 'string' && isSameOrSubdirectory(p, oldFolderPath)) {
+        viewerState.paths[i] = replaceDirectoryPrefix(p, oldFolderPath, newFolderPath);
+        anyUpdated = true;
+      }
+    }
+  }
+
+  // 2. 表示中の画像が旧フォルダ配下なら currentImagePath も付け替える（画像自体の切り替えは行わない）
+  if (viewerState.currentImagePath && isSameOrSubdirectory(viewerState.currentImagePath, oldFolderPath)) {
+    viewerState.currentImagePath = replaceDirectoryPrefix(viewerState.currentImagePath, oldFolderPath, newFolderPath);
+    anyUpdated = true;
+
+    // タイトルバーおよびファイル名表示要素の更新
+    if (typeof viewerState.currentIndex === 'number' && typeof viewerState.totalImages === 'number') {
+      document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
+    }
+    const filenameEl = document.getElementById('window-filename-display');
+    if (filenameEl) {
+      filenameEl.textContent = viewerState.currentImagePath.split(/[/\\]/).pop();
+    }
+
+    // メタデータオーバーレイが開いていれば更新
+    if (viewerState.isMetadataVisible && typeof updateMetadataOverlay === 'function') {
+      updateMetadataOverlay();
+    }
+  }
+
+  // 3. ビューアー側レーティングマップ（viewerRatings）のキーも配下分を同様に付け替える
+  if (typeof viewerRatings === 'object' && viewerRatings !== null) {
+    const keys = Object.keys(viewerRatings);
+    const updates = [];
+    for (const key of keys) {
+      if (isSameOrSubdirectory(key, oldFolderPath)) {
+        const newKey = replaceDirectoryPrefix(key, oldFolderPath, newFolderPath);
+        if (newKey !== key) {
+          updates.push([key, newKey, viewerRatings[key]]);
+        }
+      }
+    }
+    for (const [oldKey, newKey, val] of updates) {
+      delete viewerRatings[oldKey];
+      viewerRatings[newKey] = val;
+      anyUpdated = true;
+    }
+  }
+
+  // 4. ビューアーが保持しているフォルダ情報（リストの所属フォルダ）が旧フォルダ配下なら付け替える
+  if (viewerState.folder && isSameOrSubdirectory(viewerState.folder, oldFolderPath)) {
+    viewerState.folder = replaceDirectoryPrefix(viewerState.folder, oldFolderPath, newFolderPath);
+    anyUpdated = true;
+  }
+  if (viewerState.currentDirectory && isSameOrSubdirectory(viewerState.currentDirectory, oldFolderPath)) {
+    viewerState.currentDirectory = replaceDirectoryPrefix(viewerState.currentDirectory, oldFolderPath, newFolderPath);
+    anyUpdated = true;
+  }
+
+  return anyUpdated;
+}
+
 if (typeof window !== 'undefined') {
   window.handleViewerFileRenamed = handleViewerFileRenamed;
+  window.handleViewerFolderRenamed = handleViewerFolderRenamed;
+  window.getViewerRatings = getViewerRatings;
+  window.setViewerRatings = setViewerRatings;
 }
 
 window.addEventListener('keydown', async (e) => {

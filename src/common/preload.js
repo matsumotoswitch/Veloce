@@ -51,6 +51,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(callback: (payload: {path: string, rating: number}) => void) => void} onRatingChanged
  * @property {(callback: (payload: Array<{path: string, rating: number}>) => void) => void} onRatingsBatchChanged
  * @property {(callback: (payload: {old_path: string, new_path: string}) => void) => void} onViewerFileRenamed
+ * @property {(callback: (payload: {old_path: string, new_path: string}) => void) => void} onViewerFolderRenamed
  * @property {(parentDir: string, folderName: string) => Promise<{success: boolean, path?: string, error?: string}>} createFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
@@ -337,6 +338,10 @@ window.veloceAPI = {
    * ファイル名変更（F2）の完了通知を受け取ります（独立ビューアー等の表示中パス追随用）。
    */
   onViewerFileRenamed: (callback) => listen('viewer-file-renamed', (event) => callback(event.payload)),
+  /**
+   * フォルダ名変更の完了通知を受け取ります（独立ビューアー等の配下パス追随用）。
+   */
+  onViewerFolderRenamed: (callback) => listen('viewer-folder-renamed', (event) => callback(event.payload)),
   /**
    * フォルダを作成するようメインプロセスに要求します。
    * @param {string} parentDir - 親ディレクトリのパス。

@@ -2753,6 +2753,19 @@ pub fn sync_folder_rename_in_state(state: &AppState, old_path_exact: &str, new_p
             *cur_dir_lock = new_cur;
         }
     }
+
+    // viewer_paths の各ビューアー保持リスト内のパスも新フォルダプレフィックスへ同期
+    {
+        let mut v_paths = state.viewer_paths.write();
+        for (_, list) in v_paths.iter_mut() {
+            if list.iter().any(|p| replace_folder_prefix(p, old_path_exact, new_path_exact).is_some()) {
+                let updated_list: Vec<String> = list.iter().map(|p| {
+                    replace_folder_prefix(p, old_path_exact, new_path_exact).unwrap_or_else(|| p.clone())
+                }).collect();
+                *list = std::sync::Arc::new(updated_list);
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -2815,7 +2828,12 @@ async fn rename_file(
 }
 
 #[tauri::command]
-async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_name: String) -> Result<String, String> {
+async fn rename_folder(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    old_path: String,
+    new_name: String,
+) -> Result<String, String> {
     validate_new_entry_name(&new_name)?;
     let old_path_clone = old_path.clone();
     let new_path_str = tokio::task::spawn_blocking(move || {
@@ -2841,6 +2859,17 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
 
     sync_folder_rename_in_db_and_state(&state, &old_path_clone, &new_path_str);
     sync_folder_rename_in_state(&state, &old_path_clone, &new_path_str);
+
+    // 独立ビューアーへフォルダリネーム完了を通知（配下パス・表示中パス追随用）
+    let _ = app.emit_all(
+        "viewer-folder-renamed",
+        serde_json::json!({
+            "old_path": &old_path_clone,
+            "new_path": &new_path_str,
+            "oldPath": &old_path_clone,
+            "newPath": &new_path_str,
+        }),
+    );
 
     Ok(new_path_str)
 }
@@ -8456,6 +8485,21 @@ mod viewer_tests {
             ratings.insert("C:\\album2\\c.png".to_string(), 4);
         }
 
+        {
+            let mut v_paths = state.viewer_paths.write();
+            v_paths.insert(
+                "viewer_1".to_string(),
+                Arc::new(vec![
+                    "C:\\album\\sub\\a.png".to_string(),
+                    "C:\\album\\b.png".to_string(),
+                ]),
+            );
+            v_paths.insert(
+                "viewer_2".to_string(),
+                Arc::new(vec!["C:\\album2\\c.png".to_string()]),
+            );
+        }
+
         *state.current_dir.write() = "C:\\album\\sub".to_string();
 
         // フォルダ C:\album を C:\renamed_album にリネーム同期
@@ -8495,6 +8539,20 @@ mod viewer_tests {
         assert_eq!(mtime_map.get("C:\\renamed_album\\b.png"), Some(&2000));
         assert_eq!(mtime_map.get("C:\\album\\sub\\a.png"), None);
         assert_eq!(mtime_map.get("C:\\album2\\c.png"), Some(&3000));
+
+        // 5. viewer_paths の更新検証（配下パスは置換、兄弟フォルダ配下は維持）
+        let v_paths = state.viewer_paths.read();
+        assert_eq!(
+            v_paths.get("viewer_1").unwrap().as_slice(),
+            &[
+                "C:\\renamed_album\\sub\\a.png".to_string(),
+                "C:\\renamed_album\\b.png".to_string(),
+            ]
+        );
+        assert_eq!(
+            v_paths.get("viewer_2").unwrap().as_slice(),
+            &["C:\\album2\\c.png".to_string()]
+        );
     }
 
     #[test]

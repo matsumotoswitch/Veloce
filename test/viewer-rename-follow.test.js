@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { viewerState } from '../src/viewer/viewer-state.js';
-import { handleViewerFileRenamed } from '../src/viewer/viewer.js';
+import {
+  handleViewerFileRenamed,
+  handleViewerFolderRenamed,
+  getViewerRatings,
+  setViewerRatings
+} from '../src/viewer/viewer.js';
 
 describe('Viewer Rename Following (viewer-file-renamed)', () => {
   let dom;
@@ -120,6 +125,135 @@ describe('Viewer Rename Following (viewer-file-renamed)', () => {
     // 追随済みのため新リスト内でも正しくインデックスが見つかり、画像の再ロード（切り替え）が発生しないこと
     expect(newIndex).toBe(0);
     expect(newIndex).not.toBe(-1);
+  });
+
+  describe('Viewer Folder Rename Following (viewer-folder-renamed)', () => {
+    it('follows folder rename for descendant paths, currentImagePath, and ratings without switching image', () => {
+      viewerState.paths = [
+        'C:\\album\\sub\\img1.png',
+        'C:\\album\\img2.png',
+        'C:\\album2\\sibling.png'
+      ];
+      viewerState.currentImagePath = 'C:\\album\\sub\\img1.png';
+      viewerState.currentIndex = 0;
+      viewerState.totalImages = 3;
+
+      setViewerRatings({
+        'C:\\album\\sub\\img1.png': 5,
+        'C:\\album\\img2.png': 4,
+        'C:\\album2\\sibling.png': 3
+      });
+
+      const viewerImg = document.getElementById('viewer-img');
+      const initialImgSrc = viewerImg.src;
+
+      const res = handleViewerFolderRenamed('C:\\album', 'C:\\album_renamed');
+
+      // 1. 追随が成功したこと
+      expect(res).toBe(true);
+
+      // 2. 配下の paths が境界意識で置換され、兄弟フォルダ（C:\album2）は維持されていること
+      expect(viewerState.paths[0]).toBe('C:\\album_renamed\\sub\\img1.png');
+      expect(viewerState.paths[1]).toBe('C:\\album_renamed\\img2.png');
+      expect(viewerState.paths[2]).toBe('C:\\album2\\sibling.png');
+
+      // 3. currentImagePath が新パスへ付け替えられていること
+      expect(viewerState.currentImagePath).toBe('C:\\album_renamed\\sub\\img1.png');
+
+      // 4. 表示中の画像自体（DOM）は切り替わっていないこと
+      expect(viewerImg.src).toBe(initialImgSrc);
+
+      // 5. タイトルバーおよびファイル名表示が更新されていること
+      expect(document.getElementById('window-filename-display').textContent).toBe('img1.png');
+      expect(document.title).toBe('Veloce Viewer - 1 / 3');
+
+      // 6. viewerRatings のキーが配下分のみ移行されていること
+      const ratings = getViewerRatings();
+      expect(ratings['C:\\album_renamed\\sub\\img1.png']).toBe(5);
+      expect(ratings['C:\\album_renamed\\img2.png']).toBe(4);
+      expect(ratings['C:\\album2\\sibling.png']).toBe(3);
+      expect(ratings['C:\\album\\sub\\img1.png']).toBeUndefined();
+      expect(ratings['C:\\album\\img2.png']).toBeUndefined();
+    });
+
+    it('does not touch sibling folders with similar prefix when viewer holds only sibling items', () => {
+      viewerState.paths = ['C:\\album2\\sibling.png'];
+      viewerState.currentImagePath = 'C:\\album2\\sibling.png';
+      viewerState.currentIndex = 0;
+      viewerState.totalImages = 1;
+
+      setViewerRatings({
+        'C:\\album2\\sibling.png': 3
+      });
+
+      const viewerImg = document.getElementById('viewer-img');
+      const initialImgSrc = viewerImg.src;
+
+      const res = handleViewerFolderRenamed('C:\\album', 'C:\\album_renamed');
+
+      // 対象外として false が返ること
+      expect(res).toBe(false);
+
+      // 状態が完全に維持されていること
+      expect(viewerState.paths[0]).toBe('C:\\album2\\sibling.png');
+      expect(viewerState.currentImagePath).toBe('C:\\album2\\sibling.png');
+      expect(getViewerRatings()['C:\\album2\\sibling.png']).toBe(3);
+      expect(viewerImg.src).toBe(initialImgSrc);
+    });
+
+    it('does nothing when folder is unrelated', () => {
+      viewerState.paths = ['C:\\photos\\img1.png'];
+      viewerState.currentImagePath = 'C:\\photos\\img1.png';
+
+      const res = handleViewerFolderRenamed('C:\\other_dir', 'C:\\other_dir_renamed');
+
+      expect(res).toBe(false);
+      expect(viewerState.paths[0]).toBe('C:\\photos\\img1.png');
+      expect(viewerState.currentImagePath).toBe('C:\\photos\\img1.png');
+    });
+
+    it('updates folder and currentDirectory properties on viewerState if present', () => {
+      viewerState.paths = ['C:\\album\\a.png'];
+      viewerState.currentImagePath = 'C:\\album\\a.png';
+      viewerState.folder = 'C:\\album\\sub';
+      viewerState.currentDirectory = 'C:\\album';
+
+      const res = handleViewerFolderRenamed('C:\\album', 'C:\\album_renamed');
+
+      expect(res).toBe(true);
+      expect(viewerState.folder).toBe('C:\\album_renamed\\sub');
+      expect(viewerState.currentDirectory).toBe('C:\\album_renamed');
+
+      delete viewerState.folder;
+      delete viewerState.currentDirectory;
+    });
+
+    it('handles case-insensitivity and slash variations in folder rename', () => {
+      viewerState.paths = ['c:/album/image1.png'];
+      viewerState.currentImagePath = 'c:/album/image1.png';
+
+      const res = handleViewerFolderRenamed('C:\\ALBUM', 'C:\\album_renamed');
+
+      expect(res).toBe(true);
+      expect(viewerState.currentImagePath).toBe('C:\\album_renamed\\image1.png');
+      expect(viewerState.paths[0]).toBe('C:\\album_renamed\\image1.png');
+      expect(document.getElementById('window-filename-display').textContent).toBe('image1.png');
+    });
+
+    it('ensures subsequent viewer-list-updated preserves current image position after folder rename', () => {
+      viewerState.paths = ['C:\\album\\img1.png', 'C:\\album\\img2.png'];
+      viewerState.currentImagePath = 'C:\\album\\img1.png';
+
+      handleViewerFolderRenamed('C:\\album', 'C:\\album_renamed');
+      expect(viewerState.currentImagePath).toBe('C:\\album_renamed\\img1.png');
+
+      const updatedPaths = ['C:\\album_renamed\\img1.png', 'C:\\album_renamed\\img2.png'];
+      viewerState.paths = updatedPaths;
+
+      const newIndex = updatedPaths.indexOf(viewerState.currentImagePath);
+      expect(newIndex).toBe(0);
+      expect(newIndex).not.toBe(-1);
+    });
   });
 });
 
