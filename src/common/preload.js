@@ -50,6 +50,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(callback: () => void) => void} onDirectoryChanged
  * @property {(callback: (payload: {path: string, rating: number}) => void) => void} onRatingChanged
  * @property {(callback: (payload: Array<{path: string, rating: number}>) => void) => void} onRatingsBatchChanged
+ * @property {(callback: (payload: {old_path: string, new_path: string}) => void) => void} onViewerFileRenamed
  * @property {(parentDir: string, folderName: string) => Promise<{success: boolean, path?: string, error?: string}>} createFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
@@ -332,6 +333,10 @@ window.veloceAPI = {
    * 複数ファイルのレーティングが一括変更されたときの通知を受け取ります。
    */
   onRatingsBatchChanged: (callback) => listen('ratings-batch-changed', (event) => callback(event.payload)),
+  /**
+   * ファイル名変更（F2）の完了通知を受け取ります（独立ビューアー等の表示中パス追随用）。
+   */
+  onViewerFileRenamed: (callback) => listen('viewer-file-renamed', (event) => callback(event.payload)),
   /**
    * フォルダを作成するようメインプロセスに要求します。
    * @param {string} parentDir - 親ディレクトリのパス。

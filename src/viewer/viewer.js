@@ -554,6 +554,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         clearPreloadCache();
       });
 
+      listen('viewer-file-renamed', (event) => {
+        const payload = event.payload || {};
+        const oldPath = payload.old_path || payload.oldPath;
+        const newPath = payload.new_path || payload.newPath;
+        handleViewerFileRenamed(oldPath, newPath);
+      });
+
       listen('viewer-list-updated', (event) => {
         const newPaths = event.payload || []; // 更新されたファイルパスのリスト
         viewerState.paths = newPaths;
@@ -1645,6 +1652,59 @@ export async function advanceAfterPathDeleted(deletedPath) {
       if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
     }
   }
+}
+
+/**
+ * ファイルリネーム通知（viewer-file-renamed）を受け取り、
+ * 現在表示中の画像パスが一致する場合に内部状態（paths, currentImagePath）および
+ * タイトルバー・ファイル名表示を追随させる。
+ * 表示中の画像自体の再読み込み（loadImage）は行わない。
+ *
+ * @param {string} oldPath - 変更前の画像パス
+ * @param {string} newPath - 変更後の画像パス
+ * @returns {boolean} 追随が行われた場合は true、対象外（不一致等）の場合は false
+ */
+export function handleViewerFileRenamed(oldPath, newPath) {
+  if (!oldPath || !newPath) return false;
+
+  // 大文字小文字やスラッシュの差異を許容した比較
+  const normOld = oldPath.replace(/\//g, '\\').toLowerCase();
+  const currentNorm = (viewerState.currentImagePath || '').replace(/\//g, '\\').toLowerCase();
+
+  // 現在表示中のパスと一致しない場合は何もしない
+  if (currentNorm !== normOld) {
+    return false;
+  }
+
+  // viewerState.paths 内の該当要素を新パスへ差し替え
+  if (Array.isArray(viewerState.paths)) {
+    const idx = viewerState.paths.findIndex(p => (p || '').replace(/\//g, '\\').toLowerCase() === normOld);
+    if (idx !== -1) {
+      viewerState.paths[idx] = newPath;
+    }
+  }
+
+  // currentImagePath を新パスへ更新
+  viewerState.currentImagePath = newPath;
+
+  // タイトルバーおよびファイル名表示要素の更新（画像自体は切り替えない）
+  if (typeof viewerState.currentIndex === 'number' && typeof viewerState.totalImages === 'number') {
+    document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
+  }
+  const filenameEl = document.getElementById('window-filename-display');
+  if (filenameEl) {
+    filenameEl.textContent = newPath.split(/[/\\]/).pop();
+  }
+
+  // メタデータオーバーレイが開いていれば更新
+  if (viewerState.isMetadataVisible && typeof updateMetadataOverlay === 'function') {
+    updateMetadataOverlay();
+  }
+
+  return true;
+}
+if (typeof window !== 'undefined') {
+  window.handleViewerFileRenamed = handleViewerFileRenamed;
 }
 
 window.addEventListener('keydown', async (e) => {

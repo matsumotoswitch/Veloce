@@ -2753,7 +2753,12 @@ pub fn sync_folder_rename_in_state(state: &AppState, old_path_exact: &str, new_p
 }
 
 #[tauri::command]
-async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_name: String) -> Result<String, String> {
+async fn rename_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    old_path: String,
+    new_name: String,
+) -> Result<String, String> {
     validate_new_entry_name(&new_name)?;
     let old_path_clone = old_path.clone();
     let new_path_str = tokio::task::spawn_blocking(move || {
@@ -2791,6 +2796,17 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
 
     // インメモリのファイル一覧と各インデックスを新パスに同期
     sync_file_rename_in_state(&state, &old_path_clone, &new_path_str);
+
+    // 独立ビューアーへリネーム完了を通知（表示中の画像パス追随用）
+    let _ = app.emit_all(
+        "viewer-file-renamed",
+        serde_json::json!({
+            "old_path": &old_path_clone,
+            "new_path": &new_path_str,
+            "oldPath": &old_path_clone,
+            "newPath": &new_path_str,
+        }),
+    );
 
     Ok(new_path_str)
 }
