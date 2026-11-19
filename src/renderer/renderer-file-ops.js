@@ -218,10 +218,29 @@ export async function rebuildSelectedCache() {
       }
       appState.thumbnailTotalRequested += pathsToRebuild.length;
 
+      const tm = window.thumbnailManager;
+      const uiMgr = window.uiManager || uiManager;
+      const PLACEHOLDER_GIF_URL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
       if (!appState.rebuiltPaths) appState.rebuiltPaths = new Set();
       pathsToRebuild.forEach(p => {
         appState.thumbnailCounted.delete(p);
         appState.rebuiltPaths.add(p);
+        if (tm && typeof tm.remove === 'function') {
+          tm.remove(p);
+        }
+        if (uiMgr && uiMgr._domByPath) {
+          const wrapper = uiMgr._domByPath.get(p);
+          if (wrapper) {
+            wrapper.classList.add('loading');
+            const img = wrapper.children ? wrapper.children[0] : null;
+            if (img) {
+              img.dataset.currentSrc = '';
+              img.classList.add('loading');
+              img.src = PLACEHOLDER_GIF_URL;
+            }
+          }
+        }
       });
 
       if (window.thumbnailManager) window.thumbnailManager.unshiftPreload(pathsToRebuild);

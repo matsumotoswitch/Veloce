@@ -1512,6 +1512,43 @@ async fn set_ratings_batch(
     .map_err(|e| e.to_string())
 }
 
+/// ビューアーウィンドウへ最新の画像パス一覧（`viewer-list-updated`）を配信すべきかを判定する。
+///
+/// 1. 遷移後のリストが空（0件）かつビューアー側の現行リストが空でない場合:
+///    スマートフォルダ条件やディレクトリ一致条件にかかわらず `true` を返し、ビューアーを安全に閉じる。
+/// 2. スマートフォルダ表示時:
+///    ビューアー側リストが空、またはいずれかのパスが新リストに含まれていれば `true`。
+/// 3. 通常フォルダ表示時:
+///    ビューアーの先頭パスの親ディレクトリが対象ディレクトリと一致する場合に `true`。
+pub fn should_update_viewer_list(
+    is_smart_folder: bool,
+    paths_is_empty: bool,
+    path_set: Option<&std::collections::HashSet<&str>>,
+    viewer_list: &[String],
+    target_dir: Option<&str>,
+) -> bool {
+    if paths_is_empty && !viewer_list.is_empty() {
+        return true;
+    }
+
+    if is_smart_folder {
+        if let Some(set) = path_set {
+            viewer_list.is_empty() || viewer_list.iter().any(|p| set.contains(p.as_str()))
+        } else {
+            viewer_list.is_empty()
+        }
+    } else if let Some(dir_str) = target_dir {
+        let v_dir = viewer_list
+            .first()
+            .and_then(|p| std::path::Path::new(p).parent())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        v_dir == dir_str
+    } else {
+        false
+    }
+}
+
 pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
     let all_files = state.all_files.read();
     let sort_config = state.sort_config.read().clone();
@@ -1645,22 +1682,13 @@ pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &App
             };
 
             for (label, viewer_list) in viewer_paths.iter_mut() {
-                let should_update = if is_smart_folder {
-                    if let Some(ref set) = path_set {
-                        viewer_list.is_empty() || viewer_list.iter().any(|p| set.contains(p.as_str()))
-                    } else {
-                        viewer_list.is_empty()
-                    }
-                } else if let Some(ref dir_str) = target_dir {
-                    let v_dir = viewer_list
-                        .first()
-                        .and_then(|p| Path::new(p).parent())
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    v_dir == *dir_str
-                } else {
-                    false
-                };
+                let should_update = should_update_viewer_list(
+                    is_smart_folder,
+                    paths.is_empty(),
+                    path_set.as_ref(),
+                    viewer_list.as_slice(),
+                    target_dir.as_deref(),
+                );
 
                 if should_update {
                     *viewer_list = std::sync::Arc::clone(&paths);
@@ -6528,6 +6556,56 @@ mod viewer_tests {
         assert_eq!(filt_files[0].path, file_a_str);
 
         assert_eq!(state.path_to_all_idx.read().get(&file_a_str).copied(), Some(0));
+    }
+
+    #[test]
+    fn test_should_update_viewer_list_smart_folder_last_item_deleted() {
+        let viewer_list = vec!["C:\\images\\last.png".to_string()];
+        let path_set: std::collections::HashSet<&str> = std::collections::HashSet::new();
+
+        // 1. スマートフォルダで最後の1件が削除され、paths が空になった場合 -> true
+        let should_update_smart = should_update_viewer_list(
+            true,
+            true, // paths_is_empty
+            Some(&path_set),
+            &viewer_list,
+            None,
+        );
+        assert!(should_update_smart, "スマートフォルダで残り1件が削除された遷移では true になること");
+
+        // 2. 通常フォルダでも最後の1件が削除された場合 -> true
+        let should_update_normal = should_update_viewer_list(
+            false,
+            true, // paths_is_empty
+            None,
+            &viewer_list,
+            Some("C:\\images"),
+        );
+        assert!(should_update_normal, "通常フォルダでも残り1件が削除された遷移では true になること");
+
+        // 3. 削除後もまだアイテムが残っている場合で、ビューアーのアイテムが含まれていれば true
+        let mut non_empty_set = std::collections::HashSet::new();
+        non_empty_set.insert("C:\\images\\last.png");
+        let should_update_retained = should_update_viewer_list(
+            true,
+            false, // paths_is_empty
+            Some(&non_empty_set),
+            &viewer_list,
+            None,
+        );
+        assert!(should_update_retained, "残存アイテムを含むスマートフォルダの更新では true になること");
+
+        // 4. 全く関係ないスマートフォルダで他が更新された場合は false
+        let mut unrelated_set = std::collections::HashSet::new();
+        unrelated_set.insert("C:\\images\\other.png");
+        let should_update_unrelated = should_update_viewer_list(
+            true,
+            false, // paths_is_empty
+            Some(&unrelated_set),
+            &viewer_list,
+            None,
+        );
+        assert!(!should_update_unrelated, "無関係なスマートフォルダの更新では false になること");
     }
 
 

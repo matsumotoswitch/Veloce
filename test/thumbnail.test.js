@@ -1304,8 +1304,9 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
 
       // Rust バックエンド救済が呼ばれ、SVGアイコンにならず正規のURLが設定されること
       expect(window.veloceAPI.getThumbnail).toHaveBeenCalledWith(filePath);
-      expect(appState.thumbnailUrls.get(filePath)).toBe(rustRecoveredUrl);
-      expect(img.src).toBe(rustRecoveredUrl);
+      expect(appState.thumbnailUrls.get(filePath)).toContain(rustRecoveredUrl);
+      expect(appState.thumbnailUrls.get(filePath)).toMatch(/_t=\d+/);
+      expect(img.src).toContain(rustRecoveredUrl);
     });
 
     it('thumbnailWorkerPool.generate should fallback to readBinaryFile when fetch fails', async () => {
@@ -1486,6 +1487,46 @@ describe('Thumbnail Cache Rebuild Bug Fixes', () => {
 
       // 画面内アイテムが存在するため、初回のバッチには画面内アイテムのみが含まれ、preloadQueue のアイテムは巻き込まれないこと
       expect(window.veloceAPI.generateThumbnailBatch).toHaveBeenNthCalledWith(1, ['C:/test/view1.jpg', 'C:/test/view2.jpg']);
+    });
+
+    it('runBatchTask should remove successful items from rebuiltPaths with cache-busting url, and preserve dirty items', async () => {
+      const { appState } = await import('../src/renderer/renderer-state.js');
+      const filePath1 = 'C:/test/rebuild1.jpg';
+      const filePath2 = 'C:/test/rebuild2.jpg';
+      appState.rebuiltPaths = new Set([filePath1, filePath2]);
+
+      // filePath2 を activeTasks に入れた上で remove して dirty にマーク
+      manager.activeTasks.add(filePath2);
+      manager.remove(filePath2);
+
+      const rawUrl1 = 'http://127.0.0.1:12345/?path=C%3A%2Ftest%2Frebuild1.jpg&thumb=1';
+      window.veloceAPI.generateThumbnailBatch = vi.fn().mockResolvedValue([
+        { path: filePath1, url: rawUrl1 },
+        { path: filePath2, url: 'http://127.0.0.1:12345/?path=C%3A%2Ftest%2Frebuild2.jpg&thumb=1' }
+      ]);
+
+      const wrapper = document.createElement('div');
+      wrapper.dataset.filepath = filePath1;
+      const img = document.createElement('img');
+      img.classList.add('loading');
+      wrapper.appendChild(img);
+      window.uiManager = { _domByPath: new Map([[filePath1, wrapper]]) };
+
+      await manager.runBatchTask([
+        { filePath: filePath1, skipDbCheck: true },
+        { filePath: filePath2, skipDbCheck: true }
+      ]);
+
+      // 1. 成功確定した filePath1 は rebuiltPaths から削除され、_t パラメータ付きの URL になり DOM も更新されること
+      expect(appState.rebuiltPaths.has(filePath1)).toBe(false);
+      const assignedUrl1 = appState.thumbnailUrls.get(filePath1);
+      expect(assignedUrl1).toContain(rawUrl1);
+      expect(assignedUrl1).toMatch(/_t=\d+/);
+      expect(img.src).toBe(assignedUrl1);
+
+      // 2. dirty として再キューされた filePath2 は rebuiltPaths に残り、初回バッチ結果で確定しないこと
+      expect(appState.rebuiltPaths.has(filePath2)).toBe(true);
+      expect(appState.thumbnailUrls.has(filePath2)).toBe(false);
     });
 
     it('should reserve worker slots for viewport items and not dispatch buffer items while viewport items are pending', () => {

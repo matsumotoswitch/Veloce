@@ -1377,8 +1377,16 @@ export class ThumbnailQueueManager {
         if (url) {
           this.activeTasks.delete(filePath);
           if (this.activeBatchPaths) this.activeBatchPaths.delete(filePath);
-          appState.thumbnailUrls.set(filePath, url);
-          this.updateDOM(filePath, url);
+
+          let finalUrl = url;
+          if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
+            const sep = url.includes('?') ? '&' : '?';
+            finalUrl = `${url}${sep}_t=${Date.now()}`;
+            appState.rebuiltPaths.delete(filePath);
+          }
+
+          appState.thumbnailUrls.set(filePath, finalUrl);
+          this.updateDOM(filePath, finalUrl);
           if (this._trackedPaths && this._trackedPaths.has(filePath)) {
             this._trackedPaths.delete(filePath);
             this.completedCount++;
@@ -1585,12 +1593,17 @@ export class ThumbnailQueueManager {
         }
       }
 
+      let finalUrl = url;
       if (appState.rebuiltPaths && appState.rebuiltPaths.has(filePath)) {
+        if (url) {
+          const sep = url.includes('?') ? '&' : '?';
+          finalUrl = `${url}${sep}_t=${Date.now()}`;
+        }
         appState.rebuiltPaths.delete(filePath);
       }
-      appState.thumbnailUrls.set(filePath, url);
+      appState.thumbnailUrls.set(filePath, finalUrl);
       evictThumbnailCache();
-      this.updateDOM(filePath, url);
+      this.updateDOM(filePath, finalUrl);
     } catch (err) {
       if (signal.aborted) return;
 

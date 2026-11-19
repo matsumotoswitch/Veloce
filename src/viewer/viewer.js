@@ -939,7 +939,7 @@ function swapImageElement(newImg, sequenceId) {
   
   const borderOverlay = document.getElementById('border-overlay');
   if (borderOverlay && borderOverlay.parentNode) {
-    document.body.insertBefore(newImg, borderOverlay);
+    borderOverlay.parentNode.insertBefore(newImg, borderOverlay);
   } else {
     document.body.appendChild(newImg);
   }
@@ -1623,6 +1623,30 @@ export function handleWheel(e) {
 
 window.addEventListener('wheel', handleWheel, { passive: false });
 
+/**
+ * ファイル削除後にビューアー内のパス一覧から該当パスを除去し、次の画像へ進める（またはウィンドウを閉じる）。
+ * viewer-list-updated イベントが届いて既に画像が切り替わっている場合は二重処理を防止する。
+ * @param {string} deletedPath - 削除された画像パス
+ */
+export async function advanceAfterPathDeleted(deletedPath) {
+  const idx = viewerState.paths.indexOf(deletedPath);
+  if (idx !== -1) {
+    viewerState.paths.splice(idx, 1);
+  }
+  // currentImagePath がまだ deletedPath を指している場合（viewer-list-updated が未到達の場合）のみ次へ遷移
+  if (viewerState.currentImagePath === deletedPath) {
+    viewerState.totalImages = viewerState.paths.length;
+    if (viewerState.paths.length > 0) {
+      if (viewerState.currentIndex >= viewerState.paths.length) {
+        viewerState.currentIndex = viewerState.paths.length - 1;
+      }
+      await loadImage();
+    } else {
+      if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
+    }
+  }
+}
+
 window.addEventListener('keydown', async (e) => {
   // Ctrl+Shift+I で開発者ツールをトグル表示
   if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
@@ -1813,21 +1837,9 @@ window.addEventListener('keydown', async (e) => {
       const success = await window.veloceAPI.trashFile(deletedPath);
       if (success) {
         if (window.veloceAPI.notifyFileRemoved) {
-          // メイン画面に通知し、そこからbroadcastされる `viewer-list-updated` イベントで画像の切り替えを処理する
           await window.veloceAPI.notifyFileRemoved(deletedPath);
-        } else {
-          // APIがない場合のフォールバック
-          viewerState.paths.splice(viewerState.currentIndex, 1);
-          viewerState.totalImages = viewerState.paths.length;
-          if (viewerState.paths.length > 0) {
-            if (viewerState.currentIndex >= viewerState.paths.length) {
-              viewerState.currentIndex = viewerState.paths.length - 1;
-            }
-            loadImage(); 
-          } else {
-            if (window.veloceAPI && window.veloceAPI.closeWindow) window.veloceAPI.closeWindow();
-          }
         }
+        await advanceAfterPathDeleted(deletedPath);
       }
     }
   }
@@ -1996,6 +2008,7 @@ if (typeof window !== 'undefined') {
   window.applyPlayModeToMedia = applyPlayModeToMedia;
   window.cycleViewerPlayMode = cycleViewerPlayMode;
   window.updatePlayModeButtonUI = updatePlayModeButtonUI;
+  window.advanceAfterPathDeleted = advanceAfterPathDeleted;
 }
 
 window.addEventListener('beforeunload', () => {
