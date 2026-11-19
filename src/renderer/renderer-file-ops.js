@@ -153,11 +153,12 @@ export async function renameSelectedFile(callbacks = fileOpsCallbacks) {
         fileOpsState.push({ type: 'RENAME_FILE', oldPath, newPath: result.path, oldName: file.name });
         uiManager.showToast(`ファイル名を「${newName}」に変更しました`, 3000, 'file-rename', 'success');
 
-        const newExt = newName.includes('.') ? newName.split('.').pop().toLowerCase() : '';
+        const newExt = newName.includes('.') ? ('.' + newName.split('.').pop().toLowerCase()) : '';
 
         file.path = result.path;
         file.name = newName;
         file.ext = newExt;
+        file.hashKey = '';
 
         // Rust側に変更を通知
         await window.veloceAPI.notifyFileChanged(file);

@@ -788,25 +788,27 @@ pub(crate) fn commit_pending_thumbnails_batch(
         return Ok(0);
     }
     let mut conn = db_conn.get().map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let sql = "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(hash_key) DO UPDATE SET
+             thumbnail = excluded.thumbnail,
+             path = excluded.path,
+             mtime = CASE WHEN excluded.mtime > 0 THEN excluded.mtime ELSE cache.mtime END,
+             last_accessed = excluded.last_accessed";
+
     if pending_writes.len() == 1 {
         let p = &pending_writes[0];
         conn.execute(
-            "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-            rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.now],
+            sql,
+            rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.mtime, p.now],
         )?;
-        let _ = p.mtime;
         return Ok(1);
     }
 
     let tx = conn.transaction()?;
     {
-        let mut stmt = tx.prepare_cached(
-            "INSERT INTO cache (hash_key, thumbnail, path, last_accessed) VALUES (?, ?, ?, ?)
-             ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail, path = excluded.path, last_accessed = excluded.last_accessed",
-        )?;
+        let mut stmt = tx.prepare_cached(sql)?;
         for p in pending_writes {
-            stmt.execute(rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.now])?;
+            stmt.execute(rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.mtime, p.now])?;
         }
     }
     tx.commit()?;
@@ -2020,6 +2022,95 @@ mod tests {
         let stale_hash = crate::utils::hash_path_mtime_hex(&clean_path, stale_mtime);
         assert!(results[0].url.contains(&format!("hash={}", expected_fresh_hash)), "実ファイル mtime 由来の hash_key が URL に含まれること");
         assert!(!results[0].url.contains(&stale_hash), "古い mtime 由来の hash_key は使われないこと");
+    }
+
+    #[test]
+    fn test_commit_pending_thumbnails_batch_saves_and_preserves_mtime() {
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    path TEXT DEFAULT '',
+                    mtime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        let entry1 = PendingThumbnailWrite {
+            hash_key: "hash1".to_string(),
+            clean_path: "C:\\test\\1.png".to_string(),
+            mtime: 12345,
+            bytes: vec![1, 2, 3],
+            now: 100,
+        };
+
+        // 1. 新規単体 INSERT で mtime が保存されること
+        let count = commit_pending_thumbnails_batch(&pool, &[entry1]).unwrap();
+        assert_eq!(count, 1);
+        {
+            let conn = pool.get().unwrap();
+            let (mtime, path): (u64, String) = conn.query_row(
+                "SELECT mtime, path FROM cache WHERE hash_key = 'hash1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(mtime, 12345);
+            assert_eq!(path, "C:\\test\\1.png");
+        }
+
+        // 2. conflict 発生時、excluded.mtime = 0 の場合は既存の mtime (12345) を保持すること
+        let entry_conflict_zero = PendingThumbnailWrite {
+            hash_key: "hash1".to_string(),
+            clean_path: "C:\\test\\1.png".to_string(),
+            mtime: 0,
+            bytes: vec![4, 5, 6],
+            now: 200,
+        };
+        commit_pending_thumbnails_batch(&pool, &[entry_conflict_zero]).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let (mtime, bytes): (u64, Vec<u8>) = conn.query_row(
+                "SELECT mtime, thumbnail FROM cache WHERE hash_key = 'hash1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(mtime, 12345, "excluded.mtime = 0 は既存の mtime を保持すべき");
+            assert_eq!(bytes, vec![4, 5, 6], "サムネイル内容は更新されるべき");
+        }
+
+        // 3. conflict 発生時、excluded.mtime > 0 の場合は新しい mtime で更新されること
+        let entry_conflict_update = PendingThumbnailWrite {
+            hash_key: "hash1".to_string(),
+            clean_path: "C:\\test\\1.png".to_string(),
+            mtime: 67890,
+            bytes: vec![7, 8, 9],
+            now: 300,
+        };
+        // 一括経路（2件以上）でもテスト
+        let entry2 = PendingThumbnailWrite {
+            hash_key: "hash2".to_string(),
+            clean_path: "C:\\test\\2.png".to_string(),
+            mtime: 99999,
+            bytes: vec![10],
+            now: 300,
+        };
+        let count_batch = commit_pending_thumbnails_batch(&pool, &[entry_conflict_update, entry2]).unwrap();
+        assert_eq!(count_batch, 2);
+        {
+            let conn = pool.get().unwrap();
+            let mtime1: u64 = conn.query_row("SELECT mtime FROM cache WHERE hash_key = 'hash1'", [], |r| r.get(0)).unwrap();
+            let mtime2: u64 = conn.query_row("SELECT mtime FROM cache WHERE hash_key = 'hash2'", [], |r| r.get(0)).unwrap();
+            assert_eq!(mtime1, 67890);
+            assert_eq!(mtime2, 99999);
+        }
     }
 
 }

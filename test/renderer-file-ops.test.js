@@ -118,7 +118,7 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
   });
 
   describe('renameSelectedFile', () => {
-    it('should validate and rename selected file', async () => {
+    it('should validate and rename selected file, setting leading dot ext and empty hashKey', async () => {
       appState.selectedIndex = 0;
       uiManager.showPrompt.mockResolvedValueOnce('renamed.png');
       const scheduleRefresh = vi.fn();
@@ -127,6 +127,14 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
       expect(window.veloceAPI.renameFile).toHaveBeenCalledWith('C:\\test\\dir\\file0.png', 'renamed.png');
       expect(appState.undoStack.length).toBe(1);
       expect(appState.undoStack[0].type).toBe('RENAME_FILE');
+      expect(window.veloceAPI.notifyFileChanged).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: 'C:\\test\\dir\\new.png',
+          name: 'renamed.png',
+          ext: '.png',
+          hashKey: ''
+        })
+      );
       expect(scheduleRefresh).toHaveBeenCalled();
     });
   });

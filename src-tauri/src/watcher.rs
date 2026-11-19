@@ -121,8 +121,9 @@ pub(crate) fn notify_files_batch_inner(
                 for mut file in changed_files {
                     let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
                     file.path = clean.clone();
-                    if file.hash_key.is_empty() {
-                        file.hash_key = crate::utils::hash_path_mtime_hex(&clean, file.mtime).into();
+                    let expected_hash = crate::utils::hash_path_mtime_hex(&clean, file.mtime);
+                    if file.hash_key.as_str() != expected_hash {
+                        file.hash_key = expected_hash.into();
                     }
 
                     let existing_opt = new_idx_map.get(&clean).copied().or_else(|| existing_idx_map.get(&clean).copied());

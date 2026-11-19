@@ -2266,10 +2266,253 @@ pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) 
     }
 }
 
+fn get_normalized_parent_dir(p: &str) -> String {
+    let path = std::path::Path::new(p);
+    let parent = path.parent().unwrap_or(std::path::Path::new(""));
+    let binding = parent.to_string_lossy();
+    let norm = normalize_unc_path(&binding);
+    norm.trim_end_matches(&['/', '\\'][..]).to_lowercase()
+}
+
+fn normalize_dir_string(d: &str) -> String {
+    let norm = normalize_unc_path(d);
+    norm.trim_end_matches(&['/', '\\'][..]).to_lowercase()
+}
+
+/// ファイルリネームに伴い、インメモリの `state.all_files` および `state.filtered_files` の
+/// 該当エントリを新パス・新ファイル名・新拡張子・再計算された hash_key にインプレース更新し、
+/// O(1) 逆引きインデックス群（`path_to_all_idx`, `path_to_filtered_idx`, `path_to_mtime`）を移行する。
+pub fn sync_file_rename_in_state(state: &AppState, old_path: &str, new_path: &str) {
+    let old_clean = normalize_unc_path(old_path).into_owned();
+    let new_clean = normalize_unc_path(new_path).into_owned();
+
+    // 最新の mtime を取得（実ファイル優先、取得不可時は既存メモリ値）
+    let mtime = std::fs::metadata(new_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or_else(|| state.get_mtime(old_path).unwrap_or(0));
+
+    let new_hash_key = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
+    let path_obj = std::path::Path::new(new_path);
+    let new_name = path_obj.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let new_ext = path_obj.extension().map(|e| format!(".{}", e.to_string_lossy().to_ascii_lowercase())).unwrap_or_default();
+
+    // 1. all_files の該当エントリをインプレースで更新
+    let found_in_all = {
+        let mut all_files = state.all_files.write();
+        let mut target_idx = None;
+        {
+            let idx_map = state.path_to_all_idx.read();
+            if let Some(&idx) = idx_map.get(old_path).or_else(|| idx_map.get(&old_clean)) {
+                if idx < all_files.len() {
+                    target_idx = Some(idx);
+                }
+            }
+        }
+        if target_idx.is_none() {
+            target_idx = all_files.iter().position(|f| f.path == old_path || f.path == old_clean);
+        }
+
+        if let Some(idx) = target_idx {
+            if let Some(existing) = all_files.get_mut(idx) {
+                let mut updated = (**existing).clone();
+                updated.path = new_path.to_string();
+                updated.name = new_name.clone();
+                updated.ext = new_ext.into();
+                updated.hash_key = new_hash_key.clone().into();
+                updated.mtime = mtime;
+                updated.unified_search_text = format!(
+                    "{} {} {} {} {}",
+                    new_name,
+                    updated.prompt,
+                    updated.negative_prompt,
+                    updated.source,
+                    updated.search_text
+                ).to_lowercase();
+                *existing = std::sync::Arc::new(updated);
+            }
+            true
+        } else {
+            false
+        }
+    };
+
+    if found_in_all {
+        // all_files のインデックスと mtime を再構築
+        state.rebuild_all_indices(&state.all_files.read());
+
+        // ソート順やフィルタ（検索文字列等）の整合性を維持するため apply_filters_and_sort を同期実行
+        apply_filters_and_sort(None, state);
+
+        // path_to_mtime の更新
+        let mut mtime_map = state.path_to_mtime.write();
+        mtime_map.remove(old_path);
+        mtime_map.remove(&old_clean);
+        mtime_map.insert(new_path.to_string(), mtime);
+        if new_clean != new_path {
+            mtime_map.insert(new_clean.clone(), mtime);
+        }
+
+        let mut ratings_map = state.ratings.write();
+        let rating = ratings_map.remove(old_path).or_else(|| ratings_map.remove(&old_clean));
+        if let Some(r) = rating {
+            ratings_map.insert(new_path.to_string(), r);
+            if new_clean != new_path {
+                ratings_map.insert(new_clean, r);
+            }
+        }
+    }
+}
+
+/// ファイル移動（move）に伴い、現在開いているディレクトリとの関係に基づいて
+/// インメモリの `state.all_files` および `state.filtered_files` を即座に同期する。
+///
+/// - 現在のディレクトリから出る移動: 該当エントリを state から削除
+/// - 現在のディレクトリへ入る移動（Undo 含む）: ディスクと DB からエントリを構築して state に追加
+/// - 同一ディレクトリ内移動: リネームとしてインプレース更新
+pub fn sync_file_move_in_state(state: &AppState, old_path: &str, new_path: &str) {
+    let current_dir = state.current_dir.read().clone();
+    let current_norm = normalize_dir_string(&current_dir);
+    if current_norm.is_empty() {
+        return;
+    }
+
+    let old_parent = get_normalized_parent_dir(old_path);
+    let new_parent = get_normalized_parent_dir(new_path);
+
+    let old_in_current = old_parent == current_norm;
+    let new_in_current = new_parent == current_norm;
+
+    if old_in_current && new_in_current {
+        // 同一フォルダ内での移動（実質的なリネーム）
+        sync_file_rename_in_state(state, old_path, new_path);
+    } else if old_in_current && !new_in_current {
+        // 現在のディレクトリから外へ移動: state から除去
+        let old_clean = normalize_unc_path(old_path).into_owned();
+        {
+            let mut all_files = state.all_files.write();
+            all_files.retain(|f| f.path != old_path && f.path != old_clean);
+        }
+        state.rebuild_all_indices(&state.all_files.read());
+        apply_filters_and_sort(None, state);
+
+        let mut mtime_map = state.path_to_mtime.write();
+        mtime_map.remove(old_path);
+        mtime_map.remove(&old_clean);
+
+        let mut ratings_map = state.ratings.write();
+        ratings_map.remove(old_path);
+        ratings_map.remove(&old_clean);
+    } else if !old_in_current && new_in_current {
+        // 現在のディレクトリへ外から移動（Undo 復帰含む）: state へ追加
+        let new_clean = normalize_unc_path(new_path).into_owned();
+        let path_obj = std::path::Path::new(new_path);
+        let name = path_obj.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let ext = path_obj.extension().map(|e| format!(".{}", e.to_string_lossy().to_ascii_lowercase())).unwrap_or_default();
+
+        let meta = std::fs::metadata(new_path).ok();
+        let (size, mtime, ctime) = if let Some(m) = meta {
+            let s = m.len();
+            let mt = m.modified().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let ct = m.created().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(mt);
+            (s, mt, ct)
+        } else {
+            (0, 0, 0)
+        };
+
+        let hash_key = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
+
+        let mut width = 0;
+        let mut height = 0;
+        let mut prompt = String::new();
+        let mut negative_prompt = String::new();
+        let mut source = String::new();
+        let mut meta_loaded = false;
+        let mut has_thumbnail = false;
+
+        if let Ok(conn) = state.db_conn.get() {
+            if let Ok(mut stmt) = conn.prepare("SELECT width, height, metadata, (thumbnail IS NOT NULL) FROM cache WHERE hash_key = ? OR path = ? COLLATE NOCASE") {
+                if let Ok(mut rows) = stmt.query(rusqlite::params![&hash_key, &new_clean]) {
+                    if let Ok(Some(row)) = rows.next() {
+                        width = row.get(0).unwrap_or(0);
+                        height = row.get(1).unwrap_or(0);
+                        if let Ok(Some(meta_str)) = row.get::<_, Option<String>>(2) {
+                            if !meta_str.is_empty() {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&meta_str) {
+                                    prompt = parsed.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    negative_prompt = parsed.get("negativePrompt").or_else(|| parsed.get("negative_prompt")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    source = parsed.get("source").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    meta_loaded = true;
+                                }
+                            }
+                        }
+                        has_thumbnail = row.get(3).unwrap_or(false);
+                    }
+                }
+            }
+        }
+
+        let unified_search_text = format!(
+            "{} {} {} {} {}",
+            name,
+            prompt,
+            negative_prompt,
+            source,
+            ""
+        ).to_lowercase();
+
+        let new_file = std::sync::Arc::new(ImageFile {
+            name,
+            ext: ext.into(),
+            path: new_path.to_string(),
+            size,
+            mtime,
+            ctime,
+            has_thumbnail_cache: has_thumbnail,
+            width,
+            height,
+            prompt,
+            negative_prompt,
+            source,
+            meta_loaded,
+            search_text: String::new(),
+            unified_search_text,
+            hash_key: hash_key.into(),
+        });
+
+        {
+            let mut all_files = state.all_files.write();
+            if let Some(pos) = all_files.iter().position(|f| f.path == new_path || f.path == new_clean) {
+                all_files[pos] = std::sync::Arc::clone(&new_file);
+            } else {
+                all_files.push(std::sync::Arc::clone(&new_file));
+            }
+        }
+
+        state.rebuild_all_indices(&state.all_files.read());
+        apply_filters_and_sort(None, state);
+
+        let mut mtime_map = state.path_to_mtime.write();
+        mtime_map.insert(new_path.to_string(), mtime);
+        if new_clean != new_path {
+            mtime_map.insert(new_clean, mtime);
+        }
+    }
+}
+
 /// ファイル移動（ドラッグ＆ドロップ、Undo操作等）に伴う SQLite キャッシュおよびレーティング同期用 Tauri コマンド
 #[tauri::command]
 async fn sync_file_move(state: tauri::State<'_, AppState>, old_path: String, new_path: String) -> Result<(), String> {
     sync_path_rename_in_db(&state, &old_path, &new_path);
+    sync_file_move_in_state(&state, &old_path, &new_path);
     Ok(())
 }
 
@@ -2419,6 +2662,9 @@ async fn rename_file(state: tauri::State<'_, AppState>, old_path: String, new_na
 
     // DBとメモリのレーティング・キャッシュのパスを更新
     sync_path_rename_in_db(&state, &old_path_clone, &new_path_str);
+
+    // インメモリのファイル一覧と各インデックスを新パスに同期
+    sync_file_rename_in_state(&state, &old_path_clone, &new_path_str);
 
     Ok(new_path_str)
 }
@@ -6069,6 +6315,219 @@ mod viewer_tests {
         let lock = app_state.ratings.read();
         assert!(!lock.contains_key(old_path), "メモリ上から旧パスが削除されていること");
         assert_eq!(lock.get(new_path).copied(), Some(4), "メモリ上で新パスにレーティングが反映されていること");
+    }
+
+    #[test]
+    fn test_sync_file_rename_in_state_single_entry_and_indices() {
+        let state = create_test_app_state("");
+        let old_path = "C:\\images\\sub\\sample.png";
+        let new_path = "C:\\images\\sub\\sample_renamed.png";
+        let mtime: u64 = 1700000000;
+        let old_clean = normalize_unc_path(old_path).into_owned();
+        let old_hash = crate::utils::hash_path_mtime_hex(&old_clean, mtime);
+
+        let file = std::sync::Arc::new(ImageFile {
+            name: "sample.png".to_string(),
+            ext: ".png".into(),
+            path: old_path.to_string(),
+            size: 1024,
+            mtime,
+            ctime: mtime,
+            has_thumbnail_cache: true,
+            width: 100,
+            height: 100,
+            prompt: "cat".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "sample.png cat".to_string(),
+            hash_key: old_hash.into(),
+        });
+
+        {
+            let mut all_files = state.all_files.write();
+            all_files.push(std::sync::Arc::clone(&file));
+        }
+        state.rebuild_all_and_filtered_indices(&state.all_files.read());
+        state.path_to_mtime.write().insert(old_path.to_string(), mtime);
+        state.ratings.write().insert(old_path.to_string(), 5);
+
+        // リネーム状態同期を実行
+        sync_file_rename_in_state(&state, old_path, new_path);
+
+        // 1. state.all_files のエントリが新パスで1件だけ存在すること（二重登録なし）
+        let all_files = state.all_files.read();
+        assert_eq!(all_files.len(), 1, "二重登録されず1件だけ存在すること");
+        assert_eq!(all_files[0].path, new_path);
+        assert_eq!(all_files[0].name, "sample_renamed.png");
+        assert_eq!(all_files[0].ext.as_str(), ".png", "先頭ドット付き拡張子であること");
+        let new_clean = normalize_unc_path(new_path).into_owned();
+        let expected_new_hash = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
+        assert_eq!(all_files[0].hash_key.as_str(), expected_new_hash.as_str());
+
+        // 2. filtered_files も新パスに同期されていること
+        let filt_files = state.filtered_files.read();
+        assert_eq!(filt_files.len(), 1);
+        assert_eq!(filt_files[0].path, new_path);
+
+        // 3. 各インデックスが新パスを引けること
+        let all_idx = state.path_to_all_idx.read();
+        assert!(!all_idx.contains_key(old_path), "旧パスは引けないこと");
+        assert_eq!(all_idx.get(new_path).copied(), Some(0), "新パスで引けること");
+
+        let filt_idx = state.path_to_filtered_idx.read();
+        assert!(!filt_idx.contains_key(old_path), "旧パスは引けないこと");
+        assert_eq!(filt_idx.get(new_path).copied(), Some(0), "新パスで引けること");
+
+        // 4. path_to_mtime が新パスを引けること
+        let mtime_map = state.path_to_mtime.read();
+        assert!(!mtime_map.contains_key(old_path));
+        assert_eq!(mtime_map.get(new_path).copied(), Some(mtime));
+
+        // 5. レーティングが新パスに引き継がれていること
+        let ratings = state.ratings.read();
+        assert!(!ratings.contains_key(old_path));
+        assert_eq!(ratings.get(new_path).copied(), Some(5));
+    }
+
+    #[test]
+    fn test_thumbnail_first_mtime_preserved_on_rename() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_thumb_first.db");
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path).with_init(|conn| {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS ratings (path TEXT PRIMARY KEY, rating INTEGER);
+                 CREATE TABLE IF NOT EXISTS cache (
+                     hash_key TEXT PRIMARY KEY,
+                     thumbnail BLOB,
+                     metadata TEXT,
+                     path TEXT,
+                     size INTEGER,
+                     mtime INTEGER,
+                     ctime INTEGER,
+                     width INTEGER,
+                     height INTEGER,
+                     last_accessed INTEGER
+                 );",
+            )
+        });
+        let pool = r2d2::Pool::builder().max_size(2).build(manager).unwrap();
+
+        let old_path = "C:\\images\\gallery\\art.png";
+        let new_path = "C:\\images\\gallery\\art_renamed.png";
+        let mtime: u64 = 1712345678;
+        let old_clean = normalize_unc_path(old_path).into_owned();
+        let old_hash = crate::utils::hash_path_mtime_hex(&old_clean, mtime);
+
+        // commit_pending_thumbnails_batch を模倣してサムネイル先行保存（mtime が正しく保存される）
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![old_hash, vec![1u8, 2, 3], old_path, mtime, 100],
+            ).unwrap();
+        }
+
+        let mut app_state = create_test_app_state("");
+        app_state.db_conn = pool.clone();
+        app_state.settings_db_conn = pool.clone();
+
+        // リネームに伴う DB 同期を実行
+        sync_path_rename_in_db(&app_state, old_path, new_path);
+
+        // 新しい hash_key は (new_path, mtime) から算出されたものであること（mtime=0 ではない！）
+        let new_clean = normalize_unc_path(new_path).into_owned();
+        let expected_new_hash = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
+        let stale_zero_mtime_hash = crate::utils::hash_path_mtime_hex(&new_clean, 0);
+
+        let conn = pool.get().unwrap();
+        let count_correct: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cache WHERE hash_key = ?1",
+            rusqlite::params![expected_new_hash],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count_correct, 1, "正しい mtime から生成された hash_key で引き継がれていること");
+
+        let count_stale: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cache WHERE hash_key = ?1",
+            rusqlite::params![stale_zero_mtime_hash],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count_stale, 0, "mtime=0 からの誤った hash_key にはなっていないこと");
+    }
+
+    #[test]
+    fn test_sync_file_move_in_state_leave_and_return() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let folder_a = temp_dir.path().join("folderA");
+        let folder_b = temp_dir.path().join("folderB");
+        std::fs::create_dir_all(&folder_a).unwrap();
+        std::fs::create_dir_all(&folder_b).unwrap();
+
+        let file_a_path = folder_a.join("item.png");
+        std::fs::write(&file_a_path, b"test content").unwrap();
+        let file_a_str = file_a_path.to_str().unwrap().to_string();
+
+        let file_b_path = folder_b.join("item.png");
+        let file_b_str = file_b_path.to_str().unwrap().to_string();
+
+        let state = create_test_app_state(folder_a.to_str().unwrap());
+        *state.current_dir.write() = folder_a.to_str().unwrap().to_string();
+
+        let mtime: u64 = 1700000000;
+        let file_entry = std::sync::Arc::new(ImageFile {
+            name: "item.png".to_string(),
+            ext: ".png".into(),
+            path: file_a_str.clone(),
+            size: 12,
+            mtime,
+            ctime: mtime,
+            has_thumbnail_cache: true,
+            width: 50,
+            height: 50,
+            prompt: "test".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "item.png test".to_string(),
+            hash_key: "item_hash".into(),
+        });
+
+        {
+            let mut all_files = state.all_files.write();
+            all_files.push(std::sync::Arc::clone(&file_entry));
+        }
+        state.rebuild_all_and_filtered_indices(&state.all_files.read());
+        state.path_to_mtime.write().insert(file_a_str.clone(), mtime);
+
+        // 1. folderA から folderB への移動（現在のディレクトリから出る）
+        sync_file_move_in_state(&state, &file_a_str, &file_b_str);
+
+        // state からファイルが消えていること
+        assert_eq!(state.all_files.read().len(), 0, "フォルダ外へ移動したファイルは all_files から消えること");
+        assert_eq!(state.filtered_files.read().len(), 0, "filtered_files からも消えること");
+        assert!(!state.path_to_all_idx.read().contains_key(&file_a_str));
+        assert!(!state.path_to_mtime.read().contains_key(&file_a_str));
+
+        // 2. folderB から folderA への移動（Undo 等で現在のディレクトリへ戻る）
+        // ディスク上でも file_b_path にファイルが存在する状態にしておく
+        std::fs::write(&file_b_path, b"test content").unwrap();
+        // 戻し移動: folderB -> folderA
+        sync_file_move_in_state(&state, &file_b_str, &file_a_str);
+
+        // state にファイルが再び現れること
+        let all_files = state.all_files.read();
+        assert_eq!(all_files.len(), 1, "現在のフォルダに戻されたファイルは all_files に復帰すること");
+        assert_eq!(all_files[0].path, file_a_str);
+        assert_eq!(all_files[0].name, "item.png");
+
+        let filt_files = state.filtered_files.read();
+        assert_eq!(filt_files.len(), 1, "filtered_files にも復帰すること");
+        assert_eq!(filt_files[0].path, file_a_str);
+
+        assert_eq!(state.path_to_all_idx.read().get(&file_a_str).copied(), Some(0));
     }
 
 
