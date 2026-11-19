@@ -110,6 +110,22 @@ pub(crate) fn notify_files_batch_inner(
             all_files.retain(|f| !remove_set.contains(&f.path));
             // 削除ありの場合: retain 直後の1回目の rebuild_all_indices は配置の正確性のために実行
             state.rebuild_all_indices(&all_files);
+
+            // 外部削除されたパスの ratings を state.ratings から除去
+            {
+                let mut ratings_map = state.ratings.write();
+                for p in &remove_set {
+                    ratings_map.remove(p);
+                }
+            }
+
+            // path_to_mtime からも削除
+            {
+                let mut mtime_map = state.path_to_mtime.write();
+                for p in &remove_set {
+                    mtime_map.remove(p);
+                }
+            }
         }
 
         if !changed_files.is_empty() {
@@ -406,6 +422,53 @@ pub(crate) async fn notify_files_batch(
     .map_err(|e| e.to_string())
 }
 
+/// 既知のフォルダ集合（`known_folders`）と、新たにスキャンされたフォルダ集合（`current_folders`）を比較し、
+/// フォルダの追加・削除・名前変更等の変化が存在するかを判定する純粋関数。
+pub(crate) fn detect_folder_changes(
+    known_folders: &std::collections::HashSet<String>,
+    current_folders: &std::collections::HashSet<String>,
+) -> bool {
+    if known_folders.len() != current_folders.len() {
+        return true;
+    }
+    known_folders.iter().any(|f| !current_folders.contains(f))
+}
+
+/// 親ディレクトリ配下のサブフォルダ一覧を走査・収集する純粋関数
+pub(crate) fn collect_parent_subfolders(parent_dir: &str) -> std::collections::HashSet<String> {
+    let mut folders = std::collections::HashSet::new();
+    if let Ok(entries) = std::fs::read_dir(parent_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            if dir_entry_is_dir(&entry) {
+                let clean_p = entry.path().to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
+                folders.insert(clean_p);
+            }
+        }
+    }
+    folders
+}
+
+/// カレントディレクトリの存在状態にかかわらず、親ディレクトリのサブフォルダおよびカレント配下フォルダの
+/// 変更を検知する。カレントディレクトリが存在しない場合でも、親フォルダが健在であればサブフォルダの増減・
+/// リネームを確実に検出し `folder_changed = true` を返す。
+pub(crate) fn check_folder_changes_with_optional_current(
+    current_exists: bool,
+    snapshot_folders: std::collections::HashSet<String>,
+    parent_folders: std::collections::HashSet<String>,
+    known_folders: &std::collections::HashSet<String>,
+) -> (bool, std::collections::HashSet<String>) {
+    let mut current_folders = std::collections::HashSet::with_capacity(
+        snapshot_folders.len() + parent_folders.len()
+    );
+    if current_exists {
+        current_folders.extend(snapshot_folders);
+    }
+    current_folders.extend(parent_folders);
+
+    let changed = detect_folder_changes(known_folders, &current_folders);
+    (changed, current_folders)
+}
+
 /// アイドル時の安全網となる定期差分スキャンを発火させる `idle_cycles` 閾値。
 /// `poll_timeout_ms` は先頭2サイクルが 500ms、以降が 1000ms のため、15 で約 15 秒間隔となる。
 pub(crate) const WATCHER_PERIODIC_SCAN_IDLE_CYCLES: u32 = 15;
@@ -449,31 +512,37 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
 
                 let clean_current_dir = current_dir.replace("\\\\?\\", "").replace('/', "\\");
                 let current_path = std::path::Path::new(&clean_current_dir);
-                if !current_path.exists() {
-                    std::thread::sleep(std::time::Duration::from_millis(300));
-                    continue;
-                }
+                let current_exists = current_path.exists();
 
                 let parent_dir = current_path
                     .parent()
                     .map(|p| p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\"));
 
                 let parent_watch = parent_dir.clone().unwrap_or_default();
+                let parent_exists = !parent_watch.is_empty() && std::path::Path::new(&parent_watch).exists();
+
+                // カレントフォルダも親フォルダも存在しない場合は監視スキップ
+                if !current_exists && !parent_exists {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    continue;
+                }
 
                 let mut dir_changed = false;
                 if clean_current_dir != current_watched_dir || parent_watch != current_watched_parent {
                     if let Some(watcher) = &mut watcher_opt {
                         if !current_watched_dir.is_empty() {
                             let _ = watcher.unwatch(std::path::Path::new(&current_watched_dir));
+                            current_watched_dir.clear();
                         }
                         if !current_watched_parent.is_empty() {
                             let _ = watcher.unwatch(std::path::Path::new(&current_watched_parent));
+                            current_watched_parent.clear();
                         }
-                        if current_path.exists() {
+                        if current_exists {
                             let _ = watcher.watch(current_path, RecursiveMode::NonRecursive);
                             current_watched_dir = clean_current_dir.clone();
                         }
-                        if !parent_watch.is_empty() && std::path::Path::new(&parent_watch).exists() {
+                        if parent_exists {
                             let _ = watcher.watch(std::path::Path::new(&parent_watch), RecursiveMode::NonRecursive);
                             current_watched_parent = parent_watch.clone();
                         }
@@ -493,21 +562,25 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
                 }
 
                 // Fallback: poll directory mtime
-                if let Ok(meta) = std::fs::metadata(&clean_current_dir) {
-                    let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                    if mtime != last_dir_mtime && last_dir_mtime != 0 {
-                        rx_ready = true;
-                    }
-                    last_dir_mtime = mtime;
-                }
-
-                if let Some(ref parent) = parent_dir {
-                    if let Ok(meta) = std::fs::metadata(parent) {
+                if current_exists {
+                    if let Ok(meta) = std::fs::metadata(&clean_current_dir) {
                         let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                        if mtime != last_parent_mtime && last_parent_mtime != 0 {
+                        if mtime != last_dir_mtime && last_dir_mtime != 0 {
                             rx_ready = true;
                         }
-                        last_parent_mtime = mtime;
+                        last_dir_mtime = mtime;
+                    }
+                }
+
+                if parent_exists {
+                    if let Some(ref parent) = parent_dir {
+                        if let Ok(meta) = std::fs::metadata(parent) {
+                            let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+                            if mtime != last_parent_mtime && last_parent_mtime != 0 {
+                                rx_ready = true;
+                            }
+                            last_parent_mtime = mtime;
+                        }
                     }
                 }
 
@@ -533,40 +606,40 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
 
                 let clean_current_dir = current_dir.replace("\\\\?\\", "").replace('/', "\\");
                 let current_path = std::path::Path::new(&clean_current_dir);
-                if !current_path.exists() {
-                    continue;
-                }
+                let current_exists = current_path.exists();
 
                 let parent_dir = current_path
                     .parent()
                     .map(|p| p.to_string_lossy().replace("\\\\?\\", "").replace('/', "\\"));
+                let parent_exists = parent_dir.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
+
+                if !current_exists && !parent_exists {
+                    continue;
+                }
 
                 if clean_current_dir != last_dir {
                     last_dir = clean_current_dir.clone();
                     known_files.clear();
                     known_folders.clear();
 
-                    let (snapshot_files, snapshot_folders) =
-                        collect_watcher_dir_snapshot(&clean_current_dir);
-                    for (path_str, _file_name, _ext_lower, meta) in snapshot_files {
-                        let size = meta.len();
-                        let mtime = meta
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
-                        known_files.insert(path_str, (size, mtime));
+                    if current_exists {
+                        let (snapshot_files, snapshot_folders) =
+                            collect_watcher_dir_snapshot(&clean_current_dir);
+                        for (path_str, _file_name, _ext_lower, meta) in snapshot_files {
+                            let size = meta.len();
+                            let mtime = meta
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            known_files.insert(path_str, (size, mtime));
+                        }
+                        known_folders.extend(snapshot_folders);
                     }
-                    known_folders.extend(snapshot_folders);
-                    if let Some(ref parent) = parent_dir {
-                        if let Ok(entries) = std::fs::read_dir(parent) {
-                            for entry in entries.filter_map(Result::ok) {
-                                if dir_entry_is_dir(&entry) {
-                                    let clean_p = entry.path().to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
-                                    known_folders.insert(clean_p);
-                                }
-                            }
+                    if parent_exists {
+                        if let Some(ref parent) = parent_dir {
+                            known_folders.extend(collect_parent_subfolders(parent));
                         }
                     }
                     continue;
@@ -574,24 +647,55 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
 
                 let mut current_files: std::collections::HashMap<String, (u64, u64)> =
                     std::collections::HashMap::new();
-                let mut current_folders: std::collections::HashSet<String> =
-                    std::collections::HashSet::new();
-                let mut folder_changed = false;
 
-                let (snapshot_files, snapshot_folders) =
-                    collect_watcher_dir_snapshot(&clean_current_dir);
-                for (path_str, file_name, ext_lower, meta) in snapshot_files {
-                    let size = meta.len();
-                    let mtime = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
-                    current_files.insert(path_str.clone(), (size, mtime));
+                let snapshot_folders = if current_exists {
+                    let (snapshot_files, snap_folders) =
+                        collect_watcher_dir_snapshot(&clean_current_dir);
+                    for (path_str, file_name, ext_lower, meta) in snapshot_files {
+                        let size = meta.len();
+                        let mtime = meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        current_files.insert(path_str.clone(), (size, mtime));
 
-                    if let Some(&(old_size, old_mtime)) = known_files.get(&path_str) {
-                        if old_size != size || old_mtime != mtime {
+                        if let Some(&(old_size, old_mtime)) = known_files.get(&path_str) {
+                            if old_size != size || old_mtime != mtime {
+                                let (initial_width, initial_height) = if size > 0 {
+                                    get_fast_dimensions_for_file(&path_str, &ext_lower)
+                                } else {
+                                    (0, 0)
+                                };
+                                let ctime = meta
+                                    .created()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0);
+                                let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
+                                let img_file = ImageFile {
+                                    name: file_name,
+                                    ext: format_compact!(".{}", ext_lower),
+                                    path: path_str.clone(),
+                                    size,
+                                    mtime,
+                                    ctime,
+                                    has_thumbnail_cache: false,
+                                    width: initial_width,
+                                    height: initial_height,
+                                    prompt: String::new(),
+                                    negative_prompt: String::new(),
+                                    source: String::new(),
+                                    meta_loaded: false,
+                                    search_text: String::new(),
+                                    unified_search_text: String::new(),
+                                    hash_key: hash_key.into(),
+                                };
+                                let _ = app_handle.emit_all("file-changed", img_file);
+                            }
+                        } else {
                             let (initial_width, initial_height) = if size > 0 {
                                 get_fast_dimensions_for_file(&path_str, &ext_lower)
                             } else {
@@ -624,82 +728,43 @@ pub fn start_file_watcher(app_handle: tauri::AppHandle) {
                             };
                             let _ = app_handle.emit_all("file-changed", img_file);
                         }
+                    }
+
+                    for path_str in known_files.keys() {
+                        if !current_files.contains_key(path_str) {
+                            let _ = app_handle.emit_all("file-removed", path_str.clone());
+                        }
+                    }
+                    known_files = current_files;
+
+                    snap_folders
+                } else {
+                    // 現在のフォルダが存在しない場合: ファイル単位スナップショット走査と file-removed emit はスキップする
+                    std::collections::HashSet::new()
+                };
+
+                let parent_subfolders = if parent_exists {
+                    if let Some(ref parent) = parent_dir {
+                        collect_parent_subfolders(parent)
                     } else {
-                        let (initial_width, initial_height) = if size > 0 {
-                            get_fast_dimensions_for_file(&path_str, &ext_lower)
-                        } else {
-                            (0, 0)
-                        };
-                        let ctime = meta
-                            .created()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
-                        let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
-                        let img_file = ImageFile {
-                            name: file_name,
-                            ext: format_compact!(".{}", ext_lower),
-                            path: path_str.clone(),
-                            size,
-                            mtime,
-                            ctime,
-                            has_thumbnail_cache: false,
-                            width: initial_width,
-                            height: initial_height,
-                            prompt: String::new(),
-                            negative_prompt: String::new(),
-                            source: String::new(),
-                            meta_loaded: false,
-                            search_text: String::new(),
-                            unified_search_text: String::new(),
-                            hash_key: hash_key.into(),
-                        };
-                        let _ = app_handle.emit_all("file-changed", img_file);
+                        std::collections::HashSet::new()
                     }
-                }
-                for folder_path in snapshot_folders {
-                    if !known_folders.contains(&folder_path) {
-                        folder_changed = true;
-                    }
-                    current_folders.insert(folder_path);
-                }
+                } else {
+                    std::collections::HashSet::new()
+                };
 
-                if let Some(ref parent) = parent_dir {
-                    if let Ok(entries) = std::fs::read_dir(parent) {
-                        for entry in entries.filter_map(Result::ok) {
-                            if dir_entry_is_dir(&entry) {
-                                let path_str = entry.path().to_string_lossy().replace("\\\\?\\", "").replace('/', "\\");
-                                current_folders.insert(path_str.clone());
-                                if !known_folders.contains(&path_str) {
-                                    folder_changed = true;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if !folder_changed {
-                    for folder in &known_folders {
-                        if !current_folders.contains(folder) {
-                            folder_changed = true;
-                            break;
-                        }
-                    }
-                }
-
-                for path_str in known_files.keys() {
-                    if !current_files.contains_key(path_str) {
-                        let _ = app_handle.emit_all("file-removed", path_str.clone());
-                    }
-                }
+                let (folder_changed, new_known_folders) = check_folder_changes_with_optional_current(
+                    current_exists,
+                    snapshot_folders,
+                    parent_subfolders,
+                    &known_folders,
+                );
 
                 if folder_changed {
                     let _ = app_handle.emit_all("directory-changed", ());
                 }
 
-                known_files = current_files;
-                known_folders = current_folders;
+                known_folders = new_known_folders;
             }
         });
 
@@ -1217,6 +1282,121 @@ mod tests {
                 .expect("cache テーブルに行が存在すること");
             assert_eq!(db_w, 64, "DB の width が更新されていること");
             assert_eq!(db_h, 128, "DB の height が更新されていること");
+        }
+    }
+
+    #[test]
+    fn test_parent_folder_diff_detection_when_current_missing() {
+        use std::collections::HashSet;
+
+        // 1. 直前の既知フォルダ一覧（カレントフォルダ C:\photos\album と兄弟フォルダ C:\photos\other）
+        let mut known = HashSet::new();
+        known.insert("C:\\photos\\album".to_string());
+        known.insert("C:\\photos\\other".to_string());
+
+        // 2. 外部で C:\photos\album が C:\photos\album_renamed に変更され、
+        // カレントディレクトリが存在しなくなった（current_exists = false）状況を模擬
+        let mut parent_folders = HashSet::new();
+        parent_folders.insert("C:\\photos\\album_renamed".to_string());
+        parent_folders.insert("C:\\photos\\other".to_string());
+
+        let (changed, new_known) = check_folder_changes_with_optional_current(
+            false,
+            HashSet::new(),
+            parent_folders,
+            &known,
+        );
+
+        // カレントフォルダが存在しなくても親フォルダの差分から変化が検知されること
+        assert!(changed, "カレントフォルダ非存在時でも親フォルダ差分からフォルダ変化が検知されること");
+        assert!(new_known.contains("C:\\photos\\album_renamed"));
+        assert!(!new_known.contains("C:\\photos\\album"));
+        assert!(new_known.contains("C:\\photos\\other"));
+
+        // 3. 変化がない場合は changed = false となること
+        let (unchanged, _) = check_folder_changes_with_optional_current(
+            false,
+            HashSet::new(),
+            new_known.clone(),
+            &new_known,
+        );
+        assert!(!unchanged, "同一フォルダ構成であれば変化なしと判定されること");
+    }
+
+    #[test]
+    fn test_notify_files_batch_removes_from_ratings() {
+        use std::sync::Arc;
+        let state = create_test_app_state("C:\\test");
+
+        let p1 = "C:\\test\\file1.png".to_string();
+        let p2 = "C:\\test\\file2.png".to_string();
+
+        let f1 = Arc::new(ImageFile {
+            name: "file1.png".to_string(),
+            ext: ".png".into(),
+            path: p1.clone(),
+            size: 100,
+            mtime: 1234,
+            ctime: 1234,
+            has_thumbnail_cache: false,
+            width: 100,
+            height: 100,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: "h1".into(),
+        });
+
+        let f2 = Arc::new(ImageFile {
+            name: "file2.png".to_string(),
+            ext: ".png".into(),
+            path: p2.clone(),
+            size: 200,
+            mtime: 5678,
+            ctime: 5678,
+            has_thumbnail_cache: false,
+            width: 100,
+            height: 100,
+            prompt: "".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "".to_string(),
+            hash_key: "h2".into(),
+        });
+
+        {
+            let mut all_files = state.all_files.write();
+            all_files.push(f1);
+            all_files.push(f2);
+        }
+        state.rebuild_all_indices(&state.all_files.read());
+
+        {
+            let mut ratings = state.ratings.write();
+            ratings.insert(p1.clone(), 5);
+            ratings.insert(p2.clone(), 3);
+        }
+
+        // ウォッチャー経由で p1 の外部削除を通知
+        notify_files_batch_inner(None, &state, Vec::new(), vec![p1.clone()]);
+
+        // state.ratings から p1 が削除され、p2 は維持されていること
+        {
+            let ratings = state.ratings.read();
+            assert_eq!(ratings.get(&p1), None, "削除されたファイルのレーティングが除去されていること");
+            assert_eq!(ratings.get(&p2), Some(&3), "他のファイルのレーティングが維持されていること");
+        }
+
+        // path_to_mtime からも p1 が削除され、p2 は維持されていること
+        {
+            let mtimes = state.path_to_mtime.read();
+            assert_eq!(mtimes.get(&p1), None, "削除されたファイルの mtime が除去されていること");
+            assert_eq!(mtimes.get(&p2), Some(&5678), "他のファイルの mtime が維持されていること");
         }
     }
 }

@@ -94,3 +94,48 @@ export function getParentDirectory(path) {
 
   return null;
 }
+
+/**
+ * 対象パスが指定されたベースディレクトリと同一、またはそのサブディレクトリであるかを判定します。
+ * 区切り文字の境界（\ または /）を意識し、'C:\album2' が 'C:\album' のサブディレクトリと誤判定されるのを防ぎます。
+ *
+ * @param {string} targetPath
+ * @param {string} basePath
+ * @returns {boolean}
+ */
+export function isSameOrSubdirectory(targetPath, basePath) {
+  if (typeof targetPath !== 'string' || typeof basePath !== 'string') return false;
+  const normTarget = targetPath.replace(/\//g, '\\').replace(/\\+$/g, '');
+  const normBase = basePath.replace(/\//g, '\\').replace(/\\+$/g, '');
+  if (!normTarget || !normBase) return false;
+  if (normTarget.toLowerCase() === normBase.toLowerCase()) return true;
+  const prefix = normBase + '\\';
+  return normTarget.toLowerCase().startsWith(prefix.toLowerCase());
+}
+
+/**
+ * 対象パスが oldDir と同一またはその配下である場合に、そのプレフィックスを newDir に置換します。
+ * 境界（\ または /）を意識し、'C:\album2' などの類似プレフィックスは巻き込まず維持します。
+ *
+ * @param {string} currentPath
+ * @param {string} oldDir
+ * @param {string} newDir
+ * @returns {string}
+ */
+export function replaceDirectoryPrefix(currentPath, oldDir, newDir) {
+  if (typeof currentPath !== 'string' || typeof oldDir !== 'string' || typeof newDir !== 'string') {
+    return currentPath;
+  }
+  const normCurrent = currentPath.replace(/\//g, '\\');
+  const normOld = oldDir.replace(/\//g, '\\').replace(/\\+$/g, '');
+  const normNew = newDir.replace(/\//g, '\\').replace(/\\+$/g, '');
+
+  if (normCurrent.toLowerCase() === normOld.toLowerCase()) {
+    return normNew;
+  }
+  const prefix = normOld + '\\';
+  if (normCurrent.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return normNew + '\\' + normCurrent.slice(prefix.length);
+  }
+  return currentPath;
+}

@@ -2582,22 +2582,68 @@ pub fn validate_new_entry_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// パスが指定されたフォルダそのもの、またはそのサブパスである場合に、
+/// フォルダ部分のプレフィックスを新フォルダパスに置換する。
+/// 区切り文字（`\` または `/`）の境界を厳密に考慮し、
+/// たとえば `C:\album2` が `C:\album` の配下と誤判定されることを完全に防ぐ。
+pub fn replace_folder_prefix(path: &str, old_folder: &str, new_folder: &str) -> Option<String> {
+    if path == old_folder {
+        return Some(new_folder.to_string());
+    }
+
+    let old_clean = normalize_unc_path(old_folder);
+    let path_clean = normalize_unc_path(path);
+    if path_clean == old_clean {
+        let new_clean = normalize_unc_path(new_folder);
+        return Some(new_clean.into_owned());
+    }
+
+    // パス境界を伴う前方一致チェック (\ または /)
+    let check_and_replace = |target: &str, base: &str, target_repl: &str| -> Option<String> {
+        let trimmed_base = base.trim_end_matches(&['\\', '/'][..]);
+        if target.len() <= trimmed_base.len() {
+            return None;
+        }
+        if target.starts_with(trimmed_base) {
+            let next_char = target.as_bytes().get(trimmed_base.len()).copied();
+            if next_char == Some(b'\\') || next_char == Some(b'/') {
+                let remainder = &target[trimmed_base.len() + 1..];
+                let sep = if target_repl.ends_with('\\') || target_repl.ends_with('/') {
+                    ""
+                } else if next_char == Some(b'/') {
+                    "/"
+                } else {
+                    "\\"
+                };
+                return Some(format!("{}{}{}", target_repl, sep, remainder));
+            }
+        }
+        None
+    };
+
+    if let Some(res) = check_and_replace(path, old_folder, new_folder) {
+        return Some(res);
+    }
+
+    let new_clean = normalize_unc_path(new_folder);
+    if let Some(res) = check_and_replace(&path_clean, &old_clean, &new_clean) {
+        return Some(res);
+    }
+
+    None
+}
+
 /// フォルダリネームに伴うメモリ上のレーティングと SQLite（`ratings` および `cache` テーブル）の一括同期。
 /// 書き込みロック内での DB アクセスを排除し、単一コネクション・トランザクションで原子的に更新する。
 pub fn sync_folder_rename_in_db_and_state(state: &AppState, old_path_exact: &str, new_path_exact: &str) {
-    let old_prefix_backslash = format!("{}\\", old_path_exact);
-    let old_prefix_slash = format!("{}/", old_path_exact);
+    let old_prefix_backslash = format!("{}\\", old_path_exact.trim_end_matches(&['\\', '/'][..]));
     let mut keys_to_remove = Vec::new();
     let mut rating_updates = Vec::new();
     {
         let mut lock = state.ratings.write();
         for (p, rating) in lock.iter() {
-            if p == old_path_exact {
+            if let Some(new_p) = replace_folder_prefix(p, old_path_exact, new_path_exact) {
                 keys_to_remove.push(p.clone());
-                rating_updates.push((new_path_exact.to_string(), *rating));
-            } else if p.starts_with(&old_prefix_backslash) || p.starts_with(&old_prefix_slash) {
-                keys_to_remove.push(p.clone());
-                let new_p = format!("{}{}", new_path_exact, &p[old_path_exact.len()..]);
                 rating_updates.push((new_p, *rating));
             }
         }
@@ -2636,16 +2682,10 @@ pub fn sync_folder_rename_in_db_and_state(state: &AppState, old_path_exact: &str
                     let old_path: String = row.get(1).unwrap_or_default();
                     let mtime: u64 = row.get(2).unwrap_or(0);
 
-                    let new_path = if old_path == old_path_exact {
-                        new_path_exact.to_string()
-                    } else if old_path.starts_with(&old_prefix_backslash) {
-                        format!("{}\\{}", new_path_exact, &old_path[old_prefix_backslash.len()..])
-                    } else {
-                        continue;
-                    };
-
-                    let new_hash_key = crate::utils::hash_path_mtime_hex(&new_path, mtime);
-                    cache_updates.push((new_path, new_hash_key, old_hash_key));
+                    if let Some(new_path) = replace_folder_prefix(&old_path, old_path_exact, new_path_exact) {
+                        let new_hash_key = crate::utils::hash_path_mtime_hex(&new_path, mtime);
+                        cache_updates.push((new_path, new_hash_key, old_hash_key));
+                    }
                 }
             }
         }
@@ -2660,6 +2700,54 @@ pub fn sync_folder_rename_in_db_and_state(state: &AppState, old_path_exact: &str
                 }
                 let _ = tx.commit();
             }
+        }
+    }
+}
+
+/// フォルダリネームに伴い、インメモリの `state.all_files` および `state.filtered_files` の
+/// 旧フォルダ配下のエントリパスを新プレフィックスに置換し、再計算された hash_key を反映する。
+/// また、`path_to_all_idx`, `path_to_filtered_idx`, `path_to_mtime`, `current_dir` を同期する。
+pub fn sync_folder_rename_in_state(state: &AppState, old_path_exact: &str, new_path_exact: &str) {
+    let mut any_updated = false;
+    {
+        let mut all_files = state.all_files.write();
+        for file in all_files.iter_mut() {
+            if let Some(new_p) = replace_folder_prefix(&file.path, old_path_exact, new_path_exact) {
+                let mut updated = (**file).clone();
+                let new_clean = normalize_unc_path(&new_p);
+                let new_hash_key = crate::utils::hash_path_mtime_hex(&new_clean, updated.mtime);
+                updated.path = new_p;
+                updated.hash_key = new_hash_key.into();
+                *file = std::sync::Arc::new(updated);
+                any_updated = true;
+            }
+        }
+    }
+
+    if any_updated {
+        // all_files のインデックスを再構築
+        state.rebuild_all_indices(&state.all_files.read());
+
+        // filtered_files の同期とソート順・フィルタ整合性の再適用
+        apply_filters_and_sort(None, state);
+
+        // path_to_mtime の再構築
+        let mut mtime_map = state.path_to_mtime.write();
+        mtime_map.clear();
+        for file in state.all_files.read().iter() {
+            let clean = normalize_unc_path(&file.path).into_owned();
+            mtime_map.insert(file.path.clone(), file.mtime);
+            if clean != file.path {
+                mtime_map.insert(clean, file.mtime);
+            }
+        }
+    }
+
+    // current_dir が旧フォルダ自身またはその配下であれば同期置換
+    {
+        let mut cur_dir_lock = state.current_dir.write();
+        if let Some(new_cur) = replace_folder_prefix(&cur_dir_lock, old_path_exact, new_path_exact) {
+            *cur_dir_lock = new_cur;
         }
     }
 }
@@ -2733,6 +2821,7 @@ async fn rename_folder(state: tauri::State<'_, AppState>, old_path: String, new_
     .unwrap_or_else(|e| Err(e.to_string()))?;
 
     sync_folder_rename_in_db_and_state(&state, &old_path_clone, &new_path_str);
+    sync_folder_rename_in_state(&state, &old_path_clone, &new_path_str);
 
     Ok(new_path_str)
 }
@@ -8234,5 +8323,158 @@ mod viewer_tests {
             should_continue_metadata_bg_task(ep2, ep2, "C:\\folder_a", "C:\\folder_a"),
             "新世代タスクのみが継続すること"
         );
+    }
+
+    #[test]
+    fn test_replace_folder_prefix_boundary() {
+        // サブパスの置換
+        assert_eq!(
+            replace_folder_prefix("C:\\album\\sub\\1.png", "C:\\album", "C:\\new_album"),
+            Some("C:\\new_album\\sub\\1.png".to_string())
+        );
+        // フォルダ完全一致
+        assert_eq!(
+            replace_folder_prefix("C:\\album", "C:\\album", "C:\\new_album"),
+            Some("C:\\new_album".to_string())
+        );
+        // 類似プレフィックス（album2）が巻き込まれないこと
+        assert_eq!(
+            replace_folder_prefix("C:\\album2\\1.png", "C:\\album", "C:\\new_album"),
+            None
+        );
+        assert_eq!(
+            replace_folder_prefix("C:\\album_other", "C:\\album", "C:\\new_album"),
+            None
+        );
+        // スラッシュ区切りパスの置換
+        assert_eq!(
+            replace_folder_prefix("C:/album/sub/1.png", "C:/album", "C:/new_album"),
+            Some("C:/new_album/sub/1.png".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sync_folder_rename_in_state_boundary_and_descendants() {
+        use std::sync::Arc;
+        let state = create_test_app_state("C:\\album\\sub");
+
+        let f1 = Arc::new(ImageFile {
+            name: "a.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\album\\sub\\a.png".to_string(),
+            size: 100,
+            mtime: 1000,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            width: 100,
+            height: 100,
+            prompt: "prompt1".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "a.png prompt1".to_string(),
+            hash_key: crate::utils::hash_path_mtime_hex("C:\\album\\sub\\a.png", 1000).into(),
+        });
+
+        let f2 = Arc::new(ImageFile {
+            name: "b.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\album\\b.png".to_string(),
+            size: 200,
+            mtime: 2000,
+            ctime: 2000,
+            has_thumbnail_cache: false,
+            width: 100,
+            height: 100,
+            prompt: "prompt2".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "b.png prompt2".to_string(),
+            hash_key: crate::utils::hash_path_mtime_hex("C:\\album\\b.png", 2000).into(),
+        });
+
+        let f3 = Arc::new(ImageFile {
+            name: "c.png".to_string(),
+            ext: ".png".into(),
+            path: "C:\\album2\\c.png".to_string(),
+            size: 300,
+            mtime: 3000,
+            ctime: 3000,
+            has_thumbnail_cache: false,
+            width: 100,
+            height: 100,
+            prompt: "prompt3".to_string(),
+            negative_prompt: "".to_string(),
+            source: "".to_string(),
+            meta_loaded: true,
+            search_text: "".to_string(),
+            unified_search_text: "c.png prompt3".to_string(),
+            hash_key: crate::utils::hash_path_mtime_hex("C:\\album2\\c.png", 3000).into(),
+        });
+
+        {
+            let mut all_files = state.all_files.write();
+            all_files.push(Arc::clone(&f1));
+            all_files.push(Arc::clone(&f2));
+            all_files.push(Arc::clone(&f3));
+        }
+        state.rebuild_all_indices(&state.all_files.read());
+        apply_filters_and_sort(None, &state);
+
+        {
+            let mut mtimes = state.path_to_mtime.write();
+            mtimes.insert("C:\\album\\sub\\a.png".to_string(), 1000);
+            mtimes.insert("C:\\album\\b.png".to_string(), 2000);
+            mtimes.insert("C:\\album2\\c.png".to_string(), 3000);
+        }
+
+        {
+            let mut ratings = state.ratings.write();
+            ratings.insert("C:\\album\\sub\\a.png".to_string(), 5);
+            ratings.insert("C:\\album2\\c.png".to_string(), 4);
+        }
+
+        *state.current_dir.write() = "C:\\album\\sub".to_string();
+
+        // フォルダ C:\album を C:\renamed_album にリネーム同期
+        sync_folder_rename_in_state(&state, "C:\\album", "C:\\renamed_album");
+
+        // 1. current_dir の更新検証
+        assert_eq!(*state.current_dir.read(), "C:\\renamed_album\\sub");
+
+        // 2. all_files のパスと hash_key の更新検証
+        let all_files = state.all_files.read();
+        assert_eq!(all_files[0].path, "C:\\renamed_album\\sub\\a.png");
+        assert_eq!(
+            all_files[0].hash_key.as_str(),
+            crate::utils::hash_path_mtime_hex("C:\\renamed_album\\sub\\a.png", 1000).as_str()
+        );
+
+        assert_eq!(all_files[1].path, "C:\\renamed_album\\b.png");
+        assert_eq!(
+            all_files[1].hash_key.as_str(),
+            crate::utils::hash_path_mtime_hex("C:\\renamed_album\\b.png", 2000).as_str()
+        );
+
+        // album2 は巻き込まれていないこと
+        assert_eq!(all_files[2].path, "C:\\album2\\c.png");
+
+        // 3. インデックスの検証
+        let all_idx = state.path_to_all_idx.read();
+        assert!(all_idx.contains_key("C:\\renamed_album\\sub\\a.png"));
+        assert!(all_idx.contains_key("C:\\renamed_album\\b.png"));
+        assert!(!all_idx.contains_key("C:\\album\\sub\\a.png"));
+        assert!(!all_idx.contains_key("C:\\album\\b.png"));
+        assert!(all_idx.contains_key("C:\\album2\\c.png"));
+
+        // 4. path_to_mtime の検証
+        let mtime_map = state.path_to_mtime.read();
+        assert_eq!(mtime_map.get("C:\\renamed_album\\sub\\a.png"), Some(&1000));
+        assert_eq!(mtime_map.get("C:\\renamed_album\\b.png"), Some(&2000));
+        assert_eq!(mtime_map.get("C:\\album\\sub\\a.png"), None);
+        assert_eq!(mtime_map.get("C:\\album2\\c.png"), Some(&3000));
     }
 }

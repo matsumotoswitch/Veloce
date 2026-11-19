@@ -16,7 +16,7 @@ import { appState, SmartFolderStore } from './renderer-state.js';
 import { UIManager, uiManager, formatSize, formatBytesHuman, formatDate, ICON_SVGS, COLORS, createFavoriteEditorUI } from './renderer-ui.js';
 import { ThumbnailQueueManager, thumbnailWorkerPool, evictThumbnailCache, cleanupContext, resetThumbnailPreloader } from './renderer-thumbnails.js';
 import { debounce, blockDevtoolsShortcuts, getStreamUrl } from '../common/utils.js';
-import { validateFilename, getParentDirectory } from '../common/path-utils.js';
+import { validateFilename, getParentDirectory, isSameOrSubdirectory, replaceDirectoryPrefix } from '../common/path-utils.js';
 import { extractMetadataFields, highlightSearchTerms, buildInspectorSections, createSearchTermsRegex } from '../common/metadata-format.js';
 import { resolvePathDisplay } from './favorite-icons.js';
 import {
@@ -763,9 +763,10 @@ const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager
     if (result && result.success) {
       appState.undoStack.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
       showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
-      if (appState.currentDirectory.startsWith(oldPath)) {
-        appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
+      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
+        appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, oldPath, result.path);
         setSetting('currentDirectory', appState.currentDirectory);
+        refreshFileList(false);
       }
       await refreshTree();
     } else {
@@ -782,7 +783,7 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
       showNotification(`フォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しました`, 'warning');
-      if (appState.currentDirectory.startsWith(oldPath)) {
+      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
         const sep = '\\';
         const parts = oldPath.split(sep);
         parts.pop();

@@ -7,7 +7,7 @@
 
 import { appState, fileOpsState } from './renderer-state.js';
 import { uiManager } from './renderer-ui.js';
-import { validateFilename } from '../common/path-utils.js';
+import { validateFilename, isSameOrSubdirectory, replaceDirectoryPrefix } from '../common/path-utils.js';
 import { resetThumbnailPreloader } from './renderer-thumbnails.js';
 import { setSetting } from '../common/settings-store.js';
 
@@ -81,9 +81,10 @@ export async function renameSelectedFolder(callbacks = fileOpsCallbacks) {
     if (result && result.success) {
       fileOpsState.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
       callbacks.showNotification?.(`フォルダ名を「${newName}」に変更しました`, 'success');
-      if (appState.currentDirectory.startsWith(oldPath)) {
-        appState.currentDirectory = appState.currentDirectory.replace(oldPath, result.path);
+      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
+        appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, oldPath, result.path);
         setSetting('currentDirectory', appState.currentDirectory);
+        if (callbacks.refreshFileList) await callbacks.refreshFileList();
       }
       if (callbacks.refreshTree) await callbacks.refreshTree();
     } else {
@@ -114,7 +115,7 @@ export async function deleteSelectedFolder(callbacks = fileOpsCallbacks) {
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
       callbacks.showNotification?.(`フォルダ「${folderName}」をゴミ箱に移動しました`, 'warning');
-      if (appState.currentDirectory.startsWith(oldPath)) {
+      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
         const sep = '\\';
         const parts = oldPath.split(sep);
         parts.pop();
@@ -353,9 +354,10 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
       if (result && result.success) {
         undoSucceeded = true;
         uiManager.showToast('フォルダ名の変更を元に戻しました', 3000, 'undo', 'success');
-        if (appState.currentDirectory.startsWith(action.newPath)) {
-          appState.currentDirectory = appState.currentDirectory.replace(action.newPath, action.oldPath);
+        if (isSameOrSubdirectory(appState.currentDirectory, action.newPath)) {
+          appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, action.newPath, action.oldPath);
           setSetting('currentDirectory', appState.currentDirectory);
+          if (callbacks.refreshFileList) await callbacks.refreshFileList();
         }
         if (callbacks.refreshTree) await callbacks.refreshTree();
       } else {
