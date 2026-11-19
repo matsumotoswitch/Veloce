@@ -121,6 +121,30 @@ pub fn get_video_server_token(state: tauri::State<'_, AppState>) -> String {
     state.video_server_token.clone()
 }
 
+/// POST /save-thumbnail において実ファイルの stat を優先し、AppState のキャッシュと同期した最新の mtime を解決する。
+pub(crate) fn resolve_save_thumbnail_mtime_with_state(
+    state_opt: Option<&AppState>,
+    path_str: &str,
+    input_mtime: u64,
+) -> u64 {
+    if input_mtime != 0 {
+        return input_mtime;
+    }
+    if let Some(state) = state_opt {
+        if let Some(mt) = crate::thumbnail::resolve_and_sync_file_mtime(state, path_str) {
+            return mt;
+        }
+    }
+    let clean = crate::utils::normalize_unc_path(path_str);
+    std::fs::metadata(path_str)
+        .or_else(|_| std::fs::metadata(clean.as_ref()))
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::UNIX_EPOCH)
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 pub fn start_local_video_server(
     db_tx: tokio::sync::mpsc::Sender<DbMsg>,
     app_handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>>,
@@ -268,20 +292,16 @@ pub fn start_local_video_server(
                             if let Ok(handle_guard) = app_handle_slot.lock() {
                                 if let Some(app_handle) = handle_guard.as_ref() {
                                     let state = app_handle.state::<AppState>();
-                                    mtime = state.get_mtime(&path_str).unwrap_or(0);
+                                    mtime = resolve_save_thumbnail_mtime_with_state(Some(&state), &path_str, mtime);
+                                } else {
+                                    mtime = resolve_save_thumbnail_mtime_with_state(None, &path_str, mtime);
                                 }
-                            }
-                            if mtime == 0 {
-                                mtime = std::fs::metadata(&path_str)
-                                    .and_then(|m| m.modified())
-                                    .unwrap_or(std::time::UNIX_EPOCH)
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_millis() as u64;
+                            } else {
+                                mtime = resolve_save_thumbnail_mtime_with_state(None, &path_str, mtime);
                             }
                         }
 
-                        let clean_path = path_str.replace("\\\\?\\", "");
+                        let clean_path = crate::utils::normalize_unc_path(&path_str).into_owned();
                         let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
                         let hash_key_for_url = hash_key.clone();
 
@@ -680,5 +700,46 @@ mod tests {
         let n2 = read_line_bounded(&mut long_reader, &mut line2, 8192).unwrap();
         assert_eq!(n2, 8192);
         assert_eq!(line2.len(), 8192);
+    }
+
+    #[test]
+    fn test_save_thumbnail_mtime_resolution_and_path_normalization() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("save_thumb_test.png");
+        std::fs::write(&test_file, b"test content").unwrap();
+
+        let real_mtime = std::fs::metadata(&test_file)
+            .and_then(|m| m.modified())
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let state = crate::create_test_app_state(temp_dir.path().to_str().unwrap());
+        let file_path_str = test_file.to_str().unwrap().to_string();
+
+        // 1. path_to_mtime に実ファイルとは異なる古い値 (1000) を格納しておく
+        {
+            let mut mtime_map = state.path_to_mtime.write();
+            mtime_map.insert(file_path_str.clone(), 1000);
+        }
+
+        // 2. 表記揺れ（\\?\ プレフィックス付き）のパス文字列で mtime 解決を呼ぶ
+        let raw_path = format!("\\\\?\\{}", file_path_str);
+        let resolved_mtime = resolve_save_thumbnail_mtime_with_state(Some(&state), &raw_path, 0);
+
+        // 古いメモリ値 (1000) ではなく実ファイルの mtime が優先解決されること
+        assert_eq!(resolved_mtime, real_mtime, "古いメモリ値ではなく実ファイルの最新 mtime が返ること");
+
+        // state.path_to_mtime も最新の mtime に同期されていること
+        assert_eq!(state.get_mtime(&file_path_str), Some(real_mtime));
+
+        // 3. 正規化パスで hash_key を算出した際、期待通りのハッシュキーが得られること
+        let clean_path = crate::utils::normalize_unc_path(&raw_path).into_owned();
+        assert_eq!(clean_path, file_path_str, "normalize_unc_path により \\\\?\\ が除去されて正規化されること");
+
+        let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, resolved_mtime);
+        let expected_hash = crate::utils::hash_path_mtime_hex(&file_path_str, real_mtime);
+        assert_eq!(hash_key, expected_hash, "正規化されたパスと最新 mtime からのハッシュキーが一致すること");
     }
 }

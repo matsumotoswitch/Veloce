@@ -1779,35 +1779,49 @@ pub(crate) fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, V
     results
 }
 
+/// 指定ファイルのメタデータを解析し、SQLite キャッシュ DB とインメモリ state（all_files / filtered_files）を更新する。
+pub(crate) async fn parse_metadata_inner(
+    state: &AppState,
+    file_path: String,
+) -> Result<ParseMetadataResult, String> {
+    let db_conn_clone = state.db_conn.clone();
+    let fp_clone = file_path.clone();
+    let full_meta = tokio::task::spawn_blocking(move || {
+        get_full_metadata_for_path(&fp_clone, &db_conn_clone).0
+    })
+    .await
+    .unwrap_or_else(|_| FullMetadata {
+        path: file_path.clone(),
+        width: 0,
+        height: 0,
+        prompt: String::new(),
+        negative_prompt: String::new(),
+        params: serde_json::Value::Object(serde_json::Map::new()),
+        source: String::new(),
+        metadata_source: String::new(),
+    });
+
+    // state（all_files / filtered_files）内の対応エントリを同期更新
+    crate::update_metadata_in_state_inner(state, std::slice::from_ref(&full_meta));
+
+    Ok(ParseMetadataResult {
+        prompt: full_meta.prompt,
+        negative_prompt: full_meta.negative_prompt,
+        width: full_meta.width,
+        height: full_meta.height,
+        params: full_meta.params,
+        source: full_meta.source,
+        metadata_source: full_meta.metadata_source,
+    })
+}
+
 /// フロントエンドのインスペクター表示用に、指定ファイルのメタデータを非同期解析して返却する
 #[tauri::command]
 pub(crate) async fn parse_metadata(
     state: tauri::State<'_, AppState>,
     file_path: String,
 ) -> Result<ParseMetadataResult, String> {
-    let db_conn_clone = state.db_conn.clone();
-    Ok(tokio::task::spawn_blocking(move || {
-        let full_meta = get_full_metadata_for_path(&file_path, &db_conn_clone).0;
-        ParseMetadataResult {
-            prompt: full_meta.prompt,
-            negative_prompt: full_meta.negative_prompt,
-            width: full_meta.width,
-            height: full_meta.height,
-            params: full_meta.params,
-            source: full_meta.source,
-            metadata_source: full_meta.metadata_source,
-        }
-    })
-    .await
-    .unwrap_or_else(|_| ParseMetadataResult {
-        prompt: String::new(),
-        negative_prompt: String::new(),
-        width: 0,
-        height: 0,
-        params: serde_json::Value::Object(serde_json::Map::new()),
-        source: String::new(),
-        metadata_source: String::new(),
-    }))
+    parse_metadata_inner(&state, file_path).await
 }
 
 #[cfg(test)]
@@ -3215,5 +3229,92 @@ mod tests {
         );
         assert_eq!(meta_prompt.prompt, "1girl, solo, masterpiece");
         assert!(row_prompt.is_none(), "プロンプトを持つ画像はキャッシュから即時早期リターンすること");
+    }
+
+    #[test]
+    fn test_parse_metadata_updates_state_meta_loaded_and_unified_search_text() {
+        tauri::async_runtime::block_on(async {
+            let temp_dir = tempfile::tempdir().unwrap();
+            let test_png = temp_dir.path().join("parsed_sample.png");
+
+            let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+            let mut ihdr_data = Vec::new();
+            ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+            ihdr_data.extend_from_slice(&128u32.to_be_bytes());
+            ihdr_data.push(8);
+            ihdr_data.push(6);
+            ihdr_data.extend_from_slice(&[0, 0, 0]);
+            png_bytes.extend_from_slice(&(ihdr_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"IHDR");
+            png_bytes.extend_from_slice(&ihdr_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            let mut text_data = Vec::new();
+            text_data.extend_from_slice(b"Description\0cyberpunk city, glowing neon");
+            png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"tEXt");
+            png_bytes.extend_from_slice(&text_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            png_bytes.extend_from_slice(&0u32.to_be_bytes());
+            png_bytes.extend_from_slice(b"IEND");
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            std::fs::write(&test_png, &png_bytes).unwrap();
+            let file_path = test_png.to_str().unwrap().to_string();
+
+            let state = create_test_app_state(temp_dir.path().to_str().unwrap());
+            let img_file = ImageFile {
+                name: "parsed_sample.png".to_string(),
+                ext: ".png".into(),
+                path: file_path.clone(),
+                size: png_bytes.len() as u64,
+                mtime: 1000,
+                ctime: 1000,
+                has_thumbnail_cache: false,
+                width: 0,
+                height: 0,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: String::new(),
+                hash_key: Default::default(),
+            };
+
+            {
+                let mut all_files = state.all_files.write();
+                let mut all_idx = state.path_to_all_idx.write();
+                all_files.push(std::sync::Arc::new(img_file));
+                all_idx.insert(file_path.clone(), 0);
+            }
+
+            // 初期状態の検証: meta_loaded は false, unified_search_text は空
+            {
+                let all_files = state.all_files.read();
+                assert!(!all_files[0].meta_loaded);
+                assert!(all_files[0].unified_search_text.is_empty());
+            }
+
+            // parse_metadata_inner を実行
+            let res = parse_metadata_inner(&state, file_path.clone()).await.unwrap();
+            assert_eq!(res.width, 64);
+            assert_eq!(res.height, 128);
+            assert_eq!(res.prompt, "cyberpunk city, glowing neon");
+
+            // parse_metadata 実行後の state 検証: meta_loaded が true に更新され、unified_search_text にプロンプトが含まれること
+            {
+                let all_files = state.all_files.read();
+                assert!(all_files[0].meta_loaded, "state の meta_loaded が true に同期更新されること");
+                assert_eq!(all_files[0].width, 64);
+                assert_eq!(all_files[0].height, 128);
+                assert_eq!(all_files[0].prompt, "cyberpunk city, glowing neon");
+                assert!(
+                    all_files[0].unified_search_text.contains("cyberpunk city"),
+                    "unified_search_text に抽出プロンプトが含まれていること"
+                );
+            }
+        });
     }
 }

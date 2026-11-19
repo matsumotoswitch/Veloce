@@ -1826,6 +1826,10 @@ async fn get_file_by_index(
 /// メタデータ読み込み結果をRust側のSource of Truthに反映する（path_to_all_idx / path_to_filtered_idx によるO(1)一括更新）
 #[tauri::command]
 fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<FullMetadata>) {
+    update_metadata_in_state_inner(&state, &updates);
+}
+
+pub(crate) fn update_metadata_in_state_inner(state: &AppState, updates: &[FullMetadata]) {
     if updates.is_empty() {
         return;
     }
@@ -1833,9 +1837,9 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
     {
         let all_idx = state.path_to_all_idx.read();
         let mut all_files = state.all_files.write();
-        for meta in &updates {
-            let clean = meta.path.replace("\\\\?\\", "");
-            if let Some(&idx) = all_idx.get(&meta.path).or_else(|| all_idx.get(&clean)) {
+        for meta in updates {
+            let clean = normalize_unc_path(&meta.path);
+            if let Some(&idx) = all_idx.get(&meta.path).or_else(|| all_idx.get(clean.as_ref())) {
                 if let Some(f_arc) = all_files.get_mut(idx) {
                     let file = std::sync::Arc::make_mut(f_arc);
                     file.width = meta.width;
@@ -1853,9 +1857,9 @@ fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<Full
     {
         let filt_idx = state.path_to_filtered_idx.read();
         let mut filtered = state.filtered_files.write();
-        for meta in &updates {
-            let clean = meta.path.replace("\\\\?\\", "");
-            if let Some(&idx) = filt_idx.get(&meta.path).or_else(|| filt_idx.get(&clean)) {
+        for meta in updates {
+            let clean = normalize_unc_path(&meta.path);
+            if let Some(&idx) = filt_idx.get(&meta.path).or_else(|| filt_idx.get(clean.as_ref())) {
                 if let Some(f_arc) = filtered.get_mut(idx) {
                     let file = std::sync::Arc::make_mut(f_arc);
                     file.width = meta.width;
@@ -1880,14 +1884,23 @@ fn update_file_dimensions(
     width: u32,
     height: u32,
 ) {
+    update_file_dimensions_inner(&state, &path, width, height);
+}
+
+pub(crate) fn update_file_dimensions_inner(
+    state: &AppState,
+    path: &str,
+    width: u32,
+    height: u32,
+) {
     if width == 0 && height == 0 {
         return;
     }
 
-    let clean = path.replace("\\\\?\\", "");
+    let clean = normalize_unc_path(path).replace('/', "\\");
     {
         let all_idx_lock = state.path_to_all_idx.read();
-        if let Some(&idx) = all_idx_lock.get(&path).or_else(|| all_idx_lock.get(&clean)) {
+        if let Some(&idx) = all_idx_lock.get(path).or_else(|| all_idx_lock.get(&clean)) {
             let mut all_files = state.all_files.write();
             if let Some(f_arc) = all_files.get_mut(idx) {
                 let file = std::sync::Arc::make_mut(f_arc);
@@ -1898,7 +1911,7 @@ fn update_file_dimensions(
     }
     {
         let filt_idx_lock = state.path_to_filtered_idx.read();
-        if let Some(&idx) = filt_idx_lock.get(&path).or_else(|| filt_idx_lock.get(&clean)) {
+        if let Some(&idx) = filt_idx_lock.get(path).or_else(|| filt_idx_lock.get(&clean)) {
             let mut filtered = state.filtered_files.write();
             if let Some(f_arc) = filtered.get_mut(idx) {
                 let file = std::sync::Arc::make_mut(f_arc);
@@ -1908,16 +1921,13 @@ fn update_file_dimensions(
         }
     }
 
-    let db_conn = state.db_conn.clone();
-    let path_clone = path.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(conn) = db_conn.get() {
-            let _ = conn.execute(
-                "UPDATE cache SET width = ?, height = ? WHERE path = ?",
-                rusqlite::params![width, height, path_clone],
-            );
-        }
-    });
+    let clean_slash = clean.replace('\\', "/");
+    if let Ok(conn) = state.db_conn.get() {
+        let _ = conn.execute(
+            "UPDATE cache SET width = ?1, height = ?2 WHERE path = ?3 COLLATE NOCASE OR path = ?4 COLLATE NOCASE OR path = ?5 COLLATE NOCASE",
+            rusqlite::params![width, height, path, &clean, &clean_slash],
+        );
+    }
 }
 
 
@@ -3643,7 +3653,10 @@ pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState
                 mtime INTEGER DEFAULT 0,
                 ctime INTEGER DEFAULT 0,
                 last_accessed INTEGER,
-                metadata_source TEXT DEFAULT ''
+                metadata_source TEXT DEFAULT '',
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
             )",
             [],
         )
@@ -5204,6 +5217,74 @@ mod viewer_tests {
         assert_eq!(all_files[0].size, 2048, "サイズ等の更新内容は反映されること");
     }
 
+    #[test]
+    fn test_update_file_dimensions_unc_path_updates_normalized_db_row() {
+        let state = create_test_app_state("C:\\images");
+        let normalized_path = "C:\\images\\sample.png";
+        let hash_key = "test_hash_dim_123";
+
+        // DB の cache テーブルに正規化パス（\\\\?\\ なし）で保存された行を準備
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, width, height, mtime) VALUES (?1, ?2, 0, 0, 1000)",
+                rusqlite::params![hash_key, normalized_path],
+            )
+            .unwrap();
+        }
+
+        // 状態にファイルを追加
+        let img = ImageFile {
+            name: "sample.png".to_string(),
+            ext: ".png".into(),
+            path: normalized_path.to_string(),
+            size: 1024,
+            mtime: 1000,
+            ctime: 1000,
+            has_thumbnail_cache: false,
+            width: 0,
+            height: 0,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: hash_key.to_string().into(),
+        };
+        {
+            let mut all_files = state.all_files.write();
+            let mut all_idx = state.path_to_all_idx.write();
+            all_files.push(std::sync::Arc::new(img));
+            all_idx.insert(normalized_path.to_string(), 0);
+        }
+
+        // \\?\ プレフィックスおよびスラッシュ混在パスで update_file_dimensions_inner を実行
+        let raw_unc_path = "\\\\?\\C:/images/sample.png";
+        update_file_dimensions_inner(&state, raw_unc_path, 1920, 1080);
+
+        // 1. インメモリ state の width / height が更新されていること
+        {
+            let all_files = state.all_files.read();
+            assert_eq!(all_files[0].width, 1920, "state の width が更新されること");
+            assert_eq!(all_files[0].height, 1080, "state の height が更新されること");
+        }
+
+        // 2. DB の cache テーブルの width / height が正規化パス行で更新されていること
+        {
+            let conn = state.db_conn.get().unwrap();
+            let (w, h): (u32, u32) = conn
+                .query_row(
+                    "SELECT width, height FROM cache WHERE hash_key = ?1",
+                    rusqlite::params![hash_key],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(w, 1920, "DB の width が更新されていること");
+            assert_eq!(h, 1080, "DB の height が更新されていること");
+        }
+    }
+
     /// スマートフォルダ読み込み時における実在ファイル分類および purge_missing_files_from_cache の単体テスト
     #[test]
     fn test_purge_missing_files_from_cache_and_filter_logic() {
@@ -6643,7 +6724,10 @@ mod viewer_tests {
                 mtime INTEGER DEFAULT 0,
                 ctime INTEGER DEFAULT 0,
                 last_accessed INTEGER,
-                metadata_source TEXT DEFAULT ''
+                metadata_source TEXT DEFAULT '',
+                searchable_prompt TEXT DEFAULT '',
+                searchable_negative_prompt TEXT DEFAULT '',
+                searchable_source TEXT DEFAULT ''
             )",
             [],
         ).unwrap();
@@ -7280,11 +7364,11 @@ mod viewer_tests {
         let state = create_test_app_state("C:\\");
         {
             let conn = state.db_conn.get().unwrap();
+            let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_prompt TEXT DEFAULT ''", []);
+            let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_negative_prompt TEXT DEFAULT ''", []);
+            let _ = conn.execute("ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT ''", []);
             conn.execute_batch(
-                "ALTER TABLE cache ADD COLUMN searchable_prompt TEXT DEFAULT '';
-                 ALTER TABLE cache ADD COLUMN searchable_negative_prompt TEXT DEFAULT '';
-                 ALTER TABLE cache ADD COLUMN searchable_source TEXT DEFAULT '';
-                 CREATE VIRTUAL TABLE IF NOT EXISTS cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source);
+                "CREATE VIRTUAL TABLE IF NOT EXISTS cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source);
                  CREATE TRIGGER IF NOT EXISTS cache_ai AFTER INSERT ON cache BEGIN
                      INSERT INTO cache_fts(rowid, hash_key, searchable_prompt, searchable_negative_prompt, searchable_source)
                      VALUES (new.rowid, new.hash_key, new.searchable_prompt, new.searchable_negative_prompt, new.searchable_source);

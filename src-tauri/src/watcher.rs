@@ -96,6 +96,7 @@ pub(crate) fn notify_files_batch_inner(
         return state.filtered_files.read().len();
     }
 
+    let mut unparsed_paths = Vec::new();
     {
         let mut all_files = state.all_files.write();
 
@@ -136,6 +137,9 @@ pub(crate) fn notify_files_batch_inner(
                             }
                             let old_path = existing.path.clone();
                             let arc_f = std::sync::Arc::new(file);
+                            if !arc_f.meta_loaded {
+                                unparsed_paths.push(arc_f.path.clone());
+                            }
                             *existing = std::sync::Arc::clone(&arc_f);
                             updated_items.push((old_path, arc_f, idx));
                             continue;
@@ -144,6 +148,9 @@ pub(crate) fn notify_files_batch_inner(
 
                     let new_idx = all_files.len();
                     let arc_f = std::sync::Arc::new(file);
+                    if !arc_f.meta_loaded {
+                        unparsed_paths.push(arc_f.path.clone());
+                    }
                     all_files.push(std::sync::Arc::clone(&arc_f));
                     new_idx_map.insert(clean, new_idx);
                     added_items.push((new_idx, arc_f));
@@ -196,7 +203,164 @@ pub(crate) fn notify_files_batch_inner(
         }
     }
 
+    if !unparsed_paths.is_empty() {
+        if let Some(app_handle) = app {
+            let app_clone = app_handle.clone();
+            let current_epoch = crate::current_metadata_bg_epoch();
+            let target_dir = state.current_dir.read().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::task::spawn_blocking(move || {
+                    if let Some(state) = app_clone.try_state::<AppState>() {
+                        process_unloaded_metadata_batch(&state, unparsed_paths, current_epoch, &target_dir);
+                    }
+                })
+                .await
+                .ok();
+            });
+        }
+    }
+
     apply_filters_and_sort(app, state)
+}
+
+/// notify_files_batch で追加・変更された未解析のファイルについて、
+/// 世代管理とカレントディレクトリの検証を維持しつつバックグラウンドでメタデータを解析し、
+/// SQLite キャッシュ DB とインメモリ state（all_files / filtered_files）を更新する。
+pub(crate) fn process_unloaded_metadata_batch(
+    state: &AppState,
+    paths: Vec<String>,
+    task_epoch: u64,
+    target_dir: &str,
+) -> usize {
+    if paths.is_empty() {
+        return 0;
+    }
+    {
+        let cur_dir = state.current_dir.read();
+        if !crate::should_continue_metadata_bg_task(
+            task_epoch,
+            crate::current_metadata_bg_epoch(),
+            &cur_dir,
+            target_dir,
+        ) {
+            return 0;
+        }
+    }
+
+    let paths_to_process: Vec<(usize, String, u64, u64, u64)> = {
+        let all_map = state.path_to_all_idx.read();
+        let all_files = state.all_files.read();
+        paths
+            .into_iter()
+            .filter_map(|p| {
+                let clean = crate::utils::normalize_unc_path(&p);
+                let idx_opt = all_map.get(&p).or_else(|| all_map.get(clean.as_ref())).copied();
+                if let Some(idx) = idx_opt {
+                    if let Some(f) = all_files.get(idx) {
+                        if !f.meta_loaded {
+                            return Some((idx, f.path.clone(), f.mtime, f.ctime, f.size));
+                        }
+                    }
+                }
+                None
+            })
+            .collect()
+    };
+
+    if paths_to_process.is_empty() {
+        return 0;
+    }
+
+    let mut processed_count = 0;
+    const METADATA_CHUNK_SIZE: usize = 200;
+
+    for chunk in paths_to_process.chunks(METADATA_CHUNK_SIZE) {
+        {
+            let cur_dir = state.current_dir.read();
+            if !crate::should_continue_metadata_bg_task(
+                task_epoch,
+                crate::current_metadata_bg_epoch(),
+                &cur_dir,
+                target_dir,
+            ) {
+                break;
+            }
+        }
+
+        let mut pending_rows = Vec::new();
+        let mut results = Vec::with_capacity(chunk.len());
+
+        for &(idx, ref p, mtime, ctime, size) in chunk {
+            let (meta, fetched_mtime, fetched_size, row) =
+                crate::metadata::get_full_metadata_for_path_with_stat_inner(
+                    p,
+                    mtime,
+                    ctime,
+                    size,
+                    &state.db_conn,
+                    false,
+                );
+            if let Some(r) = row {
+                pending_rows.push(r);
+            }
+            results.push((idx, p.clone(), meta, fetched_mtime, fetched_size));
+        }
+
+        if crate::current_metadata_bg_epoch() != task_epoch {
+            break;
+        }
+
+        let _ = crate::metadata::commit_pending_metadata_batch(&state.db_conn, &pending_rows);
+
+        {
+            let mut all_files_lock = state.all_files.write();
+            let mut filtered_updates = Vec::with_capacity(results.len());
+
+            for (idx, path, full_meta, meta_mtime, meta_size) in results {
+                if let Some(f_arc) = all_files_lock.get_mut(idx) {
+                    if f_arc.path == path {
+                        let f = std::sync::Arc::make_mut(f_arc);
+                        f.width = full_meta.width;
+                        f.height = full_meta.height;
+                        f.prompt = full_meta.prompt.clone();
+                        f.negative_prompt = full_meta.negative_prompt.clone();
+                        f.source = full_meta.source.clone();
+                        f.search_text = crate::utils::extract_searchable_text(&full_meta.params);
+                        f.unified_search_text = format!(
+                            "{} {} {} {} {}",
+                            f.name, f.prompt, f.negative_prompt, f.source, f.search_text
+                        )
+                        .to_lowercase();
+                        if f.size == 0 {
+                            f.size = meta_size;
+                        }
+                        if f.mtime == 0 {
+                            f.mtime = meta_mtime / 1000;
+                        }
+                        f.meta_loaded = true;
+                        filtered_updates.push((path, f_arc.clone()));
+                        processed_count += 1;
+                    }
+                }
+            }
+            drop(all_files_lock);
+
+            if !filtered_updates.is_empty() {
+                let filt_idx_lock = state.path_to_filtered_idx.read();
+                let mut filtered_files_lock = state.filtered_files.write();
+                for (path, arc) in filtered_updates {
+                    let clean = path.replace("\\\\?\\", "");
+                    if let Some(&filt_idx) = filt_idx_lock.get(&path).or_else(|| filt_idx_lock.get(&clean)) {
+                        if let Some(f_arc) = filtered_files_lock.get_mut(filt_idx) {
+                            *f_arc = arc;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    processed_count
 }
 
 /// ファイルウォッチャーから通知されたファイル変更をRust側のSource of Truthに反映する
@@ -956,5 +1120,103 @@ mod tests {
             vec![r"\\?\C:\test\img1.png".to_string()],
         );
         assert_maps_match_rebuild(&state);
+    }
+
+    #[test]
+    fn test_notify_files_process_unloaded_metadata_batch_updates_db_and_state() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir_str = temp_dir.path().to_str().unwrap();
+        let test_png = temp_dir.path().join("watcher_unloaded.png");
+
+        let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+        ihdr_data.extend_from_slice(&128u32.to_be_bytes());
+        ihdr_data.push(8);
+        ihdr_data.push(6);
+        ihdr_data.extend_from_slice(&[0, 0, 0]);
+        png_bytes.extend_from_slice(&(ihdr_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"IHDR");
+        png_bytes.extend_from_slice(&ihdr_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        let mut text_data = Vec::new();
+        text_data.extend_from_slice(b"Description\0starry sky, deep blue");
+        png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"tEXt");
+        png_bytes.extend_from_slice(&text_data);
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IEND");
+        png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        std::fs::write(&test_png, &png_bytes).unwrap();
+        let png_path = test_png.to_str().unwrap().to_string();
+
+        let state = crate::create_test_app_state(temp_dir_str);
+        let unparsed_file = ImageFile {
+            name: "watcher_unloaded.png".to_string(),
+            ext: ".png".into(),
+            path: png_path.clone(),
+            size: png_bytes.len() as u64,
+            mtime: 1700000000,
+            ctime: 1700000000,
+            has_thumbnail_cache: false,
+            width: 0,
+            height: 0,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: Default::default(),
+        };
+
+        // notify 経由で未解析ファイルを追加
+        notify_files_batch_inner(None, &state, vec![unparsed_file], Vec::new());
+
+        // 追加直後は meta_loaded: false
+        {
+            let all_files = state.all_files.read();
+            assert_eq!(all_files.len(), 1);
+            assert!(!all_files[0].meta_loaded);
+            assert_eq!(all_files[0].width, 0);
+            assert_eq!(all_files[0].height, 0);
+        }
+
+        // 切り出された同期実行処理を呼び出す
+        let current_epoch = crate::current_metadata_bg_epoch();
+        let processed = process_unloaded_metadata_batch(&state, vec![png_path.clone()], current_epoch, temp_dir_str);
+        assert_eq!(processed, 1, "未解析ファイルが1件処理されること");
+
+        // 1. state の更新検証: meta_loaded, width, height, unified_search_text が反映されていること
+        {
+            let all_files = state.all_files.read();
+            assert!(all_files[0].meta_loaded, "state の meta_loaded が true に更新されること");
+            assert_eq!(all_files[0].width, 64);
+            assert_eq!(all_files[0].height, 128);
+            assert_eq!(all_files[0].prompt, "starry sky, deep blue");
+            assert!(
+                all_files[0].unified_search_text.contains("starry sky"),
+                "unified_search_text にメタデータのプロンプトが格納されること"
+            );
+        }
+
+        // 2. DB の更新検証: cache テーブルに該当ファイルのメタデータ行が保存されていること
+        {
+            let conn = state.db_conn.get().unwrap();
+            let clean = crate::utils::normalize_unc_path(&png_path);
+            let (db_w, db_h): (u32, u32) = conn
+                .query_row(
+                    "SELECT width, height FROM cache WHERE path = ?1 COLLATE NOCASE OR path = ?2 COLLATE NOCASE",
+                    rusqlite::params![&png_path, clean.as_ref()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("cache テーブルに行が存在すること");
+            assert_eq!(db_w, 64, "DB の width が更新されていること");
+            assert_eq!(db_h, 128, "DB の height が更新されていること");
+        }
     }
 }
