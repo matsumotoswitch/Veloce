@@ -261,6 +261,8 @@ pub(crate) fn commit_pending_metadata_batch(
 
 /// Stealth 抽出仕様バージョン。抽出ロジック・対応仕様を変更した場合はこの値をインクリメントして過去キャッシュを自己修復させる。
 pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 1;
+/// JPEG メタデータ抽出仕様バージョン（COMセグメント・JSON直接検出対応）。過去キャッシュを自己修復させる。
+pub(crate) const JPEG_SCHEMA_VERSION: u64 = 1;
 
 pub(crate) fn get_full_metadata_for_path_with_stat_inner(
     file_path: &str,
@@ -330,10 +332,16 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                             && cached_meta.prompt.is_empty()
                             && can_have_alpha_stealth
                             && cached_meta.params.get("stealthSchema").and_then(|v| v.as_u64()) != Some(STEALTH_SCHEMA_VERSION);
+                        // 過去の解析で JPEG のプロンプト（COMセグメント・JSON直接検出等）の抽出が空のままキャッシュされた場合、
+                        // 最新の抽出仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
+                        let is_jpeg = lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg");
+                        let needs_jpeg_retry = is_jpeg
+                            && cached_meta.prompt.is_empty()
+                            && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION);
                         // 旧バージョンの音声タグ解析（拡張タグ・TXXX 未対応時）のキャッシュをオンデマンドで最新化する
                         let needs_audio_reparse = crate::audio::is_audio_path(file_path)
                             && cached_meta.params.get("tagSchema").and_then(|v| v.as_u64()) != Some(2);
-                        if is_valid_source && !needs_stealth_retry && !needs_audio_reparse {
+                        if is_valid_source && !needs_stealth_retry && !needs_jpeg_retry && !needs_audio_reparse {
                             return (cached_meta, mtime_millis, file_size, None);
                         }
                     }
@@ -446,6 +454,20 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                 .trim()
                 .to_string();
         }
+        if let Some(c) = exif_data.get("Comment") {
+            let com_str = decode_metadata_string(c)
+                .trim_end_matches('\0')
+                .trim()
+                .to_string();
+            if !com_str.is_empty() {
+                if comment.is_empty() {
+                    comment = com_str;
+                } else if !comment.contains(&com_str) {
+                    comment.push_str("\n");
+                    comment.push_str(&com_str);
+                }
+            }
+        }
         if let Some(sw) = exif_data.get("Software") {
             src = decode_metadata_string(sw)
                 .trim_end_matches('\0')
@@ -461,6 +483,27 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                     comment.push_str("\n");
                 }
                 comment.push_str(&make_str);
+            }
+        }
+
+        let is_jpeg = lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg");
+        if is_jpeg && !comment.contains('{') && !desc.contains('{') {
+            if let Ok(file) = std::fs::File::open(file_path) {
+                if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
+                    let buf = &mmap[..];
+                    let search_limit = std::cmp::min(buf.len(), 2 * 1024 * 1024);
+                    let search_buf = &buf[..search_limit];
+                    if let Some(pos) = search_buf.windows(9).position(|w| w == b"{\"prompt\"" || w == b"{\"v4_pro") {
+                        let candidate_bytes = &search_buf[pos..];
+                        let candidate_str = decode_metadata_string(candidate_bytes);
+                        if comment.is_empty() {
+                            comment = candidate_str;
+                        } else {
+                            comment.push('\n');
+                            comment.push_str(&candidate_str);
+                        }
+                    }
+                }
             }
         }
 
@@ -579,10 +622,14 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                 }
             }
 
-            // 通常のJSON直下のSourceも取得
+            // 通常のJSON直下のSource / model_name / model も取得
             if json_source.is_none() {
                 if let Some(s) = comment_obj.get("Source").and_then(|v| v.as_str()) {
                     json_source = Some(s.to_string());
+                } else if let Some(m) = comment_obj.get("model_name").and_then(|v| v.as_str()) {
+                    json_source = Some(m.to_string());
+                } else if let Some(m) = comment_obj.get("model").and_then(|v| v.as_str()) {
+                    json_source = Some(m.to_string());
                 }
             }
 
@@ -778,6 +825,13 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
     if is_png_or_webp && metadata_source == "None" && prompt.trim().is_empty() {
         if let serde_json::Value::Object(ref mut map) = params {
             map.insert("stealthSchema".to_string(), serde_json::json!(STEALTH_SCHEMA_VERSION));
+        }
+    }
+
+    let is_jpeg = lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg");
+    if is_jpeg {
+        if let serde_json::Value::Object(ref mut map) = params {
+            map.insert("jpegSchema".to_string(), serde_json::json!(JPEG_SCHEMA_VERSION));
         }
     }
 
@@ -1799,6 +1853,25 @@ pub(crate) fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, V
                             results.extend(parse_tiff_ifd(&app1_data[6..]));
                         } else if app1_data.starts_with(XMP_HEADER) {
                             parse_xmp_metadata(&app1_data[XMP_HEADER.len()..], &mut results);
+                        } else if app1_data.windows(9).any(|w| w == b"\"prompt\":" || w == b"\"prompt\": ") {
+                            results.entry("Comment".to_string()).or_insert_with(|| app1_data.to_vec());
+                        }
+                    } else if marker == 0xFE {
+                        let com_data = &buffer[offset + 2..offset + length];
+                        if !com_data.is_empty() {
+                            if let Some(existing) = results.get_mut("Comment") {
+                                if existing.ends_with(b"}") && com_data.starts_with(b"{") {
+                                    existing.push(b'\n');
+                                }
+                                existing.extend_from_slice(com_data);
+                            } else {
+                                results.insert("Comment".to_string(), com_data.to_vec());
+                            }
+                        }
+                    } else if (0xE0..=0xEF).contains(&marker) {
+                        let app_data = &buffer[offset + 2..offset + length];
+                        if app_data.windows(9).any(|w| w == b"\"prompt\":" || w == b"\"prompt\": ") {
+                            results.entry("Comment".to_string()).or_insert_with(|| app_data.to_vec());
                         }
                     }
                     offset += length;
@@ -3117,6 +3190,124 @@ mod tests {
             String::from_utf8_lossy(webp_meta.get("Software").unwrap()),
             "Stable Diffusion WebUI"
         );
+    }
+
+    #[test]
+    fn test_parse_jpeg_com_segment_novelai_metadata() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let jpg_path = temp_dir.path().join("novelai_v5_sample.jpg");
+
+        // ユーザー提示の NovelAI Diffusion V5 メタデータ JSON
+        let json_text = r#"{"prompt": "nsfw,, black and white manga, monochrome, single panel, 1girl, 1boy, sex\nA girl bent over a table on the right. Behind her, the same man is shown twice, in two different positions.\n\n\nfrom side\n\n,,kindatsu,0.5::,na_tarapisu153 ::,,healthyman,0.8::nekomugiharu :: ,miyajima_reiji,year 2025, ,,, best quality, amazing quality, very aesthetic, highres, incredibly absurdres,::depthness::,,monochrome,1.3::,greyscale :: ,,1.4::,halftone,dithering,halftone dots, screentone, manga screentone, dot pattern, , printed manga, inked manga::, \n", "steps": 28, "height": 1024, "width": 1024, "scale": 6.0, "uncond_scale": 0.0, "cfg_rescale": 0.2, "seed": 364751580, "n_samples": 1, "noise_schedule": "karras", "legacy_v3_extend": false, "v4_prompt": {"caption": {"base_caption": "nsfw,, black and white manga, monochrome, single panel, 1girl, 1boy, sex\nA girl bent over a table on the right. Behind her, the same man is shown twice, in two different positions.\n\n\nfrom side\n\n,,kindatsu,0.5::,na_tarapisu153 ::,,healthyman,0.8::nekomugiharu :: ,miyajima_reiji,year 2025, ,,, best quality, amazing quality, very aesthetic, highres, incredibly absurdres,::depthness::,,monochrome,1.3::,greyscale :: ,,1.4::,halftone,dithering,halftone dots, screentone, manga screentone, dot pattern, , printed manga, inked manga::, \n", "char_captions": [{"char_caption": "girl, long black hair, nude, bent over, leaning on a table\n\n\n\n\n\n\n\n\n\n", "centers": [{"x": 0.632, "y": 0.562}]}, {"char_caption": "boy, nude. leaning back, his upper body tilted back, his hips far behind, his knees bent, stepping back, pulling out., his hips pushed forward close to the girl, thrusting in deeply.\n\n\n\n\n\n\n", "centers": [{"x": 0.255, "y": 0.488}]}, {"char_caption": "boy, nude, afterimage, semi-transparent. He stands away from the girl, leaning back, his upper body tilted back, his hips far behind, his knees bent, stepping back, pulling out. His head is bent forward, chin down, his face turned toward the girl, looking down at her.\n\n\n\n\n\n\n\n\n\n\n\n\n", "centers": [{"x": 0.315, "y": 0.514}]}]}, "use_coords": true, "use_order": true, "legacy_uc": false}, "v4_negative_prompt": {"caption": {"base_caption": "blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, {{{{rating:general}}}},,{{bkub ,text ,food,headwear,animal ear,character_doll,animal, ,}} , {bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, extra digits, artistic error, username, scan, [abstract], {{,text,stamp,signature}},,text,,speach,lowres,{bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, extra digits, artistic error, username, scan, [abstract], bad anatomy, bad hands, @_@, mismatched pupils, heart-shaped pupils, , worst quality,,bad anatomy,jpeg artifacts,\n", "char_captions": [{"char_caption": "", "centers": [{"x": 0.632, "y": 0.562}]}, {"char_caption": "\n", "centers": [{"x": 0.255, "y": 0.488}]}, {"char_caption": "\n\n", "centers": [{"x": 0.315, "y": 0.514}]}]}, "use_coords": false, "use_order": false, "legacy_uc": false}, "sampler": "k_euler_ancestral", "version": 1, "uc": "blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, {{{{rating:general}}}},,{{bkub ,text ,food,headwear,animal ear,character_doll,animal, ,}} , {bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, extra digits, artistic error, username, scan, [abstract], {{,text,stamp,signature}},,text,,speach,lowres,{bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, extra digits, artistic error, username, scan, [abstract], bad anatomy, bad hands, @_@, mismatched pupils, heart-shaped pupils, , worst quality,,bad anatomy,jpeg artifacts,\n", "request_type": "PromptGenerateRequest", "model_name": "NovelAI Diffusion V5", "model_hash": "0ADF9AB7", "signed_hash": "x7F2zd811gvqVWkBoODgNFCETl37wR96arbHbP+fhfsjTeOTGPO4WC8P50jzMVeCbsrvhIXHQIu8KYCLGvhXBQ=="}"#;
+
+        let json_bytes = json_text.as_bytes();
+        let com_seg_len = (json_bytes.len() + 2) as u16;
+
+        // JPEG 構造の構築: SOI (FF D8) -> APP0 (JFIF) -> COM (FF FE) -> SOF0 (FF C0) -> EOI (FF D9)
+        let mut jpg_bytes = Vec::new();
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD8]); // SOI
+
+        // APP0 (JFIF)
+        let jfif_payload = b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0";
+        let jfif_len = (jfif_payload.len() + 2) as u16;
+        jpg_bytes.extend_from_slice(&[0xFF, 0xE0]);
+        jpg_bytes.extend_from_slice(&jfif_len.to_be_bytes());
+        jpg_bytes.extend_from_slice(jfif_payload);
+
+        // COM セグメント (FF FE)
+        jpg_bytes.extend_from_slice(&[0xFF, 0xFE]);
+        jpg_bytes.extend_from_slice(&com_seg_len.to_be_bytes());
+        jpg_bytes.extend_from_slice(json_bytes);
+
+        // SOF0 (Baseline DCT, 1024x1024)
+        let sof0_payload = [0x08, 0x04, 0x00, 0x04, 0x00, 0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01];
+        let sof0_len = (sof0_payload.len() + 2) as u16;
+        jpg_bytes.extend_from_slice(&[0xFF, 0xC0]);
+        jpg_bytes.extend_from_slice(&sof0_len.to_be_bytes());
+        jpg_bytes.extend_from_slice(&sof0_payload);
+
+        // EOI (FF D9)
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD9]);
+
+        std::fs::write(&jpg_path, jpg_bytes).unwrap();
+
+        // 1. parse_jpeg_exif で COM セグメントが "Comment" として取得できること
+        let exif_map = parse_jpeg_exif(jpg_path.to_str().unwrap());
+        assert!(exif_map.contains_key("Comment"), "parse_jpeg_exif should extract COM segment as 'Comment'");
+        let com_raw = exif_map.get("Comment").unwrap();
+        assert_eq!(String::from_utf8_lossy(com_raw), json_text);
+
+        // 2. get_full_metadata_for_path で完全なメタデータとしてパースできること
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, metadata TEXT, width INTEGER, height INTEGER, path TEXT, size INTEGER, mtime INTEGER, ctime INTEGER, last_accessed INTEGER, searchable_prompt TEXT, searchable_negative_prompt TEXT, searchable_source TEXT, metadata_source TEXT)", []).unwrap();
+        }
+
+        let (meta, mtime, _) = get_full_metadata_for_path(&jpg_path.to_string_lossy(), &pool);
+
+        // プロンプトの抽出検証
+        assert!(meta.prompt.starts_with("nsfw,, black and white manga"));
+        // ネガティブプロンプト (uc) の抽出検証
+        assert!(meta.negative_prompt.starts_with("blurry, lowres, error"));
+        // 生成元モデル (model_name) の抽出検証
+        assert_eq!(meta.source, "NovelAI Diffusion V5");
+        assert_eq!(meta.metadata_source, "JPEG EXIF");
+
+        // params 内の V4/V5 キャラクタープロンプトおよび座標情報
+        let char_prompts = meta.params["characterPrompts"].as_array().expect("characterPrompts should be an array");
+        assert_eq!(char_prompts.len(), 3, "3 characters should be extracted");
+        assert!(char_prompts[0]["prompt"].as_str().unwrap().contains("girl, long black hair"));
+        assert_eq!(meta.params["use_coords"].as_bool(), Some(true));
+
+        // 数値パラメータの抽出検証
+        assert_eq!(meta.params["steps"].as_u64(), Some(28));
+        assert_eq!(meta.params["seed"].as_u64(), Some(364751580));
+        assert_eq!(meta.params["sampler"].as_str(), Some("k_euler_ancestral"));
+        assert_eq!(meta.params["request_type"].as_str(), Some("PromptGenerateRequest"));
+
+        // 3. 過去バージョンでプロンプト空（None）として保存されたレガシーキャッシュの自己修復（セルフヒーリング）
+        let hash_key = crate::utils::hash_path_mtime_hex(jpg_path.to_str().unwrap(), mtime);
+        {
+            let conn = pool.get().unwrap();
+            // 古い仕様（jpegSchema 無し、プロンプト空）のレコードで cache テーブルを意図的に汚染
+            let legacy_json = serde_json::json!({
+                "path": jpg_path.to_str().unwrap(),
+                "width": 1024,
+                "height": 1024,
+                "prompt": "",
+                "negative_prompt": "",
+                "params": {},
+                "source": "",
+                "metadata_source": "None"
+            }).to_string();
+            conn.execute(
+                "UPDATE cache SET metadata = ?1, searchable_prompt = '', metadata_source = 'None' WHERE hash_key = ?2",
+                rusqlite::params![legacy_json, hash_key],
+            ).unwrap();
+        }
+
+        // 汚染後でも needs_jpeg_retry により早期リターンがスキップされ、ディスクから再解析されてプロンプトが復元されること
+        let (repaired_meta, _, _) = get_full_metadata_for_path(&jpg_path.to_string_lossy(), &pool);
+        assert!(repaired_meta.prompt.starts_with("nsfw,, black and white manga"), "レガシー空キャッシュから自動的に自己修復してプロンプトが再抽出されること");
+        assert_eq!(repaired_meta.source, "NovelAI Diffusion V5");
+        assert_eq!(repaired_meta.params["jpegSchema"].as_u64(), Some(1));
+
+        // 4. マーカー長が壊れている等の異常セグメント配置でも、ファイル直接スキャンフォールバックによりプロンプトが抽出されること
+        let fallback_jpg_path = temp_dir.path().join("fallback_scan.jpg");
+        let mut malformed_jpg_bytes = Vec::new();
+        malformed_jpg_bytes.extend_from_slice(&[0xFF, 0xD8]); // SOI
+        // 不正なマーカーパディングや未知マーカー
+        malformed_jpg_bytes.extend_from_slice(&[0xFF, 0xEE, 0x00, 0x04, 0x00, 0x00]);
+        // 生の JSON をそのまま埋め込む
+        malformed_jpg_bytes.extend_from_slice(json_bytes);
+        malformed_jpg_bytes.extend_from_slice(&[0xFF, 0xD9]); // EOI
+        std::fs::write(&fallback_jpg_path, malformed_jpg_bytes).unwrap();
+
+        let (fallback_meta, _, _) = get_full_metadata_for_path(&fallback_jpg_path.to_string_lossy(), &pool);
+        assert!(fallback_meta.prompt.starts_with("nsfw,, black and white manga"), "直接スキャンフォールバックによりプロンプトが確実に抽出されること");
+        assert_eq!(fallback_meta.source, "NovelAI Diffusion V5");
     }
 
     /// プロンプトを持たない PNG / WebP 画像における stealthSchema マーカー付与と

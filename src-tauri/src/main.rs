@@ -2027,6 +2027,8 @@ pub(crate) fn update_file_dimensions_in_db(
     }
 }
 
+/// 同期実行環境（単体テスト等）や内部呼び出し用に state と DB の寸法更新を直列実行するヘルパー
+#[allow(dead_code)]
 pub(crate) fn update_file_dimensions_inner(
     state: &AppState,
     path: &str,
