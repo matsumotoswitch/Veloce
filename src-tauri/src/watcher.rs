@@ -111,11 +111,14 @@ pub(crate) fn notify_files_batch_inner(
             // 削除ありの場合: retain 直後の1回目の rebuild_all_indices は配置の正確性のために実行
             state.rebuild_all_indices(&all_files);
 
-            // 外部削除されたパスの ratings を state.ratings から除去
+            // 外部削除されたパスの ratings を state.ratings から除去、および音声カバーキャッシュを無効化
             {
                 let mut ratings_map = state.ratings.write();
                 for p in &remove_set {
                     ratings_map.remove(p);
+                    if crate::audio::is_audio_path(p) {
+                        crate::audio::invalidate_audio_cover_cache(p);
+                    }
                 }
             }
 
@@ -138,6 +141,9 @@ pub(crate) fn notify_files_batch_inner(
                 for mut file in changed_files {
                     let clean = file.path.replace("\\\\?\\", "").replace('/', "\\");
                     file.path = clean.clone();
+                    if crate::audio::is_audio_path(&clean) {
+                        crate::audio::invalidate_audio_cover_cache(&clean);
+                    }
                     let expected_hash = crate::utils::hash_path_mtime_hex(&clean, file.mtime);
                     if file.hash_key.as_str() != expected_hash {
                         file.hash_key = expected_hash.into();

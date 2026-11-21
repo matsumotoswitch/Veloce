@@ -45,18 +45,27 @@ pub(crate) fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageF
     let mtime = item.mtime;
     let ctime = item.ctime;
 
-    let mut meta_loaded = false;
-
-    if item.metadata.is_some() {
-        meta_loaded = true;
-    }
+    let has_searchable = !item.searchable_prompt.is_empty()
+        || !item.searchable_negative_prompt.is_empty()
+        || !item.searchable_source.is_empty();
+    let meta_loaded = item.metadata.is_some() || (item.has_metadata && has_searchable);
 
     let search_text = if let Some(meta_str) = &item.metadata {
         format!("{} {}", item.path, meta_str).to_lowercase()
     } else {
         item.path.to_lowercase()
     };
-    let unified_search_text = search_text.clone();
+    let unified_search_text = if has_searchable || item.has_metadata {
+        format!(
+            "{} {} {} {}",
+            file_name.to_lowercase(),
+            item.searchable_prompt,
+            item.searchable_negative_prompt,
+            item.searchable_source
+        )
+    } else {
+        search_text.clone()
+    };
 
     ImageFile {
         name: file_name,
@@ -68,13 +77,17 @@ pub(crate) fn create_image_file_from_smart_item(item: SmartFolderItem) -> ImageF
         has_thumbnail_cache: item.has_thumbnail,
         width: item.width,
         height: item.height,
-        prompt: String::new(),
-        negative_prompt: String::new(),
-        source: String::new(),
+        prompt: item.searchable_prompt,
+        negative_prompt: item.searchable_negative_prompt,
+        source: item.searchable_source,
         meta_loaded,
         search_text,
         unified_search_text,
-        hash_key: CompactString::default(),
+        hash_key: if item.hash_key.is_empty() {
+            CompactString::default()
+        } else {
+            CompactString::from(item.hash_key)
+        },
     }
 }
 
@@ -151,7 +164,7 @@ pub(crate) fn build_smart_folder_query_with_sort(
     let select_clause = if is_count {
         "SELECT COUNT(c.path)"
     } else {
-        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, (c.thumbnail IS NOT NULL), c.hash_key"
+        "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, (c.thumbnail IS NOT NULL), c.hash_key, IFNULL(c.searchable_prompt, ''), IFNULL(c.searchable_negative_prompt, ''), IFNULL(c.searchable_source, ''), (c.metadata IS NOT NULL)"
     };
 
     let has_rating_cond = rule.conditions.iter().any(|c| c.r#type == "rating");
@@ -509,6 +522,10 @@ pub(crate) fn query_smart_folder_image_files(
             let height: u32 = row.get(5)?;
             let has_thumbnail: bool = row.get(6)?;
             let hash_key: CompactString = row.get::<_, String>(7).map(CompactString::from).unwrap_or_default();
+            let sp: String = row.get::<_, Option<String>>(8).unwrap_or_default().unwrap_or_default();
+            let snp: String = row.get::<_, Option<String>>(9).unwrap_or_default().unwrap_or_default();
+            let ss: String = row.get::<_, Option<String>>(10).unwrap_or_default().unwrap_or_default();
+            let has_metadata: bool = row.get::<_, Option<bool>>(11).unwrap_or_default().unwrap_or(false);
 
             let clean_path = normalize_unc_path(&raw_path).replace('/', "\\");
 
@@ -528,7 +545,9 @@ pub(crate) fn query_smart_folder_image_files(
                 (name_slice.to_string(), ext_str)
             };
 
-            let unified_search_text = clean_path.to_lowercase();
+            let name_lower = file_name.to_lowercase();
+            let unified_search_text = format!("{} {} {} {}", name_lower, sp, snp, ss);
+            let meta_loaded = has_metadata && (!sp.is_empty() || !snp.is_empty() || !ss.is_empty());
 
             Ok(std::sync::Arc::new(ImageFile {
                 name: file_name,
@@ -540,10 +559,10 @@ pub(crate) fn query_smart_folder_image_files(
                 has_thumbnail_cache: has_thumbnail,
                 width,
                 height,
-                prompt: String::new(),
-                negative_prompt: String::new(),
-                source: String::new(),
-                meta_loaded: false,
+                prompt: sp,
+                negative_prompt: snp,
+                source: ss,
+                meta_loaded,
                 search_text: String::new(),
                 unified_search_text,
                 hash_key,
@@ -591,6 +610,11 @@ pub(crate) fn get_smart_folder_paths(
                         height: row.get(5)?,
                         metadata: None,
                         has_thumbnail: row.get(6)?,
+                        hash_key: row.get::<_, Option<String>>(7).unwrap_or_default().unwrap_or_default(),
+                        searchable_prompt: row.get::<_, Option<String>>(8).unwrap_or_default().unwrap_or_default(),
+                        searchable_negative_prompt: row.get::<_, Option<String>>(9).unwrap_or_default().unwrap_or_default(),
+                        searchable_source: row.get::<_, Option<String>>(10).unwrap_or_default().unwrap_or_default(),
+                        has_metadata: row.get::<_, Option<bool>>(11).unwrap_or_default().unwrap_or(false),
                     })
                 }) {
                     for r in rows {
@@ -615,7 +639,7 @@ pub(crate) fn get_smart_folder_paths(
                 if let Ok(conn) = db_conn.get() {
                     for chunk in paths.chunks(900) {
                         let placeholders = vec!["?"; chunk.len()].join(",");
-                        let query = format!("SELECT path, size, mtime, ctime, width, height, (thumbnail IS NOT NULL) FROM cache WHERE path IN ({})", placeholders);
+                        let query = format!("SELECT path, size, mtime, ctime, width, height, (thumbnail IS NOT NULL), IFNULL(hash_key, ''), IFNULL(searchable_prompt, ''), IFNULL(searchable_negative_prompt, ''), IFNULL(searchable_source, ''), (metadata IS NOT NULL) FROM cache WHERE path IN ({})", placeholders);
                         if let Ok(mut stmt) = conn.prepare(&query) {
                             let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
                             if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
@@ -628,6 +652,11 @@ pub(crate) fn get_smart_folder_paths(
                                     height: row.get(5)?,
                                     metadata: None,
                                     has_thumbnail: row.get(6)?,
+                                    hash_key: row.get::<_, Option<String>>(7).unwrap_or_default().unwrap_or_default(),
+                                    searchable_prompt: row.get::<_, Option<String>>(8).unwrap_or_default().unwrap_or_default(),
+                                    searchable_negative_prompt: row.get::<_, Option<String>>(9).unwrap_or_default().unwrap_or_default(),
+                                    searchable_source: row.get::<_, Option<String>>(10).unwrap_or_default().unwrap_or_default(),
+                                    has_metadata: row.get::<_, Option<bool>>(11).unwrap_or_default().unwrap_or(false),
                                 })
                             }) {
                                 target_paths.extend(rows.flatten());
@@ -638,7 +667,7 @@ pub(crate) fn get_smart_folder_paths(
             }
         } else if folder_id == "history" {
             if let Ok(conn) = db_conn.get() {
-                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height, (thumbnail IS NOT NULL) FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
+                if let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, ctime, width, height, (thumbnail IS NOT NULL), IFNULL(hash_key, ''), IFNULL(searchable_prompt, ''), IFNULL(searchable_negative_prompt, ''), IFNULL(searchable_source, ''), (metadata IS NOT NULL) FROM cache WHERE path != '' AND path IS NOT NULL ORDER BY last_accessed DESC LIMIT 100") {
                 if let Ok(rows) = stmt.query_map([], |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
@@ -649,6 +678,11 @@ pub(crate) fn get_smart_folder_paths(
                         height: row.get(5)?,
                         metadata: None,
                         has_thumbnail: row.get(6)?,
+                        hash_key: row.get::<_, Option<String>>(7).unwrap_or_default().unwrap_or_default(),
+                        searchable_prompt: row.get::<_, Option<String>>(8).unwrap_or_default().unwrap_or_default(),
+                        searchable_negative_prompt: row.get::<_, Option<String>>(9).unwrap_or_default().unwrap_or_default(),
+                        searchable_source: row.get::<_, Option<String>>(10).unwrap_or_default().unwrap_or_default(),
+                        has_metadata: row.get::<_, Option<bool>>(11).unwrap_or_default().unwrap_or(false),
                     })
                 }) {
                     for r in rows {
@@ -769,7 +803,7 @@ mod tests {
         
         let (query, params) = build_smart_folder_query(&rule, false, false);
         // FTS5 MATCH 方式に更新済み: LIKE ではなく MATCH を使う
-        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, (c.thumbnail IS NOT NULL), c.hash_key FROM cache c WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
+        let expected_query = "SELECT c.path, c.size, c.mtime, c.ctime, c.width, c.height, (c.thumbnail IS NOT NULL), c.hash_key, IFNULL(c.searchable_prompt, ''), IFNULL(c.searchable_negative_prompt, ''), IFNULL(c.searchable_source, ''), (c.metadata IS NOT NULL) FROM cache c WHERE c.path != '' AND c.path IS NOT NULL AND (c.rowid IN (SELECT rowid FROM cache_fts WHERE searchable_prompt MATCH ?) AND c.rowid NOT IN (SELECT rowid FROM cache_fts WHERE searchable_negative_prompt MATCH ?)) ORDER BY c.mtime DESC";
         assert!(query.contains(expected_query), "prompt の contains 条件は FTS5 IN サブクエリを使うべき。実際のクエリ: {}", query);
         // not_contains は NOT IN (SELECT ... MATCH ?) 形式
         assert!(
@@ -1057,6 +1091,7 @@ mod tests {
             height: 0,
             metadata: None,
             has_thumbnail: true,
+            ..Default::default()
         };
 
         let img = create_image_file_from_smart_item(item);
@@ -1201,6 +1236,9 @@ mod tests {
                     mtime INTEGER DEFAULT 0,
                     ctime INTEGER DEFAULT 0,
                     last_accessed INTEGER,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT '',
                     metadata_source TEXT DEFAULT ''
                 )",
                 [],
@@ -1305,6 +1343,9 @@ mod tests {
                     mtime INTEGER DEFAULT 0,
                     ctime INTEGER DEFAULT 0,
                     last_accessed INTEGER,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT '',
                     metadata_source TEXT DEFAULT ''
                 );
                 CREATE INDEX idx_cache_path ON cache (path);
@@ -1838,5 +1879,88 @@ mod tests {
 
         // 5. 時計の巻き戻り（未来タイムスタンプ） -> 安全側に倒して実行
         assert!(should_run_smart_purge(Some(now + 10_000), now, interval), "未来時刻検知時は安全側に倒して実行すること");
+    }
+
+    #[test]
+    fn test_smart_folder_populates_unified_search_text_and_meta_loaded() {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let db_conn = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+
+        {
+            let conn = db_conn.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    path TEXT,
+                    metadata TEXT,
+                    thumbnail BLOB,
+                    width INTEGER DEFAULT 0,
+                    height INTEGER DEFAULT 0,
+                    size INTEGER DEFAULT 0,
+                    mtime INTEGER DEFAULT 0,
+                    ctime INTEGER DEFAULT 0,
+                    last_accessed INTEGER,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT '',
+                    metadata_source TEXT DEFAULT ''
+                )",
+                [],
+            )
+            .unwrap();
+
+            // 1. 有効なメタデータ・プロンプト・生成元を持つ行
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, metadata, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source, mtime)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    "h_valid",
+                    r"C:\art\magical_girl.png",
+                    r#"{"prompt":"1girl, magical wand"}"#,
+                    "1girl, magical wand",
+                    "lowres, blurry",
+                    "novelai diffusion v4.5",
+                    "PNG Chunks",
+                    200
+                ],
+            )
+            .unwrap();
+
+            // 2. レガシー空キャッシュ行（metadata_source = 'None', searchable_prompt = ''）
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, metadata, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source, mtime)
+                 VALUES (?1, ?2, ?3, '', '', '', 'None', ?4)",
+                rusqlite::params![
+                    "h_legacy",
+                    r"C:\art\legacy_empty.jpg",
+                    r#"{"prompt":"","metadata_source":"None"}"#,
+                    100
+                ],
+            )
+            .unwrap();
+        }
+
+        let rule = SmartFolderRule {
+            id: "all_art".to_string(),
+            name: "All Art".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![],
+        };
+
+        let items = query_smart_folder_image_files(&rule, &db_conn, Some("mtime"), false, None);
+        assert_eq!(items.len(), 2);
+
+        let valid = &items[0];
+        assert_eq!(valid.name, "magical_girl.png");
+        assert!(valid.meta_loaded, "メタデータおよび searchable 文字列が存在する行は meta_loaded = true になること");
+        assert_eq!(valid.prompt, "1girl, magical wand");
+        assert_eq!(valid.negative_prompt, "lowres, blurry");
+        assert_eq!(valid.source, "novelai diffusion v4.5");
+        assert!(valid.unified_search_text.contains("magical wand"), "unified_search_text にプロンプト語が含まれること");
+        assert!(valid.unified_search_text.contains("novelai diffusion v4.5"), "unified_search_text にモデル名が含まれること");
+
+        let legacy = &items[1];
+        assert_eq!(legacy.name, "legacy_empty.jpg");
+        assert!(!legacy.meta_loaded, "レガシー空キャッシュ行は meta_loaded = false のまま維持されること");
     }
 }

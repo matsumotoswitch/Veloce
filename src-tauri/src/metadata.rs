@@ -264,6 +264,35 @@ pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 1;
 /// JPEG メタデータ抽出仕様バージョン（COMセグメント・JSON直接検出対応）。過去キャッシュを自己修復させる。
 pub(crate) const JPEG_SCHEMA_VERSION: u64 = 1;
 
+/// ファイル先頭12バイトのマジックバイトから実際の画像コンテナ形式（"png" / "jpeg" / "webp"）を判定する。
+/// マジックバイトを読み取れない場合や既知のシグネチャに一致しない場合は、従来どおり拡張子（`lower_path`）で判定する。
+pub(crate) fn detect_image_container(file_path: &str, lower_path: &str) -> &'static str {
+    use std::io::Read;
+    if let Ok(mut f) = std::fs::File::open(file_path) {
+        let mut magic = [0u8; 12];
+        if let Ok(n) = f.read(&mut magic) {
+            if n >= 8 && &magic[0..8] == b"\x89PNG\r\n\x1a\n" {
+                return "png";
+            }
+            if n >= 2 && magic[0] == 0xFF && magic[1] == 0xD8 {
+                return "jpeg";
+            }
+            if n >= 12 && &magic[0..4] == b"RIFF" && &magic[8..12] == b"WEBP" {
+                return "webp";
+            }
+        }
+    }
+    if lower_path.ends_with(".png") {
+        "png"
+    } else if lower_path.ends_with(".webp") {
+        "webp"
+    } else if lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg") {
+        "jpeg"
+    } else {
+        ""
+    }
+}
+
 pub(crate) fn get_full_metadata_for_path_with_stat_inner(
     file_path: &str,
     mtime_millis: u64,
@@ -325,7 +354,21 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                             "PNG Chunks" | "Alpha Channel" | "WebP EXIF" | "JPEG EXIF" | "Audio Tags" | "None"
                         );
                         let lower_path = file_path.to_lowercase();
-                        let can_have_alpha_stealth = lower_path.ends_with(".png") || lower_path.ends_with(".webp");
+                        let (can_have_alpha_stealth, is_jpeg) = if cached_meta.prompt.is_empty() {
+                            match detect_image_container(file_path, &lower_path) {
+                                "png" | "webp" => (true, false),
+                                "jpeg" => (false, true),
+                                _ => (
+                                    lower_path.ends_with(".png") || lower_path.ends_with(".webp"),
+                                    lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg"),
+                                ),
+                            }
+                        } else {
+                            (
+                                lower_path.ends_with(".png") || lower_path.ends_with(".webp"),
+                                lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg"),
+                            )
+                        };
                         // 過去の解析でアルファチャンネルからの抽出に失敗し "None" かつプロンプト空でキャッシュされた場合、
                         // 最新のデコード仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
                         let needs_stealth_retry = cached_meta.metadata_source == "None"
@@ -334,7 +377,6 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                             && cached_meta.params.get("stealthSchema").and_then(|v| v.as_u64()) != Some(STEALTH_SCHEMA_VERSION);
                         // 過去の解析で JPEG のプロンプト（COMセグメント・JSON直接検出等）の抽出が空のままキャッシュされた場合、
                         // 最新の抽出仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
-                        let is_jpeg = lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg");
                         let needs_jpeg_retry = is_jpeg
                             && cached_meta.prompt.is_empty()
                             && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION);
@@ -364,7 +406,10 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
     }
 
     let lower_path = file_path.to_lowercase();
-    let is_png = lower_path.ends_with(".png");
+    let container = detect_image_container(file_path, &lower_path);
+    let is_png = container == "png";
+    let is_webp = container == "webp";
+    let is_jpeg = container == "jpeg";
     let mut png_color_type = 0u8;
     let mut detected_source = String::new();
     let (raw_description, mut raw_comment, raw_parameters, mut source, width, height): (String, String, String, String, u32, u32) = if is_png {
@@ -420,7 +465,14 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
 
         (desc, comment, params, src, w, h)
     } else {
-        let (mut w, mut h) = image::image_dimensions(file_path).unwrap_or((0, 0));
+        let (mut w, mut h) = image::image_dimensions(file_path)
+            .or_else(|_| {
+                image::ImageReader::open(file_path)
+                    .and_then(|r| r.with_guessed_format())
+                    .and_then(|r| r.into_dimensions().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                    .map_err(image::ImageError::IoError)
+            })
+            .unwrap_or((0, 0));
         if w == 0 && h == 0 && lower_path.ends_with(".mp4") {
             if let Some((vw, vh)) = parse_mp4_dimensions(file_path) {
                 w = vw;
@@ -428,7 +480,6 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
             }
         }
 
-        let is_webp = lower_path.ends_with(".webp");
         let exif_data = if is_webp {
             parse_webp_exif(file_path)
         } else {
@@ -486,7 +537,6 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
             }
         }
 
-        let is_jpeg = lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg");
         if is_jpeg && !comment.contains('{') && !desc.contains('{') {
             if let Ok(file) = std::fs::File::open(file_path) {
                 if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
@@ -494,13 +544,19 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                     let search_limit = std::cmp::min(buf.len(), 2 * 1024 * 1024);
                     let search_buf = &buf[..search_limit];
                     if let Some(pos) = search_buf.windows(9).position(|w| w == b"{\"prompt\"" || w == b"{\"v4_pro") {
-                        let candidate_bytes = &search_buf[pos..];
-                        let candidate_str = decode_metadata_string(candidate_bytes);
-                        if comment.is_empty() {
-                            comment = candidate_str;
-                        } else {
-                            comment.push('\n');
-                            comment.push_str(&candidate_str);
+                        let candidate_slice = &search_buf[pos..];
+                        let mut stream = serde_json::Deserializer::from_slice(candidate_slice)
+                            .into_iter::<serde_json::Value>();
+                        if let Some(Ok(_)) = stream.next() {
+                            let end_offset = stream.byte_offset();
+                            let json_bytes = &candidate_slice[..end_offset];
+                            let candidate_str = decode_metadata_string(json_bytes);
+                            if comment.is_empty() {
+                                comment = candidate_str;
+                            } else {
+                                comment.push('\n');
+                                comment.push_str(&candidate_str);
+                            }
                         }
                     }
                 }
@@ -526,7 +582,7 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
         let can_have_stealth = if is_png {
             png_color_type == 6 || png_color_type == 4
         } else {
-            lower_path.ends_with(".webp")
+            is_webp
         };
 
         if can_have_stealth {
@@ -821,14 +877,13 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
         }
     }
 
-    let is_png_or_webp = lower_path.ends_with(".png") || lower_path.ends_with(".webp");
+    let is_png_or_webp = is_png || is_webp;
     if is_png_or_webp && metadata_source == "None" && prompt.trim().is_empty() {
         if let serde_json::Value::Object(ref mut map) = params {
             map.insert("stealthSchema".to_string(), serde_json::json!(STEALTH_SCHEMA_VERSION));
         }
     }
 
-    let is_jpeg = lower_path.ends_with(".jpg") || lower_path.ends_with(".jpeg");
     if is_jpeg {
         if let serde_json::Value::Object(ref mut map) = params {
             map.insert("jpegSchema".to_string(), serde_json::json!(JPEG_SCHEMA_VERSION));
@@ -3294,7 +3349,8 @@ mod tests {
         assert_eq!(repaired_meta.source, "NovelAI Diffusion V5");
         assert_eq!(repaired_meta.params["jpegSchema"].as_u64(), Some(1));
 
-        // 4. マーカー長が壊れている等の異常セグメント配置でも、ファイル直接スキャンフォールバックによりプロンプトが抽出されること
+        // 4. マーカー長が壊れている等の異常セグメント配置かつ JSON の後ろに `{` を多数含む圧縮バイナリが続く JPEG でも、
+        //    from_slice の byte_offset により JSON 終端までのみが切り出され、後続バイナリや偽 JSON が混入しないこと
         let fallback_jpg_path = temp_dir.path().join("fallback_scan.jpg");
         let mut malformed_jpg_bytes = Vec::new();
         malformed_jpg_bytes.extend_from_slice(&[0xFF, 0xD8]); // SOI
@@ -3302,12 +3358,29 @@ mod tests {
         malformed_jpg_bytes.extend_from_slice(&[0xFF, 0xEE, 0x00, 0x04, 0x00, 0x00]);
         // 生の JSON をそのまま埋め込む
         malformed_jpg_bytes.extend_from_slice(json_bytes);
+        // JSON 終端直後に `{` を多数含むランダムバイナリおよび偽の JSON 断片を64KB分追加
+        for i in 0..4096usize {
+            malformed_jpg_bytes.extend_from_slice(b"\xFF\x00{\x80\x99{\"prompt\":\"CORRUPTED_BINARY_TAIL\"}");
+            malformed_jpg_bytes.push((i & 0xFF) as u8);
+        }
         malformed_jpg_bytes.extend_from_slice(&[0xFF, 0xD9]); // EOI
         std::fs::write(&fallback_jpg_path, malformed_jpg_bytes).unwrap();
 
         let (fallback_meta, _, _) = get_full_metadata_for_path(&fallback_jpg_path.to_string_lossy(), &pool);
-        assert!(fallback_meta.prompt.starts_with("nsfw,, black and white manga"), "直接スキャンフォールバックによりプロンプトが確実に抽出されること");
+        assert!(fallback_meta.prompt.starts_with("nsfw,, black and white manga"), "直接スキャンフォールバックにより先頭JSONのプロンプトが確実に抽出されること");
+        assert!(!fallback_meta.prompt.contains("CORRUPTED_BINARY_TAIL"), "JSON終端以降の後続バイナリ内の波括弧データが混入しないこと");
+        assert!(fallback_meta.params.get("rawParameters").is_none(), "非JSONバイナリが rawParameters としてぶら下がらないこと");
         assert_eq!(fallback_meta.source, "NovelAI Diffusion V5");
+
+        // 5. 実体が JPEG（FF D8 + COM セグメント）でありながら拡張子が .png で保存されたファイルでも、
+        //    先頭マジックバイト判定により parse_jpeg_exif が選択されメタデータが抽出できること
+        let misnamed_png_path = temp_dir.path().join("actually_jpeg_with_com.png");
+        std::fs::copy(&jpg_path, &misnamed_png_path).unwrap();
+        let (misnamed_meta, _, _) = get_full_metadata_for_path(&misnamed_png_path.to_string_lossy(), &pool);
+        assert!(misnamed_meta.prompt.starts_with("nsfw,, black and white manga"), "拡張子が .png でも実体が JPEG なら COM セグメントからプロンプトが抽出されること");
+        assert_eq!(misnamed_meta.source, "NovelAI Diffusion V5");
+        assert_eq!(misnamed_meta.metadata_source, "JPEG EXIF");
+        assert_eq!(misnamed_meta.params["jpegSchema"].as_u64(), Some(1));
     }
 
     /// プロンプトを持たない PNG / WebP 画像における stealthSchema マーカー付与と

@@ -182,7 +182,7 @@ pub struct SmartFolderRule {
 }
 
 /// スマートフォルダクエリの中間アイテム
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SmartFolderItem {
     pub path: String,
     pub size: u64,
@@ -192,6 +192,11 @@ pub struct SmartFolderItem {
     pub height: u32,
     pub metadata: Option<String>,
     pub has_thumbnail: bool,
+    pub hash_key: String,
+    pub searchable_prompt: String,
+    pub searchable_negative_prompt: String,
+    pub searchable_source: String,
+    pub has_metadata: bool,
 }
 
 /// キャッシュサイズ・統計情報

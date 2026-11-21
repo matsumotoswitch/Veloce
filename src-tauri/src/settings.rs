@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tauri::State;
+use tauri::Manager;
 use crate::state::AppState;
 use crate::utils::get_veloce_data_dir;
 
@@ -78,9 +78,8 @@ pub fn init_settings_db() -> Result<(r2d2::Pool<r2d2_sqlite::SqliteConnectionMan
 /// 2. localStorage あり & DBなし: 新規作成・localStorageの内容をDBへ一括保存して返却
 /// 3. localStorage なし & DBあり: DBの内容を全件取得して返却
 /// 4. localStorage あり & DBあり: DBの内容を全件取得して返却（DB優先）
-#[tauri::command]
-pub fn init_settings(
-    state: State<'_, AppState>,
+pub fn init_settings_inner(
+    state: &AppState,
     entries_from_localstorage: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, String> {
     let mut existed_guard = state.settings_db_existed.lock();
@@ -127,9 +126,21 @@ pub fn init_settings(
     Ok(result)
 }
 
-/// 単一設定値の取得
 #[tauri::command]
-pub fn get_setting(state: State<'_, AppState>, key: String) -> Result<Option<String>, String> {
+pub async fn init_settings(
+    app: tauri::AppHandle,
+    entries_from_localstorage: HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        init_settings_inner(&state, entries_from_localstorage)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 単一設定値の取得（同期内部ロジック）
+pub fn get_setting_inner(state: &AppState, key: String) -> Result<Option<String>, String> {
     let conn = state.settings_db_conn.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1").map_err(|e| e.to_string())?;
     let mut rows = stmt.query(rusqlite::params![key]).map_err(|e| e.to_string())?;
@@ -142,9 +153,19 @@ pub fn get_setting(state: State<'_, AppState>, key: String) -> Result<Option<Str
     }
 }
 
-/// 単一設定値の保存
+/// 単一設定値の取得
 #[tauri::command]
-pub fn set_setting(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+pub async fn get_setting(app: tauri::AppHandle, key: String) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        get_setting_inner(&state, key)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 単一設定値の保存（同期内部ロジック）
+pub fn set_setting_inner(state: &AppState, key: String, value: String) -> Result<(), String> {
     let conn = state.settings_db_conn.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
@@ -154,9 +175,19 @@ pub fn set_setting(state: State<'_, AppState>, key: String, value: String) -> Re
     Ok(())
 }
 
-/// 複数設定値の一括保存（トランザクション実行）
+/// 単一設定値の保存
 #[tauri::command]
-pub fn set_settings_batch(state: State<'_, AppState>, settings: HashMap<String, String>) -> Result<(), String> {
+pub async fn set_setting(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        set_setting_inner(&state, key, value)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 複数設定値の一括保存（同期内部ロジック・トランザクション実行）
+pub fn set_settings_batch_inner(state: &AppState, settings: HashMap<String, String>) -> Result<(), String> {
     if settings.is_empty() {
         return Ok(());
     }
@@ -177,18 +208,38 @@ pub fn set_settings_batch(state: State<'_, AppState>, settings: HashMap<String, 
     Ok(())
 }
 
-/// 設定項目の削除
+/// 複数設定値の一括保存（トランザクション実行）
 #[tauri::command]
-pub fn delete_setting(state: State<'_, AppState>, key: String) -> Result<(), String> {
+pub async fn set_settings_batch(app: tauri::AppHandle, settings: HashMap<String, String>) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        set_settings_batch_inner(&state, settings)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 設定項目の削除（同期内部ロジック）
+pub fn delete_setting_inner(state: &AppState, key: String) -> Result<(), String> {
     let conn = state.settings_db_conn.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM app_settings WHERE key = ?1", rusqlite::params![key])
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// 全設定値の取得
+/// 設定項目の削除
 #[tauri::command]
-pub fn get_all_settings(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
+pub async fn delete_setting(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        delete_setting_inner(&state, key)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 全設定値の取得（同期内部ロジック）
+pub fn get_all_settings_inner(state: &AppState) -> Result<HashMap<String, String>, String> {
     let conn = state.settings_db_conn.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare("SELECT key, value FROM app_settings").map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
@@ -201,6 +252,17 @@ pub fn get_all_settings(state: State<'_, AppState>) -> Result<HashMap<String, St
         result.insert(k, v);
     }
     Ok(result)
+}
+
+/// 全設定値の取得
+#[tauri::command]
+pub async fn get_all_settings(app: tauri::AppHandle) -> Result<HashMap<String, String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        get_all_settings_inner(&state)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -383,5 +445,34 @@ mod tests {
         conn.execute("DELETE FROM app_settings WHERE key = 'key2'", []).unwrap();
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM app_settings WHERE key = 'key2'", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_settings_inner_functions_with_app_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("veloce_settings_inner.db");
+        let pool = setup_test_db(&db_path);
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let state = AppState::new(pool.clone(), pool, false, tx, 0, "token".to_string());
+
+        let mut initial = HashMap::new();
+        initial.insert("theme".to_string(), "dark".to_string());
+        let migrated = init_settings_inner(&state, initial).unwrap();
+        assert_eq!(migrated.get("theme").map(|s| s.as_str()), Some("dark"));
+
+        set_setting_inner(&state, "zoom".to_string(), "150".to_string()).unwrap();
+        assert_eq!(get_setting_inner(&state, "zoom".to_string()).unwrap(), Some("150".to_string()));
+
+        let mut batch = HashMap::new();
+        batch.insert("k1".to_string(), "v1".to_string());
+        batch.insert("k2".to_string(), "v2".to_string());
+        set_settings_batch_inner(&state, batch).unwrap();
+
+        let all = get_all_settings_inner(&state).unwrap();
+        assert_eq!(all.get("k1").map(|s| s.as_str()), Some("v1"));
+        assert_eq!(all.get("k2").map(|s| s.as_str()), Some("v2"));
+
+        delete_setting_inner(&state, "k1".to_string()).unwrap();
+        assert_eq!(get_setting_inner(&state, "k1".to_string()).unwrap(), None);
     }
 }

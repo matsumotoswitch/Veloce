@@ -8,7 +8,9 @@ import {
   renameSelectedFile,
   rebuildSelectedCache,
   deleteSelectedFiles,
-  performUndo
+  performUndo,
+  syncFolderRenameInRendererState,
+  syncFolderDeleteInRendererState
 } from '../src/renderer/renderer-file-ops.js';
 
 describe('Renderer File Operations (renderer-file-ops.js)', () => {
@@ -262,6 +264,137 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
       expect(window.veloceAPI.trashFile).toHaveBeenCalledWith('C:\\target\\copy.png');
       expect(window.__TAURI__.fs.removeFile).not.toHaveBeenCalled();
       expect(scheduleRefresh).toHaveBeenCalled();
+    });
+
+    it('should update all open tabs, tab histories, and favorites on folder rename and undo without touching sibling folders', async () => {
+      uiManager.renderTabs = vi.fn();
+      appState.currentDirectory = 'C:\\test\\sub\\nested';
+      appState.favorites = [
+        { id: 'fav1', name: 'sub', path: 'C:\\test\\sub' },
+        { id: 'fav2', name: 'child', path: 'C:\\test\\sub\\child' },
+        { id: 'fav_sib', name: 'sub2', path: 'C:\\test\\sub2\\child' }
+      ];
+      appState.tabs = [
+        {
+          id: 1,
+          path: 'C:\\test\\sub\\nested',
+          name: 'nested',
+          history: ['C:\\test', 'C:\\test\\sub', 'C:\\test\\sub\\nested'],
+          historyIndex: 2
+        },
+        {
+          id: 2,
+          path: 'C:\\test\\sub',
+          name: 'sub',
+          history: ['C:\\test\\sub', 'C:\\test\\sub2\\other'],
+          historyIndex: 0
+        },
+        {
+          id: 3,
+          path: 'C:\\test\\sub2',
+          name: 'sub2',
+          history: ['C:\\test\\sub2'],
+          historyIndex: 0
+        }
+      ];
+      appState.activeTabIndex = 0;
+
+      window.veloceAPI.renameFolder.mockResolvedValueOnce({
+        success: true,
+        path: 'C:\\test\\sub_renamed'
+      });
+      uiManager.showPrompt.mockResolvedValueOnce('sub_renamed');
+      const refreshFileList = vi.fn();
+      const refreshTree = vi.fn();
+
+      // 1. 通常フォルダリネーム
+      await renameSelectedFolder({ refreshFileList, refreshTree });
+
+      expect(appState.currentDirectory).toBe('C:\\test\\sub_renamed\\nested');
+      expect(appState.tabs[0].path).toBe('C:\\test\\sub_renamed\\nested');
+      expect(appState.tabs[0].history).toEqual([
+        'C:\\test',
+        'C:\\test\\sub_renamed',
+        'C:\\test\\sub_renamed\\nested'
+      ]);
+      expect(appState.tabs[1].path).toBe('C:\\test\\sub_renamed');
+      expect(appState.tabs[1].name).toBe('sub_renamed');
+      expect(appState.tabs[1].history).toEqual([
+        'C:\\test\\sub_renamed',
+        'C:\\test\\sub2\\other'
+      ]);
+      // 兄弟フォルダ sub2 のタブは変更されないこと
+      expect(appState.tabs[2].path).toBe('C:\\test\\sub2');
+      expect(appState.tabs[2].history).toEqual(['C:\\test\\sub2']);
+
+      expect(appState.favorites[0].path).toBe('C:\\test\\sub_renamed');
+      expect(appState.favorites[0].name).toBe('sub_renamed');
+      expect(appState.favorites[1].path).toBe('C:\\test\\sub_renamed\\child');
+      expect(appState.favorites[2].path).toBe('C:\\test\\sub2\\child');
+      expect(refreshFileList).toHaveBeenCalledTimes(1);
+
+      // 2. Undo (Ctrl+Z) で元に戻した際にも全タブ・履歴・お気に入りが旧パスへ復帰すること
+      window.veloceAPI.renameFolder.mockResolvedValueOnce({
+        success: true,
+        path: 'C:\\test\\sub'
+      });
+      await performUndo({ refreshFileList, refreshTree });
+
+      expect(appState.currentDirectory).toBe('C:\\test\\sub\\nested');
+      expect(appState.tabs[0].path).toBe('C:\\test\\sub\\nested');
+      expect(appState.tabs[0].history).toEqual([
+        'C:\\test',
+        'C:\\test\\sub',
+        'C:\\test\\sub\\nested'
+      ]);
+      expect(appState.tabs[1].path).toBe('C:\\test\\sub');
+      expect(appState.tabs[1].name).toBe('sub');
+      expect(appState.favorites[0].path).toBe('C:\\test\\sub');
+      expect(appState.favorites[1].path).toBe('C:\\test\\sub\\child');
+      expect(appState.favorites[2].path).toBe('C:\\test\\sub2\\child');
+    });
+
+    it('should resolve parent directory accurately when deleting a folder with forward/mixed slashes', async () => {
+      uiManager.renderTabs = vi.fn();
+      document.body.innerHTML = `
+        <div id="dir-tree">
+          <ul>
+            <li>
+              <div class="tree-item selected" data-path="C:/test/mixed\\target_dir">
+                <span class="tree-label">target_dir</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+      `;
+      appState.currentDirectory = 'C:\\test\\mixed\\target_dir\\deep';
+      appState.tabs = [
+        {
+          id: 1,
+          path: 'C:\\test\\mixed\\target_dir\\deep',
+          name: 'deep',
+          history: ['C:\\test\\mixed\\target_dir\\deep'],
+          historyIndex: 0
+        },
+        {
+          id: 2,
+          path: 'C:/test/mixed/target_dir',
+          name: 'target_dir',
+          history: ['C:/test/mixed/target_dir'],
+          historyIndex: 0
+        }
+      ];
+
+      uiManager.showConfirm.mockResolvedValueOnce(true);
+      const refreshFileList = vi.fn();
+      const refreshTree = vi.fn();
+
+      await deleteSelectedFolder({ refreshFileList, refreshTree });
+
+      expect(appState.currentDirectory).toBe('C:\\test\\mixed');
+      expect(appState.tabs[0].path).toBe('C:\\test\\mixed');
+      expect(appState.tabs[1].path).toBe('C:\\test\\mixed');
+      expect(refreshFileList).toHaveBeenCalledTimes(1);
     });
   });
 });

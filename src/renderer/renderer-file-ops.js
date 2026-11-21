@@ -7,9 +7,11 @@
 
 import { appState, fileOpsState } from './renderer-state.js';
 import { uiManager } from './renderer-ui.js';
-import { validateFilename, isSameOrSubdirectory, replaceDirectoryPrefix } from '../common/path-utils.js';
+import { validateFilename, getParentDirectory, isSameOrSubdirectory, replaceDirectoryPrefix } from '../common/path-utils.js';
 import { resetThumbnailPreloader } from './renderer-thumbnails.js';
 import { setSetting } from '../common/settings-store.js';
+import { saveTabsState, getTabNameForPath } from './renderer-tabs.js';
+import { renderFavorites } from './renderer-bookmarks.js';
 
 export { fileOpsState };
 
@@ -96,6 +98,149 @@ export function syncFolderRatingsOnRename(oldFolderPath, newFolderPath) {
 }
 
 /**
+ * フォルダのリネーム（通常操作およびUndo）時に、appState.currentDirectory、
+ * 全タブ（path, name, history[] の各要素）、およびお気に入り（favorites）の配下パスを
+ * 境界意識置換（isSameOrSubdirectory + replaceDirectoryPrefix）で一括追随させ、
+ * 設定永続化とタブ・お気に入りUIの再描画まで同期する。
+ * @param {string} oldPath
+ * @param {string} newPath
+ * @returns {{ currentDirChanged: boolean, tabsChanged: boolean, favoritesChanged: boolean }}
+ */
+export function syncFolderRenameInRendererState(oldPath, newPath) {
+  const result = {
+    currentDirChanged: false,
+    tabsChanged: false,
+    favoritesChanged: false
+  };
+  if (!oldPath || !newPath || !appState) return result;
+
+  const oldBaseName = oldPath.split(/[/\\]/).filter(Boolean).pop() || '';
+  const newBaseName = newPath.split(/[/\\]/).filter(Boolean).pop() || '';
+
+  // 1. favorites の配下パス追随
+  if (Array.isArray(appState.favorites)) {
+    for (const fav of appState.favorites) {
+      if (fav && fav.path && isSameOrSubdirectory(fav.path, oldPath)) {
+        const nextFavPath = replaceDirectoryPrefix(fav.path, oldPath, newPath);
+        if (nextFavPath !== fav.path) {
+          const wasExactFolder = isSameOrSubdirectory(oldPath, fav.path);
+          fav.path = nextFavPath;
+          if (wasExactFolder && fav.name === oldBaseName && newBaseName) {
+            fav.name = newBaseName;
+          }
+          result.favoritesChanged = true;
+        }
+      }
+    }
+    if (result.favoritesChanged) {
+      setSetting('favorites', JSON.stringify(appState.favorites));
+      if (typeof renderFavorites === 'function') {
+        renderFavorites();
+      }
+    }
+  }
+
+  // 2. 全タブ（アクティブ・非アクティブ）の path / name / history 追随
+  if (Array.isArray(appState.tabs)) {
+    const favs = Array.isArray(appState.favorites) ? appState.favorites : [];
+    for (const tab of appState.tabs) {
+      if (!tab) continue;
+      if (tab.path && isSameOrSubdirectory(tab.path, oldPath)) {
+        tab.path = replaceDirectoryPrefix(tab.path, oldPath, newPath);
+        tab.name = getTabNameForPath(tab.path, favs);
+        result.tabsChanged = true;
+      } else if (result.favoritesChanged && tab.path) {
+        const updatedName = getTabNameForPath(tab.path, favs);
+        if (updatedName && updatedName !== tab.name) {
+          tab.name = updatedName;
+          result.tabsChanged = true;
+        }
+      }
+      if (Array.isArray(tab.history)) {
+        for (let i = 0; i < tab.history.length; i++) {
+          if (tab.history[i] && isSameOrSubdirectory(tab.history[i], oldPath)) {
+            tab.history[i] = replaceDirectoryPrefix(tab.history[i], oldPath, newPath);
+            result.tabsChanged = true;
+          }
+        }
+      }
+    }
+  }
+
+  // 3. currentDirectory の追随
+  if (appState.currentDirectory && isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
+    appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, oldPath, newPath);
+    setSetting('currentDirectory', appState.currentDirectory);
+    result.currentDirChanged = true;
+  }
+
+  // 4. タブ描画と状態の保存
+  if (result.tabsChanged || result.currentDirChanged || result.favoritesChanged) {
+    if (uiManager && typeof uiManager.renderTabs === 'function') {
+      uiManager.renderTabs();
+    }
+    if (Array.isArray(appState.tabs)) {
+      saveTabsState(appState, uiManager);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * フォルダ削除時に getParentDirectory(deletedFolderPath) を用いて親フォルダを算出し、
+ * 削除フォルダ自身またはその配下を指している currentDirectory および各タブを親フォルダへ遷移させる。
+ * @param {string} deletedFolderPath
+ * @returns {{ parentDir: string|null, currentDirChanged: boolean, tabsChanged: boolean }}
+ */
+export function syncFolderDeleteInRendererState(deletedFolderPath) {
+  const parentDir = getParentDirectory(deletedFolderPath);
+  const result = {
+    parentDir,
+    currentDirChanged: false,
+    tabsChanged: false
+  };
+  if (!deletedFolderPath || !parentDir || !appState) return result;
+
+  if (Array.isArray(appState.tabs)) {
+    const favs = Array.isArray(appState.favorites) ? appState.favorites : [];
+    for (const tab of appState.tabs) {
+      if (!tab) continue;
+      if (tab.path && isSameOrSubdirectory(tab.path, deletedFolderPath)) {
+        tab.path = parentDir;
+        tab.name = getTabNameForPath(parentDir, favs);
+        result.tabsChanged = true;
+      }
+      if (Array.isArray(tab.history)) {
+        for (let i = 0; i < tab.history.length; i++) {
+          if (tab.history[i] && isSameOrSubdirectory(tab.history[i], deletedFolderPath)) {
+            tab.history[i] = parentDir;
+            result.tabsChanged = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (appState.currentDirectory && isSameOrSubdirectory(appState.currentDirectory, deletedFolderPath)) {
+    appState.currentDirectory = parentDir;
+    setSetting('currentDirectory', appState.currentDirectory);
+    result.currentDirChanged = true;
+  }
+
+  if (result.tabsChanged || result.currentDirChanged) {
+    if (uiManager && typeof uiManager.renderTabs === 'function') {
+      uiManager.renderTabs();
+    }
+    if (Array.isArray(appState.tabs)) {
+      saveTabsState(appState, uiManager);
+    }
+  }
+
+  return result;
+}
+
+/**
  * 選択中のフォルダの名前を変更します。
  * @param {Object} [callbacks=fileOpsCallbacks]
  */
@@ -125,10 +270,9 @@ export async function renameSelectedFolder(callbacks = fileOpsCallbacks) {
       fileOpsState.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
       syncFolderRatingsOnRename(oldPath, result.path);
       callbacks.showNotification?.(`フォルダ名を「${newName}」に変更しました`, 'success');
-      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
-        appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, oldPath, result.path);
-        setSetting('currentDirectory', appState.currentDirectory);
-        if (callbacks.refreshFileList) await callbacks.refreshFileList();
+      const { currentDirChanged } = syncFolderRenameInRendererState(oldPath, result.path);
+      if (currentDirChanged && callbacks.refreshFileList) {
+        await callbacks.refreshFileList();
       }
       if (callbacks.refreshTree) await callbacks.refreshTree();
     } else {
@@ -159,15 +303,9 @@ export async function deleteSelectedFolder(callbacks = fileOpsCallbacks) {
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
       callbacks.showNotification?.(`フォルダ「${folderName}」をゴミ箱に移動しました`, 'warning');
-      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
-        const sep = '\\';
-        const parts = oldPath.split(sep);
-        parts.pop();
-        let parentDir = parts.join(sep);
-        if (!parentDir.includes(sep)) parentDir += sep;
-        appState.currentDirectory = parentDir;
-        setSetting('currentDirectory', appState.currentDirectory);
-        if (callbacks.refreshFileList) await callbacks.refreshFileList();
+      const { currentDirChanged } = syncFolderDeleteInRendererState(oldPath);
+      if (currentDirChanged && callbacks.refreshFileList) {
+        await callbacks.refreshFileList();
       }
       if (callbacks.refreshTree) await callbacks.refreshTree();
     } else {
@@ -401,12 +539,12 @@ export async function performUndo(callbacks = fileOpsCallbacks) {
       const result = await window.veloceAPI.renameFolder(action.newPath, oldName);
       if (result && result.success) {
         undoSucceeded = true;
-        syncFolderRatingsOnRename(action.newPath, result.path || action.oldPath);
+        const restoredFolderPath = result.path || action.oldPath;
+        syncFolderRatingsOnRename(action.newPath, restoredFolderPath);
         uiManager.showToast('フォルダ名の変更を元に戻しました', 3000, 'undo', 'success');
-        if (isSameOrSubdirectory(appState.currentDirectory, action.newPath)) {
-          appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, action.newPath, action.oldPath);
-          setSetting('currentDirectory', appState.currentDirectory);
-          if (callbacks.refreshFileList) await callbacks.refreshFileList();
+        const { currentDirChanged } = syncFolderRenameInRendererState(action.newPath, restoredFolderPath);
+        if (currentDirChanged && callbacks.refreshFileList) {
+          await callbacks.refreshFileList();
         }
         if (callbacks.refreshTree) await callbacks.refreshTree();
       } else {

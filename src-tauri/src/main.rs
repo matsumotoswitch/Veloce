@@ -532,6 +532,62 @@ pub(crate) fn filter_smart_folder_head_missing(
     (arcs, head_valid, head_missing, all_paths_for_bg_purge)
 }
 
+/// SQLite キャッシュテーブルを一括照会し、`files` 内の各 `ImageFile` にサムネイル有無・幅・高さ・検索用プロンプト等を復元する。
+/// `metadata_source = 'None'` かつ `searchable_prompt = ''` のレガシー空キャッシュ行は `meta_loaded = false` のまま維持し、
+/// 後続のバックグラウンド解析タスクで自己修復（`needs_jpeg_retry` / `needs_stealth_retry`）が実行されるようにする。
+pub(crate) fn apply_cached_metadata_to_files(
+    files: &mut [std::sync::Arc<ImageFile>],
+    hash_to_idx: &std::collections::HashMap<String, usize>,
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) {
+    if let Ok(conn) = db_conn.get() {
+        let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
+        for chunk in hash_keys.chunks(900) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let query = format!(
+                "SELECT hash_key, (thumbnail IS NOT NULL), (metadata IS NOT NULL), width, height, searchable_prompt, searchable_negative_prompt, searchable_source, IFNULL(metadata_source, '') FROM cache WHERE hash_key IN ({})",
+                placeholders
+            );
+            if let Ok(mut stmt) = conn.prepare(&query) {
+                let params: Vec<&dyn rusqlite::ToSql> =
+                    chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                    let hash_key: String = row.get(0)?;
+                    let has_thumbnail: bool = row.get(1)?;
+                    let has_metadata: bool = row.get(2)?;
+                    let width: u32 = row.get::<_, Option<u32>>(3).unwrap_or_default().unwrap_or(0);
+                    let height: u32 = row.get::<_, Option<u32>>(4).unwrap_or_default().unwrap_or(0);
+                    let prompt: String = row.get::<_, Option<String>>(5).unwrap_or_default().unwrap_or_default();
+                    let negative_prompt: String = row.get::<_, Option<String>>(6).unwrap_or_default().unwrap_or_default();
+                    let source: String = row.get::<_, Option<String>>(7).unwrap_or_default().unwrap_or_default();
+                    let metadata_source: String = row.get::<_, Option<String>>(8).unwrap_or_default().unwrap_or_default();
+                    Ok((hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source, metadata_source))
+                }) {
+                    for row in rows.flatten() {
+                        let (hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source, metadata_source) = row;
+                        if let Some(&idx) = hash_to_idx.get(&hash_key) {
+                            if let Some(f_arc) = files.get_mut(idx) {
+                                let f = std::sync::Arc::make_mut(f_arc);
+                                f.has_thumbnail_cache = has_thumbnail;
+                                if has_metadata {
+                                    f.width = width;
+                                    f.height = height;
+                                    f.prompt = prompt.clone();
+                                    f.negative_prompt = negative_prompt.clone();
+                                    f.source = source.clone();
+                                    f.unified_search_text = format!("{} {} {} {}", f.name.to_lowercase(), prompt, negative_prompt, source);
+                                    let is_legacy_empty = metadata_source == "None" && prompt.is_empty();
+                                    f.meta_loaded = !is_legacy_empty;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// 指定されたディレクトリスキャンまたはスマートフォルダ検索をバックグラウンドスレッドで開始する
 /// 走査結果はソートおよびサムネイルキャッシュ一括照会を経て、イベント `dir-load-progress` / `dir-load-complete` でフロントエンドへストリーミング通知される
 #[tauri::command]
@@ -958,50 +1014,7 @@ fn load_directory(
                     }
                 }
 
-                if let Ok(conn) = db_conn_clone.get() {
-                    let hash_keys: Vec<String> = hash_to_idx.keys().cloned().collect();
-                    for chunk in hash_keys.chunks(900) {
-                        let placeholders = vec!["?"; chunk.len()].join(",");
-                        let query = format!(
-                            "SELECT hash_key, (thumbnail IS NOT NULL), (metadata IS NOT NULL), width, height, searchable_prompt, searchable_negative_prompt, searchable_source FROM cache WHERE hash_key IN ({})",
-                            placeholders
-                        );
-                        if let Ok(mut stmt) = conn.prepare(&query) {
-                            let params: Vec<&dyn rusqlite::ToSql> =
-                                chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-                            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-                                let hash_key: String = row.get(0)?;
-                                let has_thumbnail: bool = row.get(1)?;
-                                let has_metadata: bool = row.get(2)?;
-                                let width: u32 = row.get::<_, Option<u32>>(3).unwrap_or_default().unwrap_or(0);
-                                let height: u32 = row.get::<_, Option<u32>>(4).unwrap_or_default().unwrap_or(0);
-                                let prompt: String = row.get::<_, Option<String>>(5).unwrap_or_default().unwrap_or_default();
-                                let negative_prompt: String = row.get::<_, Option<String>>(6).unwrap_or_default().unwrap_or_default();
-                                let source: String = row.get::<_, Option<String>>(7).unwrap_or_default().unwrap_or_default();
-                                Ok((hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source))
-                            }) {
-                                for row in rows.flatten() {
-                                    let (hash_key, has_thumbnail, has_metadata, width, height, prompt, negative_prompt, source) = row;
-                                    if let Some(&idx) = hash_to_idx.get(&hash_key) {
-                                        if let Some(f_arc) = files.get_mut(idx) {
-                                            let f = std::sync::Arc::make_mut(f_arc);
-                                            f.has_thumbnail_cache = has_thumbnail;
-                                            if has_metadata {
-                                                f.width = width;
-                                                f.height = height;
-                                                f.prompt = prompt.clone();
-                                                f.negative_prompt = negative_prompt.clone();
-                                                f.source = source.clone();
-                                                f.unified_search_text = format!("{} {} {} {}", f.name.to_lowercase(), prompt, negative_prompt, source);
-                                                f.meta_loaded = true;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                apply_cached_metadata_to_files(&mut files, &hash_to_idx, &db_conn_clone);
             }
 
             println!("[Veloce: PERF] load_directory for {} completed in {}ms (total files: {})", path_for_spawn, t_load_start.elapsed().as_millis(), files.len());
@@ -1336,14 +1349,26 @@ pub fn sort_files_by_natural_name(files: &mut [std::sync::Arc<ImageFile>], asc: 
 
 
 /// Rust側でソート・フィルタリングを実行し、最新のpathsをViewerにも同期する
-
-#[tauri::command]
-fn sync_ratings(
-    state: tauri::State<'_, AppState>,
+pub(crate) fn sync_ratings_inner(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
     ratings: std::collections::HashMap<String, u8>,
 ) -> usize {
     *state.ratings.write() = ratings;
-    apply_filters_and_sort(None, &state)
+    apply_filters_and_sort(app, state)
+}
+
+#[tauri::command]
+async fn sync_ratings(
+    app: tauri::AppHandle,
+    ratings: std::collections::HashMap<String, u8>,
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        sync_ratings_inner(Some(&app), &state, ratings)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 pub(crate) fn get_all_ratings_inner(state: &AppState) -> std::collections::HashMap<String, u8> {
@@ -1386,9 +1411,8 @@ async fn get_all_ratings(
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn migrate_ratings(
-    state: tauri::State<'_, AppState>,
+pub(crate) fn migrate_ratings_inner(
+    state: &AppState,
     ratings: std::collections::HashMap<String, u8>,
 ) -> Result<(), String> {
     if let Ok(mut conn) = state.db_conn.get() {
@@ -1408,6 +1432,19 @@ fn migrate_ratings(
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn migrate_ratings(
+    app: tauri::AppHandle,
+    ratings: std::collections::HashMap<String, u8>,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        migrate_ratings_inner(&state, ratings)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// ファイルのレーティングを更新してデータベースおよびメモリ上の状態に反映する。
@@ -2185,6 +2222,7 @@ async fn trash_file(state: tauri::State<'_, AppState>, file_path: String) -> Res
     
     if result {
         let clean_path = normalize_unc_path(&file_path_clone).replace('/', "\\");
+        crate::audio::invalidate_audio_cover_cache(&file_path_clone);
         if let Ok(conn) = state.db_conn.get() {
             let _ = conn.execute(
                 "DELETE FROM ratings WHERE path = ?1 OR path = ?2",
@@ -2256,6 +2294,7 @@ fn purge_trashed_files_from_db_and_state(state: &AppState, succeeded: &[String])
         let clean_path = normalize_unc_path(p).replace('/', "\\");
         ratings.remove(p);
         ratings.remove(&clean_path);
+        crate::audio::invalidate_audio_cover_cache(p);
     }
 }
 
@@ -2286,6 +2325,7 @@ async fn trash_files_batch(app: tauri::AppHandle, paths: Vec<String>) -> Result<
 /// フォルダ削除成功時に、SQLite の `ratings` / `cache` テーブルおよびメモリ上の `state.ratings` から
 /// 対象フォルダ配下のエントリのみをワイルドカードエスケープ付きで安全に削除する
 fn purge_trashed_folder_from_db_and_state(state: &AppState, folder_path: &str) {
+    crate::audio::invalidate_audio_cover_cache_prefix(folder_path);
     let old_dir_prefix = format!("{}\\", folder_path);
     let like_query = format!("{}%", escape_sql_like(&old_dir_prefix));
     let clean_path = folder_path.replace("\\\\?\\", "");
@@ -2318,10 +2358,9 @@ fn purge_trashed_folder_from_db_and_state(state: &AppState, folder_path: &str) {
 }
 
 #[tauri::command]
-async fn trash_folder(state: tauri::State<'_, AppState>, folder_path: String) -> Result<FolderOperationResult, String> {
-    let folder_path_clone = folder_path.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        match trash::delete(&folder_path) {
+async fn trash_folder(app: tauri::AppHandle, folder_path: String) -> Result<FolderOperationResult, String> {
+    Ok(tokio::task::spawn_blocking(move || {
+        let result = match trash::delete(&folder_path) {
             Ok(_) => FolderOperationResult {
                 success: true,
                 path: None,
@@ -2332,20 +2371,19 @@ async fn trash_folder(state: tauri::State<'_, AppState>, folder_path: String) ->
                 path: None,
                 error: Some(e.to_string()),
             },
+        };
+        if result.success {
+            let state = app.state::<AppState>();
+            purge_trashed_folder_from_db_and_state(&state, &folder_path);
         }
+        result
     })
     .await
     .unwrap_or_else(|e| FolderOperationResult {
         success: false,
         path: None,
         error: Some(e.to_string()),
-    });
-    
-    if result.success {
-        purge_trashed_folder_from_db_and_state(&state, &folder_path_clone);
-    }
-    
-    Ok(result)
+    }))
 }
 
 #[tauri::command]
@@ -2380,6 +2418,8 @@ async fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
 ///    新 hash_key を算出してレコードを更新。
 /// 3. メモリ上の `state.ratings` マップから旧キーを削除し、新キーへ登録。
 pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) {
+    crate::audio::invalidate_audio_cover_cache(old_path);
+    crate::audio::invalidate_audio_cover_cache(new_path);
     let old_clean = normalize_unc_path(old_path).into_owned();
     let new_clean = normalize_unc_path(new_path).into_owned();
 
@@ -2425,6 +2465,81 @@ pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) 
     }
 }
 
+/// 複数ファイルの移動またはリネームに伴い、SQLite データベース内のキャッシュ・レーティング情報および
+/// メモリ上のレーティングマップを単一トランザクション（`conn.transaction()` + `prepare_cached`）で一括同期する。
+/// ファイルシステムの `mtime` 解決はトランザクション開始前に完了させ、トランザクション内では SQL 操作のみを行う。
+pub fn sync_paths_rename_batch_in_db(state: &AppState, pairs: &[(String, String)]) {
+    if pairs.is_empty() {
+        return;
+    }
+
+    // 1. トランザクション開始前に正規化パスと実ファイルの最新 mtime を解決
+    let mut prepared_pairs: Vec<(&str, String, &str, String, u64)> = Vec::with_capacity(pairs.len());
+    for (old_path, new_path) in pairs {
+        crate::audio::invalidate_audio_cover_cache(old_path);
+        crate::audio::invalidate_audio_cover_cache(new_path);
+        let old_clean = normalize_unc_path(old_path).into_owned();
+        let new_clean = normalize_unc_path(new_path).into_owned();
+        let real_mtime = crate::thumbnail::resolve_and_sync_file_mtime(state, new_path).unwrap_or(0);
+        prepared_pairs.push((old_path.as_str(), old_clean, new_path.as_str(), new_clean, real_mtime));
+    }
+
+    // 2. 単一トランザクションで ratings と cache を一括更新
+    if let Ok(mut conn) = state.db_conn.get() {
+        if let Ok(tx) = conn.transaction() {
+            {
+                let mut stmt_update_rating = tx
+                    .prepare_cached("UPDATE ratings SET path = ?1 WHERE path COLLATE NOCASE IN (?2, ?3)")
+                    .ok();
+                let mut stmt_select_cache = tx
+                    .prepare_cached("SELECT mtime, hash_key FROM cache WHERE path COLLATE NOCASE IN (?1, ?2)")
+                    .ok();
+                let mut stmt_update_cache = tx
+                    .prepare_cached("UPDATE OR REPLACE cache SET path = ?1, hash_key = ?2, mtime = ?3 WHERE hash_key = ?4")
+                    .ok();
+
+                for (old_path, ref old_clean, _new_path, ref new_clean, real_mtime) in &prepared_pairs {
+                    if let Some(ref mut stmt) = stmt_update_rating {
+                        let _ = stmt.execute(rusqlite::params![new_clean, old_path, old_clean]);
+                    }
+                    let mut cached_info: Option<(u64, String)> = None;
+                    if let Some(ref mut stmt) = stmt_select_cache {
+                        if let Ok(mut rows) = stmt.query(rusqlite::params![old_path, old_clean]) {
+                            if let Ok(Some(row)) = rows.next() {
+                                let db_mtime: u64 = row.get(0).unwrap_or(0);
+                                let old_hash_key: String = row.get(1).unwrap_or_default();
+                                cached_info = Some((db_mtime, old_hash_key));
+                            }
+                        }
+                    }
+                    if let Some((db_mtime, old_hash_key)) = cached_info {
+                        let mtime = if *real_mtime > 0 { *real_mtime } else { db_mtime };
+                        let new_hash_key = crate::utils::hash_path_mtime_hex(new_clean, mtime);
+                        if let Some(ref mut stmt) = stmt_update_cache {
+                            let _ = stmt.execute(rusqlite::params![new_clean, &new_hash_key, mtime, &old_hash_key]);
+                        }
+                    }
+                }
+            }
+            let _ = tx.commit();
+        }
+    }
+
+    // 3. メモリ上のレーティングキャッシュを一括同期
+    {
+        let mut lock = state.ratings.write();
+        for (old_path, ref old_clean, new_path, ref new_clean, _) in &prepared_pairs {
+            let rating = lock.remove(*old_path).or_else(|| lock.remove(old_clean));
+            if let Some(r) = rating {
+                lock.insert(new_clean.clone(), r);
+                if *new_path != new_clean.as_str() {
+                    lock.insert((*new_path).to_string(), r);
+                }
+            }
+        }
+    }
+}
+
 fn get_normalized_parent_dir(p: &str) -> String {
     let path = std::path::Path::new(p);
     let parent = path.parent().unwrap_or(std::path::Path::new(""));
@@ -2442,6 +2557,15 @@ fn normalize_dir_string(d: &str) -> String {
 /// 該当エントリを新パス・新ファイル名・新拡張子・再計算された hash_key にインプレース更新し、
 /// O(1) 逆引きインデックス群（`path_to_all_idx`, `path_to_filtered_idx`, `path_to_mtime`）を移行する。
 pub fn sync_file_rename_in_state(state: &AppState, old_path: &str, new_path: &str) {
+    sync_file_rename_in_state_with_app(None, state, old_path, new_path);
+}
+
+pub fn sync_file_rename_in_state_with_app(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    old_path: &str,
+    new_path: &str,
+) {
     let old_clean = normalize_unc_path(old_path).into_owned();
     let new_clean = normalize_unc_path(new_path).into_owned();
 
@@ -2495,20 +2619,11 @@ pub fn sync_file_rename_in_state(state: &AppState, old_path: &str, new_path: &st
     };
 
     if found_in_all {
-        // all_files のインデックスと mtime を再構築
+        // all_files のインデックスと mtime を再構築（path_to_mtime の更新も rebuild_all_indices に一元化）
         state.rebuild_all_indices(&state.all_files.read());
 
         // ソート順やフィルタ（検索文字列等）の整合性を維持するため apply_filters_and_sort を同期実行
-        apply_filters_and_sort(None, state);
-
-        // path_to_mtime の更新
-        let mut mtime_map = state.path_to_mtime.write();
-        mtime_map.remove(old_path);
-        mtime_map.remove(&old_clean);
-        mtime_map.insert(new_path.to_string(), mtime);
-        if new_clean != new_path {
-            mtime_map.insert(new_clean.clone(), mtime);
-        }
+        apply_filters_and_sort(app, state);
 
         let mut ratings_map = state.ratings.write();
         let rating = ratings_map.remove(old_path).or_else(|| ratings_map.remove(&old_clean));
@@ -2528,6 +2643,15 @@ pub fn sync_file_rename_in_state(state: &AppState, old_path: &str, new_path: &st
 /// - 現在のディレクトリへ入る移動（Undo 含む）: ディスクと DB からエントリを構築して state に追加
 /// - 同一ディレクトリ内移動: リネームとしてインプレース更新
 pub fn sync_file_move_in_state(state: &AppState, old_path: &str, new_path: &str) {
+    sync_file_move_in_state_with_app(None, state, old_path, new_path);
+}
+
+pub fn sync_file_move_in_state_with_app(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    old_path: &str,
+    new_path: &str,
+) {
     let current_dir = state.current_dir.read().clone();
     let current_norm = normalize_dir_string(&current_dir);
     if current_norm.is_empty() {
@@ -2542,7 +2666,7 @@ pub fn sync_file_move_in_state(state: &AppState, old_path: &str, new_path: &str)
 
     if old_in_current && new_in_current {
         // 同一フォルダ内での移動（実質的なリネーム）
-        sync_file_rename_in_state(state, old_path, new_path);
+        sync_file_rename_in_state_with_app(app, state, old_path, new_path);
     } else if old_in_current && !new_in_current {
         // 現在のディレクトリから外へ移動: state から除去
         let old_clean = normalize_unc_path(old_path).into_owned();
@@ -2551,11 +2675,7 @@ pub fn sync_file_move_in_state(state: &AppState, old_path: &str, new_path: &str)
             all_files.retain(|f| f.path != old_path && f.path != old_clean);
         }
         state.rebuild_all_indices(&state.all_files.read());
-        apply_filters_and_sort(None, state);
-
-        let mut mtime_map = state.path_to_mtime.write();
-        mtime_map.remove(old_path);
-        mtime_map.remove(&old_clean);
+        apply_filters_and_sort(app, state);
 
         let mut ratings_map = state.ratings.write();
         ratings_map.remove(old_path);
@@ -2563,85 +2683,7 @@ pub fn sync_file_move_in_state(state: &AppState, old_path: &str, new_path: &str)
     } else if !old_in_current && new_in_current {
         // 現在のディレクトリへ外から移動（Undo 復帰含む）: state へ追加
         let new_clean = normalize_unc_path(new_path).into_owned();
-        let path_obj = std::path::Path::new(new_path);
-        let name = path_obj.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let ext = path_obj.extension().map(|e| format!(".{}", e.to_string_lossy().to_ascii_lowercase())).unwrap_or_default();
-
-        let meta = std::fs::metadata(new_path).ok();
-        let (size, mtime, ctime) = if let Some(m) = meta {
-            let s = m.len();
-            let mt = m.modified().ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let ct = m.created().ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(mt);
-            (s, mt, ct)
-        } else {
-            (0, 0, 0)
-        };
-
-        let hash_key = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
-
-        let mut width = 0;
-        let mut height = 0;
-        let mut prompt = String::new();
-        let mut negative_prompt = String::new();
-        let mut source = String::new();
-        let mut meta_loaded = false;
-        let mut has_thumbnail = false;
-
-        if let Ok(conn) = state.db_conn.get() {
-            if let Ok(mut stmt) = conn.prepare("SELECT width, height, metadata, (thumbnail IS NOT NULL) FROM cache WHERE hash_key = ? OR path COLLATE NOCASE = ?") {
-                if let Ok(mut rows) = stmt.query(rusqlite::params![&hash_key, &new_clean]) {
-                    if let Ok(Some(row)) = rows.next() {
-                        width = row.get(0).unwrap_or(0);
-                        height = row.get(1).unwrap_or(0);
-                        if let Ok(Some(meta_str)) = row.get::<_, Option<String>>(2) {
-                            if !meta_str.is_empty() {
-                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&meta_str) {
-                                    prompt = parsed.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                    negative_prompt = parsed.get("negativePrompt").or_else(|| parsed.get("negative_prompt")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                    source = parsed.get("source").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                    meta_loaded = true;
-                                }
-                            }
-                        }
-                        has_thumbnail = row.get(3).unwrap_or(false);
-                    }
-                }
-            }
-        }
-
-        let unified_search_text = format!(
-            "{} {} {} {} {}",
-            name,
-            prompt,
-            negative_prompt,
-            source,
-            ""
-        ).to_lowercase();
-
-        let new_file = std::sync::Arc::new(ImageFile {
-            name,
-            ext: ext.into(),
-            path: new_path.to_string(),
-            size,
-            mtime,
-            ctime,
-            has_thumbnail_cache: has_thumbnail,
-            width,
-            height,
-            prompt,
-            negative_prompt,
-            source,
-            meta_loaded,
-            search_text: String::new(),
-            unified_search_text,
-            hash_key: hash_key.into(),
-        });
+        let (new_file, _mtime) = build_moved_in_image_file(state, new_path);
 
         {
             let mut all_files = state.all_files.write();
@@ -2653,22 +2695,24 @@ pub fn sync_file_move_in_state(state: &AppState, old_path: &str, new_path: &str)
         }
 
         state.rebuild_all_indices(&state.all_files.read());
-        apply_filters_and_sort(None, state);
-
-        let mut mtime_map = state.path_to_mtime.write();
-        mtime_map.insert(new_path.to_string(), mtime);
-        if new_clean != new_path {
-            mtime_map.insert(new_clean, mtime);
-        }
+        apply_filters_and_sort(app, state);
     }
 }
 
 /// ファイル移動（ドラッグ＆ドロップ、Undo操作等）に伴う SQLite キャッシュおよびレーティング同期用 Tauri コマンド
 #[tauri::command]
-async fn sync_file_move(state: tauri::State<'_, AppState>, old_path: String, new_path: String) -> Result<(), String> {
-    sync_path_rename_in_db(&state, &old_path, &new_path);
-    sync_file_move_in_state(&state, &old_path, &new_path);
-    Ok(())
+async fn sync_file_move(
+    app: tauri::AppHandle,
+    old_path: String,
+    new_path: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        sync_path_rename_in_db(&state, &old_path, &new_path);
+        sync_file_move_in_state_with_app(Some(&app), &state, &old_path, &new_path);
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// 複数ファイルの一括移動同期リクエストの1ペア
@@ -2767,6 +2811,14 @@ fn build_moved_in_image_file(state: &AppState, new_path: &str) -> (std::sync::Ar
 /// 離脱・進入・同一フォルダ内移動をまとめて `all_files` へ反映し、
 /// `rebuild_all_indices` および `apply_filters_and_sort` は最後に 1 回だけ実行する。
 pub fn sync_files_move_batch_in_state(state: &AppState, pairs: &[(String, String)]) {
+    sync_files_move_batch_in_state_with_app(None, state, pairs);
+}
+
+pub fn sync_files_move_batch_in_state_with_app(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    pairs: &[(String, String)],
+) {
     if pairs.is_empty() {
         return;
     }
@@ -2863,7 +2915,7 @@ pub fn sync_files_move_batch_in_state(state: &AppState, pairs: &[(String, String
 
     // 4. インデックス再構築とフィルタ・ソート再適用は最後に 1 回だけ実行
     state.rebuild_all_indices(&state.all_files.read());
-    apply_filters_and_sort(None, state);
+    apply_filters_and_sort(app, state);
 
     // 5. ratings の旧キー除去・リネーム移行（sync_path_rename_in_db 非経由の直接呼び出しにも対応）
     if !leaving_set.is_empty() || !rename_payloads.is_empty() {
@@ -2885,21 +2937,23 @@ pub fn sync_files_move_batch_in_state(state: &AppState, pairs: &[(String, String
 /// 複数ファイルの移動（ドラッグ＆ドロップ等）に伴う DB および state の一括同期用 Tauri コマンド
 #[tauri::command]
 async fn sync_files_move_batch(
-    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     pairs: Vec<FileMovePair>,
 ) -> Result<(), String> {
     if pairs.is_empty() {
         return Ok(());
     }
-    for pair in &pairs {
-        sync_path_rename_in_db(&state, &pair.old_path, &pair.new_path);
-    }
-    let pair_tuples: Vec<(String, String)> = pairs
-        .into_iter()
-        .map(|p| (p.old_path, p.new_path))
-        .collect();
-    sync_files_move_batch_in_state(&state, &pair_tuples);
-    Ok(())
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let pair_tuples: Vec<(String, String)> = pairs
+            .into_iter()
+            .map(|p| (p.old_path, p.new_path))
+            .collect();
+        sync_paths_rename_batch_in_db(&state, &pair_tuples);
+        sync_files_move_batch_in_state_with_app(Some(&app), &state, &pair_tuples);
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// ファイル・フォルダのリネーム時に指定された新しいエントリ名を検証する。
@@ -2984,6 +3038,7 @@ pub fn replace_folder_prefix(path: &str, old_folder: &str, new_folder: &str) -> 
 /// フォルダリネームに伴うメモリ上のレーティングと SQLite（`ratings` および `cache` テーブル）の一括同期。
 /// 書き込みロック内での DB アクセスを排除し、単一コネクション・トランザクションで原子的に更新する。
 pub fn sync_folder_rename_in_db_and_state(state: &AppState, old_path_exact: &str, new_path_exact: &str) {
+    crate::audio::invalidate_audio_cover_cache_prefix(old_path_exact);
     let old_prefix_backslash = format!("{}\\", old_path_exact.trim_end_matches(&['\\', '/'][..]));
     let mut keys_to_remove = Vec::new();
     let mut rating_updates = Vec::new();
@@ -3056,6 +3111,15 @@ pub fn sync_folder_rename_in_db_and_state(state: &AppState, old_path_exact: &str
 /// 旧フォルダ配下のエントリパスを新プレフィックスに置換し、再計算された hash_key を反映する。
 /// また、`path_to_all_idx`, `path_to_filtered_idx`, `path_to_mtime`, `current_dir` を同期する。
 pub fn sync_folder_rename_in_state(state: &AppState, old_path_exact: &str, new_path_exact: &str) {
+    sync_folder_rename_in_state_with_app(None, state, old_path_exact, new_path_exact);
+}
+
+pub fn sync_folder_rename_in_state_with_app(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    old_path_exact: &str,
+    new_path_exact: &str,
+) {
     let mut any_updated = false;
     {
         let mut all_files = state.all_files.write();
@@ -3073,22 +3137,11 @@ pub fn sync_folder_rename_in_state(state: &AppState, old_path_exact: &str, new_p
     }
 
     if any_updated {
-        // all_files のインデックスを再構築
+        // all_files のインデックスと path_to_mtime を一括再構築（rebuild_all_indices に一元化）
         state.rebuild_all_indices(&state.all_files.read());
 
         // filtered_files の同期とソート順・フィルタ整合性の再適用
-        apply_filters_and_sort(None, state);
-
-        // path_to_mtime の再構築
-        let mut mtime_map = state.path_to_mtime.write();
-        mtime_map.clear();
-        for file in state.all_files.read().iter() {
-            let clean = normalize_unc_path(&file.path).into_owned();
-            mtime_map.insert(file.path.clone(), file.mtime);
-            if clean != file.path {
-                mtime_map.insert(clean, file.mtime);
-            }
-        }
+        apply_filters_and_sort(app, state);
     }
 
     // current_dir が旧フォルダ自身またはその配下であれば同期置換
@@ -3116,13 +3169,11 @@ pub fn sync_folder_rename_in_state(state: &AppState, old_path_exact: &str, new_p
 #[tauri::command]
 async fn rename_file(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     old_path: String,
     new_name: String,
 ) -> Result<String, String> {
     validate_new_entry_name(&new_name)?;
-    let old_path_clone = old_path.clone();
-    let new_path_str = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&old_path);
         let parent = path.parent().unwrap_or(std::path::Path::new(""));
 
@@ -3144,44 +3195,44 @@ async fn rename_file(
             }
         }
 
-        match std::fs::rename(&old_path, &new_path) {
-            Ok(_) => Ok(new_path.to_string_lossy().to_string()),
-            Err(e) => Err(e.to_string()),
-        }
+        let new_path_str = match std::fs::rename(&old_path, &new_path) {
+            Ok(_) => new_path.to_string_lossy().to_string(),
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let state = app.state::<AppState>();
+
+        // DBとメモリのレーティング・キャッシュのパスを更新
+        sync_path_rename_in_db(&state, &old_path, &new_path_str);
+
+        // インメモリのファイル一覧と各インデックスを新パスに同期（独立ビューアーリスト更新も含む）
+        sync_file_rename_in_state_with_app(Some(&app), &state, &old_path, &new_path_str);
+
+        // 独立ビューアーへリネーム完了を通知（表示中の画像パス追随用）
+        let _ = app.emit_all(
+            "viewer-file-renamed",
+            serde_json::json!({
+                "old_path": &old_path,
+                "new_path": &new_path_str,
+                "oldPath": &old_path,
+                "newPath": &new_path_str,
+            }),
+        );
+
+        Ok(new_path_str)
     })
     .await
-    .unwrap_or_else(|e| Err(e.to_string()))?;
-
-    // DBとメモリのレーティング・キャッシュのパスを更新
-    sync_path_rename_in_db(&state, &old_path_clone, &new_path_str);
-
-    // インメモリのファイル一覧と各インデックスを新パスに同期
-    sync_file_rename_in_state(&state, &old_path_clone, &new_path_str);
-
-    // 独立ビューアーへリネーム完了を通知（表示中の画像パス追随用）
-    let _ = app.emit_all(
-        "viewer-file-renamed",
-        serde_json::json!({
-            "old_path": &old_path_clone,
-            "new_path": &new_path_str,
-            "oldPath": &old_path_clone,
-            "newPath": &new_path_str,
-        }),
-    );
-
-    Ok(new_path_str)
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
 async fn rename_folder(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     old_path: String,
     new_name: String,
 ) -> Result<String, String> {
     validate_new_entry_name(&new_name)?;
-    let old_path_clone = old_path.clone();
-    let new_path_str = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(&old_path);
         let parent = path.parent().unwrap_or(std::path::Path::new(""));
         let new_path = parent.join(new_name);
@@ -3194,51 +3245,56 @@ async fn rename_folder(
             }
         }
 
-        match std::fs::rename(&old_path, &new_path) {
-            Ok(_) => Ok(new_path.to_string_lossy().to_string()),
-            Err(e) => Err(e.to_string()),
-        }
+        let new_path_str = match std::fs::rename(&old_path, &new_path) {
+            Ok(_) => new_path.to_string_lossy().to_string(),
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let state = app.state::<AppState>();
+        sync_folder_rename_in_db_and_state(&state, &old_path, &new_path_str);
+        sync_folder_rename_in_state_with_app(Some(&app), &state, &old_path, &new_path_str);
+
+        // 独立ビューアーへフォルダリネーム完了を通知（配下パス・表示中パス追随用）
+        let _ = app.emit_all(
+            "viewer-folder-renamed",
+            serde_json::json!({
+                "old_path": &old_path,
+                "new_path": &new_path_str,
+                "oldPath": &old_path,
+                "newPath": &new_path_str,
+            }),
+        );
+
+        Ok(new_path_str)
     })
     .await
-    .unwrap_or_else(|e| Err(e.to_string()))?;
-
-    sync_folder_rename_in_db_and_state(&state, &old_path_clone, &new_path_str);
-    sync_folder_rename_in_state(&state, &old_path_clone, &new_path_str);
-
-    // 独立ビューアーへフォルダリネーム完了を通知（配下パス・表示中パス追随用）
-    let _ = app.emit_all(
-        "viewer-folder-renamed",
-        serde_json::json!({
-            "old_path": &old_path_clone,
-            "new_path": &new_path_str,
-            "oldPath": &old_path_clone,
-            "newPath": &new_path_str,
-        }),
-    );
-
-    Ok(new_path_str)
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
-fn open_cache_folder() -> Result<(), String> {
-    if let Some(path) = get_veloce_data_dir() {
-        if !path.exists() {
-            let _ = std::fs::create_dir_all(&path);
+async fn open_cache_folder() -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if let Some(path) = get_veloce_data_dir() {
+            if !path.exists() {
+                let _ = std::fs::create_dir_all(&path);
+            }
+
+            #[cfg(target_os = "windows")]
+            let _ = std::process::Command::new("explorer").arg(&path).spawn();
+
+            #[cfg(target_os = "macos")]
+            let _ = std::process::Command::new("open").arg(&path).spawn();
+
+            #[cfg(target_os = "linux")]
+            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+
+            Ok(())
+        } else {
+            Err("Could not resolve local data directory".to_string())
         }
-
-        #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("explorer").arg(&path).spawn();
-
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(&path).spawn();
-
-        #[cfg(target_os = "linux")]
-        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
-
-        Ok(())
-    } else {
-        Err("Could not resolve local data directory".to_string())
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn perform_audit_cache<F>(conn: &mut rusqlite::Connection, mut on_progress: F) -> Result<(usize, usize), String>
@@ -5875,9 +5931,9 @@ mod viewer_tests {
 
         // 1. スマートフォルダの分類ロジック検証 (is_file による実在判定)
         let smart_items = vec![
-            SmartFolderItem { path: real_file_str.clone(), size: 4, mtime: 100, ctime: 100, width: 100, height: 100, metadata: None, has_thumbnail: true },
-            SmartFolderItem { path: missing_file_1.clone(), size: 0, mtime: 100, ctime: 100, width: 200, height: 200, metadata: None, has_thumbnail: true },
-            SmartFolderItem { path: missing_file_2.clone(), size: 0, mtime: 100, ctime: 100, width: 300, height: 300, metadata: None, has_thumbnail: true },
+            SmartFolderItem { path: real_file_str.clone(), size: 4, mtime: 100, ctime: 100, width: 100, height: 100, metadata: None, has_thumbnail: true, ..Default::default() },
+            SmartFolderItem { path: missing_file_1.clone(), size: 0, mtime: 100, ctime: 100, width: 200, height: 200, metadata: None, has_thumbnail: true, ..Default::default() },
+            SmartFolderItem { path: missing_file_2.clone(), size: 0, mtime: 100, ctime: 100, width: 300, height: 300, metadata: None, has_thumbnail: true, ..Default::default() },
         ];
 
         use rayon::prelude::*;
@@ -9374,5 +9430,308 @@ mod viewer_tests {
         assert_eq!(ratings.get("C:\\src_dir\\a.png"), None);
         assert_eq!(ratings.get("C:\\src_dir\\b.png"), None);
         assert_eq!(ratings.get("C:\\src_dir\\c.png"), Some(&3));
+    }
+
+    /// Phase 1-1: sync_folder_rename_in_state と notify_files_batch_inner を別スレッドで繰り返し同時実行しても
+    /// デッドロックせず完了し、path_to_mtime が最終状態と一致すること
+    #[test]
+    fn test_sync_folder_rename_and_notify_files_batch_no_deadlock() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let state = Arc::new(create_test_app_state(r"C:\test_dir\album"));
+        let make_file = |folder: &str, idx: usize, mtime: u64| -> ImageFile {
+            let p = format!(r"{}\img_{}.png", folder, idx);
+            ImageFile {
+                name: format!("img_{}.png", idx),
+                ext: ".png".into(),
+                path: p.clone(),
+                size: 1024,
+                mtime,
+                ctime: mtime,
+                has_thumbnail_cache: true,
+                width: 100,
+                height: 100,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: format!("img_{}.png", idx),
+                hash_key: crate::utils::hash_path_mtime_hex(&p, mtime).into(),
+            }
+        };
+
+        {
+            let mut all = state.all_files.write();
+            for i in 0..20 {
+                all.push(Arc::new(make_file(r"C:\test_dir\album", i, 1000 + i as u64)));
+            }
+        }
+        state.rebuild_all_indices(&state.all_files.read());
+
+        let state_renamer = Arc::clone(&state);
+        let t_renamer = thread::spawn(move || {
+            for iter in 0..80 {
+                if iter % 2 == 0 {
+                    sync_folder_rename_in_state(
+                        &state_renamer,
+                        r"C:\test_dir\album",
+                        r"C:\test_dir\album_renamed",
+                    );
+                } else {
+                    sync_folder_rename_in_state(
+                        &state_renamer,
+                        r"C:\test_dir\album_renamed",
+                        r"C:\test_dir\album",
+                    );
+                }
+            }
+        });
+
+        let state_watcher = Arc::clone(&state);
+        let t_watcher = thread::spawn(move || {
+            for iter in 0..80 {
+                // ウォッチャースレッドは別パスのファイル更新を同時並行で流し、ロック競合（all_files / path_to_mtime）を発生させる
+                let changed = vec![make_file(r"C:\test_dir\incoming", iter % 5, 5000 + iter as u64)];
+                crate::watcher::notify_files_batch_inner(None, &state_watcher, changed, vec![]);
+            }
+        });
+
+        t_renamer.join().expect("folder rename thread panicked or deadlocked");
+        t_watcher.join().expect("watcher thread panicked or deadlocked");
+
+        // 最後に1回フォルダリネームを実行し、最終状態の全ファイルについて path_to_mtime が完全一致することを検証
+        sync_folder_rename_in_state(
+            &state,
+            r"C:\test_dir\album",
+            r"C:\test_dir\album_final",
+        );
+
+        let all_files = state.all_files.read();
+        assert_eq!(all_files.len(), 25);
+        for f in all_files.iter() {
+            assert_eq!(state.get_mtime(&f.path), Some(f.mtime));
+        }
+    }
+
+    /// Phase 1-3: sync_paths_rename_batch_in_db で複数件の ratings / cache が単一トランザクションで移行され、
+    /// 途中ペアがキャッシュ未登録でも全体が不整合にならないこと
+    #[test]
+    fn test_sync_paths_rename_batch_in_db_atomic_migration() {
+        let state = create_test_app_state(r"C:\src");
+        let old1 = r"C:\src\img1.png";
+        let new1 = r"C:\dst\img1.png";
+        let old2 = r"C:\src\missing_in_cache.png";
+        let new2 = r"C:\dst\missing_in_cache.png";
+        let old3 = r"C:\src\img3.png";
+        let new3 = r"C:\dst\img3.png";
+
+        let mtime1 = 1_700_000_001_000u64;
+        let mtime3 = 1_700_000_003_000u64;
+        let old_hash1 = crate::utils::hash_path_mtime_hex(old1, mtime1);
+        let old_hash3 = crate::utils::hash_path_mtime_hex(old3, mtime3);
+
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, 5)", rusqlite::params![old1]).unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, 4)", rusqlite::params![old2]).unwrap();
+            conn.execute("INSERT INTO ratings (path, rating) VALUES (?1, 3)", rusqlite::params![old3]).unwrap();
+
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, mtime, width, height) VALUES (?1, ?2, ?3, 512, 512)",
+                rusqlite::params![&old_hash1, old1, mtime1],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, mtime, width, height) VALUES (?1, ?2, ?3, 1024, 768)",
+                rusqlite::params![&old_hash3, old3, mtime3],
+            ).unwrap();
+        }
+        {
+            let mut r = state.ratings.write();
+            r.insert(old1.to_string(), 5);
+            r.insert(old2.to_string(), 4);
+            r.insert(old3.to_string(), 3);
+        }
+
+        let pairs = vec![
+            (old1.to_string(), new1.to_string()),
+            (old2.to_string(), new2.to_string()),
+            (old3.to_string(), new3.to_string()),
+        ];
+        sync_paths_rename_batch_in_db(&state, &pairs);
+
+        // 1. インメモリ ratings が全件移行されていること
+        {
+            let r = state.ratings.read();
+            assert_eq!(r.get(old1), None);
+            assert_eq!(r.get(old2), None);
+            assert_eq!(r.get(old3), None);
+            assert_eq!(r.get(new1), Some(&5));
+            assert_eq!(r.get(new2), Some(&4));
+            assert_eq!(r.get(new3), Some(&3));
+        }
+
+        // 2. DB ratings と cache が全件移行されていること
+        {
+            let conn = state.db_conn.get().unwrap();
+            let r1: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", [new1], |row| row.get(0)).unwrap();
+            let r2: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", [new2], |row| row.get(0)).unwrap();
+            let r3: u8 = conn.query_row("SELECT rating FROM ratings WHERE path = ?1", [new3], |row| row.get(0)).unwrap();
+            assert_eq!((r1, r2, r3), (5, 4, 3));
+
+            let new_hash1 = crate::utils::hash_path_mtime_hex(new1, mtime1);
+            let new_hash3 = crate::utils::hash_path_mtime_hex(new3, mtime3);
+            let p1: String = conn.query_row("SELECT path FROM cache WHERE hash_key = ?1", [&new_hash1], |row| row.get(0)).unwrap();
+            let p3: String = conn.query_row("SELECT path FROM cache WHERE hash_key = ?1", [&new_hash3], |row| row.get(0)).unwrap();
+            assert_eq!(p1, new1);
+            assert_eq!(p3, new3);
+        }
+    }
+
+    /// Phase 2-2: metadata_source='None'・プロンプト空のレガシーキャッシュ行がある状態で
+    /// load_directory 相当のキャッシュ照合（apply_cached_metadata_to_files）を行うと meta_loaded=false になり、
+    /// バックグラウンド解析後にプロンプトが復元されること
+    #[test]
+    fn test_load_directory_legacy_empty_cache_self_heals_in_background() {
+        use std::sync::Arc;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let jpg_path = temp_dir.path().join("legacy_cached_novelai.jpg");
+        let json_text = r#"{"prompt": "1girl, solo, silver hair", "uc": "lowres", "model_name": "NovelAI Diffusion V5", "steps": 28, "seed": 42}"#;
+        let json_bytes = json_text.as_bytes();
+        let mut jpg_bytes = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        jpg_bytes.extend_from_slice(b"JFIF\0\x01\x01\x00\x00\x01\x00\x01\x00\x00");
+        jpg_bytes.extend_from_slice(&[0xFF, 0xFE]);
+        jpg_bytes.extend_from_slice(&((json_bytes.len() + 2) as u16).to_be_bytes());
+        jpg_bytes.extend_from_slice(json_bytes);
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD9]);
+        std::fs::write(&jpg_path, &jpg_bytes).unwrap();
+
+        let path_str = jpg_path.to_string_lossy().to_string();
+        let meta_stat = std::fs::metadata(&jpg_path).unwrap();
+        let mtime = meta_stat.modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let size = meta_stat.len();
+        let hash_key = crate::utils::hash_path_mtime_hex(&path_str, mtime);
+
+        let state = create_test_app_state(temp_dir.path().to_str().unwrap());
+
+        // DB に旧バージョンの空キャッシュ（metadata_source = 'None', searchable_prompt = '', jpegSchema 無し）を登録
+        {
+            let conn = state.db_conn.get().unwrap();
+            let legacy_json = serde_json::json!({
+                "path": &path_str,
+                "width": 1024,
+                "height": 1024,
+                "prompt": "",
+                "negative_prompt": "",
+                "params": {},
+                "source": "",
+                "metadata_source": "None"
+            }).to_string();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, size, mtime, ctime, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source)
+                 VALUES (?1, ?2, ?3, 1024, 1024, ?4, ?5, ?6, ?6, '', '', '', 'None')",
+                rusqlite::params![&hash_key, vec![1u8, 2, 3], legacy_json, &path_str, size, mtime],
+            ).unwrap();
+        }
+
+        let mut files = vec![Arc::new(ImageFile {
+            name: "legacy_cached_novelai.jpg".to_string(),
+            ext: ".jpg".into(),
+            path: path_str.clone(),
+            size,
+            mtime,
+            ctime: mtime,
+            has_thumbnail_cache: false,
+            width: 0,
+            height: 0,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: "legacy_cached_novelai.jpg".to_string(),
+            hash_key: hash_key.clone().into(),
+        })];
+        let mut hash_to_idx = std::collections::HashMap::new();
+        hash_to_idx.insert(hash_key.clone(), 0);
+
+        // 1. load_directory のキャッシュ照合を実行
+        apply_cached_metadata_to_files(&mut files, &hash_to_idx, &state.db_conn);
+
+        // サムネイル・寸法は復元されるが、metadata_source == 'None' かつ prompt 空のため meta_loaded は false のまま維持されること
+        assert!(files[0].has_thumbnail_cache);
+        assert_eq!(files[0].width, 1024);
+        assert_eq!(files[0].height, 1024);
+        assert!(!files[0].meta_loaded, "レガシー空キャッシュ行は meta_loaded = false のままとなりバックグラウンド解析対象になること");
+
+        // 2. バックグラウンド解析タスク（!f.meta_loaded のファイルを解析して state 更新）を実行
+        *state.all_files.write() = files.clone();
+        state.rebuild_all_indices(&files);
+        let (repaired_meta, _, _) = crate::metadata::get_full_metadata_for_path_with_stat(
+            &path_str, mtime, mtime, size, &state.db_conn,
+        );
+        update_metadata_in_state_inner(&state, std::slice::from_ref(&repaired_meta));
+
+        let all_after = state.all_files.read();
+        assert!(all_after[0].meta_loaded);
+        assert_eq!(all_after[0].prompt, "1girl, solo, silver hair");
+        assert!(all_after[0].unified_search_text.contains("silver hair"));
+    }
+
+    /// Phase 2-3 & Phase 3-1: スマートフォルダのファイル一覧でプロンプト・モデル名の検索語が
+    /// apply_filters_and_sort で絞り込め、かつ移動後のリストで should_update_viewer_list が正しく更新判定を行うこと
+    #[test]
+    fn test_smart_folder_in_memory_search_and_viewer_list_update_after_move() {
+        let state = create_test_app_state("smart://all_art");
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, metadata, searchable_prompt, searchable_negative_prompt, searchable_source, mtime, width, height)
+                 VALUES ('h1', 'C:\\art\\alice.png', '{\"prompt\":\"alice, wonderland\"}', 'alice, wonderland', 'lowres', 'novelai diffusion v5', 200, 1024, 1024)",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, metadata, searchable_prompt, searchable_negative_prompt, searchable_source, mtime, width, height)
+                 VALUES ('h2', 'C:\\art\\bob.png', '{\"prompt\":\"bob, cyber\"}', 'bob, cyber', 'blurry', 'stable diffusion xl', 100, 1024, 1024)",
+                [],
+            ).unwrap();
+        }
+
+        let rule = crate::models::SmartFolderRule {
+            id: "all_art".to_string(),
+            name: "All Art".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![],
+        };
+        let files = crate::smart_folder::query_smart_folder_image_files(&rule, &state.db_conn, Some("mtime"), false, None);
+        assert_eq!(files.len(), 2);
+
+        *state.all_files.write() = files.clone();
+        state.rebuild_all_indices(&files);
+
+        // 1. スマートフォルダ表示中に検索クエリ（プロンプトキーワード＋モデル名）で絞り込めること
+        *state.search_query.write() = "wonderland, v5".to_string();
+        let count = apply_filters_and_sort(None, &state);
+        assert_eq!(count, 1);
+        assert_eq!(state.filtered_files.read()[0].path, r"C:\art\alice.png");
+
+        // 2. 通常フォルダ表示中、ファイル移動後に should_update_viewer_list が該当ビューアーの更新を許可すること
+        *state.current_dir.write() = r"C:\art".to_string();
+        *state.search_query.write() = String::new();
+        sync_file_move_in_state(&state, r"C:\art\bob.png", r"C:\other\bob.png");
+        let new_paths = state.image_paths.read().clone();
+        assert_eq!(new_paths.as_ref(), &vec![r"C:\art\alice.png".to_string()]);
+
+        let viewer_list = vec![r"C:\art\alice.png".to_string(), r"C:\art\bob.png".to_string()];
+        let should_update = should_update_viewer_list(
+            false,
+            new_paths.is_empty(),
+            None,
+            &viewer_list,
+            Some(r"C:\art"),
+        );
+        assert!(should_update, "ファイル退去後の新リストが当該フォルダのビューアーへ配信対象と判定されること");
     }
 }

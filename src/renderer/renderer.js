@@ -94,7 +94,9 @@ import {
   rebuildSelectedCache,
   deleteSelectedFiles,
   performUndo,
-  syncFolderRatingsOnRename
+  syncFolderRatingsOnRename,
+  syncFolderRenameInRendererState,
+  syncFolderDeleteInRendererState
 } from './renderer-file-ops.js';
 import {
   initFolderTree,
@@ -765,9 +767,8 @@ const menuRenameFolder = createMenuItem('フォルダ名を変更...', UIManager
       appState.undoStack.push({ type: 'RENAME_FOLDER', oldPath, newPath: result.path });
       syncFolderRatingsOnRename(oldPath, result.path);
       showNotification(`フォルダ名を「${newName}」に変更しました`, 'success');
-      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
-        appState.currentDirectory = replaceDirectoryPrefix(appState.currentDirectory, oldPath, result.path);
-        setSetting('currentDirectory', appState.currentDirectory);
+      const { currentDirChanged } = syncFolderRenameInRendererState(oldPath, result.path);
+      if (currentDirChanged) {
         refreshFileList(false);
       }
       await refreshTree();
@@ -785,14 +786,8 @@ const menuDeleteFolder = createMenuItem('フォルダを削除', UIManager.ICONS
     const result = await window.veloceAPI.trashFolder(oldPath);
     if (result && result.success) {
       showNotification(`フォルダ「${contextMenu.targetFolder.name}」をゴミ箱に移動しました`, 'warning');
-      if (isSameOrSubdirectory(appState.currentDirectory, oldPath)) {
-        const sep = '\\';
-        const parts = oldPath.split(sep);
-        parts.pop();
-        let parentDir = parts.join(sep);
-        if (!parentDir.includes(sep)) parentDir += sep;
-        appState.currentDirectory = parentDir;
-        setSetting('currentDirectory', appState.currentDirectory);
+      const { currentDirChanged } = syncFolderDeleteInRendererState(oldPath);
+      if (currentDirChanged) {
         await refreshFileList();
       }
       await refreshTree();

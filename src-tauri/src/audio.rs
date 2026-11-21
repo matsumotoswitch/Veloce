@@ -225,6 +225,70 @@ impl AudioCoverCache {
         self.order.clear();
         self.total_bytes = 0;
     }
+
+    /// 指定された単一パス（大小文字・区切り文字・UNCプレフィックス正規化後）に一致する全エントリを無効化する
+    pub fn invalidate_path(&mut self, path: &str) -> usize {
+        let target = crate::utils::normalize_unc_path(path)
+            .replace('/', "\\")
+            .to_lowercase();
+        if target.is_empty() {
+            return 0;
+        }
+        let keys_to_remove: Vec<AudioCoverKey> = self
+            .entries
+            .keys()
+            .filter(|k| {
+                crate::utils::normalize_unc_path(&k.path)
+                    .replace('/', "\\")
+                    .to_lowercase()
+                    == target
+            })
+            .cloned()
+            .collect();
+        let count = keys_to_remove.len();
+        for key in keys_to_remove {
+            if let Some(removed) = self.entries.remove(&key) {
+                self.total_bytes = self.total_bytes.saturating_sub(removed.len());
+            }
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                self.order.remove(pos);
+            }
+        }
+        count
+    }
+
+    /// 指定されたフォルダパス自身またはその配下にある全エントリを境界意識で無効化する（兄弟フォルダは保護）
+    pub fn invalidate_prefix(&mut self, folder_path: &str) -> usize {
+        let prefix_base = crate::utils::normalize_unc_path(folder_path)
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase();
+        if prefix_base.is_empty() {
+            return 0;
+        }
+        let prefix_with_sep = format!("{}\\", prefix_base);
+        let keys_to_remove: Vec<AudioCoverKey> = self
+            .entries
+            .keys()
+            .filter(|k| {
+                let norm = crate::utils::normalize_unc_path(&k.path)
+                    .replace('/', "\\")
+                    .to_lowercase();
+                norm == prefix_base || norm.starts_with(&prefix_with_sep)
+            })
+            .cloned()
+            .collect();
+        let count = keys_to_remove.len();
+        for key in keys_to_remove {
+            if let Some(removed) = self.entries.remove(&key) {
+                self.total_bytes = self.total_bytes.saturating_sub(removed.len());
+            }
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                self.order.remove(pos);
+            }
+        }
+        count
+    }
 }
 
 pub static AUDIO_COVER_CACHE: LazyLock<parking_lot::Mutex<AudioCoverCache>> = LazyLock::new(|| {
@@ -233,6 +297,19 @@ pub static AUDIO_COVER_CACHE: LazyLock<parking_lot::Mutex<AudioCoverCache>> = La
         DEFAULT_AUDIO_COVER_CACHE_MAX_BYTES,
     ))
 });
+
+/// 指定された音声ファイルパスのカバー画像キャッシュを無効化する
+pub fn invalidate_audio_cover_cache(path: &str) -> usize {
+    if !is_audio_path(path) {
+        return 0;
+    }
+    AUDIO_COVER_CACHE.lock().invalidate_path(path)
+}
+
+/// 指定されたフォルダ配下のすべてのカバー画像キャッシュを無効化する
+pub fn invalidate_audio_cover_cache_prefix(folder_path: &str) -> usize {
+    AUDIO_COVER_CACHE.lock().invalidate_prefix(folder_path)
+}
 
 /// キャッシュ付きで埋め込みカバー画像を高速抽出する（HTTP 配信・ビューアー向け）。
 /// (パス, mtime, ファイルサイズ) をキーとしてインメモリ LRU キャッシュに保持し、
@@ -962,5 +1039,60 @@ mod tests {
         // 2. カバー無し: None であり、キャッシュされない
         let no_cover1 = extract_audio_cover_cached(&tagless_str);
         assert!(no_cover1.is_none());
+    }
+
+    #[test]
+    fn test_audio_cover_cache_invalidation_single_and_prefix() {
+        let mut cache = AudioCoverCache::new(10, 1024);
+        let k1 = AudioCoverKey {
+            path: r"C:\Music\Album\track1.mp3".to_string(),
+            mtime: 100,
+            file_size: 50,
+        };
+        let k2 = AudioCoverKey {
+            path: r"C:\Music\Album\Sub\track2.mp3".to_string(),
+            mtime: 200,
+            file_size: 60,
+        };
+        let k3_sibling = AudioCoverKey {
+            path: r"C:\Music\Album2\track3.mp3".to_string(),
+            mtime: 300,
+            file_size: 70,
+        };
+        let k4_other = AudioCoverKey {
+            path: r"C:\Other\song.mp3".to_string(),
+            mtime: 400,
+            file_size: 80,
+        };
+
+        cache.insert(k1.clone(), vec![1u8; 10]);
+        cache.insert(k2.clone(), vec![2u8; 20]);
+        cache.insert(k3_sibling.clone(), vec![3u8; 30]);
+        cache.insert(k4_other.clone(), vec![4u8; 40]);
+        assert_eq!(cache.len(), 4);
+        assert_eq!(cache.total_bytes(), 100);
+
+        // 1. 単一パス無効化（スラッシュ・大小文字違いでも対象エントリのみ削除）
+        let removed_single = cache.invalidate_path("c:/music/album/track1.mp3");
+        assert_eq!(removed_single, 1);
+        assert!(cache.get(&k1).is_none());
+        assert!(cache.get(&k2).is_some());
+        assert!(cache.get(&k3_sibling).is_some());
+        assert!(cache.get(&k4_other).is_some());
+        assert_eq!(cache.total_bytes(), 90);
+
+        // k1 を再挿入してフォルダプレフィックス無効化をテスト
+        cache.insert(k1.clone(), vec![1u8; 10]);
+        assert_eq!(cache.len(), 4);
+
+        // 2. フォルダプレフィックス無効化（Album 配下の k1, k2 のみ消え、兄弟 Album2 の k3_sibling と k4_other は残ること）
+        let removed_prefix = cache.invalidate_prefix(r"C:\Music\Album");
+        assert_eq!(removed_prefix, 2);
+        assert!(cache.get(&k1).is_none());
+        assert!(cache.get(&k2).is_none());
+        assert!(cache.get(&k3_sibling).is_some(), "兄弟フォルダ Album2 のエントリは消えないこと");
+        assert!(cache.get(&k4_other).is_some(), "無関係フォルダのエントリは消えないこと");
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.total_bytes(), 70);
     }
 }

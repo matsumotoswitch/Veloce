@@ -141,8 +141,15 @@ export function extractMetadataFields(file, meta = {}) {
     return parseComfyUIPromptFormat(file, meta, p);
   }
 
+  const filePathOrName = (file && (file.path || file.name)) || (meta && meta.path) || '';
+  const isAudioMeta = Boolean(
+    (meta && (meta.metadataSource === 'Audio Tags' || meta.metadata_source === 'Audio Tags')) ||
+    (file && file.metadataSource === 'Audio Tags') ||
+    (typeof filePathOrName === 'string' && filePathOrName.toLowerCase().endsWith('.mp3'))
+  );
+
   // --- A1111 / Forge 解析 ---
-  let a1111Candidate = p.rawParameters || p.Description || p.prompt || file.prompt || meta.prompt;
+  let a1111Candidate = isAudioMeta ? null : (p.rawParameters || p.Description || p.prompt || file.prompt || meta.prompt);
   if (typeof a1111Candidate === 'string') {
     // EXIFのUTF-16LE文字列がUTF-8としてパースされた際に混入するNULL文字（\0）を除去し、先頭の識別子（UNICODEなど）を消す
     a1111Candidate = a1111Candidate.replace(/\0/g, '').replace(/^(?:[^<A-Za-z0-9]*UNICODE[^<A-Za-z0-9]*)?/i, '').trim();
@@ -154,7 +161,7 @@ export function extractMetadataFields(file, meta = {}) {
   const ap = (p && typeof p.actual_prompts === 'object') ? p.actual_prompts :
              ((p && typeof p.actualPrompts === 'object') ? p.actualPrompts : null);
 
-  const currentPrompt = meta.prompt || file.prompt || '';
+  const currentPrompt = meta.prompt || (!isAudioMeta && file.prompt) || '';
   let adoptedPrompt = null;
   const rawAdopted = p.adoptedPrompt || p.adopted_prompt ||
     (ap && typeof ap.prompt === 'string' ? ap.prompt : (ap && ap.prompt && typeof ap.prompt.base_caption === 'string' ? ap.prompt.base_caption : null)) ||
@@ -168,7 +175,7 @@ export function extractMetadataFields(file, meta = {}) {
     }
   }
 
-  const currentNegativePrompt = meta.negativePrompt || file.negativePrompt || '';
+  const currentNegativePrompt = meta.negativePrompt || (!isAudioMeta && file.negativePrompt) || '';
   let adoptedNegativePrompt = null;
   const rawAdoptedUc = p.adoptedNegativePrompt || p.adopted_negative_prompt ||
     (ap && typeof ap.negative_prompt === 'string' ? ap.negative_prompt : (ap && ap.negative_prompt && typeof ap.negative_prompt.base_caption === 'string' ? ap.negative_prompt.base_caption : null)) ||

@@ -459,5 +459,33 @@ describe('Metadata Format Utils', () => {
       const result = extractMetadataFields(file, meta);
       expect(result.metadataSource).toBe('WebP EXIF');
     });
+
+    it('should not fallback to file.prompt or generate a prompt section for MP3 audio files carrying searchable_prompt', () => {
+      const mp3File = {
+        name: 'opening_theme.mp3',
+        path: 'C:\\Music\\opening_theme.mp3',
+        prompt: 'opening theme awesome artist',
+        negativePrompt: 'unused negative'
+      };
+      const mp3Meta = {
+        prompt: '',
+        negativePrompt: '',
+        metadataSource: 'Audio Tags',
+        params: {
+          title: 'Opening Theme',
+          artist: 'Awesome Artist',
+          duration: '3:45'
+        }
+      };
+
+      const extracted = extractMetadataFields(mp3File, mp3Meta);
+      expect(extracted.prompt).toBe('');
+      expect(extracted.negativePrompt).toBe('');
+
+      const sections = buildInspectorSections(extracted).filter(s => Boolean(s.value && s.value !== '-'));
+      expect(sections.some(s => s.title === 'プロンプト')).toBe(false);
+      expect(sections.some(s => s.title === '除外したい要素')).toBe(false);
+      expect(sections.some(s => s.title === 'タイトル' && s.value === 'Opening Theme')).toBe(true);
+    });
   });
 });
