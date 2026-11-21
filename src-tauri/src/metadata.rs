@@ -270,6 +270,34 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
     db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     auto_save: bool,
 ) -> (FullMetadata, u64, u64, Option<MetadataCacheRow>) {
+    // mtime または file_size が未取得（0）の場合のみ実ファイルからミリ秒単位の stat を補完する
+    let (mtime_millis, ctime_millis, file_size) = if mtime_millis == 0 || file_size == 0 {
+        std::fs::metadata(file_path)
+            .map(|m| {
+                let mt = m
+                    .modified()
+                    .unwrap_or(std::time::UNIX_EPOCH)
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let ct = m
+                    .created()
+                    .unwrap_or(std::time::UNIX_EPOCH)
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let s = m.len();
+                (
+                    if mtime_millis == 0 { mt } else { mtime_millis },
+                    if ctime_millis == 0 { ct } else { ctime_millis },
+                    if file_size == 0 { s } else { file_size },
+                )
+            })
+            .unwrap_or((mtime_millis, ctime_millis, file_size))
+    } else {
+        (mtime_millis, ctime_millis, file_size)
+    };
+
     let hash_key = crate::utils::hash_path_mtime_hex(file_path, mtime_millis);
 
     if let Ok(conn) = db_conn.get() {
@@ -1587,8 +1615,10 @@ pub(crate) fn generate_alpha_overlay_image(path: &str) -> Result<AlphaOverlayRes
 /// アルファチャンネルに埋め込まれたメタデータ領域を検出し、
 /// LSBビット情報と半透明レイヤーを元画像に重ね合わせたハイブリッド画像を返却するコマンド
 #[tauri::command]
-pub(crate) fn get_alpha_overlay_image(file_path: String) -> Result<AlphaOverlayResult, String> {
-    generate_alpha_overlay_image(&file_path)
+pub(crate) async fn get_alpha_overlay_image(file_path: String) -> Result<AlphaOverlayResult, String> {
+    tokio::task::spawn_blocking(move || generate_alpha_overlay_image(&file_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// XMP (XML) 文字列内の基本的な XML エンティティをデコードする。

@@ -1327,7 +1327,7 @@ mod tests {
         let tx = conn.transaction().unwrap();
         {
             let mut stmt_path = tx.prepare_cached(
-                "DELETE FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE"
+                "DELETE FROM cache WHERE path COLLATE NOCASE IN (?, ?, ?)"
             ).unwrap();
             let norm_back = test_path.replace('/', "\\");
             let norm_fwd = test_path.replace('\\', "/");

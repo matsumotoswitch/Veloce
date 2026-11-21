@@ -11,8 +11,8 @@ describe('File Move Cache and Rating Sync (Section 4)', () => {
   describe('Static Contract Tests', () => {
     it('main.rs defines sync_path_rename_in_db function', () => {
       expect(mainRsCode).toContain('pub fn sync_path_rename_in_db(');
-      expect(mainRsCode).toContain('UPDATE ratings SET path = ?1 WHERE path = ?2 COLLATE NOCASE OR path = ?3 COLLATE NOCASE');
-      expect(mainRsCode).toContain('SELECT mtime, hash_key FROM cache WHERE path = ? COLLATE NOCASE OR path = ? COLLATE NOCASE');
+      expect(mainRsCode).toContain('UPDATE ratings SET path = ?1 WHERE path COLLATE NOCASE IN (?2, ?3)');
+      expect(mainRsCode).toContain('SELECT mtime, hash_key FROM cache WHERE path COLLATE NOCASE IN (?, ?)');
     });
 
     it('main.rs defines sync_file_move command and registers it in invoke_handler', () => {
@@ -141,6 +141,15 @@ describe('File Move Cache and Rating Sync (Section 4)', () => {
       expect(result.success).toBe(false);
       expect(result.reason).toBe('conflict');
       expect(mockFs.renameFile).not.toHaveBeenCalled();
+    });
+
+    it('defers sync_file_move when deferSync: true option is specified', async () => {
+      const result = await window.veloceAPI.moveOrCopyFile('C:\\source\\image.png', 'C:\\dest', 'move', { deferSync: true });
+
+      expect(result.success).toBe(true);
+      expect(result.action).toBe('move');
+      expect(result.syncDeferred).toBe(true);
+      expect(mockInvoke).not.toHaveBeenCalledWith('sync_file_move', expect.anything());
     });
   });
 });

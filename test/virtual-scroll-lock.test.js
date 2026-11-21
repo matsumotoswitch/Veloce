@@ -53,6 +53,105 @@ describe('UIManager._runWithUpdateLock', () => {
     // よって、実際の実行回数は「最初の1回」＋「キューイングされた1回」＝ 2回となる。
     expect(executionCount).toBe(2); 
   });
+
+  it('実行中の force=false 更新中に force=true が要求された場合、最新タスクと force=true を保持して再実行する', async () => {
+    const dummyAppState = { ratings: {} };
+    const ui = new UIManager(dummyAppState);
+
+    const calls = [];
+    let resolveFirst;
+    const firstGate = new Promise(resolve => { resolveFirst = resolve; });
+
+    const firstTask = async (effectiveForce) => {
+      calls.push({ id: 'first', effectiveForce });
+      await firstGate;
+    };
+    const forcedTask = async (effectiveForce) => {
+      calls.push({ id: 'forced', effectiveForce });
+    };
+    const trailingNormalTask = async (effectiveForce) => {
+      calls.push({ id: 'trailingNormal', effectiveForce });
+    };
+
+    const p1 = ui._runWithUpdateLock('grid', firstTask, false);
+    // 実行中に force=true が到着し、さらに後続で force=false が到着しても force=true が失われないこと
+    ui._runWithUpdateLock('grid', forcedTask, true);
+    ui._runWithUpdateLock('grid', trailingNormalTask, false);
+
+    resolveFirst();
+    await p1;
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    expect(calls).toEqual([
+      { id: 'first', effectiveForce: false },
+      { id: 'trailingNormal', effectiveForce: true }
+    ]);
+  });
+
+  it('updateVirtualGrid(false) が getItems 待ちで実行中に updateVirtualGrid(true) を呼ぶと、同じ表示範囲でも強制再描画が実行される', async () => {
+    appState.totalCount = 10;
+    appState.selection = new Set();
+    appState.thumbnailUrls = new Map();
+    appState.ratings = {};
+    appState.dragState = { isAppDragging: false };
+    appState.initialChunk = null;
+    appState.savedScrollTopGrid = 0;
+
+    let resolveFirstFetch;
+    let callCount = 0;
+    const getItemsMock = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return new Promise((resolve) => {
+          resolveFirstFetch = () => resolve(
+            Array.from({ length: 10 }, (_, i) => ({
+              path: `C:/grid/old_${i}.png`,
+              name: `old_${i}.png`,
+              mtime: 1000,
+              hasThumbnailCache: true
+            }))
+          );
+        });
+      }
+      return Promise.resolve(
+        Array.from({ length: 10 }, (_, i) => ({
+          path: `C:/grid/new_${i}.png`,
+          name: `new_${i}.png`,
+          mtime: 2000,
+          hasThumbnailCache: true
+        }))
+      );
+    });
+    window.veloceAPI = { getItems: getItemsMock };
+
+    const ui = new UIManager(appState);
+    const container = document.createElement('div');
+    container.id = 'center-bottom';
+    Object.defineProperty(container, 'clientWidth', { value: 648, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: 384, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true });
+    ui.elements.thumbnailGrid = container;
+    ui.elements.thumbnailSizeSlider = { value: '120' };
+
+    // 1回目: force=false で開始し、getItems の応答待ち中に停止させる
+    const firstPromise = ui.updateVirtualGrid(false);
+    expect(getItemsMock).toHaveBeenCalledTimes(1);
+
+    // 実行中にキャッシュ無効化 + force=true の強制再描画を要求（スクロール位置・範囲は同一）
+    ui.invalidateItemWindowCache();
+    ui.updateVirtualGrid(true);
+
+    // 1回目の getItems を完了させる
+    resolveFirstFetch();
+    await firstPromise;
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    // 表示範囲（startIndex / endIndex）が同じでも、保留されていた force=true により再描画が実行されること
+    expect(getItemsMock).toHaveBeenCalledTimes(2);
+    const firstDomItem = container.querySelector('.thumbnail-item[data-index="0"]');
+    expect(firstDomItem).not.toBeNull();
+    expect(firstDomItem.dataset.filepath).toBe('C:/grid/new_0.png');
+  });
 });
 
 describe('Virtual Scroll Reflow Optimization', () => {

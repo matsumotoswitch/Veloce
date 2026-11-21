@@ -185,6 +185,130 @@ describe('renderer-dnd.js - Drag and Drop Management', () => {
       expect(window.veloceAPI.moveOrCopyFile).toHaveBeenCalledWith('C:/Photos/img1.png', 'C:/Photos', 'auto');
       expect(appState.ratings['C:/Dest/img1.png']).toBe(5);
       expect(appState.ratings['C:/Photos/img1.png']).toBeUndefined();
+      // drop 完了時のフェイルセーフにより dragend なしでも isAppDragging が false に戻ること
+      expect(appState.dragState.isAppDragging).toBe(false);
+    });
+
+    it('batches syncFilesMoveBatch once for multiple moved files and skips it for copy', async () => {
+      const dirTree = document.getElementById('dir-tree');
+      const refreshSpy = vi.fn().mockResolvedValue(undefined);
+      initDirTreeDnd(dirTree, { refreshFileList: refreshSpy });
+
+      window.veloceAPI.syncFilesMoveBatch = vi.fn().mockResolvedValue(undefined);
+      window.veloceAPI.moveOrCopyFile.mockImplementation(async (srcPath, destDir, intent) => {
+        const name = srcPath.split('/').pop();
+        return {
+          success: true,
+          action: intent === 'copy' ? 'copy' : 'move',
+          targetPath: `${destDir}/${name}`,
+          syncDeferred: intent !== 'copy'
+        };
+      });
+
+      const movePaths = ['C:/Src/a.png', 'C:/Src/b.png', 'C:/Src/c.png'];
+      appState.dragState.paths = [...movePaths];
+      appState.dragState.isAppDragging = true;
+
+      const item = dirTree.querySelector('.tree-item[data-path="C:/Photos"]');
+      const moveDropEvent = new Event('drop', { bubbles: true });
+      moveDropEvent.dataTransfer = {
+        types: ['application/json'],
+        getData: vi.fn(() => JSON.stringify(movePaths))
+      };
+      item.dispatchEvent(moveDropEvent);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(window.veloceAPI.moveOrCopyFile).toHaveBeenCalledTimes(3);
+      expect(window.veloceAPI.moveOrCopyFile).toHaveBeenNthCalledWith(1, 'C:/Src/a.png', 'C:/Photos', 'auto', { deferSync: true });
+      expect(window.veloceAPI.moveOrCopyFile).toHaveBeenNthCalledWith(2, 'C:/Src/b.png', 'C:/Photos', 'auto', { deferSync: true });
+      expect(window.veloceAPI.moveOrCopyFile).toHaveBeenNthCalledWith(3, 'C:/Src/c.png', 'C:/Photos', 'auto', { deferSync: true });
+      expect(window.veloceAPI.syncFilesMoveBatch).toHaveBeenCalledTimes(1);
+      expect(window.veloceAPI.syncFilesMoveBatch).toHaveBeenCalledWith([
+        { oldPath: 'C:/Src/a.png', newPath: 'C:/Photos/a.png' },
+        { oldPath: 'C:/Src/b.png', newPath: 'C:/Photos/b.png' },
+        { oldPath: 'C:/Src/c.png', newPath: 'C:/Photos/c.png' }
+      ]);
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      expect(appState.dragState.isAppDragging).toBe(false);
+
+      // コピー操作（ctrlKey: true）では syncFilesMoveBatch が呼ばれないこと
+      window.veloceAPI.syncFilesMoveBatch.mockClear();
+      window.veloceAPI.moveOrCopyFile.mockClear();
+      appState.dragState.paths = ['C:/Src/d.png', 'C:/Src/e.png'];
+      appState.dragState.isAppDragging = true;
+
+      const copyDropEvent = new Event('drop', { bubbles: true });
+      copyDropEvent.ctrlKey = true;
+      copyDropEvent.dataTransfer = {
+        types: ['application/json'],
+        getData: vi.fn(() => JSON.stringify(['C:/Src/d.png', 'C:/Src/e.png']))
+      };
+      item.dispatchEvent(copyDropEvent);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(window.veloceAPI.moveOrCopyFile).toHaveBeenCalledTimes(2);
+      expect(window.veloceAPI.syncFilesMoveBatch).not.toHaveBeenCalled();
+      expect(appState.dragState.isAppDragging).toBe(false);
+    });
+  });
+
+  describe('initGlobalDndHandlers - isAppDragging failsafe reset', () => {
+    it('resets isAppDragging on window blur and remains idempotent with subsequent dragend', async () => {
+      const refreshSpy = vi.fn().mockResolvedValue(undefined);
+      initGlobalDndHandlers({ refreshFileList: refreshSpy });
+      initDragTooltip();
+      updateDragTooltip('2 個のアイテム', 10, 20);
+
+      appState.dragState.isAppDragging = true;
+      appState.dragState.paths = ['C:/Photos/img1.png', 'C:/Photos/img2.png'];
+      appState.dragState.indices = [0, 1];
+      appState.dragState.cachedRoot = 'c:';
+      appState.dragState.pendingRefresh = true;
+
+      window.dispatchEvent(new Event('blur'));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(appState.dragState.isAppDragging).toBe(false);
+      expect(appState.dragState.paths).toEqual([]);
+      expect(appState.dragState.indices).toEqual([]);
+      expect(appState.dragState.cachedRoot).toBeNull();
+      expect(document.getElementById('drag-tooltip').classList.contains('show')).toBe(false);
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+
+      // 後続で dragend が遅れて到着しても冪等に動作し、refreshFileList が二重実行されないこと
+      document.dispatchEvent(new Event('dragend', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets isAppDragging on Escape keydown while dragging and ignores Escape when idle', async () => {
+      const refreshSpy = vi.fn().mockResolvedValue(undefined);
+      initGlobalDndHandlers({ refreshFileList: refreshSpy });
+
+      // アイドル時の Escape では何もしないこと
+      appState.dragState.isAppDragging = false;
+      appState.dragState.pendingRefresh = true;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(refreshSpy).not.toHaveBeenCalled();
+
+      // ドラッグ中の Escape で状態がリセットされること
+      appState.dragState.isAppDragging = true;
+      appState.dragState.paths = ['C:/Photos/img1.png'];
+      appState.dragState.indices = [0];
+      appState.dragState.cachedRoot = 'c:';
+      appState.dragState.pendingRefresh = true;
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(appState.dragState.isAppDragging).toBe(false);
+      expect(appState.dragState.paths).toEqual([]);
+      expect(appState.dragState.indices).toEqual([]);
+      expect(appState.dragState.cachedRoot).toBeNull();
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
     });
   });
 

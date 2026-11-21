@@ -127,6 +127,52 @@ describe('Viewer Rename Following (viewer-file-renamed)', () => {
     expect(newIndex).not.toBe(-1);
   });
 
+  it('migrates overlayCache, drops non-visible preloadCache, and updates audioPath without changing audio src', () => {
+    const oldPath = 'C:\\photos\\track1.mp3';
+    const newPath = 'C:\\photos\\track1_renamed.mp3';
+    viewerState.paths = [oldPath, 'C:\\photos\\image2.png'];
+    viewerState.currentImagePath = oldPath;
+    viewerState.overlayCache = new Map([
+      [oldPath, { dataUrl: 'data:image/png;base64,AAA' }],
+      ['C:\\photos\\image2.png', { dataUrl: 'data:image/png;base64,BBB' }]
+    ]);
+
+    const viewerImg = document.getElementById('viewer-img');
+    viewerImg.dataset.audioPath = oldPath;
+    const initialImgSrc = viewerImg.src;
+
+    const nonVisiblePreloadImg = document.createElement('img');
+    viewerState.preloadCache = new Map([
+      [0, { img: viewerImg, path: oldPath }],
+      [99, { img: nonVisiblePreloadImg, path: oldPath }],
+      [1, { img: document.createElement('img'), path: 'C:\\photos\\image2.png' }]
+    ]);
+
+    const audioEl = document.createElement('audio');
+    audioEl.id = 'viewer-audio';
+    audioEl.src = 'http://127.0.0.1:12345/?path=track1.mp3';
+    document.body.appendChild(audioEl);
+    const initialAudioSrc = audioEl.src;
+
+    const res = handleViewerFileRenamed(oldPath, newPath);
+    expect(res).toBe(true);
+
+    // overlayCache のキーが新パスへ移行し、無関係キーは維持されること
+    expect(viewerState.overlayCache.has(oldPath)).toBe(false);
+    expect(viewerState.overlayCache.get(newPath)).toEqual({ dataUrl: 'data:image/png;base64,AAA' });
+    expect(viewerState.overlayCache.get('C:\\photos\\image2.png')).toEqual({ dataUrl: 'data:image/png;base64,BBB' });
+
+    // preloadCache の非表示エントリは削除され、表示中要素のエントリのみパス更新・src 維持されること
+    expect(viewerState.preloadCache.has(99)).toBe(false);
+    expect(viewerState.preloadCache.get(0).path).toBe(newPath);
+    expect(viewerState.preloadCache.get(1).path).toBe('C:\\photos\\image2.png');
+    expect(viewerImg.src).toBe(initialImgSrc);
+
+    // 表示中要素の dataset.audioPath が新パスへ更新され、再生中 audio の src は変更されないこと
+    expect(viewerImg.dataset.audioPath).toBe(newPath);
+    expect(audioEl.src).toBe(initialAudioSrc);
+  });
+
   describe('Viewer Folder Rename Following (viewer-folder-renamed)', () => {
     it('follows folder rename for descendant paths, currentImagePath, and ratings without switching image', () => {
       viewerState.paths = [
@@ -253,6 +299,60 @@ describe('Viewer Rename Following (viewer-file-renamed)', () => {
       const newIndex = updatedPaths.indexOf(viewerState.currentImagePath);
       expect(newIndex).toBe(0);
       expect(newIndex).not.toBe(-1);
+    });
+
+    it('migrates descendant overlayCache, drops non-visible preloadCache, and updates audioPath on folder rename', () => {
+      viewerState.paths = [
+        'C:\\album\\sub\\song1.mp3',
+        'C:\\album\\img2.png',
+        'C:\\album2\\sibling.png'
+      ];
+      viewerState.currentImagePath = 'C:\\album\\sub\\song1.mp3';
+      viewerState.currentIndex = 0;
+      viewerState.totalImages = 3;
+      viewerState.overlayCache = new Map([
+        ['C:\\album\\sub\\song1.mp3', { dataUrl: 'data:image/png;base64,111' }],
+        ['C:\\album\\img2.png', { dataUrl: 'data:image/png;base64,222' }],
+        ['C:\\album2\\sibling.png', { dataUrl: 'data:image/png;base64,333' }]
+      ]);
+
+      const viewerImg = document.getElementById('viewer-img');
+      viewerImg.dataset.audioPath = 'C:\\album\\sub\\song1.mp3';
+      const initialImgSrc = viewerImg.src;
+
+      const hiddenImg = document.createElement('img');
+      const siblingImg = document.createElement('img');
+      viewerState.preloadCache = new Map([
+        [0, { img: viewerImg, path: 'C:\\album\\sub\\song1.mp3' }],
+        [1, { img: hiddenImg, path: 'C:\\album\\img2.png' }],
+        [2, { img: siblingImg, path: 'C:\\album2\\sibling.png' }]
+      ]);
+
+      const audioEl = document.createElement('audio');
+      audioEl.id = 'viewer-audio';
+      audioEl.src = 'http://127.0.0.1:12345/?path=song1.mp3';
+      document.body.appendChild(audioEl);
+      const initialAudioSrc = audioEl.src;
+
+      const res = handleViewerFolderRenamed('C:\\album', 'C:\\album_renamed');
+      expect(res).toBe(true);
+
+      // overlayCache は配下のみ新フォルダへ移行し、兄弟フォルダは維持されること
+      expect(viewerState.overlayCache.has('C:\\album\\sub\\song1.mp3')).toBe(false);
+      expect(viewerState.overlayCache.has('C:\\album\\img2.png')).toBe(false);
+      expect(viewerState.overlayCache.get('C:\\album_renamed\\sub\\song1.mp3')).toEqual({ dataUrl: 'data:image/png;base64,111' });
+      expect(viewerState.overlayCache.get('C:\\album_renamed\\img2.png')).toEqual({ dataUrl: 'data:image/png;base64,222' });
+      expect(viewerState.overlayCache.get('C:\\album2\\sibling.png')).toEqual({ dataUrl: 'data:image/png;base64,333' });
+
+      // preloadCache は配下の非表示要素が削除され、表示中要素と兄弟フォルダは維持されること
+      expect(viewerState.preloadCache.has(1)).toBe(false);
+      expect(viewerState.preloadCache.get(0).path).toBe('C:\\album_renamed\\sub\\song1.mp3');
+      expect(viewerState.preloadCache.get(2).path).toBe('C:\\album2\\sibling.png');
+      expect(viewerImg.src).toBe(initialImgSrc);
+
+      // 表示中要素の dataset.audioPath が新フォルダへ更新され、再生中 audio の src は変更されないこと
+      expect(viewerImg.dataset.audioPath).toBe('C:\\album_renamed\\sub\\song1.mp3');
+      expect(audioEl.src).toBe(initialAudioSrc);
     });
   });
 });

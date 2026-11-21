@@ -291,29 +291,42 @@ class UIManager {
   /**
    * 仮想スクロール描画の排他ロック制御機構
    * 連続スクロール時に非同期レンダリング処理が並行して二重実行されるのを防ぎ、
-   * 実行中に生じた最新の更新要求を保留（Pending）して完了後に次フレーム（rAF）で再実行する
+   * 実行中に生じた最新の更新要求を保留（Pending）して完了後に次フレーム（rAF）で再実行する。
+   * 保留中に一度でも force=true が要求された場合、後続の通常更新要求で上書きされても
+   * 次回再実行時は必ず force=true として描画されることを保証する。
    * @param {string} lockKey - ロックの識別子 ('list' や 'grid' など)
-   * @param {() => Promise<void>} taskFn - 排他実行する非同期描画関数
+   * @param {(effectiveForce: boolean) => Promise<void>} taskFn - 排他実行する非同期描画関数
+   * @param {boolean} [force=false] - 強制再描画フラグ
    */
-  async _runWithUpdateLock(lockKey, taskFn) {
+  async _runWithUpdateLock(lockKey, taskFn, force = false) {
     const updatingKey = `_${lockKey}Updating`;
     const pendingKey = `_${lockKey}UpdatePending`;
+    const pendingTaskKey = `_${lockKey}PendingTask`;
+    const pendingForceKey = `_${lockKey}PendingForce`;
 
-    // 既にレンダリング処理が進行中の場合は、最新状態の再描画フラグを立ててスキップ
+    // 既にレンダリング処理が進行中の場合は、最新のタスク関数と強制再描画フラグを保留してスキップ
     if (this[updatingKey]) {
       this[pendingKey] = true;
+      this[pendingTaskKey] = taskFn;
+      if (force) {
+        this[pendingForceKey] = true;
+      }
       return;
     }
 
     this[updatingKey] = true;
     try {
-      await taskFn();
+      await taskFn(Boolean(force));
     } finally {
       this[updatingKey] = false;
-      // 処理中にスクロール位置がさらに進んでいた場合は、次フレームで最新位置の描画を実行
+      // 処理中に新たな更新要求が来ていた場合は、最新タスクと強制再描画フラグを引き継いで次フレームで 1 回再実行
       if (this[pendingKey]) {
+        const nextTask = this[pendingTaskKey] || taskFn;
+        const nextForce = Boolean(this[pendingForceKey]);
         this[pendingKey] = false;
-        requestAnimationFrame(() => this._runWithUpdateLock(lockKey, taskFn));
+        this[pendingTaskKey] = null;
+        this[pendingForceKey] = false;
+        requestAnimationFrame(() => this._runWithUpdateLock(lockKey, nextTask, nextForce));
       }
     }
   }
@@ -1205,6 +1218,7 @@ class UIManager {
    * ソート順変更・フィルタ変更・ファイル追加削除時などに呼び出してバックエンドとの整合性を保証する。
    */
   invalidateItemWindowCache() {
+    this._itemWindowCacheVersion = (this._itemWindowCacheVersion || 0) + 1;
     this._itemWindowCache = { start: -1, items: [], totalCount: 0 };
     this._lastInitialChunkRef = null;
   }
@@ -1216,6 +1230,7 @@ class UIManager {
    * @param {number} [totalCount] - 現在の総件数
    */
   seedItemWindowCache(start, items, totalCount) {
+    this._itemWindowCacheVersion = (this._itemWindowCacheVersion || 0) + 1;
     const arr = Array.isArray(items) ? items.slice() : [];
     const total = typeof totalCount === 'number' ? totalCount : (appState ? appState.totalCount : arr.length);
     this._itemWindowCache = {
@@ -1271,17 +1286,22 @@ class UIManager {
     const total = appState.totalCount > 0 ? appState.totalCount : (startIndex + count);
     const desiredCount = Math.max(count + (startIndex - fetchStart), WINDOW_SIZE);
     const fetchCount = Math.max(count, Math.min(desiredCount, Math.max(count, total - fetchStart)));
+    const versionBeforeFetch = this._itemWindowCacheVersion || 0;
 
     const fetched = await window.veloceAPI.getItems(fetchStart, fetchCount);
     if (!Array.isArray(fetched) || fetched.length === 0) {
       return [];
     }
 
-    this._itemWindowCache = {
-      start: fetchStart,
-      items: fetched,
-      totalCount: appState.totalCount
-    };
+    // 非同期 IPC 待機中にキャッシュ無効化または再シードが行われていた場合は、
+    // 古いスナップショットでウィンドウキャッシュを上書きしない
+    if ((this._itemWindowCacheVersion || 0) === versionBeforeFetch) {
+      this._itemWindowCache = {
+        start: fetchStart,
+        items: fetched,
+        totalCount: appState.totalCount
+      };
+    }
 
     const relStart = startIndex - fetchStart;
     if (relStart >= 0 && fetched.length > relStart) {
@@ -1358,7 +1378,8 @@ class UIManager {
   }
 
   updateVirtualList(force = false) {
-    return this._runWithUpdateLock('list', async () => {
+    return this._runWithUpdateLock('list', async (effectiveForce) => {
+      force = Boolean(force || effectiveForce);
       if (!this.elements.fileListBody) return;
     const container = document.getElementById('center-top');
     if (!container) return;
@@ -1616,11 +1637,12 @@ class UIManager {
       container.scrollTop = appState.savedScrollTopList;
       appState.savedScrollTopList = 0;
     }
-    });
+    }, force);
   }
 
   updateVirtualGrid(force = false) {
-    return this._runWithUpdateLock('grid', async () => {
+    return this._runWithUpdateLock('grid', async (effectiveForce) => {
+      force = Boolean(force || effectiveForce);
       if (!this.elements.thumbnailGrid) return;
     const container = this.elements.thumbnailGrid;
 
@@ -2190,7 +2212,7 @@ class UIManager {
 
     // 画像読み込みタスクをキック
     if (typeof window.processNextTask === 'function') window.processNextTask();
-    });
+    }, force);
   }
 
   /**

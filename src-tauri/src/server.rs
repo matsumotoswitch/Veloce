@@ -314,9 +314,17 @@ pub fn start_local_video_server(
                                 bytes: body,
                                 now,
                             })
-                            .is_ok()
+                            .is_err()
                         {
-                            // AppState のメモリ上キャッシュフラグを即時反映（キューへの投入が成功した場合のみ）
+                            // チャネル満杯・切断時はブロックせず 503 を返し、フロントエンド側の IPC フォールバック保存へ委譲する
+                            let resp = "HTTP/1.1 503 Service Unavailable\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                            let _ = reader.get_mut().write_all(resp.as_bytes());
+                            let _ = reader.get_mut().flush();
+                            return;
+                        }
+
+                        // AppState のメモリ上キャッシュフラグを即時反映（キューへの投入が成功した場合のみ）
+                        {
                             use tauri::Manager;
                             if let Ok(handle_guard) = app_handle_slot.lock() {
                                 if let Some(app_handle) = handle_guard.as_ref() {

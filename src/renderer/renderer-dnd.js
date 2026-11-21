@@ -30,12 +30,40 @@ let dragTooltip = null;
 let dragTooltipText = null;
 let emptyDragImage = null;
 let draggedFavoriteId = null;
+let globalDndRefreshCallback = null;
+let globalDndHandlersInitialized = false;
+
+/**
+ * ドラッグ状態（ツールチップ・パス・フラグ）を冪等にリセットし、
+ * 保留中のファイル一覧更新（pendingRefresh）があれば 1 回だけ実行する。
+ * @param {Function|null} [refreshFileList=null]
+ */
+export async function resetDragState(refreshFileList = null) {
+  hideDragTooltip();
+  dndState.paths = [];
+  dndState.indices = [];
+  dndState.cachedRoot = null;
+  dndState.isAppDragging = false;
+
+  if (dndState.pendingRefresh) {
+    dndState.pendingRefresh = false;
+    const refreshFn = refreshFileList || globalDndRefreshCallback;
+    if (typeof refreshFn === 'function') {
+      await refreshFn();
+    }
+  }
+}
 
 /**
  * 透明なドラッグプレビュー画像とドラッグツールチップDOMを初期化する。
  */
 export function initDragTooltip() {
-  if (emptyDragImage) return;
+  if (emptyDragImage) {
+    if (dragTooltip && !dragTooltip.isConnected && document.body) {
+      document.body.appendChild(dragTooltip);
+    }
+    return;
+  }
 
   emptyDragImage = new Image();
   emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -188,6 +216,10 @@ export function handleItemDragStart(e, isGrid, callbacks = {}) {
  */
 export function initGlobalDndHandlers(callbacks = {}) {
   const { refreshFileList = null } = callbacks;
+  globalDndRefreshCallback = refreshFileList || null;
+
+  if (globalDndHandlersInitialized) return;
+  globalDndHandlersInitialized = true;
 
   document.addEventListener('dragover', (e) => {
     if (dndState && dndState.isAppDragging) {
@@ -221,17 +253,19 @@ export function initGlobalDndHandlers(callbacks = {}) {
   });
 
   document.addEventListener('dragend', async () => {
-    hideDragTooltip();
-    dndState.paths = [];
-    dndState.indices = [];
-    dndState.cachedRoot = null;
-    dndState.isAppDragging = false;
+    await resetDragState();
+  });
 
-    if (dndState.pendingRefresh) {
-      dndState.pendingRefresh = false;
-      if (refreshFileList) {
-        await refreshFileList();
-      }
+  // WebView2 / Chromium でドラッグ元要素のデタッチやウィンドウ外終了により dragend が届かない場合のフェイルセーフ
+  window.addEventListener('blur', async () => {
+    if (dndState && dndState.isAppDragging) {
+      await resetDragState();
+    }
+  });
+
+  document.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape' && dndState && dndState.isAppDragging) {
+      await resetDragState();
     }
   });
 }
@@ -332,64 +366,84 @@ export function initDirTreeDnd(dirTreeElement, callbacks = {}) {
       }
 
       setTimeout(async () => {
-        let targetPaths = paths;
-        let skipCount = 0;
+        try {
+          let targetPaths = paths;
+          let skipCount = 0;
 
-        if (window.veloceAPI.checkConflicts && uiManager.showConflictDialog) {
-          try {
-            const conflicts = await window.veloceAPI.checkConflicts(paths, itemDiv.dataset.path);
-            if (conflicts && conflicts.length > 0) {
-              const choice = await uiManager.showConflictDialog(conflicts.length, actionStr);
-              if (choice === 'cancel') {
-                if (uiManager.showToast) uiManager.showToast('操作をキャンセルしました', 3000, 'file-move');
-                return;
-              } else if (choice === 'skip') {
-                targetPaths = paths.filter(p => !conflicts.includes(p));
-                skipCount = conflicts.length;
-                if (targetPaths.length === 0) {
-                  if (uiManager.showToast) uiManager.showToast(`${skipCount}件の重複をスキップしました`, 3000, 'file-move');
+          if (window.veloceAPI.checkConflicts && uiManager.showConflictDialog) {
+            try {
+              const conflicts = await window.veloceAPI.checkConflicts(paths, itemDiv.dataset.path);
+              if (conflicts && conflicts.length > 0) {
+                const choice = await uiManager.showConflictDialog(conflicts.length, actionStr);
+                if (choice === 'cancel') {
+                  if (uiManager.showToast) uiManager.showToast('操作をキャンセルしました', 3000, 'file-move');
                   return;
+                } else if (choice === 'skip') {
+                  targetPaths = paths.filter(p => !conflicts.includes(p));
+                  skipCount = conflicts.length;
+                  if (targetPaths.length === 0) {
+                    if (uiManager.showToast) uiManager.showToast(`${skipCount}件の重複をスキップしました`, 3000, 'file-move');
+                    return;
+                  }
                 }
               }
+            } catch (err) {
+              console.error('Failed to check conflicts:', err);
             }
-          } catch (err) {
-            console.error('Failed to check conflicts:', err);
           }
-        }
 
-        if (uiManager.showToast) {
-          uiManager.showToast(`${targetPaths.length}件のファイルを${actionStr}中`, 0, 'file-move', 'info');
-        }
+          if (uiManager.showToast) {
+            uiManager.showToast(`${targetPaths.length}件のファイルを${actionStr}中`, 0, 'file-move', 'info');
+          }
 
-        let successCount = 0;
-        for (const p of targetPaths) {
-          const result = await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path, intent);
-          if (result && result.success) {
-            successCount++;
-            if (result.action === 'move') {
-              if (appState && appState.ratings && appState.ratings[p] !== undefined) {
-                appState.ratings[result.targetPath] = appState.ratings[p];
-                delete appState.ratings[p];
+          const useBatchSync = Boolean(window.veloceAPI && typeof window.veloceAPI.syncFilesMoveBatch === 'function');
+          const movedPairs = [];
+          let successCount = 0;
+          for (const p of targetPaths) {
+            const result = useBatchSync
+              ? await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path, intent, { deferSync: true })
+              : await window.veloceAPI.moveOrCopyFile(p, itemDiv.dataset.path, intent);
+            if (result && result.success) {
+              successCount++;
+              if (result.action === 'move') {
+                if (useBatchSync && result.syncDeferred !== false) {
+                  movedPairs.push({ oldPath: p, newPath: result.targetPath });
+                }
+                if (appState && appState.ratings && appState.ratings[p] !== undefined) {
+                  appState.ratings[result.targetPath] = appState.ratings[p];
+                  delete appState.ratings[p];
+                }
+                fileOpsState.push({ type: 'MOVE_FILE', sourcePath: p, targetPath: result.targetPath });
+              } else if (result.action === 'copy') {
+                fileOpsState.push({ type: 'COPY_FILE', sourcePath: p, targetPath: result.targetPath });
               }
-              fileOpsState.push({ type: 'MOVE_FILE', sourcePath: p, targetPath: result.targetPath });
-            } else if (result.action === 'copy') {
-              fileOpsState.push({ type: 'COPY_FILE', sourcePath: p, targetPath: result.targetPath });
             }
           }
-        }
-        if (successCount > 0) {
-          let msg = `${successCount}件のファイルを${actionStr}しました`;
-          if (skipCount > 0) msg += `（${skipCount}件スキップ）`;
-          if (uiManager.showToast) uiManager.showToast(msg, 3000, 'file-move');
-          if (dndState.isAppDragging) {
-            dndState.pendingRefresh = true;
-          } else if (refreshFileList) {
-            await refreshFileList();
+          if (useBatchSync && movedPairs.length > 0) {
+            try {
+              await window.veloceAPI.syncFilesMoveBatch(movedPairs);
+            } catch (syncErr) {
+              console.error('Failed to batch sync file moves:', syncErr);
+            }
           }
-        } else {
-          if (uiManager.showToast) uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
+          if (successCount > 0) {
+            let msg = `${successCount}件のファイルを${actionStr}しました`;
+            if (skipCount > 0) msg += `（${skipCount}件スキップ）`;
+            if (uiManager.showToast) uiManager.showToast(msg, 3000, 'file-move');
+            if (dndState.isAppDragging) {
+              dndState.pendingRefresh = true;
+            } else if (refreshFileList) {
+              await refreshFileList();
+            }
+          } else {
+            if (uiManager.showToast) uiManager.showToast(`ファイルの${actionStr}に失敗しました`, 3000, 'file-move');
+          }
+        } finally {
+          await resetDragState(refreshFileList);
         }
       }, 10);
+    } else {
+      await resetDragState(refreshFileList);
     }
   });
 }

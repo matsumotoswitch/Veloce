@@ -1718,6 +1718,47 @@ export function handleViewerFileRenamed(oldPath, newPath) {
     }
   }
 
+  // overlayCache の該当エントリを新パスへ付け替え
+  if (viewerState.overlayCache instanceof Map) {
+    const overlayUpdates = [];
+    for (const [k, v] of viewerState.overlayCache.entries()) {
+      if (typeof k === 'string' && k.replace(/\//g, '\\').toLowerCase() === normOld) {
+        overlayUpdates.push([k, v]);
+      }
+    }
+    for (const [oldKey, val] of overlayUpdates) {
+      viewerState.overlayCache.delete(oldKey);
+      viewerState.overlayCache.set(newPath, val);
+    }
+  }
+
+  const domViewerImg = (typeof document !== 'undefined') ? document.getElementById('viewer-img') : null;
+  const isVisibleMedia = (el) => Boolean(el && (el === currentlyVisibleImg || el === currentViewerImg || el === domViewerImg));
+
+  // preloadCache の該当エントリのうち、表示中要素を含まないものは削除（次回先読みで再生成）
+  if (viewerState.preloadCache instanceof Map) {
+    for (const [idx, entry] of Array.from(viewerState.preloadCache.entries())) {
+      if (entry && typeof entry.path === 'string' && entry.path.replace(/\//g, '\\').toLowerCase() === normOld) {
+        if (isVisibleMedia(entry.img)) {
+          entry.path = newPath;
+        } else {
+          if (entry.img && entry.img.tagName === 'VIDEO' && typeof entry.img.pause === 'function') {
+            entry.img.pause();
+          }
+          viewerState.preloadCache.delete(idx);
+        }
+      }
+    }
+  }
+
+  // 表示中要素の dataset.audioPath を新パスへ更新（再生中の audio 要素の src は変更しない）
+  for (const el of [currentlyVisibleImg, currentViewerImg, domViewerImg]) {
+    if (el && el.dataset && typeof el.dataset.audioPath === 'string'
+      && el.dataset.audioPath.replace(/\//g, '\\').toLowerCase() === normOld) {
+      el.dataset.audioPath = newPath;
+    }
+  }
+
   // タイトルバーおよびファイル名表示要素の更新（画像自体は切り替えない）
   if (typeof viewerState.currentIndex === 'number' && typeof viewerState.totalImages === 'number') {
     document.title = `Veloce Viewer - ${viewerState.currentIndex + 1} / ${viewerState.totalImages}`;
@@ -1808,6 +1849,53 @@ export function handleViewerFolderRenamed(oldFolderPath, newFolderPath) {
   if (viewerState.currentDirectory && isSameOrSubdirectory(viewerState.currentDirectory, oldFolderPath)) {
     viewerState.currentDirectory = replaceDirectoryPrefix(viewerState.currentDirectory, oldFolderPath, newFolderPath);
     anyUpdated = true;
+  }
+
+  // 5. overlayCache の配下エントリを新フォルダプレフィックスへ付け替え
+  if (viewerState.overlayCache instanceof Map) {
+    const overlayUpdates = [];
+    for (const [k, v] of viewerState.overlayCache.entries()) {
+      if (typeof k === 'string' && isSameOrSubdirectory(k, oldFolderPath)) {
+        const newKey = replaceDirectoryPrefix(k, oldFolderPath, newFolderPath);
+        if (newKey !== k) {
+          overlayUpdates.push([k, newKey, v]);
+        }
+      }
+    }
+    for (const [oldKey, newKey, val] of overlayUpdates) {
+      viewerState.overlayCache.delete(oldKey);
+      viewerState.overlayCache.set(newKey, val);
+      anyUpdated = true;
+    }
+  }
+
+  const domViewerImg = (typeof document !== 'undefined') ? document.getElementById('viewer-img') : null;
+  const isVisibleMedia = (el) => Boolean(el && (el === currentlyVisibleImg || el === currentViewerImg || el === domViewerImg));
+
+  // 6. preloadCache の配下エントリのうち、表示中要素を含まないものは削除（次回先読みで再生成）
+  if (viewerState.preloadCache instanceof Map) {
+    for (const [idx, entry] of Array.from(viewerState.preloadCache.entries())) {
+      if (entry && typeof entry.path === 'string' && isSameOrSubdirectory(entry.path, oldFolderPath)) {
+        if (isVisibleMedia(entry.img)) {
+          entry.path = replaceDirectoryPrefix(entry.path, oldFolderPath, newFolderPath);
+        } else {
+          if (entry.img && entry.img.tagName === 'VIDEO' && typeof entry.img.pause === 'function') {
+            entry.img.pause();
+          }
+          viewerState.preloadCache.delete(idx);
+        }
+        anyUpdated = true;
+      }
+    }
+  }
+
+  // 7. 表示中要素の dataset.audioPath が旧フォルダ配下なら新パスへ更新（再生中の audio 要素の src は変更しない）
+  for (const el of [currentlyVisibleImg, currentViewerImg, domViewerImg]) {
+    if (el && el.dataset && typeof el.dataset.audioPath === 'string'
+      && isSameOrSubdirectory(el.dataset.audioPath, oldFolderPath)) {
+      el.dataset.audioPath = replaceDirectoryPrefix(el.dataset.audioPath, oldFolderPath, newFolderPath);
+      anyUpdated = true;
+    }
   }
 
   return anyUpdated;

@@ -56,6 +56,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFolder
  * @property {(oldPath: string, newName: string) => Promise<{success: boolean, path?: string, error?: string}>} renameFile
  * @property {(oldPath: string, newPath: string) => Promise<void>} syncFileMove
+ * @property {(pairs: Array<{oldPath: string, newPath: string}>) => Promise<void>} syncFilesMoveBatch
  * @property {(folderPath: string) => Promise<{success: boolean, error?: string}>} trashFolder
  * @property {(sourcePath: string, targetDir: string, intent?: 'auto'|'copy'|'move') => Promise<{success: boolean, action: string, reason: string|null}>} moveOrCopyFile
  * @property {(paths: string[], destDir: string) => Promise<string[]>} checkConflicts
@@ -396,12 +397,18 @@ window.veloceAPI = {
    */
   syncFileMove: (oldPath, newPath) => invoke('sync_file_move', { oldPath, newPath }),
   /**
+   * 複数ファイルの移動に伴い、SQLite キャッシュ・レーティングおよび state を一括同期します。
+   * @param {Array<{oldPath: string, newPath: string}>} pairs - 移動前・移動後のパスペア配列。
+   * @returns {Promise<void>}
+   */
+  syncFilesMoveBatch: (pairs) => invoke('sync_files_move_batch', { pairs }),
+  /**
    * ファイルを指定ディレクトリに移動またはコピーします。
    * @param {string} sourcePath - 元のファイルパス。
    * @param {string} targetDir - ドロップ先のディレクトリパス。
    * @param {'auto' | 'copy' | 'move'} [intent='auto'] - 強制的に実行するアクション
-   * @param {object} [options={}] - 追加オプション（{ overwrite: false } 指定時は競合検出で中断）
-   * @returns {Promise<object>} 処理結果 { success, action, targetPath, reason }。
+   * @param {object} [options={}] - 追加オプション（{ overwrite: false, deferSync: false }）
+   * @returns {Promise<object>} 処理結果 { success, action, targetPath, reason, syncDeferred }。
    */
   moveOrCopyFile: async (sourcePath, targetDir, intent = 'auto', options = {}) => {
     const { fs, path } = window.__TAURI__;
@@ -427,6 +434,9 @@ window.veloceAPI = {
         action = getRoot(sourcePath) === getRoot(targetDir) ? 'move' : 'copy';
       }
 
+      const deferSync = Boolean(options && options.deferSync);
+      let syncCompleted = false;
+
       if (action === 'copy') {
         await fs.copyFile(sourcePath, targetPath);
       } else {
@@ -440,21 +450,33 @@ window.veloceAPI = {
         }
         // 移動成功時（またはフォールバックのコピー完了直後）、元ファイル削除や trash_file より先に
         // SQLite のキャッシュおよびレーティングのパスをアトミックに同期してレーティング消失を防ぐ
-        try {
-          await invoke('sync_file_move', { oldPath: sourcePath, newPath: targetPath });
-        } catch (syncErr) {
-          console.error('Failed to sync file move in DB:', syncErr);
+        // deferSync 指定時は呼び出し元が最後に sync_files_move_batch で一括同期する
+        if (!deferSync) {
+          try {
+            await invoke('sync_file_move', { oldPath: sourcePath, newPath: targetPath });
+            syncCompleted = true;
+          } catch (syncErr) {
+            console.error('Failed to sync file move in DB:', syncErr);
+          }
         }
         if (movedByFallback) {
           try {
             await fs.removeFile(sourcePath);
           } catch (rmErr) {
+            if (!syncCompleted) {
+              try {
+                await invoke('sync_file_move', { oldPath: sourcePath, newPath: targetPath });
+                syncCompleted = true;
+              } catch (syncErr) {
+                console.error('Failed to sync file move in DB:', syncErr);
+              }
+            }
             // removeFileも失敗した場合は invoke('trash_file') でゴミ箱送りを試みる
             await invoke('trash_file', { filePath: sourcePath });
           }
         }
       }
-      return { success: true, action, targetPath, reason: null };
+      return { success: true, action, targetPath, reason: null, syncDeferred: action === 'move' && deferSync && !syncCompleted };
     } catch (error) {
       return { success: false, action: '', reason: String(error) };
     }

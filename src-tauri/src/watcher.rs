@@ -301,19 +301,31 @@ pub(crate) fn process_unloaded_metadata_batch(
         }
     }
 
-    let paths_to_process: Vec<(usize, String, u64, u64, u64)> = {
+    // AB-BA デッドロック防止のため、path_to_all_idx の読み取りロックを先に解放してから all_files を単独取得する
+    let resolved_indices: Vec<(usize, String)> = {
         let all_map = state.path_to_all_idx.read();
-        let all_files = state.all_files.read();
         paths
             .into_iter()
             .filter_map(|p| {
                 let clean = crate::utils::normalize_unc_path(&p);
-                let idx_opt = all_map.get(&p).or_else(|| all_map.get(clean.as_ref())).copied();
-                if let Some(idx) = idx_opt {
-                    if let Some(f) = all_files.get(idx) {
-                        if !f.meta_loaded {
-                            return Some((idx, f.path.clone(), f.mtime, f.ctime, f.size));
-                        }
+                all_map
+                    .get(&p)
+                    .or_else(|| all_map.get(clean.as_ref()))
+                    .copied()
+                    .map(|idx| (idx, p))
+            })
+            .collect()
+    };
+
+    let paths_to_process: Vec<(usize, String, u64, u64, u64)> = {
+        let all_files = state.all_files.read();
+        resolved_indices
+            .into_iter()
+            .filter_map(|(idx, p)| {
+                if let Some(f) = all_files.get(idx) {
+                    let clean_p = crate::utils::normalize_unc_path(&p);
+                    if !f.meta_loaded && (f.path == p || crate::utils::normalize_unc_path(&f.path) == clean_p) {
+                        return Some((idx, f.path.clone(), f.mtime, f.ctime, f.size));
                     }
                 }
                 None
@@ -389,7 +401,7 @@ pub(crate) fn process_unloaded_metadata_batch(
                             f.size = meta_size;
                         }
                         if f.mtime == 0 {
-                            f.mtime = meta_mtime / 1000;
+                            f.mtime = meta_mtime;
                         }
                         f.meta_loaded = true;
                         filtered_updates.push((path, f_arc.clone()));
@@ -400,13 +412,28 @@ pub(crate) fn process_unloaded_metadata_batch(
             drop(all_files_lock);
 
             if !filtered_updates.is_empty() {
-                let filt_idx_lock = state.path_to_filtered_idx.read();
-                let mut filtered_files_lock = state.filtered_files.write();
-                for (path, arc) in filtered_updates {
-                    let clean = path.replace("\\\\?\\", "");
-                    if let Some(&filt_idx) = filt_idx_lock.get(&path).or_else(|| filt_idx_lock.get(&clean)) {
+                // AB-BA デッドロック防止のため、インデックス逆引きロックを先に解放してから filtered_files の write を単独取得する
+                let resolved_filtered: Vec<(usize, String, std::sync::Arc<ImageFile>)> = {
+                    let filt_idx_lock = state.path_to_filtered_idx.read();
+                    filtered_updates
+                        .into_iter()
+                        .filter_map(|(path, arc)| {
+                            let clean = path.replace("\\\\?\\", "");
+                            filt_idx_lock
+                                .get(&path)
+                                .or_else(|| filt_idx_lock.get(&clean))
+                                .copied()
+                                .map(|filt_idx| (filt_idx, path, arc))
+                        })
+                        .collect()
+                };
+                if !resolved_filtered.is_empty() {
+                    let mut filtered_files_lock = state.filtered_files.write();
+                    for (filt_idx, path, arc) in resolved_filtered {
                         if let Some(f_arc) = filtered_files_lock.get_mut(filt_idx) {
-                            *f_arc = arc;
+                            if f_arc.path == path {
+                                *f_arc = arc;
+                            }
                         }
                     }
                 }
@@ -1313,7 +1340,7 @@ mod tests {
             let clean = crate::utils::normalize_unc_path(&png_path);
             let (db_w, db_h): (u32, u32) = conn
                 .query_row(
-                    "SELECT width, height FROM cache WHERE path = ?1 COLLATE NOCASE OR path = ?2 COLLATE NOCASE",
+                    "SELECT width, height FROM cache WHERE path COLLATE NOCASE IN (?1, ?2)",
                     rusqlite::params![&png_path, clean.as_ref()],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -1509,6 +1536,64 @@ mod tests {
                 && updated.unified_search_text.contains("christmas_outfit"),
             "unified_search_text に新ファイル名とプロンプトの両方が維持されること: {}",
             updated.unified_search_text
+        );
+    }
+
+    #[test]
+    fn test_process_unloaded_metadata_batch_sets_millisecond_mtime_when_zero() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir_str = temp_dir.path().to_str().unwrap();
+
+        let test_png = temp_dir.path().join("zero_mtime.png");
+        let mut png_bytes = Vec::new();
+        png_bytes.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&32u32.to_be_bytes());
+        ihdr.extend_from_slice(&48u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+        png_bytes.extend_from_slice(&(ihdr.len() as u32).to_be_bytes());
+        png_bytes.extend_from_slice(b"IHDR");
+        png_bytes.extend_from_slice(&ihdr);
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        png_bytes.extend_from_slice(b"IEND");
+        png_bytes.extend_from_slice(&0u32.to_be_bytes());
+        std::fs::write(&test_png, &png_bytes).unwrap();
+
+        let png_path = test_png.to_str().unwrap().to_string();
+        let state = crate::create_test_app_state(temp_dir_str);
+
+        let file_with_zero_mtime = ImageFile {
+            name: "zero_mtime.png".to_string(),
+            ext: ".png".into(),
+            path: png_path.clone(),
+            size: 0,
+            mtime: 0,
+            ctime: 0,
+            has_thumbnail_cache: false,
+            width: 0,
+            height: 0,
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            source: String::new(),
+            meta_loaded: false,
+            search_text: String::new(),
+            unified_search_text: String::new(),
+            hash_key: Default::default(),
+        };
+
+        notify_files_batch_inner(None, &state, vec![file_with_zero_mtime], Vec::new());
+
+        let current_epoch = crate::current_metadata_bg_epoch();
+        let processed = process_unloaded_metadata_batch(&state, vec![png_path.clone()], current_epoch, temp_dir_str);
+        assert_eq!(processed, 1);
+
+        let all_files = state.all_files.read();
+        assert!(all_files[0].meta_loaded);
+        assert!(
+            all_files[0].mtime >= 1_000_000_000_000,
+            "mtime=0 のファイルに対してバックグラウンド解析後はミリ秒桁（>= 10^12）で格納されること: {}",
+            all_files[0].mtime
         );
     }
 }
