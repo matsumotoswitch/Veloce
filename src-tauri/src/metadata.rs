@@ -262,7 +262,7 @@ pub(crate) fn commit_pending_metadata_batch(
 /// Stealth 抽出仕様バージョン。抽出ロジック・対応仕様を変更した場合はこの値をインクリメントして過去キャッシュを自己修復させる。
 pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 1;
 /// JPEG メタデータ抽出仕様バージョン（COMセグメント・JSON直接検出・Photoshop 8BIM対応）。過去キャッシュを自己修復させる。
-pub(crate) const JPEG_SCHEMA_VERSION: u64 = 3;
+pub(crate) const JPEG_SCHEMA_VERSION: u64 = 4;
 
 /// ファイル先頭12バイトのマジックバイトから実際の画像コンテナ形式（"png" / "jpeg" / "webp"）を判定する。
 /// マジックバイトを読み取れない場合や既知のシグネチャに一致しない場合は、従来どおり拡張子（`lower_path`）で判定する。
@@ -380,7 +380,8 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                         let needs_jpeg_retry = is_jpeg
                             && (cached_meta.prompt.is_empty()
                                 || (cached_meta.metadata_source == "JPEG EXIF"
-                                    && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION)))
+                                    && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION))
+                                || cached_meta.negative_prompt.starts_with("from image/"))
                             && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION);
                         // 旧バージョンの音声タグ解析（拡張タグ・TXXX 未対応時）のキャッシュをオンデマンドで最新化する
                         let needs_audio_reparse = crate::audio::is_audio_path(file_path)
@@ -911,7 +912,10 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
             }
         } else if prompt.is_empty() && !comment_string.is_empty() {
             prompt = comment_string.to_string();
-        } else if !comment_string.is_empty() && !comment_string.contains("Steps: ") {
+        } else if !comment_string.is_empty()
+            && !comment_string.contains("Steps: ")
+            && !comment_string.starts_with("from image/")
+        {
             negative_prompt = comment_string.to_string();
         }
     }
@@ -1825,7 +1829,17 @@ pub(crate) fn extract_xmp_field(xml: &str, tag_names: &[&str]) -> Option<String>
                 let abs_pos = search_from + rel_pos;
                 let valid_boundary = abs_pos == 0 || {
                     let prev = xml.as_bytes()[abs_pos - 1];
-                    prev.is_ascii_whitespace() || prev == b':'
+                    if prev.is_ascii_whitespace() {
+                        true
+                    } else if prev == b':' {
+                        // コロンプレフィックスの場合、stEvt: などの Adobe 操作履歴やリソースイベント属性を除外
+                        !tag.contains(':')
+                            && (abs_pos < 6 || &xml.as_bytes()[abs_pos - 6..abs_pos] != b"stEvt:")
+                            && (abs_pos < 6 || &xml.as_bytes()[abs_pos - 6..abs_pos] != b"stRef:")
+                            && (abs_pos < 6 || &xml.as_bytes()[abs_pos - 6..abs_pos] != b"stVer:")
+                    } else {
+                        false
+                    }
                 };
                 let val_start = abs_pos + attr_pat.len();
                 if valid_boundary {
@@ -3698,6 +3712,7 @@ mod tests {
         if std::path::Path::new(real_path).exists() {
             let (real_meta, _, _) = get_full_metadata_for_path(real_path, &pool);
             assert_eq!(real_meta.prompt, "1girl, cowboy shot, character image, silver short hair");
+            assert_eq!(real_meta.negative_prompt, "", "stEvt:parameters の変換履歴が除外要素に混入しないこと");
             assert_eq!(real_meta.source, "NovelAI Diffusion V5");
             assert_eq!(real_meta.metadata_source, "JPEG Photoshop (Slices)");
         }
@@ -3738,6 +3753,34 @@ mod tests {
         assert_eq!(meta.prompt, "1girl, solo, masterpiece");
         assert_eq!(meta.metadata_source, "JPEG XMP");
         assert_eq!(meta.params["jpegSchema"].as_u64(), Some(JPEG_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn test_extract_xmp_field_ignores_adobe_steavt_parameters() {
+        let xmp_with_history = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+            <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+                <rdf:Description rdf:about="" xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/" xmlns:stEvt="http://ns.adobe.com/xap/1.0/sType/ResourceEvent#">
+                    <xmpMM:History>
+                        <rdf:Seq>
+                            <rdf:li stEvt:action="converted" stEvt:parameters="from image/png to image/jpeg"/>
+                        </rdf:Seq>
+                    </xmpMM:History>
+                </rdf:Description>
+            </rdf:RDF>
+        </x:xmpmeta>"#;
+
+        // "parameters" キーの検索で stEvt:parameters (変換履歴) が誤って抽出されないこと
+        let extracted = extract_xmp_field(xmp_with_history, &["exif:UserComment", "UserComment", "parameters", "c2pa:parameters"]);
+        assert_eq!(extracted, None, "stEvt:parameters は AI 生成パラメータとして抽出されてはならない");
+
+        // 正規の parameters 属性は正常に抽出できること
+        let xmp_with_real_params = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+            <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+                <rdf:Description rdf:about="" parameters="Steps: 28, Sampler: Euler a, Seed: 12345"/>
+            </rdf:RDF>
+        </x:xmpmeta>"#;
+        let extracted_real = extract_xmp_field(xmp_with_real_params, &["parameters"]);
+        assert_eq!(extracted_real, Some("Steps: 28, Sampler: Euler a, Seed: 12345".to_string()));
     }
 
     /// プロンプトを持たない PNG / WebP 画像における stealthSchema マーカー付与と
