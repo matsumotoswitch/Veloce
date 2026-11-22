@@ -4133,13 +4133,13 @@ fn main() {
                     } else if label == "viewer_pool_0" {
                         // プール用のウィンドウは破棄せず非表示にする
                         api.prevent_close();
-                        let _ = event.window().emit("close-viewer", ());
+                        let _ = event.window().emit("close-viewer", label.clone());
                         let _ = event.window().hide();
                         let state = event.window().state::<AppState>();
                         state.viewer_paths.write().remove(&label);
                         state.viewer_hashes.write().remove(&label);
                     } else if label.starts_with("viewer_") {
-                        let _ = event.window().emit("close-viewer", ());
+                        let _ = event.window().emit("close-viewer", label.clone());
                         let _ = event.window().set_always_on_top(false);
                         // ビューアウィンドウが閉じられた際にキャッシュを破棄
                         let state = event.window().state::<AppState>();

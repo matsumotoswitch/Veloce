@@ -243,6 +243,7 @@ pub async fn open_viewer(
             #[derive(Clone, serde::Serialize)]
             #[serde(rename_all = "camelCase")]
             struct ViewerInitSessionPayload {
+                label: String,
                 index: usize,
                 path: Option<String>,
                 total: usize,
@@ -253,6 +254,7 @@ pub async fn open_viewer(
             let _ = pool_win.emit(
                 "viewer-init-session",
                 ViewerInitSessionPayload {
+                    label: "viewer_pool_0".to_string(),
                     index: resolved_index,
                     path: target_path.clone(),
                     total: current_paths.len(),
@@ -400,7 +402,7 @@ pub fn show_window(window: tauri::Window) {
 #[tauri::command]
 pub fn close_viewer_window(window: tauri::Window, state: tauri::State<'_, AppState>) {
     let label = window.label().to_string();
-    let _ = window.emit("close-viewer", ());
+    let _ = window.emit("close-viewer", label.clone());
     if label == "viewer_pool_0" {
         let _ = window.hide();
     } else {

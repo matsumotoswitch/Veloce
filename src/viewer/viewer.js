@@ -366,6 +366,18 @@ export function applyViewerInitSessionPayload(payload) {
 }
 
 /**
+ * 現在のビューアーウィンドウの識別ラベルを取得します。
+ * @returns {string|null}
+ */
+export function getViewerWindowLabel() {
+  if (typeof window === 'undefined') return null;
+  return (window.__TAURI__ && window.__TAURI__.window && window.__TAURI__.window.appWindow && window.__TAURI__.window.appWindow.label)
+    || (window.__TAURI_METADATA__ && window.__TAURI_METADATA__.__currentWindow && window.__TAURI_METADATA__.__currentWindow.label)
+    || (window.__VELOCE_WINDOW_LABEL__)
+    || null;
+}
+
+/**
  * ビューアーセッション終了時（close-viewer）の完全初期化処理。
  * 次回プール再利用時の状態リークを防ぐため、パス配列・画像パス・ズーム・キャッシュを安全に破棄する。
  */
@@ -419,6 +431,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (listen) {
       await Promise.all([
         listen('viewer-init-session', async (event) => {
+          if (event && event.payload && event.payload.label) {
+            const myLabel = getViewerWindowLabel();
+            if (myLabel && event.payload.label !== myLabel) {
+              return;
+            }
+          }
           hasInitSessionReceived = true;
           isViewerWindowShown = false;
           await serverInfoPromise;
@@ -578,7 +596,14 @@ window.addEventListener('DOMContentLoaded', async () => {
         viewerState.isImmersiveArranged = true;
         resetZoomAndFit();
       });
-      listen('close-viewer', () => {
+      listen('close-viewer', (event) => {
+        if (event && event.payload) {
+          const targetLabel = typeof event.payload === 'string' ? event.payload : event.payload.label;
+          const myLabel = getViewerWindowLabel();
+          if (targetLabel && myLabel && targetLabel !== myLabel) {
+            return;
+          }
+        }
         handleCloseViewer();
       });
 
@@ -2308,6 +2333,7 @@ if (typeof window !== 'undefined') {
   window.advanceAfterPathDeleted = advanceAfterPathDeleted;
   window.cleanupCurrentImage = cleanupCurrentImage;
   window.handleCloseViewer = handleCloseViewer;
+window.getViewerWindowLabel = getViewerWindowLabel;
 }
 
 window.addEventListener('beforeunload', () => {

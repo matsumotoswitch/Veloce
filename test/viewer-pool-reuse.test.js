@@ -84,6 +84,7 @@ describe('Viewer Pool Reuse, Close, and Reopening State Consistency', () => {
       showWindow: vi.fn().mockResolvedValue(true),
       isViewerMaximized: vi.fn().mockResolvedValue(false),
       getAllRatings: vi.fn().mockResolvedValue({}),
+      getViewerImage: vi.fn().mockResolvedValue(null),
       getVideoServerPort: vi.fn().mockResolvedValue(1234),
       getVideoServerToken: vi.fn().mockResolvedValue('test')
     };
@@ -95,7 +96,7 @@ describe('Viewer Pool Reuse, Close, and Reopening State Consistency', () => {
     viewerState.currentImagePath = 'C:\\img1.png';
     viewerState.totalImages = 2;
 
-    document.dispatchEvent(new Event('DOMContentLoaded'));
+    window.dispatchEvent(new Event('DOMContentLoaded'));
     await new Promise((r) => setTimeout(r, 50));
 
     // イベント経由またはハンドラ直接呼び出しの両方で初期化されることを検証
@@ -165,5 +166,64 @@ describe('Viewer Pool Reuse, Close, and Reopening State Consistency', () => {
     const secondImg = document.getElementById('viewer-img');
     expect(secondImg).not.toBeNull();
     expect(document.body.contains(secondImg)).toBe(true);
+  });
+
+  it('close-viewer event is ignored if payload label does not match current window label', async () => {
+    let closeViewerCallback;
+    window.__TAURI__ = {
+      tauri: {
+        invoke: vi.fn().mockResolvedValue(true)
+      },
+      event: {
+        listen: vi.fn((event, cb) => {
+          if (event === 'close-viewer') {
+            closeViewerCallback = cb;
+          }
+          return Promise.resolve(() => {});
+        })
+      },
+      window: {
+        appWindow: {
+          label: 'viewer_pool_0'
+        }
+      }
+    };
+    window.veloceAPI = {
+      convertFileSrc: (p) => `asset://localhost/${encodeURIComponent(p)}`,
+      showWindow: vi.fn().mockResolvedValue(true),
+      isViewerMaximized: vi.fn().mockResolvedValue(false),
+      getAllRatings: vi.fn().mockResolvedValue({}),
+      getViewerImage: vi.fn().mockResolvedValue(null),
+      getVideoServerPort: vi.fn().mockResolvedValue(1234),
+      getVideoServerToken: vi.fn().mockResolvedValue('test')
+    };
+
+    const { viewerState } = await import('../src/viewer/viewer-state.js');
+    await import('../src/viewer/viewer.js');
+
+    viewerState.paths = ['C:\\img1.png', 'C:\\img2.png'];
+    viewerState.currentImagePath = 'C:\\img1.png';
+    viewerState.totalImages = 2;
+
+    window.dispatchEvent(new Event('DOMContentLoaded'));
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(typeof closeViewerCallback).toBe('function');
+
+    // 別ウィンドウ (viewer_1) のクローズイベントを受信した場合
+    closeViewerCallback({ payload: 'viewer_1' });
+
+    // 自ウィンドウ (viewer_pool_0) の状態は保持され、クリアされないこと
+    expect(viewerState.paths).toEqual(['C:\\img1.png', 'C:\\img2.png']);
+    expect(viewerState.currentImagePath).toBe('C:\\img1.png');
+    expect(viewerState.totalImages).toBe(2);
+
+    // 自ウィンドウ (viewer_pool_0) のクローズイベントを受信した場合
+    closeViewerCallback({ payload: 'viewer_pool_0' });
+
+    // 自ウィンドウ宛のイベントでは正常にクリーンアップされること
+    expect(viewerState.paths).toEqual([]);
+    expect(viewerState.currentImagePath).toBeNull();
+    expect(viewerState.totalImages).toBe(0);
   });
 });
