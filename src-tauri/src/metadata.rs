@@ -261,8 +261,8 @@ pub(crate) fn commit_pending_metadata_batch(
 
 /// Stealth 抽出仕様バージョン。抽出ロジック・対応仕様を変更した場合はこの値をインクリメントして過去キャッシュを自己修復させる。
 pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 1;
-/// JPEG メタデータ抽出仕様バージョン（COMセグメント・JSON直接検出対応）。過去キャッシュを自己修復させる。
-pub(crate) const JPEG_SCHEMA_VERSION: u64 = 1;
+/// JPEG メタデータ抽出仕様バージョン（COMセグメント・JSON直接検出・Photoshop 8BIM対応）。過去キャッシュを自己修復させる。
+pub(crate) const JPEG_SCHEMA_VERSION: u64 = 2;
 
 /// ファイル先頭12バイトのマジックバイトから実際の画像コンテナ形式（"png" / "jpeg" / "webp"）を判定する。
 /// マジックバイトを読み取れない場合や既知のシグネチャに一致しない場合は、従来どおり拡張子（`lower_path`）で判定する。
@@ -1863,6 +1863,165 @@ pub(crate) fn parse_webp_exif(path: &str) -> std::collections::HashMap<String, V
     results
 }
 
+/// Photoshop 8BIM Slices リソース (ID 0x041A) を解析し、グループ名からプロンプトおよび生成モデル情報を抽出する。
+fn parse_slices_resource(
+    data: &[u8],
+    results: &mut std::collections::HashMap<String, Vec<u8>>,
+) {
+    // Slices 構造体 (Photoshop 6.0+):
+    // version: u32 (4 bytes)
+    // bounds: top(i32), left(i32), bottom(i32), right(i32) (16 bytes)
+    // group name char count: u32 (4 bytes) -> offset 20..24
+    if data.len() < 24 {
+        return;
+    }
+    let char_count = u32::from_be_bytes([data[20], data[21], data[22], data[23]]) as usize;
+    let byte_len = char_count.saturating_mul(2);
+    if 24 + byte_len > data.len() {
+        return;
+    }
+    let name_bytes = &data[24..24 + byte_len];
+    let u16_chars: Vec<u16> = name_bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+        .collect();
+    let group_name = String::from_utf16_lossy(&u16_chars);
+    let trimmed = group_name.trim_end_matches('\0').trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    // パターン 1: 「【...】」が含まれている場合
+    // 例: "11-22_01-33-01__V5 Full Medium【1girl, cowboy shot, character image, silver short hair】"
+    if let (Some(start), Some(end)) = (trimmed.find('【'), trimmed.rfind('】')) {
+        if start < end {
+            let prompt = trimmed[start + '【'.len_utf8()..end].trim();
+            let model_part = trimmed[..start].trim();
+
+            if !prompt.is_empty() {
+                results.insert("ImageDescription".to_string(), prompt.as_bytes().to_vec());
+            }
+
+            // モデル情報（Source）の抽出
+            // "11-22_01-33-01__V5 Full Medium" -> "__" 以降を取得
+            let model_clean = if let Some(idx) = model_part.rfind("__") {
+                model_part[idx + 2..].trim()
+            } else {
+                model_part
+            };
+
+            let source = if model_clean.contains("V5") {
+                "NovelAI Diffusion V5".to_string()
+            } else if model_clean.contains("V4") {
+                "NovelAI Diffusion V4".to_string()
+            } else if model_clean.contains("V3") {
+                "NovelAI Diffusion V3".to_string()
+            } else if !model_clean.is_empty() {
+                model_clean.to_string()
+            } else {
+                String::new()
+            };
+
+            if !source.is_empty() {
+                let should_replace = results.get("Software").map_or(true, |existing| {
+                    let s = String::from_utf8_lossy(existing);
+                    s.starts_with("Adobe Photoshop") || s.is_empty()
+                });
+                if should_replace {
+                    results.insert("Software".to_string(), source.into_bytes());
+                }
+            }
+            return;
+        }
+    }
+
+    // パターン 2: 「【」を含まない場合
+    results.entry("ImageDescription".to_string()).or_insert_with(|| trimmed.as_bytes().to_vec());
+}
+
+/// Photoshop 8BIM IPTC-NAA リソース (ID 0x0404) を解析し、Caption (2:120) や Object Name (2:5) を抽出する。
+fn parse_iptc_resource(
+    data: &[u8],
+    results: &mut std::collections::HashMap<String, Vec<u8>>,
+) {
+    let mut p = 0;
+    while p + 5 <= data.len() {
+        if data[p] != 0x1C {
+            p += 1;
+            continue;
+        }
+        let record = data[p + 1];
+        let dataset = data[p + 2];
+        let size = u16::from_be_bytes([data[p + 3], data[p + 4]]) as usize;
+        p += 5;
+        if p + size > data.len() {
+            break;
+        }
+        let val = &data[p..p + size];
+        p += size;
+
+        // Record 2, Dataset 120 (Caption / Description)
+        if record == 2 && dataset == 120 {
+            results.entry("ImageDescription".to_string()).or_insert_with(|| val.to_vec());
+        }
+        // Record 2, Dataset 5 (Object Name / Document Title)
+        else if record == 2 && dataset == 5 {
+            results.entry("Comment".to_string()).or_insert_with(|| val.to_vec());
+        }
+    }
+}
+
+/// JPEG APP13 (0xFFED) セグメント内の Photoshop 3.0 8BIM リソースブロックを走査し、
+/// Slices リソース (0x041A) や IPTC (0x0404) からプロンプト・モデル情報を抽出する。
+fn parse_photoshop_8bim(
+    app13_data: &[u8],
+    results: &mut std::collections::HashMap<String, Vec<u8>>,
+) {
+    const PS_HEADER: &[u8] = b"Photoshop 3.0\0";
+    if !app13_data.starts_with(PS_HEADER) {
+        return;
+    }
+    let mut p = PS_HEADER.len();
+    while p + 8 <= app13_data.len() {
+        if &app13_data[p..p + 4] != b"8BIM" {
+            if let Some(pos) = app13_data[p + 1..].windows(4).position(|w| w == b"8BIM") {
+                p += 1 + pos;
+            } else {
+                break;
+            }
+        }
+        let res_id = u16::from_be_bytes([app13_data[p + 4], app13_data[p + 5]]);
+        let name_len = app13_data[p + 6] as usize;
+        // Pascal 文字列 (1バイト長 + name_len バイト) を偶数バイト境界へパディング
+        let name_field_len = (1 + name_len + 1) & !1;
+        let data_len_offset = p + 6 + name_field_len;
+        if data_len_offset + 4 > app13_data.len() {
+            break;
+        }
+        let data_len = u32::from_be_bytes([
+            app13_data[data_len_offset],
+            app13_data[data_len_offset + 1],
+            app13_data[data_len_offset + 2],
+            app13_data[data_len_offset + 3],
+        ]) as usize;
+        let data_start = data_len_offset + 4;
+        let data_end = data_start + data_len;
+        if data_end > app13_data.len() {
+            break;
+        }
+        let block_data = &app13_data[data_start..data_end];
+
+        if res_id == 0x041A {
+            parse_slices_resource(block_data, results);
+        } else if res_id == 0x0404 {
+            parse_iptc_resource(block_data, results);
+        }
+
+        // 各ブロックの末尾パディング (奇数長の場合は 1 バイトスキップ)
+        p = data_end + (data_len % 2);
+    }
+}
+
 pub(crate) fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, Vec<u8>> {
     const XMP_HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
     let mut results = std::collections::HashMap::new();
@@ -1911,6 +2070,9 @@ pub(crate) fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, V
                         } else if app1_data.windows(9).any(|w| w == b"\"prompt\":" || w == b"\"prompt\": ") {
                             results.entry("Comment".to_string()).or_insert_with(|| app1_data.to_vec());
                         }
+                    } else if marker == 0xED {
+                        let app13_data = &buffer[offset + 2..offset + length];
+                        parse_photoshop_8bim(app13_data, &mut results);
                     } else if marker == 0xFE {
                         let com_data = &buffer[offset + 2..offset + length];
                         if !com_data.is_empty() {
@@ -3347,7 +3509,7 @@ mod tests {
         let (repaired_meta, _, _) = get_full_metadata_for_path(&jpg_path.to_string_lossy(), &pool);
         assert!(repaired_meta.prompt.starts_with("nsfw,, black and white manga"), "レガシー空キャッシュから自動的に自己修復してプロンプトが再抽出されること");
         assert_eq!(repaired_meta.source, "NovelAI Diffusion V5");
-        assert_eq!(repaired_meta.params["jpegSchema"].as_u64(), Some(1));
+        assert_eq!(repaired_meta.params["jpegSchema"].as_u64(), Some(JPEG_SCHEMA_VERSION));
 
         // 4. マーカー長が壊れている等の異常セグメント配置かつ JSON の後ろに `{` を多数含む圧縮バイナリが続く JPEG でも、
         //    from_slice の byte_offset により JSON 終端までのみが切り出され、後続バイナリや偽 JSON が混入しないこと
@@ -3380,7 +3542,93 @@ mod tests {
         assert!(misnamed_meta.prompt.starts_with("nsfw,, black and white manga"), "拡張子が .png でも実体が JPEG なら COM セグメントからプロンプトが抽出されること");
         assert_eq!(misnamed_meta.source, "NovelAI Diffusion V5");
         assert_eq!(misnamed_meta.metadata_source, "JPEG EXIF");
-        assert_eq!(misnamed_meta.params["jpegSchema"].as_u64(), Some(1));
+        assert_eq!(misnamed_meta.params["jpegSchema"].as_u64(), Some(JPEG_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn test_parse_jpeg_photoshop_8bim_metadata() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let jpg_path = temp_dir.path().join("photoshop_8bim_test.jpg");
+
+        // 1. Slices リソース (0x041A) を含む APP13 セグメントのバイナリ構築
+        // GroupName: "11-22_01-33-01__V5 Full Medium【1girl, cowboy shot, character image, silver short hair】"
+        let group_name = "11-22_01-33-01__V5 Full Medium【1girl, cowboy shot, character image, silver short hair】";
+        let u16_chars: Vec<u16> = group_name.encode_utf16().collect();
+        let mut slices_payload = Vec::new();
+        slices_payload.extend_from_slice(&6u32.to_be_bytes()); // version = 6
+        slices_payload.extend_from_slice(&0i32.to_be_bytes()); // top
+        slices_payload.extend_from_slice(&0i32.to_be_bytes()); // left
+        slices_payload.extend_from_slice(&1216i32.to_be_bytes()); // bottom
+        slices_payload.extend_from_slice(&832i32.to_be_bytes()); // right
+        slices_payload.extend_from_slice(&(u16_chars.len() as u32).to_be_bytes()); // char count
+        for c in u16_chars {
+            slices_payload.extend_from_slice(&c.to_be_bytes());
+        }
+
+        // 8BIM Slices block: "8BIM" + 0x041A + name(0x00, 0x00) + size(u32) + payload
+        let mut bim_slices = Vec::new();
+        bim_slices.extend_from_slice(b"8BIM");
+        bim_slices.extend_from_slice(&0x041Au16.to_be_bytes());
+        bim_slices.extend_from_slice(&[0x00, 0x00]); // empty pascal string (2 bytes padded)
+        bim_slices.extend_from_slice(&(slices_payload.len() as u32).to_be_bytes());
+        bim_slices.extend_from_slice(&slices_payload);
+        if slices_payload.len() % 2 != 0 {
+            bim_slices.push(0);
+        }
+
+        // APP13 segment: 0xFF 0xED + length(u16) + "Photoshop 3.0\0" + 8BIM blocks
+        let mut app13_data = Vec::new();
+        app13_data.extend_from_slice(b"Photoshop 3.0\0");
+        app13_data.extend_from_slice(&bim_slices);
+
+        let app13_len = (app13_data.len() + 2) as u16;
+        let mut jpg_bytes = Vec::new();
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD8]); // SOI
+        jpg_bytes.extend_from_slice(&[0xFF, 0xED]); // APP13
+        jpg_bytes.extend_from_slice(&app13_len.to_be_bytes());
+        jpg_bytes.extend_from_slice(&app13_data);
+
+        // SOF0 (0xFF 0xC0) 832x1216
+        jpg_bytes.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11, 0x08, 0x04, 0xC0, 0x03, 0x40, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]);
+        // SOS (0xFF 0xDA)
+        jpg_bytes.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3F, 0x00]);
+        // dummy scan data
+        jpg_bytes.extend_from_slice(&[0x00, 0x00]);
+        // EOI (0xFF 0xD9)
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD9]);
+
+        std::fs::write(&jpg_path, &jpg_bytes).unwrap();
+
+        // 1. parse_jpeg_exif で ImageDescription と Software が抽出できること
+        let exif_map = parse_jpeg_exif(jpg_path.to_str().unwrap());
+        assert_eq!(
+            String::from_utf8_lossy(exif_map.get("ImageDescription").unwrap()),
+            "1girl, cowboy shot, character image, silver short hair"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(exif_map.get("Software").unwrap()),
+            "NovelAI Diffusion V5"
+        );
+
+        // 2. get_full_metadata_for_path で完全な FullMetadata として解決できること
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        crate::migrate_cache_db(&mut pool.get().unwrap()).unwrap();
+
+        let (meta, _, _) = get_full_metadata_for_path(&jpg_path.to_string_lossy(), &pool);
+        assert_eq!(meta.prompt, "1girl, cowboy shot, character image, silver short hair");
+        assert_eq!(meta.source, "NovelAI Diffusion V5");
+        assert_eq!(meta.metadata_source, "JPEG EXIF");
+        assert_eq!(meta.params["jpegSchema"].as_u64(), Some(JPEG_SCHEMA_VERSION));
+
+        // 3. 実ファイル (D:/11-22_...hair2.jpg) がローカル環境に存在する場合の直接検証
+        let real_path = "D:/11-22_01-33-01__V5_Full_Medium1girl_cowboy_shot_character_image_silver_short_hair2.jpg";
+        if std::path::Path::new(real_path).exists() {
+            let (real_meta, _, _) = get_full_metadata_for_path(real_path, &pool);
+            assert_eq!(real_meta.prompt, "1girl, cowboy shot, character image, silver short hair");
+            assert_eq!(real_meta.source, "NovelAI Diffusion V5");
+            assert_eq!(real_meta.metadata_source, "JPEG EXIF");
+        }
     }
 
     /// プロンプトを持たない PNG / WebP 画像における stealthSchema マーカー付与と
