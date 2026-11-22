@@ -262,7 +262,7 @@ pub(crate) fn commit_pending_metadata_batch(
 /// Stealth 抽出仕様バージョン。抽出ロジック・対応仕様を変更した場合はこの値をインクリメントして過去キャッシュを自己修復させる。
 pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 1;
 /// JPEG メタデータ抽出仕様バージョン（COMセグメント・JSON直接検出・Photoshop 8BIM対応）。過去キャッシュを自己修復させる。
-pub(crate) const JPEG_SCHEMA_VERSION: u64 = 2;
+pub(crate) const JPEG_SCHEMA_VERSION: u64 = 3;
 
 /// ファイル先頭12バイトのマジックバイトから実際の画像コンテナ形式（"png" / "jpeg" / "webp"）を判定する。
 /// マジックバイトを読み取れない場合や既知のシグネチャに一致しない場合は、従来どおり拡張子（`lower_path`）で判定する。
@@ -351,8 +351,8 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                         // 早期リターンせず、最新の仕様で再解析を行ってDBを更新・保存する
                         let is_valid_source = matches!(
                             cached_meta.metadata_source.as_str(),
-                            "PNG Chunks" | "Alpha Channel" | "WebP EXIF" | "JPEG EXIF" | "Audio Tags" | "None"
-                        );
+                            "PNG Chunks" | "Alpha Channel" | "WebP EXIF" | "Audio Tags" | "None"
+                        ) || cached_meta.metadata_source.starts_with("JPEG ");
                         let lower_path = file_path.to_lowercase();
                         let (can_have_alpha_stealth, is_jpeg) = if cached_meta.prompt.is_empty() {
                             match detect_image_container(file_path, &lower_path) {
@@ -378,7 +378,9 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                         // 過去の解析で JPEG のプロンプト（COMセグメント・JSON直接検出等）の抽出が空のままキャッシュされた場合、
                         // 最新の抽出仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
                         let needs_jpeg_retry = is_jpeg
-                            && cached_meta.prompt.is_empty()
+                            && (cached_meta.prompt.is_empty()
+                                || (cached_meta.metadata_source == "JPEG EXIF"
+                                    && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION)))
                             && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION);
                         // 旧バージョンの音声タグ解析（拡張タグ・TXXX 未対応時）のキャッシュをオンデマンドで最新化する
                         let needs_audio_reparse = crate::audio::is_audio_path(file_path)
@@ -489,6 +491,19 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
         let mut desc = String::new();
         let mut comment = String::new();
         let mut src = String::new();
+        let mut desc_source: Option<String> = None;
+        let mut usercomment_source: Option<String> = None;
+        let mut comment_source: Option<String> = None;
+
+        if let Some(s) = exif_data.get("_desc_source") {
+            desc_source = Some(decode_metadata_string(s));
+        }
+        if let Some(s) = exif_data.get("_usercomment_source") {
+            usercomment_source = Some(decode_metadata_string(s));
+        }
+        if let Some(s) = exif_data.get("_comment_source") {
+            comment_source = Some(decode_metadata_string(s));
+        }
 
         if let Some(d) = exif_data.get("ImageDescription") {
             desc = decode_metadata_string(d)
@@ -537,6 +552,7 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
             }
         }
 
+        let mut stream_source = false;
         if is_jpeg && !comment.contains('{') && !desc.contains('{') {
             if let Ok(file) = std::fs::File::open(file_path) {
                 if let Ok(mmap) = unsafe { memmap2::MmapOptions::new().map(&file) } {
@@ -557,15 +573,37 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                                 comment.push('\n');
                                 comment.push_str(&candidate_str);
                             }
+                            stream_source = true;
                         }
                     }
                 }
             }
         }
 
-        let prefix = if is_webp { "WebP" } else { "JPEG" };
-        if !comment.trim().is_empty() || !desc.trim().is_empty() {
-            detected_source = format!("{} EXIF", prefix);
+        if is_webp {
+            if !comment.trim().is_empty() || !desc.trim().is_empty() {
+                detected_source = "WebP EXIF".to_string();
+            }
+        } else if stream_source {
+            detected_source = "JPEG Stream".to_string();
+        } else if !desc.trim().is_empty() && desc_source.as_deref() == Some("JPEG Photoshop (Slices)") {
+            detected_source = "JPEG Photoshop (Slices)".to_string();
+        } else if comment.contains('{') {
+            detected_source = comment_source
+                .or(usercomment_source)
+                .or(desc_source)
+                .unwrap_or_else(|| "JPEG EXIF".to_string());
+        } else if desc.contains('{') {
+            detected_source = desc_source
+                .or(usercomment_source)
+                .or(comment_source)
+                .unwrap_or_else(|| "JPEG EXIF".to_string());
+        } else if !desc.trim().is_empty() {
+            detected_source = desc_source.unwrap_or_else(|| "JPEG EXIF".to_string());
+        } else if !comment.trim().is_empty() {
+            detected_source = comment_source
+                .or(usercomment_source)
+                .unwrap_or_else(|| "JPEG EXIF".to_string());
         }
 
         (desc, comment, String::new(), src, w, h)
@@ -710,7 +748,8 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
             });
             let comment_prompt = comment_obj.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
 
-            if prompt.is_empty() {
+            let prompt_was_raw_json = prompt.trim().starts_with('{');
+            if prompt.is_empty() || prompt_was_raw_json {
                 if let Some(p) = comment_prompt.as_deref().or(ap_prompt_base) {
                     prompt = p.to_string();
                 }
@@ -720,7 +759,7 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                 .or_else(|| comment_prompt.clone());
             if let Some(cp) = candidate_adopted_prompt {
                 let is_different = prompt.trim() != cp.trim() || prompt.contains("||");
-                if is_different {
+                if is_different && !prompt_was_raw_json {
                     if let serde_json::Value::Object(ref mut map) = comment_obj {
                         map.insert("adoptedPrompt".to_string(), serde_json::Value::String(cp.clone()));
                         map.insert("adopted_prompt".to_string(), serde_json::Value::String(cp));
@@ -1899,6 +1938,7 @@ fn parse_slices_resource(
             let model_part = trimmed[..start].trim();
 
             if !prompt.is_empty() {
+                results.insert("_desc_source".to_string(), b"JPEG Photoshop (Slices)".to_vec());
                 results.insert("ImageDescription".to_string(), prompt.as_bytes().to_vec());
             }
 
@@ -1936,6 +1976,7 @@ fn parse_slices_resource(
     }
 
     // パターン 2: 「【」を含まない場合
+    results.entry("_desc_source".to_string()).or_insert_with(|| b"JPEG Photoshop (Slices)".to_vec());
     results.entry("ImageDescription".to_string()).or_insert_with(|| trimmed.as_bytes().to_vec());
 }
 
@@ -1962,10 +2003,12 @@ fn parse_iptc_resource(
 
         // Record 2, Dataset 120 (Caption / Description)
         if record == 2 && dataset == 120 {
+            results.entry("_desc_source".to_string()).or_insert_with(|| b"JPEG IPTC".to_vec());
             results.entry("ImageDescription".to_string()).or_insert_with(|| val.to_vec());
         }
         // Record 2, Dataset 5 (Object Name / Document Title)
         else if record == 2 && dataset == 5 {
+            results.entry("_comment_source".to_string()).or_insert_with(|| b"JPEG IPTC".to_vec());
             results.entry("Comment".to_string()).or_insert_with(|| val.to_vec());
         }
     }
@@ -2064,10 +2107,36 @@ pub(crate) fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, V
                     if marker == 0xE1 {
                         let app1_data = &buffer[offset + 2..offset + length];
                         if app1_data.len() >= 6 && &app1_data[0..4] == b"Exif" {
-                            results.extend(parse_tiff_ifd(&app1_data[6..]));
+                            let tiff_map = parse_tiff_ifd(&app1_data[6..]);
+                            if tiff_map.contains_key("ImageDescription") {
+                                results.insert("_desc_source".to_string(), b"JPEG EXIF".to_vec());
+                            }
+                            if tiff_map.contains_key("UserComment") {
+                                results.insert("_usercomment_source".to_string(), b"JPEG EXIF".to_vec());
+                            }
+                            results.extend(tiff_map);
                         } else if app1_data.starts_with(XMP_HEADER) {
-                            parse_xmp_metadata(&app1_data[XMP_HEADER.len()..], &mut results);
+                            let mut xmp_map = std::collections::HashMap::new();
+                            parse_xmp_metadata(&app1_data[XMP_HEADER.len()..], &mut xmp_map);
+                            if xmp_map.contains_key("ImageDescription") {
+                                results.insert("_desc_source".to_string(), b"JPEG XMP".to_vec());
+                            }
+                            if xmp_map.contains_key("UserComment") {
+                                results.insert("_usercomment_source".to_string(), b"JPEG XMP".to_vec());
+                            }
+                            for (k, v) in xmp_map {
+                                if k == "Software" {
+                                    if let Some(existing) = results.get("Software") {
+                                        let s = String::from_utf8_lossy(existing);
+                                        if !s.starts_with("Adobe Photoshop") && !s.is_empty() {
+                                            continue; // 既に判明している生成AIモデル名（NovelAI等）をAdobe Photoshopで上書きしない
+                                        }
+                                    }
+                                }
+                                results.insert(k, v);
+                            }
                         } else if app1_data.windows(9).any(|w| w == b"\"prompt\":" || w == b"\"prompt\": ") {
+                            results.entry("_comment_source".to_string()).or_insert_with(|| b"JPEG APP1".to_vec());
                             results.entry("Comment".to_string()).or_insert_with(|| app1_data.to_vec());
                         }
                     } else if marker == 0xED {
@@ -2076,6 +2145,7 @@ pub(crate) fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, V
                     } else if marker == 0xFE {
                         let com_data = &buffer[offset + 2..offset + length];
                         if !com_data.is_empty() {
+                            results.insert("_comment_source".to_string(), b"JPEG COM".to_vec());
                             if let Some(existing) = results.get_mut("Comment") {
                                 if existing.ends_with(b"}") && com_data.starts_with(b"{") {
                                     existing.push(b'\n');
@@ -2088,6 +2158,7 @@ pub(crate) fn parse_jpeg_exif(path: &str) -> std::collections::HashMap<String, V
                     } else if (0xE0..=0xEF).contains(&marker) {
                         let app_data = &buffer[offset + 2..offset + length];
                         if app_data.windows(9).any(|w| w == b"\"prompt\":" || w == b"\"prompt\": ") {
+                            results.entry("_comment_source".to_string()).or_insert_with(|| b"JPEG APP".to_vec());
                             results.entry("Comment".to_string()).or_insert_with(|| app_data.to_vec());
                         }
                     }
@@ -3470,7 +3541,7 @@ mod tests {
         assert!(meta.negative_prompt.starts_with("blurry, lowres, error"));
         // 生成元モデル (model_name) の抽出検証
         assert_eq!(meta.source, "NovelAI Diffusion V5");
-        assert_eq!(meta.metadata_source, "JPEG EXIF");
+        assert_eq!(meta.metadata_source, "JPEG COM");
 
         // params 内の V4/V5 キャラクタープロンプトおよび座標情報
         let char_prompts = meta.params["characterPrompts"].as_array().expect("characterPrompts should be an array");
@@ -3533,6 +3604,7 @@ mod tests {
         assert!(!fallback_meta.prompt.contains("CORRUPTED_BINARY_TAIL"), "JSON終端以降の後続バイナリ内の波括弧データが混入しないこと");
         assert!(fallback_meta.params.get("rawParameters").is_none(), "非JSONバイナリが rawParameters としてぶら下がらないこと");
         assert_eq!(fallback_meta.source, "NovelAI Diffusion V5");
+        assert_eq!(fallback_meta.metadata_source, "JPEG Stream");
 
         // 5. 実体が JPEG（FF D8 + COM セグメント）でありながら拡張子が .png で保存されたファイルでも、
         //    先頭マジックバイト判定により parse_jpeg_exif が選択されメタデータが抽出できること
@@ -3541,7 +3613,7 @@ mod tests {
         let (misnamed_meta, _, _) = get_full_metadata_for_path(&misnamed_png_path.to_string_lossy(), &pool);
         assert!(misnamed_meta.prompt.starts_with("nsfw,, black and white manga"), "拡張子が .png でも実体が JPEG なら COM セグメントからプロンプトが抽出されること");
         assert_eq!(misnamed_meta.source, "NovelAI Diffusion V5");
-        assert_eq!(misnamed_meta.metadata_source, "JPEG EXIF");
+        assert_eq!(misnamed_meta.metadata_source, "JPEG COM");
         assert_eq!(misnamed_meta.params["jpegSchema"].as_u64(), Some(JPEG_SCHEMA_VERSION));
     }
 
@@ -3618,7 +3690,7 @@ mod tests {
         let (meta, _, _) = get_full_metadata_for_path(&jpg_path.to_string_lossy(), &pool);
         assert_eq!(meta.prompt, "1girl, cowboy shot, character image, silver short hair");
         assert_eq!(meta.source, "NovelAI Diffusion V5");
-        assert_eq!(meta.metadata_source, "JPEG EXIF");
+        assert_eq!(meta.metadata_source, "JPEG Photoshop (Slices)");
         assert_eq!(meta.params["jpegSchema"].as_u64(), Some(JPEG_SCHEMA_VERSION));
 
         // 3. 実ファイル (D:/11-22_...hair2.jpg) がローカル環境に存在する場合の直接検証
@@ -3627,8 +3699,45 @@ mod tests {
             let (real_meta, _, _) = get_full_metadata_for_path(real_path, &pool);
             assert_eq!(real_meta.prompt, "1girl, cowboy shot, character image, silver short hair");
             assert_eq!(real_meta.source, "NovelAI Diffusion V5");
-            assert_eq!(real_meta.metadata_source, "JPEG EXIF");
+            assert_eq!(real_meta.metadata_source, "JPEG Photoshop (Slices)");
         }
+    }
+
+    #[test]
+    fn test_parse_jpeg_xmp_metadata_source() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let jpg_path = temp_dir.path().join("xmp_test.jpg");
+
+        let xmp_xml = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt><rdf:li xml:lang="x-default">{"prompt": "1girl, solo, masterpiece"}</rdf:li></rdf:Alt></dc:description></rdf:Description></rdf:RDF></x:xmpmeta>"#;
+
+        let mut app1_payload = Vec::new();
+        app1_payload.extend_from_slice(b"http://ns.adobe.com/xap/1.0/\0");
+        app1_payload.extend_from_slice(xmp_xml.as_bytes());
+
+        let app1_len = (app1_payload.len() + 2) as u16;
+        let mut jpg_bytes = Vec::new();
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD8]); // SOI
+        jpg_bytes.extend_from_slice(&[0xFF, 0xE1]); // APP1
+        jpg_bytes.extend_from_slice(&app1_len.to_be_bytes());
+        jpg_bytes.extend_from_slice(&app1_payload);
+
+        // SOF0 (0xFF 0xC0) 512x512
+        jpg_bytes.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11, 0x08, 0x02, 0x00, 0x02, 0x00, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]);
+        // SOS
+        jpg_bytes.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3F, 0x00]);
+        jpg_bytes.extend_from_slice(&[0x00, 0x00]);
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD9]); // EOI
+
+        std::fs::write(&jpg_path, &jpg_bytes).unwrap();
+
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        crate::migrate_cache_db(&mut pool.get().unwrap()).unwrap();
+
+        let (meta, _, _) = get_full_metadata_for_path(&jpg_path.to_string_lossy(), &pool);
+        assert_eq!(meta.prompt, "1girl, solo, masterpiece");
+        assert_eq!(meta.metadata_source, "JPEG XMP");
+        assert_eq!(meta.params["jpegSchema"].as_u64(), Some(JPEG_SCHEMA_VERSION));
     }
 
     /// プロンプトを持たない PNG / WebP 画像における stealthSchema マーカー付与と

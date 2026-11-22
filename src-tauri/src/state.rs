@@ -288,7 +288,7 @@ mod tests {
             let stop_clone = Arc::clone(&stop);
             handles.push(thread::spawn(move || {
                 let mut count = 0;
-                while !stop_clone.load(Ordering::Relaxed) {
+                while count < 10 || !stop_clone.load(Ordering::Relaxed) {
                     let idx = (count + thread_id) % 100;
                     let path = format!(r"C:\test\img_{}.png", idx);
                     let _ = state_clone.get_mtime(&path);
