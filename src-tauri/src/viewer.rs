@@ -266,10 +266,42 @@ pub async fn open_viewer(
                 height: win_height,
             }));
             let _ = pool_win.center();
+            let _ = pool_win.unminimize();
             let _ = pool_win.show();
             let _ = pool_win.set_focus();
+
+            // Windows 8.1 前面化: 非表示から再表示したプールウィンドウがメインウィンドウの背面に潜り込まないよう
+            // TOPMOST 一時適用と SetForegroundWindow で最前面アクティブ化を保証する
+            #[cfg(target_os = "windows")]
+            {
+                let label_clone = "viewer_pool_0".to_string();
+                let app_clone = app.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    if let Some(win) = app_clone.get_window(&label_clone) {
+                        if let Ok(hwnd_ptr) = win.hwnd() {
+                            let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
+                            unsafe {
+                                use windows::Win32::UI::WindowsAndMessaging::{
+                                    SetForegroundWindow, SetWindowPos, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE,
+                                    SWP_NOSIZE,
+                                };
+                                let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                                let _ = SetForegroundWindow(hwnd);
+                                let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                            }
+                        }
+                    }
+                });
+            }
+
             return Ok(());
         }
+    } else {
+        // プールウィンドウが破棄されていた場合は自己修復のため生成フラグをリセットして再生成を試みる
+        state.viewer_pool_spawned.store(false, Ordering::Release);
+        state.viewer_pool_ready.store(false, Ordering::Release);
+        spawn_viewer_pool_once(&app, &state);
     }
 
     let now_ms = std::time::SystemTime::now()
@@ -343,8 +375,39 @@ pub async fn open_viewer(
 
 #[tauri::command]
 pub fn show_window(window: tauri::Window) {
+    let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(hwnd_ptr) = window.hwnd() {
+            let hwnd = windows::Win32::Foundation::HWND(hwnd_ptr.0 as isize);
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SetForegroundWindow, SetWindowPos, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE, SWP_NOSIZE,
+                };
+                let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                let _ = SetForegroundWindow(hwnd);
+                let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            }
+        }
+    }
+}
+
+/// ビューアーウィンドウを安全に閉じるコマンド。
+/// viewer_pool_0 の場合はウィンドウを破棄せず 'close-viewer' を発行して非表示（プール復帰）にし、
+/// 独立動的ウィンドウの場合は破棄（close）する。
+#[tauri::command]
+pub fn close_viewer_window(window: tauri::Window, state: tauri::State<'_, AppState>) {
+    let label = window.label().to_string();
+    let _ = window.emit("close-viewer", ());
+    if label == "viewer_pool_0" {
+        let _ = window.hide();
+    } else {
+        let _ = window.close();
+    }
+    state.viewer_paths.write().remove(&label);
+    state.viewer_hashes.write().remove(&label);
 }
 
 #[tauri::command]
@@ -506,5 +569,48 @@ mod tests {
         assert_eq!(start_tail, 67); // 99 - 32
         assert_eq!(chunk_tail.len(), 33); // 67..100
         assert_eq!(chunk_tail[32], "C:\\img\\99.png");
+    }
+
+    #[test]
+    fn test_viewer_pool_close_and_reopen_state_consistency() {
+        let state = crate::create_test_app_state("C:\\test");
+        // 初期状態: プール準備完了
+        assert!(mark_viewer_pool_ready_for_label(&state, "viewer_pool_0"));
+        assert!(state.viewer_pool_ready.load(Ordering::Acquire));
+
+        // 1回目のセッション開始: paths と hash が登録され表示状態になる
+        state.viewer_paths.write().insert("viewer_pool_0".to_string(), Arc::new(vec!["C:\\a.png".to_string()]));
+        state.viewer_hashes.write().insert("viewer_pool_0".to_string(), "12345".to_string());
+        // 表示中（pool_is_visible = true）は再利用不可
+        assert!(!can_reuse_viewer_pool(true, true, state.viewer_pool_ready.load(Ordering::Acquire)));
+
+        // ウィンドウ閉じる（非表示化）: paths と hash がクリーンアップされる
+        state.viewer_paths.write().remove("viewer_pool_0");
+        state.viewer_hashes.write().remove("viewer_pool_0");
+        assert!(!state.viewer_paths.read().contains_key("viewer_pool_0"));
+        assert!(!state.viewer_hashes.read().contains_key("viewer_pool_0"));
+
+        // 非表示状態（pool_is_visible = false）に戻ったため、2回目のオープン時に即座に再利用可能
+        assert!(can_reuse_viewer_pool(true, false, state.viewer_pool_ready.load(Ordering::Acquire)));
+    }
+
+    #[test]
+    fn test_viewer_pool_destroyed_self_healing_flags() {
+        let state = crate::create_test_app_state("C:\\test");
+        state.viewer_pool_spawned.store(true, Ordering::Release);
+        state.viewer_pool_ready.store(true, Ordering::Release);
+        state.viewer_paths.write().insert("viewer_pool_0".to_string(), Arc::new(vec!["C:\\a.png".to_string()]));
+        state.viewer_hashes.write().insert("viewer_pool_0".to_string(), "hash1".to_string());
+
+        // ウィンドウが予期せず破棄された場合、Destroyed ハンドラによりフラグがリセットされること
+        state.viewer_pool_spawned.store(false, Ordering::Release);
+        state.viewer_pool_ready.store(false, Ordering::Release);
+        state.viewer_paths.write().remove("viewer_pool_0");
+        state.viewer_hashes.write().remove("viewer_pool_0");
+
+        assert!(!state.viewer_pool_spawned.load(Ordering::Acquire));
+        assert!(!state.viewer_pool_ready.load(Ordering::Acquire));
+        assert!(!state.viewer_paths.read().contains_key("viewer_pool_0"));
+        assert!(!state.viewer_hashes.read().contains_key("viewer_pool_0"));
     }
 }

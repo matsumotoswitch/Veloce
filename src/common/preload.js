@@ -499,13 +499,28 @@ window.veloceAPI = {
    */
   toggleDevtools: () => { /* 完全に無効化 */ },
   /**
+   * ビューアーウィンドウを安全に閉じます（viewer_pool_0 は破棄せず非表示化）。
+   */
+  closeViewerWindow: () => invoke('close_viewer_window'),
+  /**
    * ウィンドウを安全に閉じます。
+   * viewer_pool_0 の場合はウィンドウを破棄せず非表示にし、次回表示時の Window Pool 再利用性を維持する。
    */
   closeWindow: async () => {
     try {
       await appWindow.setAlwaysOnTop(false);
     } catch (e) {}
-    appWindow.close();
+    try {
+      await invoke('close_viewer_window');
+      return;
+    } catch (e) {}
+    if (appWindow) {
+      if (appWindow.label === 'viewer_pool_0') {
+        await appWindow.hide();
+      } else {
+        appWindow.close();
+      }
+    }
   },
   /**
    * 開いているすべてのビューアーウィンドウを横一列に並べます。

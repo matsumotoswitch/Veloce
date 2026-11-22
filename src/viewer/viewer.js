@@ -261,7 +261,7 @@ export async function toggleAlphaOverlayMode(customImgEl = null) {
 /**
  * 現在表示中の画像・動画要素のリソースを即座に解放
  */
-function cleanupCurrentImage() {
+export function cleanupCurrentImage() {
   closeVolumePopup();
   stopAndDiscardAudio();
   if (viewerState.isAlphaOverlayMode && viewerState.originalSrc && currentlyVisibleImg) {
@@ -276,6 +276,13 @@ function cleanupCurrentImage() {
     }
     currentlyVisibleImg.remove();
     currentlyVisibleImg = null;
+  }
+  if (currentViewerImg && currentViewerImg !== currentlyVisibleImg) {
+    currentViewerImg.remove();
+  }
+  currentViewerImg = null;
+  if (viewerUI && viewerUI.elements) {
+    viewerUI.elements.viewerImg = null;
   }
 }
 
@@ -358,6 +365,20 @@ export function applyViewerInitSessionPayload(payload) {
   }
 }
 
+/**
+ * ビューアーセッション終了時（close-viewer）の完全初期化処理。
+ * 次回プール再利用時の状態リークを防ぐため、パス配列・画像パス・ズーム・キャッシュを安全に破棄する。
+ */
+export function handleCloseViewer() {
+  viewerState.paths = [];
+  viewerState.currentImagePath = null;
+  viewerState.totalImages = 0;
+  isViewerWindowShown = false;
+  cleanupCurrentImage();
+  clearPreloadCache();
+  resetZoomAndFit();
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
     function applyViewerInitialData() {
       // IPC通信のラグを隠蔽するため、LocalStorageから初期データを取得して即座に描画を開始する
@@ -399,6 +420,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       await Promise.all([
         listen('viewer-init-session', async (event) => {
           hasInitSessionReceived = true;
+          isViewerWindowShown = false;
           await serverInfoPromise;
 
           // プールされたウィンドウが再利用されるため、以前の状態を完全にリセットする
@@ -408,6 +430,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           applyViewerTheme(sessionTheme);
           cleanupCurrentImage();
           clearPreloadCache();
+          resetZoomAndFit();
           applyViewerInitSessionPayload(event.payload);
           applyViewerInitialData();
 
@@ -556,11 +579,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         resetZoomAndFit();
       });
       listen('close-viewer', () => {
-        viewerState.paths = [];
-        viewerState.currentImagePath = null;
-        viewerState.totalImages = 0;
-        cleanupCurrentImage();
-        clearPreloadCache();
+        handleCloseViewer();
       });
 
       listen('viewer-file-renamed', (event) => {
@@ -661,6 +680,7 @@ function setViewerBodyAlignment(alignment) {
 }
 
 function clearViewerImgLayoutClasses(img) {
+  if (!img || !img.classList) return;
   img.classList.remove('is-zoomed', 'is-swapped', 'mode-immersive', 'mode-fit-window', 'mode-default');
   img.style.width = '';
   img.style.height = '';
@@ -728,6 +748,7 @@ function applyFitState() {
   if (viewerState.isZoomed) return;
 
   const img = viewerUI.elements.viewerImg;
+  if (!img) return;
   const isSwapped = isRotationSwapped();
 
   clearViewerImgLayoutClasses(img);
@@ -785,6 +806,10 @@ if (resizeObserver && typeof resizeObserver.observe === 'function' && typeof doc
  */
 function updateFullscreenStyles() {
   const img = viewerUI.elements.viewerImg;
+  if (!img) {
+    if (window.updateScaleDisplay) window.updateScaleDisplay();
+    return;
+  }
   if (!viewerState.isZoomed) {
     setViewerBodyAlignment('center');
     img.style.margin = '0';
@@ -941,6 +966,17 @@ let imageLoadSequence = 0;       // 非同期ロード競合防止用
  */
 function swapImageElement(newImg, sequenceId) {
   if (currentViewerImg === newImg) {
+    if (!document.body.contains(newImg)) {
+      const borderOverlay = document.getElementById('border-overlay');
+      if (borderOverlay && borderOverlay.parentNode) {
+        borderOverlay.parentNode.insertBefore(newImg, borderOverlay);
+      } else {
+        document.body.appendChild(newImg);
+      }
+    }
+    currentlyVisibleImg = newImg;
+    newImg.id = 'viewer-img';
+    newImg.style.display = '';
     if (newImg && newImg.tagName === 'VIDEO') {
       applyPlayModeToMedia(newImg, 'video');
       applyVolumeSettingsToMedia(newImg, true);
@@ -2270,6 +2306,8 @@ if (typeof window !== 'undefined') {
   window.cycleViewerPlayMode = cycleViewerPlayMode;
   window.updatePlayModeButtonUI = updatePlayModeButtonUI;
   window.advanceAfterPathDeleted = advanceAfterPathDeleted;
+  window.cleanupCurrentImage = cleanupCurrentImage;
+  window.handleCloseViewer = handleCloseViewer;
 }
 
 window.addEventListener('beforeunload', () => {
