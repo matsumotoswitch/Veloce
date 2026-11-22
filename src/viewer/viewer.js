@@ -761,7 +761,7 @@ function resetZoomAndFit() {
   viewerState.currentScale = 1.0;
   viewerState.currentTranslateX = 0;
   viewerState.currentTranslateY = 0;
-  viewerUI.updateImageRendering();
+  updateCompensateScale();
   applyFitState();
   updateFullscreenStyles();
 }
@@ -883,14 +883,75 @@ const debouncedFocusWindow = debounce(() => {
 let _resizePending = false;
 
 /**
+ * 画像の非クライアント領域（影・ボーダー・DPI丸め誤差・タスクバー制約）による
+ * 縦横比の微小な不一致を検出し、画像端の黒い隙間（レターボックス）をなくす補正倍率を計算・適用します。
+ */
+export function updateCompensateScale() {
+  if (viewerState.isZoomed || viewerState.isFullscreen || viewerState.isImmersiveArranged) {
+    viewerState.compensateScale = 1.0;
+    viewerUI.updateImageRendering();
+    return;
+  }
+  const img = viewerUI.elements.viewerImg;
+  if (!img || !img.naturalWidth || !img.naturalHeight) {
+    viewerState.compensateScale = 1.0;
+    viewerUI.updateImageRendering();
+    return;
+  }
+
+  const { width: natW, height: natH } = getNaturalDimensions();
+  if (natW <= 0 || natH <= 0) return;
+
+  const actualW = window.innerWidth;
+  const actualH = window.innerHeight;
+  if (actualW <= 0 || actualH <= 0) return;
+
+  const imgAspect = natW / natH;
+  const winAspect = actualW / actualH;
+
+  var compensate = 1.0;
+  if (winAspect > imgAspect) {
+    // ウィンドウの方が横に広い（または縦がタスクバー等で制限された）ため、左右に黒い隙間ができる
+    // 高さに合わせて描画された画像の幅 = actualH * imgAspect
+    const renderedW = actualH * imgAspect;
+    if (renderedW > 0) {
+      compensate = actualW / renderedW;
+    }
+  } else if (winAspect < imgAspect) {
+    // ウィンドウの方が縦に長い（または横が狭い）ため、上下に黒い隙間ができる
+    // 幅に合わせて描画された画像の高さ = actualW / imgAspect
+    const renderedH = actualW / imgAspect;
+    if (renderedH > 0) {
+      compensate = actualH / renderedH;
+    }
+  }
+
+  // 誤差補正は微小範囲（約10%未満のズレ、0.9 < compensate < 1.1）のみオーバースキャン補正として適用
+  if (Math.abs(compensate - 1.0) > 0.0005 && compensate > 0.9 && compensate < 1.1) {
+    viewerState.compensateScale = compensate;
+  } else {
+    viewerState.compensateScale = 1.0;
+  }
+  viewerUI.updateImageRendering();
+}
+
+/**
  * 回転を考慮した画像本来のサイズに合わせてウィンドウをリサイズします。
  */
-function resizeWindowToFitImage() {
+export function resizeWindowToFitImage() {
   if (viewerState.isFullscreen || document.fullscreenElement || viewerState.isImmersiveArranged) return;
 
   const { width: natW, height: natH } = getNaturalDimensions();
-  const maxWindowWidth = window.screen.width;
-  const maxWindowHeight = window.screen.height - 1;
+  if (natW <= 0 || natH <= 0) return;
+
+  // タスクバーを考慮した有効作業領域（availWidth / availHeight）を基準に設定
+  // タスクバー非表示時等のフルスクリーン誤判定を防ぐため、screen.height - 1 を上限とする
+  const maxWindowWidth = (window.screen && window.screen.availWidth)
+    ? window.screen.availWidth
+    : (window.screen ? window.screen.width : 1920);
+  const maxWindowHeight = (window.screen && window.screen.availHeight)
+    ? Math.min(window.screen.availHeight, (window.screen.height || window.screen.availHeight) - 1)
+    : (window.screen ? window.screen.height - 1 : 1080);
 
   let scale = Math.min(maxWindowWidth / natW, maxWindowHeight / natH, 1.0);
   
@@ -908,8 +969,10 @@ function resizeWindowToFitImage() {
 
   if (window.updateScaleDisplay) setTimeout(window.updateScaleDisplay, 50);
 
-  // 現在のウィンドウサイズと同じ場合は無駄なリサイズ要求をスキップする
+  // 現在のウィンドウサイズと同じ場合は無駄なリサイズ要求をスキップするが、
+  // 隙間補正（compensateScale）は現在の寸法に合わせて確実に適用する
   if (Math.abs(window.innerWidth - targetWidth) < 2 && Math.abs(window.innerHeight - targetHeight) < 2) {
+    updateCompensateScale();
     return;
   }
 
@@ -920,36 +983,7 @@ function resizeWindowToFitImage() {
     window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
       _resizePending = false;
       debouncedFocusWindow(); // 連続呼び出しによるフォーカス外れを防ぐためデバウンス処理を行う
-
-      // ウィンドウの非クライアント領域（影・ボーダー）による数px誤差を
-      // transform: scale() で補正し、画像端の黒い隙間をなくす。
-      // ズーム中は補正しない（ユーザー操作の scale と競合するため）。
-      if (!viewerState.isZoomed) {
-        const img = viewerUI.elements.viewerImg;
-        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-          const actualW = window.innerWidth;
-          const actualH = window.innerHeight;
-          // ウィンドウに対して画像が占める割合を計算
-          const imgAspect = targetWidth / targetHeight;
-          const winAspect = actualW / actualH;
-          // 短辺方向の誤差比率を補正倍率として使う（オーバースキャン）
-          var compensate;
-          if (imgAspect >= winAspect) {
-            // 高さが制約軸: actualH と targetHeight の比
-            compensate = (actualH > 0 && targetHeight > 0) ? actualH / targetHeight : 1.0;
-          } else {
-            // 幅が制約軸: actualW と targetWidth の比
-            compensate = (actualW > 0 && targetWidth > 0) ? actualW / targetWidth : 1.0;
-          }
-          // 誤差が0.5px以上の場合のみ適用（不要な再描画を回避）
-          if (Math.abs(compensate - 1.0) > 0.0005 && compensate > 0.9 && compensate < 1.1) {
-            viewerState.compensateScale = compensate;
-          } else {
-            viewerState.compensateScale = 1.0;
-          }
-          viewerUI.updateImageRendering();
-        }
-      }
+      updateCompensateScale();
     }).catch(() => {
       _resizePending = false;
     });
@@ -2333,7 +2367,9 @@ if (typeof window !== 'undefined') {
   window.advanceAfterPathDeleted = advanceAfterPathDeleted;
   window.cleanupCurrentImage = cleanupCurrentImage;
   window.handleCloseViewer = handleCloseViewer;
-window.getViewerWindowLabel = getViewerWindowLabel;
+  window.getViewerWindowLabel = getViewerWindowLabel;
+  window.resizeWindowToFitImage = resizeWindowToFitImage;
+  window.updateCompensateScale = updateCompensateScale;
 }
 
 window.addEventListener('beforeunload', () => {
