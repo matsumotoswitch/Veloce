@@ -103,5 +103,39 @@ describe('Diff Modal XSS Sanitization', () => {
     const container = document.getElementById('diff-container');
     expect(container.querySelector('img[onerror]')).toBeNull();
     expect(container.innerHTML).toContain('&lt;img src=x onerror=exploit()&gt;');
+
+  it('should display [V4] sublabel badge and render copy button when either file has negativeFromV4', () => {
+    const file1 = { name: 'f1.png', path: 'f1.png' };
+    const file2 = { name: 'f2.png', path: 'f2.png' };
+
+    const meta1 = {
+      prompt: '1girl',
+      negativePrompt: 'lowres, bad hands',
+      params: {
+        negativeFromV4: true
+      }
+    };
+    const meta2 = {
+      prompt: '1girl',
+      negativePrompt: 'lowres, bad feet',
+      params: {}
+    };
+
+    uiManager.showDiffModal(file1, file2, meta1, meta2);
+
+    const container = document.getElementById('diff-container');
+    expect(container.innerHTML).toContain('[V4]');
+    expect(container.innerHTML).toContain('sublabel-tag--muted');
+
+    // [V4] 見出しのブロック内にも copy-val-btn が存在することを検証
+    const sections = Array.from(container.querySelectorAll('.diff-section'));
+    const negSection = sections.find(sec => {
+      const titleEl = sec.querySelector('.diff-section-title');
+      return titleEl && titleEl.textContent.includes('除外したい要素') && titleEl.textContent.includes('[V4]');
+    });
+    expect(negSection).toBeDefined();
+    const copyBtns = negSection.querySelectorAll('.copy-val-btn');
+    expect(copyBtns.length).toBeGreaterThan(0);
+  });
   });
 });

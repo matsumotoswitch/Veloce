@@ -198,6 +198,7 @@ export function extractMetadataFields(file, meta = {}) {
     adoptedPrompt: adoptedPrompt,
     negativePrompt: currentNegativePrompt,
     adoptedNegativePrompt: adoptedNegativePrompt,
+    negativeFromV4: Boolean(p && p.negativeFromV4 === true),
     chars: [],
     params: {}
   };
@@ -391,8 +392,9 @@ export function buildInspectorSections(data) {
     );
   }
 
+  const negSubLabel = data.negativeFromV4 ? 'V4' : null;
   sections.push(
-    { title: '除外したい要素', value: data.negativePrompt, copyable: true }
+    { title: '除外したい要素', value: data.negativePrompt, copyable: true, subLabel: negSubLabel }
   );
 
   if (data.adoptedNegativePrompt) {
@@ -597,6 +599,7 @@ function parseComfyUI(file, meta, p) {
     requestType: null,
     prompt: positivePrompt || '',
     negativePrompt: negativePrompt || '',
+    negativeFromV4: false,
     chars: [],
     params: {
       resolution: res,
@@ -688,6 +691,7 @@ function parseA1111(file, meta, p) {
     requestType: null,
     prompt: positivePrompt || '',
     negativePrompt: negativePrompt || '',
+    negativeFromV4: false,
     chars: [],
     params: {
       resolution: resolutionStr,
@@ -765,6 +769,7 @@ function parseComfyUIPromptFormat(file, meta, p) {
     requestType: null,
     prompt: positivePrompt || '',
     negativePrompt: negativePrompt || '',
+    negativeFromV4: false,
     chars: [],
     params: {
       resolution: res,

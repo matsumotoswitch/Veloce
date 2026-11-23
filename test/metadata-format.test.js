@@ -487,5 +487,44 @@ describe('Metadata Format Utils', () => {
       expect(sections.some(s => s.title === '除外したい要素')).toBe(false);
       expect(sections.some(s => s.title === 'タイトル' && s.value === 'Opening Theme')).toBe(true);
     });
+
+    describe('NovelAI V4/V5 negativeFromV4 indicator', () => {
+      it('should extract negativeFromV4: true when params.negativeFromV4 is true and set subLabel: V4', () => {
+        const file = { name: 'sample_v5.png' };
+        const meta = {
+          prompt: '1girl',
+          negativePrompt: 'lowres, bad quality',
+          params: {
+            negativeFromV4: true
+          }
+        };
+        const extracted = extractMetadataFields(file, meta);
+        expect(extracted.negativeFromV4).toBe(true);
+
+        const sections = buildInspectorSections(extracted);
+        const negSection = sections.find(s => s.title === '除外したい要素');
+        expect(negSection).toBeDefined();
+        expect(negSection.subLabel).toBe('V4');
+        expect(negSection.value).toBe('lowres, bad quality');
+        expect(negSection.copyable).toBe(true);
+      });
+
+      it('should use default title 除外したい要素 with subLabel: null when negativeFromV4 is false or not present', () => {
+        const file = { name: 'sample_normal.png' };
+        const meta = {
+          prompt: '1girl',
+          negativePrompt: 'lowres, bad quality',
+          params: {}
+        };
+        const extracted = extractMetadataFields(file, meta);
+        expect(extracted.negativeFromV4).toBe(false);
+
+        const sections = buildInspectorSections(extracted);
+        const negSection = sections.find(s => s.title === '除外したい要素');
+        expect(negSection).toBeDefined();
+        expect(negSection.subLabel).toBeNull();
+        expect(negSection.value).toBe('lowres, bad quality');
+      });
+    });
   });
 });

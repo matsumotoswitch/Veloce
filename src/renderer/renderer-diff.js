@@ -57,6 +57,7 @@ export function showDiffModal(file1, file2, meta1 = {}, meta2 = {}, uiInstance =
 
     const isCopyable = title === 'プロンプト' ||
                        title === '除外したい要素' ||
+                       title.startsWith('除外したい要素') ||
                        title.endsWith('プロンプト') ||
                        title.endsWith('除外したい要素');
     const copyBtn1Html = isCopyable && v1 !== '-' ? UIManager.createCopyButtonHTML(v1) : '';
@@ -149,7 +150,9 @@ export function showDiffModal(file1, file2, meta1 = {}, meta2 = {}, uiInstance =
   if (d1.adoptedPrompt || d2.adoptedPrompt) {
     contentHtml += renderSideBySideSection('採用プロンプト', d1.adoptedPrompt, d2.adoptedPrompt);
   }
-  contentHtml += renderSideBySideSection('除外したい要素', d1.negativePrompt, d2.negativePrompt);
+  const negSub1 = (d1 && d1.negativeFromV4) ? 'V4' : null;
+  const negSub2 = (d2 && d2.negativeFromV4) ? 'V4' : null;
+  contentHtml += renderSideBySideSection('除外したい要素', d1.negativePrompt, d2.negativePrompt, false, negSub1, negSub2);
   if (d1.adoptedNegativePrompt || d2.adoptedNegativePrompt) {
     contentHtml += renderSideBySideSection('採用除外したい要素', d1.adoptedNegativePrompt, d2.adoptedNegativePrompt);
   }

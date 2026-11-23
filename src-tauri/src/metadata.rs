@@ -260,9 +260,9 @@ pub(crate) fn commit_pending_metadata_batch(
 }
 
 /// Stealth 抽出仕様バージョン。抽出ロジック・対応仕様を変更した場合はこの値をインクリメントして過去キャッシュを自己修復させる。
-pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 1;
+pub(crate) const STEALTH_SCHEMA_VERSION: u64 = 2;
 /// JPEG メタデータ抽出仕様バージョン（COMセグメント・JSON直接検出・Photoshop 8BIM対応）。過去キャッシュを自己修復させる。
-pub(crate) const JPEG_SCHEMA_VERSION: u64 = 4;
+pub(crate) const JPEG_SCHEMA_VERSION: u64 = 5;
 
 /// ファイル先頭12バイトのマジックバイトから実際の画像コンテナ形式（"png" / "jpeg" / "webp"）を判定する。
 /// マジックバイトを読み取れない場合や既知のシグネチャに一致しない場合は、従来どおり拡張子（`lower_path`）で判定する。
@@ -370,15 +370,18 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                             )
                         };
                         // 過去の解析でアルファチャンネルからの抽出に失敗し "None" かつプロンプト空でキャッシュされた場合、
+                        // または NovelAI V5 等でプロンプトがあるのにネガティブが空で旧スキーマでキャッシュされた場合、
                         // 最新のデコード仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
-                        let needs_stealth_retry = cached_meta.metadata_source == "None"
-                            && cached_meta.prompt.is_empty()
-                            && can_have_alpha_stealth
+                        let needs_stealth_retry = can_have_alpha_stealth
+                            && ((cached_meta.metadata_source == "None" && cached_meta.prompt.is_empty())
+                                || (!cached_meta.prompt.is_empty() && cached_meta.negative_prompt.is_empty()))
                             && cached_meta.params.get("stealthSchema").and_then(|v| v.as_u64()) != Some(STEALTH_SCHEMA_VERSION);
                         // 過去の解析で JPEG のプロンプト（COMセグメント・JSON直接検出等）の抽出が空のままキャッシュされた場合、
+                        // またはネガティブプロンプトが空のままキャッシュされた場合、
                         // 最新の抽出仕様で再抽出を試みるため早期リターンをスキップ（セルフヒーリング）
                         let needs_jpeg_retry = is_jpeg
                             && (cached_meta.prompt.is_empty()
+                                || cached_meta.negative_prompt.is_empty()
                                 || (cached_meta.metadata_source == "JPEG EXIF"
                                     && cached_meta.params.get("jpegSchema").and_then(|v| v.as_u64()) != Some(JPEG_SCHEMA_VERSION))
                                 || cached_meta.negative_prompt.starts_with("from image/"))
@@ -786,8 +789,36 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                 }
             }
 
-            // 3. NovelAI V4プロンプト対応
-            if let Some(v4_prompt) = comment_obj.get("v4_prompt").cloned() {
+            // Step 1 & 1b: NovelAI V4/V5 ネガティブプロンプト (v4_negative_prompt.caption.base_caption) へのフォールバック
+            let neg_base = comment_obj
+                .pointer("/v4_negative_prompt/caption/base_caption")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            if let Some(ref nb) = neg_base {
+                let nb_trimmed = nb.trim();
+                if negative_prompt.trim().is_empty() {
+                    if !nb_trimmed.is_empty() {
+                        negative_prompt = nb.clone();
+                        if let serde_json::Value::Object(ref mut map) = comment_obj {
+                            map.insert("negativeFromV4".to_string(), serde_json::Value::Bool(true));
+                        }
+                    }
+                } else if !nb_trimmed.is_empty()
+                    && (negative_prompt.trim() != nb_trimmed || negative_prompt.contains("||"))
+                    && comment_obj.get("adoptedNegativePrompt").is_none()
+                {
+                    if let serde_json::Value::Object(ref mut map) = comment_obj {
+                        map.insert("adoptedNegativePrompt".to_string(), serde_json::Value::String(nb.clone()));
+                        map.insert("adopted_negative_prompt".to_string(), serde_json::Value::String(nb.clone()));
+                    }
+                }
+            }
+
+            // 3. NovelAI V4/V5 プロンプト・キャラクター対応
+            let v4_prompt_val = comment_obj.get("v4_prompt").cloned();
+            let v4_neg_val = comment_obj.get("v4_negative_prompt").cloned();
+
+            if let Some(ref v4_prompt) = v4_prompt_val {
                 // base_caption による採用プロンプト補完
                 if let Some(base_cap) = v4_prompt.pointer("/caption/base_caption").and_then(|v| v.as_str()) {
                     if prompt.is_empty() {
@@ -799,90 +830,109 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
                         }
                     }
                 }
-                let v4_use_coords = v4_prompt.get("use_coords").and_then(|v| v.as_bool());
-                if let Some(char_captions) = v4_prompt
-                    .pointer("/caption/char_captions")
-                    .and_then(|v| v.as_array())
-                {
-                    let mut char_prompts_arr = Vec::new();
-                    let ucs = comment_obj
-                        .pointer("/v4_negative_prompt/caption/char_captions")
-                        .and_then(|v| v.as_array());
+            }
 
-                    let ap_char_prompts = actual_prompts_obj.as_ref()
-                        .and_then(|ap| ap.pointer("/prompt/char_captions"))
-                        .and_then(|v| v.as_array());
-                    let ap_char_ucs = actual_prompts_obj.as_ref()
-                        .and_then(|ap| ap.pointer("/negative_prompt/char_captions"))
-                        .and_then(|v| v.as_array());
+            // Step 2: キャラクタープロンプト・UC の抽出（両配列の長い方を基準に駆動）
+            let v4_pos_chars = v4_prompt_val
+                .as_ref()
+                .and_then(|vp| vp.pointer("/caption/char_captions"))
+                .and_then(|v| v.as_array());
+            let v4_neg_chars = v4_neg_val
+                .as_ref()
+                .and_then(|vn| vn.pointer("/caption/char_captions"))
+                .and_then(|v| v.as_array());
 
-                    for (i, p) in char_captions.iter().enumerate() {
-                        let mut char_obj = serde_json::Map::new();
-                        let cap_str = p.get("char_caption").and_then(|v| v.as_str()).unwrap_or_default();
+            let pos_len = v4_pos_chars.map(|a| a.len()).unwrap_or(0);
+            let neg_len = v4_neg_chars.map(|a| a.len()).unwrap_or(0);
+            let max_char_len = pos_len.max(neg_len);
+
+            if max_char_len > 0 {
+                let v4_use_coords = v4_prompt_val
+                    .as_ref()
+                    .and_then(|vp| vp.get("use_coords").and_then(|v| v.as_bool()));
+
+                let ap_char_prompts = actual_prompts_obj.as_ref()
+                    .and_then(|ap| ap.pointer("/prompt/char_captions"))
+                    .and_then(|v| v.as_array());
+                let ap_char_ucs = actual_prompts_obj.as_ref()
+                    .and_then(|ap| ap.pointer("/negative_prompt/char_captions"))
+                    .and_then(|v| v.as_array());
+
+                let mut char_prompts_arr = Vec::new();
+                for i in 0..max_char_len {
+                    let mut char_obj = serde_json::Map::new();
+
+                    // ポジティブ側キャラクタープロンプト
+                    let p_item = v4_pos_chars.and_then(|arr| arr.get(i));
+                    let cap_str = p_item
+                        .and_then(|p| p.get("char_caption").and_then(|v| v.as_str()))
+                        .unwrap_or_default();
+                    char_obj.insert(
+                        "prompt".to_string(),
+                        serde_json::Value::String(cap_str.to_string()),
+                    );
+
+                    // キャラクター採用プロンプト判定
+                    if let Some(ap_char_item) = ap_char_prompts.and_then(|arr| arr.get(i)) {
+                        if let Some(ap_cap) = ap_char_item.get("char_caption").and_then(|v| v.as_str()) {
+                            if cap_str.trim() != ap_cap.trim() || cap_str.contains("||") {
+                                char_obj.insert("adoptedPrompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
+                                char_obj.insert("adopted_prompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
+                            }
+                        }
+                    }
+
+                    // ネガティブ側キャラクター除外要素（非空の場合のみ uc キーを挿入）
+                    let u_item = v4_neg_chars.and_then(|arr| arr.get(i));
+                    let uc_str = u_item
+                        .and_then(|u| u.get("char_caption").and_then(|v| v.as_str()))
+                        .unwrap_or_default();
+                    if !uc_str.trim().is_empty() {
                         char_obj.insert(
-                            "prompt".to_string(),
-                            serde_json::Value::String(cap_str.to_string()),
+                            "uc".to_string(),
+                            serde_json::Value::String(uc_str.to_string()),
                         );
+                    }
 
-                        // キャラクター採用プロンプト判定
-                        if let Some(ap_char_item) = ap_char_prompts.and_then(|arr| arr.get(i)) {
-                            if let Some(ap_cap) = ap_char_item.get("char_caption").and_then(|v| v.as_str()) {
-                                if cap_str.trim() != ap_cap.trim() || cap_str.contains("||") {
-                                    char_obj.insert("adoptedPrompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
-                                    char_obj.insert("adopted_prompt".to_string(), serde_json::Value::String(ap_cap.to_string()));
-                                }
+                    // キャラクター採用除外要素判定
+                    if let Some(ap_uc_item) = ap_char_ucs.and_then(|arr| arr.get(i)) {
+                        if let Some(ap_uc_cap) = ap_uc_item.get("char_caption").and_then(|v| v.as_str()) {
+                            if uc_str.trim() != ap_uc_cap.trim() || uc_str.contains("||") {
+                                char_obj.insert("adoptedUc".to_string(), serde_json::Value::String(ap_uc_cap.to_string()));
+                                char_obj.insert("adopted_uc".to_string(), serde_json::Value::String(ap_uc_cap.to_string()));
                             }
                         }
+                    }
 
-                        let mut uc_str = "";
-                        if let Some(uc_arr) = ucs {
-                            if let Some(uc_item) = uc_arr.get(i) {
-                                if let Some(uc_cap) =
-                                    uc_item.get("char_caption").and_then(|v| v.as_str())
-                                {
-                                    uc_str = uc_cap;
-                                    char_obj.insert(
-                                        "uc".to_string(),
-                                        serde_json::Value::String(uc_cap.to_string()),
-                                    );
-                                }
-                            }
-                        }
-
-                        // キャラクター採用除外要素判定
-                        if let Some(ap_uc_item) = ap_char_ucs.and_then(|arr| arr.get(i)) {
-                            if let Some(ap_uc_cap) = ap_uc_item.get("char_caption").and_then(|v| v.as_str()) {
-                                if uc_str.trim() != ap_uc_cap.trim() || uc_str.contains("||") {
-                                    char_obj.insert("adoptedUc".to_string(), serde_json::Value::String(ap_uc_cap.to_string()));
-                                    char_obj.insert("adopted_uc".to_string(), serde_json::Value::String(ap_uc_cap.to_string()));
-                                }
-                            }
-                        }
-
-                        // キャラクター位置座標 (centers / center) の抽出
-                        if let Some(centers) = p.get("centers") {
+                    // キャラクター位置座標 (centers / center) の抽出（ポジティブ優先、なければネガティブ側）
+                    let target_center_item = p_item.or(u_item);
+                    if let Some(item) = target_center_item {
+                        if let Some(centers) = item.get("centers") {
                             char_obj.insert("centers".to_string(), centers.clone());
-                        } else if let Some(center) = p.get("center") {
+                        } else if let Some(center) = item.get("center") {
                             char_obj.insert(
                                 "centers".to_string(),
                                 serde_json::Value::Array(vec![center.clone()]),
                             );
                         }
-                        char_prompts_arr.push(serde_json::Value::Object(char_obj));
                     }
+                    char_prompts_arr.push(serde_json::Value::Object(char_obj));
+                }
 
-                    if let serde_json::Value::Object(ref mut map) = comment_obj {
-                        map.insert(
-                            "characterPrompts".to_string(),
-                            serde_json::Value::Array(char_prompts_arr),
-                        );
-                        if let Some(use_coords) = v4_use_coords {
-                            map.insert("use_coords".to_string(), serde_json::Value::Bool(use_coords));
-                        }
-                        map.remove("v4_prompt");
-                        map.remove("v4_negative_prompt");
+                if let serde_json::Value::Object(ref mut map) = comment_obj {
+                    map.insert(
+                        "characterPrompts".to_string(),
+                        serde_json::Value::Array(char_prompts_arr),
+                    );
+                    if let Some(use_coords) = v4_use_coords {
+                        map.insert("use_coords".to_string(), serde_json::Value::Bool(use_coords));
                     }
                 }
+            }
+
+            if let serde_json::Value::Object(ref mut map) = comment_obj {
+                map.remove("v4_prompt");
+                map.remove("v4_negative_prompt");
             }
             params = comment_obj;
         }
@@ -921,7 +971,7 @@ pub(crate) fn get_full_metadata_for_path_with_stat_inner(
     }
 
     let is_png_or_webp = is_png || is_webp;
-    if is_png_or_webp && metadata_source == "None" && prompt.trim().is_empty() {
+    if is_png_or_webp {
         if let serde_json::Value::Object(ref mut map) = params {
             map.insert("stealthSchema".to_string(), serde_json::json!(STEALTH_SCHEMA_VERSION));
         }
@@ -4010,5 +4060,380 @@ mod tests {
                 );
             }
         });
+    }
+
+    #[test]
+    fn test_novelai_v4_negative_fallback_and_v4_flag() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, metadata TEXT, width INTEGER, height INTEGER, path TEXT, size INTEGER, mtime INTEGER, ctime INTEGER, last_accessed INTEGER, searchable_prompt TEXT, searchable_negative_prompt TEXT, searchable_source TEXT, metadata_source TEXT)", []).unwrap();
+        }
+
+        let make_png = |name: &str, comment: &str| -> std::path::PathBuf {
+            let p = temp_dir.path().join(name);
+            let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+            let mut ihdr_data = Vec::new();
+            ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+            ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+            ihdr_data.push(8);
+            ihdr_data.push(6);
+            ihdr_data.extend_from_slice(&[0, 0, 0]);
+            png_bytes.extend_from_slice(&(ihdr_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"IHDR");
+            png_bytes.extend_from_slice(&ihdr_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            let mut text_data = Vec::new();
+            text_data.extend_from_slice(b"Comment\0");
+            text_data.extend_from_slice(comment.as_bytes());
+            png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"tEXt");
+            png_bytes.extend_from_slice(&text_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            png_bytes.extend_from_slice(&0u32.to_be_bytes());
+            png_bytes.extend_from_slice(b"IEND");
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            std::fs::write(&p, &png_bytes).unwrap();
+            p
+        };
+
+        let neg_323 = "lowres, {bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, extra digits, artistic error, username, scan, [abstract], bad anatomy, bad hands, @_@, mismatched pupils, heart pupils, glowing eyes, cat ears, fake animal ears";
+
+        // ケース 1: uc = "" ＋ neg_base = 323文字相当 -> negative_prompt が neg_base になり、negativeFromV4 が true
+        let p1 = make_png("p1.png", &serde_json::json!({
+            "prompt": "1girl, akashi",
+            "uc": "",
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": neg_323
+                }
+            }
+        }).to_string());
+        let (meta1, _, _) = get_full_metadata_for_path(&p1.to_string_lossy(), &pool);
+        assert_eq!(meta1.negative_prompt, neg_323);
+        assert_eq!(meta1.params.get("negativeFromV4"), Some(&serde_json::Value::Bool(true)));
+        assert!(meta1.params.get("adoptedNegativePrompt").is_none());
+
+        // ケース 2: uc = "" ＋ neg_base = "" -> negative_prompt は空のまま、negativeFromV4 なし
+        let p2 = make_png("p2.png", &serde_json::json!({
+            "prompt": "1girl, akashi",
+            "uc": "",
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": ""
+                }
+            }
+        }).to_string());
+        let (meta2, _, _) = get_full_metadata_for_path(&p2.to_string_lossy(), &pool);
+        assert_eq!(meta2.negative_prompt, "");
+        assert!(meta2.params.get("negativeFromV4").is_none());
+
+        // ケース 3: uc 非空 ＋ neg_base が同一 -> negative_prompt は uc のまま、adoptedNegativePrompt は付かない
+        let p3 = make_png("p3.png", &serde_json::json!({
+            "prompt": "1girl, akashi",
+            "uc": "lowres, bad quality",
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": "lowres, bad quality"
+                }
+            }
+        }).to_string());
+        let (meta3, _, _) = get_full_metadata_for_path(&p3.to_string_lossy(), &pool);
+        assert_eq!(meta3.negative_prompt, "lowres, bad quality");
+        assert!(meta3.params.get("adoptedNegativePrompt").is_none());
+        assert!(meta3.params.get("negativeFromV4").is_none());
+
+        // ケース 4: uc 非空 ＋ neg_base が異なる -> negative_prompt は uc のまま、adoptedNegativePrompt に neg_base が入る
+        let p4 = make_png("p4.png", &serde_json::json!({
+            "prompt": "1girl, akashi",
+            "uc": "lowres, bad quality",
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": "worst quality, artifacts"
+                }
+            }
+        }).to_string());
+        let (meta4, _, _) = get_full_metadata_for_path(&p4.to_string_lossy(), &pool);
+        assert_eq!(meta4.negative_prompt, "lowres, bad quality");
+        assert_eq!(
+            meta4.params.get("adoptedNegativePrompt").and_then(|v| v.as_str()),
+            Some("worst quality, artifacts")
+        );
+        assert!(meta4.params.get("negativeFromV4").is_none());
+
+        // ケース 5: actual_prompts 由来の adoptedNegativePrompt がある場合は優先され上書きされない
+        let p5 = make_png("p5.png", &serde_json::json!({
+            "prompt": "1girl, akashi",
+            "uc": "lowres, ||bad quality|worst quality||",
+            "actual_prompts": {
+                "negative_prompt": {
+                    "base_caption": "lowres, bad quality"
+                }
+            },
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": "different base caption from v4"
+                }
+            }
+        }).to_string());
+        let (meta5, _, _) = get_full_metadata_for_path(&p5.to_string_lossy(), &pool);
+        assert_eq!(meta5.negative_prompt, "lowres, ||bad quality|worst quality||");
+        assert_eq!(
+            meta5.params.get("adoptedNegativePrompt").and_then(|v| v.as_str()),
+            Some("lowres, bad quality")
+        );
+        assert!(meta5.params.get("negativeFromV4").is_none());
+    }
+
+    #[test]
+    fn test_novelai_v4_character_uc_handling() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, metadata TEXT, width INTEGER, height INTEGER, path TEXT, size INTEGER, mtime INTEGER, ctime INTEGER, last_accessed INTEGER, searchable_prompt TEXT, searchable_negative_prompt TEXT, searchable_source TEXT, metadata_source TEXT)", []).unwrap();
+        }
+
+        let make_png = |name: &str, comment: &str| -> std::path::PathBuf {
+            let p = temp_dir.path().join(name);
+            let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+            let mut ihdr_data = Vec::new();
+            ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+            ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+            ihdr_data.push(8);
+            ihdr_data.push(6);
+            ihdr_data.extend_from_slice(&[0, 0, 0]);
+            png_bytes.extend_from_slice(&(ihdr_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"IHDR");
+            png_bytes.extend_from_slice(&ihdr_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            let mut text_data = Vec::new();
+            text_data.extend_from_slice(b"Comment\0");
+            text_data.extend_from_slice(comment.as_bytes());
+            png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"tEXt");
+            png_bytes.extend_from_slice(&text_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            png_bytes.extend_from_slice(&0u32.to_be_bytes());
+            png_bytes.extend_from_slice(b"IEND");
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            std::fs::write(&p, &png_bytes).unwrap();
+            p
+        };
+
+        // 1. ポジティブ char_captions が1件、ネガティブが2件 -> characterPrompts が2件になり、2件目に UC が入る
+        let p1 = make_png("char1.png", &serde_json::json!({
+            "prompt": "2girls",
+            "uc": "lowres",
+            "v4_prompt": {
+                "caption": {
+                    "base_caption": "2girls",
+                    "char_captions": [
+                        { "char_caption": "girl A", "centers": [{"x": 0.3, "y": 0.5}] }
+                    ]
+                }
+            },
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": "lowres",
+                    "char_captions": [
+                        { "char_caption": "bad face", "centers": [{"x": 0.3, "y": 0.5}] },
+                        { "char_caption": "bad hands", "centers": [{"x": 0.7, "y": 0.5}] }
+                    ]
+                }
+            }
+        }).to_string());
+        let (meta1, _, _) = get_full_metadata_for_path(&p1.to_string_lossy(), &pool);
+        let chars1 = meta1.params["characterPrompts"].as_array().expect("characterPrompts should be array");
+        assert_eq!(chars1.len(), 2, "characterPrompts must have 2 elements");
+        assert_eq!(chars1[0]["prompt"].as_str(), Some("girl A"));
+        assert_eq!(chars1[0]["uc"].as_str(), Some("bad face"));
+        assert_eq!(chars1[1]["prompt"].as_str(), Some(""));
+        assert_eq!(chars1[1]["uc"].as_str(), Some("bad hands"));
+
+        // 2. ネガティブ char_caption が "" / "\n" -> そのエントリに uc キーが無い
+        let p2 = make_png("char2.png", &serde_json::json!({
+            "prompt": "2girls",
+            "uc": "lowres",
+            "v4_prompt": {
+                "caption": {
+                    "base_caption": "2girls",
+                    "char_captions": [
+                        { "char_caption": "girl A" },
+                        { "char_caption": "girl B" }
+                    ]
+                }
+            },
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": "lowres",
+                    "char_captions": [
+                        { "char_caption": "" },
+                        { "char_caption": "\n  \t" }
+                    ]
+                }
+            }
+        }).to_string());
+        let (meta2, _, _) = get_full_metadata_for_path(&p2.to_string_lossy(), &pool);
+        let chars2 = meta2.params["characterPrompts"].as_array().expect("characterPrompts should be array");
+        assert_eq!(chars2.len(), 2);
+        assert!(chars2[0].get("uc").is_none(), "empty uc should not have uc key");
+        assert!(chars2[1].get("uc").is_none(), "whitespace-only uc should not have uc key");
+    }
+
+    #[test]
+    fn test_stealth_and_jpeg_schema_self_healing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("CREATE TABLE cache (hash_key TEXT PRIMARY KEY, metadata TEXT, width INTEGER, height INTEGER, path TEXT, size INTEGER, mtime INTEGER, ctime INTEGER, last_accessed INTEGER, searchable_prompt TEXT, searchable_negative_prompt TEXT, searchable_source TEXT, metadata_source TEXT)", []).unwrap();
+        }
+
+        let make_png = |name: &str, comment: &str| -> (std::path::PathBuf, u64) {
+            let p = temp_dir.path().join(name);
+            let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+            let mut ihdr_data = Vec::new();
+            ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+            ihdr_data.extend_from_slice(&64u32.to_be_bytes());
+            ihdr_data.push(8);
+            ihdr_data.push(6);
+            ihdr_data.extend_from_slice(&[0, 0, 0]);
+            png_bytes.extend_from_slice(&(ihdr_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"IHDR");
+            png_bytes.extend_from_slice(&ihdr_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            let mut text_data = Vec::new();
+            text_data.extend_from_slice(b"Comment\0");
+            text_data.extend_from_slice(comment.as_bytes());
+            png_bytes.extend_from_slice(&(text_data.len() as u32).to_be_bytes());
+            png_bytes.extend_from_slice(b"tEXt");
+            png_bytes.extend_from_slice(&text_data);
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            png_bytes.extend_from_slice(&0u32.to_be_bytes());
+            png_bytes.extend_from_slice(b"IEND");
+            png_bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+            let len = png_bytes.len() as u64;
+            std::fs::write(&p, &png_bytes).unwrap();
+            (p, len)
+        };
+
+        // 1. PNG: 旧スタンプ（stealthSchema=1）＋プロンプト非空＋ネガティブ空
+        let (png_path, png_size) = make_png("v5_old_cache.png", &serde_json::json!({
+            "prompt": "1girl, ooyodo",
+            "uc": "",
+            "v4_negative_prompt": {
+                "caption": {
+                    "base_caption": "lowres, bad quality, 323 chars"
+                }
+            }
+        }).to_string());
+        let hash_key = crate::utils::hash_path_mtime_hex(png_path.to_str().unwrap(), 1000);
+
+        // 旧キャッシュ行（stealthSchema=1, prompt非空, negative_prompt空）を手動挿入
+        {
+            let conn = pool.get().unwrap();
+            let old_meta = serde_json::json!({
+                "path": png_path.to_str().unwrap(),
+                "width": 64,
+                "height": 64,
+                "prompt": "1girl, ooyodo",
+                "negative_prompt": "",
+                "params": {
+                    "stealthSchema": 1
+                },
+                "source": "NovelAI",
+                "metadata_source": "PNG Chunks"
+            }).to_string();
+            conn.execute(
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source)
+                 VALUES (?, ?, 64, 64, ?, ?, 1000, 1000, 1000, '1girl, ooyodo', '', 'NovelAI', 'PNG Chunks')",
+                rusqlite::params![hash_key, old_meta, png_path.to_str().unwrap(), png_size],
+            ).unwrap();
+        }
+
+        // 取得実行: needs_stealth_retry が発動して再解析され、negative_prompt が修復され stealthSchema=2 になる
+        let (meta1, _, _, row1) = get_full_metadata_for_path_with_stat_inner(
+            png_path.to_str().unwrap(), 1000, 1000, png_size, &pool, true,
+        );
+        assert!(row1.is_some(), "再解析が行われ新規キャッシュ行が生成されること");
+        assert_eq!(meta1.negative_prompt, "lowres, bad quality, 323 chars");
+        assert_eq!(meta1.params.get("stealthSchema").and_then(|v| v.as_u64()), Some(STEALTH_SCHEMA_VERSION));
+        assert_eq!(meta1.params.get("negativeFromV4"), Some(&serde_json::Value::Bool(true)));
+
+        // 新スタンプ（=2）＋ネガティブ空（または非空）の場合、2回目は早期リターンされる（row == None）
+        let (meta2, _, _, row2) = get_full_metadata_for_path_with_stat_inner(
+            png_path.to_str().unwrap(), 1000, 1000, png_size, &pool, true,
+        );
+        assert!(row2.is_none(), "2回目はキャッシュから早期リターンすること");
+        assert_eq!(meta2.negative_prompt, "lowres, bad quality, 323 chars");
+
+        // 2. JPEG: jpegSchema=4 -> 再解析発動、=5 -> 早期リターン
+        let jpg_path = temp_dir.path().join("v5_old_cache.jpg");
+        let json_text = serde_json::json!({
+            "prompt": "1girl, ooyodo",
+            "uc": "lowres",
+            "model_name": "NovelAI Diffusion V5"
+        }).to_string();
+        let json_bytes = json_text.as_bytes();
+        let com_seg_len = (json_bytes.len() + 2) as u16;
+        let mut jpg_bytes = Vec::new();
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD8]);
+        jpg_bytes.extend_from_slice(&[0xFF, 0xFE]);
+        jpg_bytes.extend_from_slice(&com_seg_len.to_be_bytes());
+        jpg_bytes.extend_from_slice(json_bytes);
+        jpg_bytes.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x40, 0x00, 0x40, 0x01, 0x01, 0x11, 0x00]);
+        jpg_bytes.extend_from_slice(&[0xFF, 0xD9]);
+        let jpg_size = jpg_bytes.len() as u64;
+        std::fs::write(&jpg_path, &jpg_bytes).unwrap();
+
+        let jpg_hash_key = crate::utils::hash_path_mtime_hex(jpg_path.to_str().unwrap(), 1000);
+        {
+            let conn = pool.get().unwrap();
+            let old_jpeg_meta = serde_json::json!({
+                "path": jpg_path.to_str().unwrap(),
+                "width": 64,
+                "height": 64,
+                "prompt": "1girl, ooyodo",
+                "negative_prompt": "",
+                "params": {
+                    "jpegSchema": 4
+                },
+                "source": "NovelAI Diffusion V5",
+                "metadata_source": "JPEG COM"
+            }).to_string();
+            conn.execute(
+                "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source)
+                 VALUES (?, ?, 64, 64, ?, ?, 1000, 1000, 1000, '1girl, ooyodo', '', 'NovelAI Diffusion V5', 'JPEG COM')",
+                rusqlite::params![jpg_hash_key, old_jpeg_meta, jpg_path.to_str().unwrap(), jpg_size],
+            ).unwrap();
+        }
+
+        // jpegSchema=4 かつ negative_prompt空 -> needs_jpeg_retry が発動して再解析され jpegSchema=5 に更新
+        let (jmeta1, _, _, jrow1) = get_full_metadata_for_path_with_stat_inner(
+            jpg_path.to_str().unwrap(), 1000, 1000, jpg_size, &pool, true,
+        );
+        assert!(jrow1.is_some(), "JPEG も再解析が行われ新規キャッシュ行が生成されること");
+        assert_eq!(jmeta1.negative_prompt, "lowres");
+        assert_eq!(jmeta1.params.get("jpegSchema").and_then(|v| v.as_u64()), Some(JPEG_SCHEMA_VERSION));
+
+        // 2回目取得: jpegSchema=5 のため早期リターン
+        let (_jmeta2, _, _, jrow2) = get_full_metadata_for_path_with_stat_inner(
+            jpg_path.to_str().unwrap(), 1000, 1000, jpg_size, &pool, true,
+        );
+        assert!(jrow2.is_none(), "2回目はキャッシュから早期リターンすること");
     }
 }
