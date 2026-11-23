@@ -22,6 +22,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(offset: number, limit: number) => Promise<Array<import('./renderer-state.js').ImageFile>>} getItems
  * @property {(offset: number, limit: number) => Promise<Array<{path: string, hasThumbnailCache: boolean}>>} getPreloadItems
  * @property {(index: number) => Promise<import('./renderer-state.js').ImageFile|null>} getFileByIndex
+ * @property {(path: string) => Promise<number|null>} getFileIndexByPath
  * @property {(updates: any[]) => Promise<void>} updateMetadataInState
  * @property {(path: string, width: number, height: number) => Promise<void>} updateFileDimensions
  * @property {(file: import('./renderer-state.js').ImageFile) => Promise<number>} notifyFileChanged
@@ -145,6 +146,12 @@ window.veloceAPI = {
    * selectImage用: 指定インデックスの単一ImageFileを取得
    */
   getFileByIndex: (index) => invoke('get_file_by_index', { index }),
+  /**
+   * パスから現在のフィルタ・ソート済みインデックスを取得します。
+   * @param {string} path - ファイルパス。
+   * @returns {Promise<number|null>} インデックス番号（見つからない場合は null）。
+   */
+  getFileIndexByPath: (path) => invoke('get_file_index_by_path', { path }),
   getFilesByIndices: (indices) => invoke('get_files_by_indices', { indices }),
   getVideoThumbnail: (path) => invoke('get_video_thumbnail', { path }),
   /**

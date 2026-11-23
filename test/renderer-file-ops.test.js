@@ -39,7 +39,8 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
       notifyFileRemoved: vi.fn().mockResolvedValue(undefined),
       notifyFilesBatch: vi.fn().mockResolvedValue(undefined),
       clearMetadataCache: vi.fn().mockResolvedValue(undefined),
-      moveOrCopyFile: vi.fn().mockResolvedValue({ success: true })
+      moveOrCopyFile: vi.fn().mockResolvedValue({ success: true }),
+      getFileIndexByPath: vi.fn().mockResolvedValue(0)
     };
 
     window.__TAURI__ = {
@@ -120,23 +121,49 @@ describe('Renderer File Operations (renderer-file-ops.js)', () => {
   });
 
   describe('renameSelectedFile', () => {
-    it('should validate and rename selected file, setting leading dot ext and empty hashKey', async () => {
+    it('should rename selected file, clear thumbnail cache, clean up DOM pool, and track new index without notifyFileChanged', async () => {
       appState.selectedIndex = 0;
+      appState.selection.add(0);
+      appState.thumbnailUrls.set('C:\\test\\dir\\file0.png', 'blob:http://localhost/old-blob');
+      
+      const mockWrapper = document.createElement('div');
+      mockWrapper.dataset.filepath = 'C:\\test\\dir\\file0.png';
+      const mockImg = document.createElement('img');
+      mockImg.dataset.currentSrc = 'C:\\test\\dir\\file0.png';
+      mockWrapper.appendChild(mockImg);
+      
+      uiManager._domByPath = new Map([
+        ['C:\\test\\dir\\file0.png', mockWrapper]
+      ]);
+
+      window.veloceAPI.getFileIndexByPath = vi.fn().mockResolvedValue(2);
       uiManager.showPrompt.mockResolvedValueOnce('renamed.png');
       const scheduleRefresh = vi.fn();
 
       await renameSelectedFile({ scheduleRefresh });
+
+      // 1. rename_file IPC が正しく呼ばれ、Undo スタックに積まれること
       expect(window.veloceAPI.renameFile).toHaveBeenCalledWith('C:\\test\\dir\\file0.png', 'renamed.png');
       expect(appState.undoStack.length).toBe(1);
       expect(appState.undoStack[0].type).toBe('RENAME_FILE');
-      expect(window.veloceAPI.notifyFileChanged).toHaveBeenCalledWith(
-        expect.objectContaining({
-          path: 'C:\\test\\dir\\new.png',
-          name: 'renamed.png',
-          ext: '.png',
-          hashKey: ''
-        })
-      );
+
+      // 2. 不要かつ有害な notifyFileChanged は呼ばれないこと（Source of Truth は Rust 側 rename_file 内で同期済み）
+      expect(window.veloceAPI.notifyFileChanged).not.toHaveBeenCalled();
+
+      // 3. 古いサムネイル URL キャッシュが削除されていること
+      expect(appState.thumbnailUrls.has('C:\\test\\dir\\file0.png')).toBe(false);
+
+      // 4. DOM プールから旧パスの参照が削除され、DOM 要素のプロパティがリセットされて再描画可能になっていること
+      expect(uiManager._domByPath.has('C:\\test\\dir\\file0.png')).toBe(false);
+      expect(mockWrapper.dataset.filepath).toBe('');
+      expect(mockImg.dataset.currentSrc).toBe('');
+
+      // 5. getFileIndexByPath によりソート移動後の新インデックスに選択状態が追随すること
+      expect(window.veloceAPI.getFileIndexByPath).toHaveBeenCalledWith('C:\\test\\dir\\new.png');
+      expect(appState.selectedIndex).toBe(2);
+      expect(appState.selection.has(2)).toBe(true);
+
+      // 6. 再描画がスケジュールされること
       expect(scheduleRefresh).toHaveBeenCalled();
     });
   });

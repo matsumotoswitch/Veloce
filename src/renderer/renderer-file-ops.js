@@ -339,20 +339,40 @@ export async function renameSelectedFile(callbacks = fileOpsCallbacks) {
 
         const newExt = newName.includes('.') ? ('.' + newName.split('.').pop().toLowerCase()) : '';
 
-        file.path = result.path;
-        file.name = newName;
-        file.ext = newExt;
-        file.hashKey = '';
-
-        // Rust側に変更を通知
-        await window.veloceAPI.notifyFileChanged(file);
-
+        // 古いパスと新しいパスのサムネイルURLキャッシュを破棄
         const pathsToClean = [oldPath, result.path].filter(Boolean);
         for (const p of pathsToClean) {
           const oldUrl = appState.thumbnailUrls.get(p);
           if (oldUrl && oldUrl.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(oldUrl);
           appState.thumbnailUrls.delete(p);
         }
+
+        // DOM再利用マップ（_domByPath）から旧パスの要素を解除し、DOM属性をリセットして再描画を確実に促す
+        if (uiManager && uiManager._domByPath) {
+          const oldWrapper = uiManager._domByPath.get(oldPath);
+          if (oldWrapper) {
+            oldWrapper.dataset.filepath = '';
+            const img = oldWrapper.children && oldWrapper.children[0];
+            if (img && img.dataset) {
+              img.dataset.currentSrc = '';
+            }
+          }
+          uiManager._domByPath.delete(oldPath);
+        }
+
+        // リネーム後にソート順（名前昇順・降順等）が変わり選択インデックスが移動する可能性があるため、
+        // 新パスで該当エントリのインデックスを再解決して追随させる
+        if (window.veloceAPI && window.veloceAPI.getFileIndexByPath) {
+          try {
+            const newIdx = await window.veloceAPI.getFileIndexByPath(result.path);
+            if (typeof newIdx === 'number' && newIdx >= 0) {
+              appState.selectedIndex = newIdx;
+              appState.selection.clear();
+              appState.selection.add(newIdx);
+            }
+          } catch (_) {}
+        }
+
         resetThumbnailPreloader();
         if (callbacks.scheduleRefresh) callbacks.scheduleRefresh();
       } else {

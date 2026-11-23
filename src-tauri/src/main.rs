@@ -1900,6 +1900,26 @@ async fn get_file_by_index(
     Ok(lock.get(index).cloned())
 }
 
+/// パスから現在のフィルタ・ソート済みインデックス（filtered_files 内の位置）を O(1) で取得
+#[tauri::command]
+fn get_file_index_by_path(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Option<usize> {
+    let clean = normalize_unc_path(&path);
+    let filt_idx = state.path_to_filtered_idx.read();
+    if let Some(&idx) = filt_idx.get(&path).or_else(|| filt_idx.get(clean.as_ref())) {
+        return Some(idx);
+    }
+    let clean_lower = clean.to_lowercase();
+    for (k, &idx) in filt_idx.iter() {
+        if k.to_lowercase() == clean_lower {
+            return Some(idx);
+        }
+    }
+    None
+}
+
 /// メタデータ読み込み結果をRust側のSource of Truthに反映する（path_to_all_idx / path_to_filtered_idx によるO(1)一括更新）
 #[tauri::command]
 fn update_metadata_in_state(state: tauri::State<'_, AppState>, updates: Vec<FullMetadata>) {
@@ -2418,51 +2438,7 @@ async fn copy_image_to_clipboard(file_path: String) -> Result<(), String> {
 ///    新 hash_key を算出してレコードを更新。
 /// 3. メモリ上の `state.ratings` マップから旧キーを削除し、新キーへ登録。
 pub fn sync_path_rename_in_db(state: &AppState, old_path: &str, new_path: &str) {
-    crate::audio::invalidate_audio_cover_cache(old_path);
-    crate::audio::invalidate_audio_cover_cache(new_path);
-    let old_clean = normalize_unc_path(old_path).into_owned();
-    let new_clean = normalize_unc_path(new_path).into_owned();
-
-    // DBのレーティング更新
-    if let Ok(conn) = state.db_conn.get() {
-        let _ = conn.execute(
-            "UPDATE ratings SET path = ?1 WHERE path COLLATE NOCASE IN (?2, ?3)",
-            rusqlite::params![&new_clean, old_path, &old_clean],
-        );
-
-        // キャッシュテーブルのパスおよび hash_key の引き継ぎ
-        if let Ok(mut stmt) = conn.prepare("SELECT mtime, hash_key FROM cache WHERE path COLLATE NOCASE IN (?, ?)") {
-            if let Ok(mut rows) = stmt.query(rusqlite::params![old_path, &old_clean]) {
-                if let Ok(Some(row)) = rows.next() {
-                    let db_mtime: u64 = row.get(0).unwrap_or(0);
-                    let old_hash_key: String = row.get(1).unwrap_or_default();
-
-                    // 実ファイルの最新 mtime（ミリ秒）を優先し、DB キャッシュの mtime と hash_key を確実に同期
-                    let real_mtime = crate::thumbnail::resolve_and_sync_file_mtime(state, new_path).unwrap_or(0);
-                    let mtime = if real_mtime > 0 { real_mtime } else { db_mtime };
-
-                    let new_hash_key = crate::utils::hash_path_mtime_hex(&new_clean, mtime);
-
-                    let _ = conn.execute(
-                        "UPDATE OR REPLACE cache SET path = ?, hash_key = ?, mtime = ? WHERE hash_key = ?",
-                        rusqlite::params![&new_clean, &new_hash_key, mtime, &old_hash_key],
-                    );
-                }
-            }
-        }
-    }
-
-    // メモリ上のレーティングキャッシュの同期
-    {
-        let mut lock = state.ratings.write();
-        let rating = lock.remove(old_path).or_else(|| lock.remove(&old_clean));
-        if let Some(r) = rating {
-            lock.insert(new_clean.clone(), r);
-            if new_path != new_clean {
-                lock.insert(new_path.to_string(), r);
-            }
-        }
-    }
+    sync_paths_rename_batch_in_db(state, &[(old_path.to_string(), new_path.to_string())]);
 }
 
 /// 複数ファイルの移動またはリネームに伴い、SQLite データベース内のキャッシュ・レーティング情報および
@@ -2473,15 +2449,33 @@ pub fn sync_paths_rename_batch_in_db(state: &AppState, pairs: &[(String, String)
         return;
     }
 
-    // 1. トランザクション開始前に正規化パスと実ファイルの最新 mtime を解決
-    let mut prepared_pairs: Vec<(&str, String, &str, String, u64)> = Vec::with_capacity(pairs.len());
-    for (old_path, new_path) in pairs {
-        crate::audio::invalidate_audio_cover_cache(old_path);
-        crate::audio::invalidate_audio_cover_cache(new_path);
-        let old_clean = normalize_unc_path(old_path).into_owned();
-        let new_clean = normalize_unc_path(new_path).into_owned();
-        let real_mtime = crate::thumbnail::resolve_and_sync_file_mtime(state, new_path).unwrap_or(0);
-        prepared_pairs.push((old_path.as_str(), old_clean, new_path.as_str(), new_clean, real_mtime));
+    // 1. トランザクション開始前に正規化パスと実ファイルの最新 mtime、および旧ハッシュキーのヒントを解決
+    let mut prepared_pairs: Vec<(String, String, String, String, u64, Option<String>)> = Vec::with_capacity(pairs.len());
+    {
+        let idx_map = state.path_to_all_idx.read();
+        let all_files = state.all_files.read();
+        for (old_path, new_path) in pairs {
+            crate::audio::invalidate_audio_cover_cache(old_path);
+            crate::audio::invalidate_audio_cover_cache(new_path);
+            let old_clean = normalize_unc_path(old_path).into_owned();
+            let new_clean = normalize_unc_path(new_path).into_owned();
+            let real_mtime = crate::thumbnail::resolve_and_sync_file_mtime(state, new_path).unwrap_or(0);
+
+            // メモリ上の Source of Truth から旧 hash_key を高速取得（ヒント）
+            let old_hash_hint = idx_map
+                .get(old_path.as_str())
+                .or_else(|| idx_map.get(&old_clean))
+                .and_then(|&idx| all_files.get(idx).map(|f| f.hash_key.to_string()));
+
+            prepared_pairs.push((
+                old_path.clone(),
+                old_clean,
+                new_path.clone(),
+                new_clean,
+                real_mtime,
+                old_hash_hint,
+            ));
+        }
     }
 
     // 2. 単一トランザクションで ratings と cache を一括更新
@@ -2489,29 +2483,56 @@ pub fn sync_paths_rename_batch_in_db(state: &AppState, pairs: &[(String, String)
         if let Ok(tx) = conn.transaction() {
             {
                 let mut stmt_update_rating = tx
-                    .prepare_cached("UPDATE ratings SET path = ?1 WHERE path COLLATE NOCASE IN (?2, ?3)")
+                    .prepare_cached("UPDATE ratings SET path = ?1 WHERE path COLLATE NOCASE IN (?2, ?3, ?4, ?5)")
                     .ok();
-                let mut stmt_select_cache = tx
-                    .prepare_cached("SELECT mtime, hash_key FROM cache WHERE path COLLATE NOCASE IN (?1, ?2)")
+                let mut stmt_select_cache_by_hash = tx
+                    .prepare_cached("SELECT mtime, hash_key FROM cache WHERE hash_key = ?1")
+                    .ok();
+                let mut stmt_select_cache_by_path = tx
+                    .prepare_cached("SELECT mtime, hash_key FROM cache WHERE path COLLATE NOCASE IN (?1, ?2, ?3, ?4)")
                     .ok();
                 let mut stmt_update_cache = tx
                     .prepare_cached("UPDATE OR REPLACE cache SET path = ?1, hash_key = ?2, mtime = ?3 WHERE hash_key = ?4")
                     .ok();
 
-                for (old_path, ref old_clean, _new_path, ref new_clean, real_mtime) in &prepared_pairs {
+                for (old_path, ref old_clean, _new_path, ref new_clean, real_mtime, ref old_hash_hint) in &prepared_pairs {
+                    let old_slash = old_clean.replace('\\', "/");
+                    let old_backslash = old_clean.replace('/', "\\");
+
                     if let Some(ref mut stmt) = stmt_update_rating {
-                        let _ = stmt.execute(rusqlite::params![new_clean, old_path, old_clean]);
+                        let _ = stmt.execute(rusqlite::params![new_clean, old_path, old_clean, &old_slash, &old_backslash]);
                     }
+
                     let mut cached_info: Option<(u64, String)> = None;
-                    if let Some(ref mut stmt) = stmt_select_cache {
-                        if let Ok(mut rows) = stmt.query(rusqlite::params![old_path, old_clean]) {
-                            if let Ok(Some(row)) = rows.next() {
-                                let db_mtime: u64 = row.get(0).unwrap_or(0);
-                                let old_hash_key: String = row.get(1).unwrap_or_default();
-                                cached_info = Some((db_mtime, old_hash_key));
+
+                    // 1. 旧 hash_key が判明していれば PRIMARY KEY 直撃（最速かつ完全一致）
+                    if let Some(ref h) = old_hash_hint {
+                        if !h.is_empty() {
+                            if let Some(ref mut stmt) = stmt_select_cache_by_hash {
+                                if let Ok(mut rows) = stmt.query(rusqlite::params![h]) {
+                                    if let Ok(Some(row)) = rows.next() {
+                                        let db_mtime: u64 = row.get(0).unwrap_or(0);
+                                        let old_hash: String = row.get(1).unwrap_or_default();
+                                        cached_info = Some((db_mtime, old_hash));
+                                    }
+                                }
                             }
                         }
                     }
+
+                    // 2. hash 直撃で見つからなかった場合はパスの全バリエーション（スラッシュ／バックスラッシュ含む）で検索
+                    if cached_info.is_none() {
+                        if let Some(ref mut stmt) = stmt_select_cache_by_path {
+                            if let Ok(mut rows) = stmt.query(rusqlite::params![old_path, old_clean, &old_slash, &old_backslash]) {
+                                if let Ok(Some(row)) = rows.next() {
+                                    let db_mtime: u64 = row.get(0).unwrap_or(0);
+                                    let old_hash: String = row.get(1).unwrap_or_default();
+                                    cached_info = Some((db_mtime, old_hash));
+                                }
+                            }
+                        }
+                    }
+
                     if let Some((db_mtime, old_hash_key)) = cached_info {
                         let mtime = if *real_mtime > 0 { *real_mtime } else { db_mtime };
                         let new_hash_key = crate::utils::hash_path_mtime_hex(new_clean, mtime);
@@ -2528,12 +2549,12 @@ pub fn sync_paths_rename_batch_in_db(state: &AppState, pairs: &[(String, String)
     // 3. メモリ上のレーティングキャッシュを一括同期
     {
         let mut lock = state.ratings.write();
-        for (old_path, ref old_clean, new_path, ref new_clean, _) in &prepared_pairs {
-            let rating = lock.remove(*old_path).or_else(|| lock.remove(old_clean));
+        for (old_path, ref old_clean, new_path, ref new_clean, _, _) in &prepared_pairs {
+            let rating = lock.remove(old_path.as_str()).or_else(|| lock.remove(old_clean.as_str()));
             if let Some(r) = rating {
                 lock.insert(new_clean.clone(), r);
-                if *new_path != new_clean.as_str() {
-                    lock.insert((*new_path).to_string(), r);
+                if new_path != new_clean {
+                    lock.insert(new_path.clone(), r);
                 }
             }
         }
@@ -4180,6 +4201,7 @@ fn main() {
             get_items,
             get_preload_items,
             get_file_by_index,
+            get_file_index_by_path,
             update_metadata_in_state,
             get_video_server_port,
             get_video_server_token,
@@ -9279,6 +9301,63 @@ mod viewer_tests {
                 plan
             );
         }
+
+        // 4. スラッシュ区切りの旧パスに対する sync_path_rename_in_db がキャッシュとレーティングを引き継げること
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, path, mtime, thumbnail) VALUES ('hk_slash', 'c:/slashdir/pic.png', 1000, X'89504E47')",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO ratings (path, rating) VALUES ('c:/slashdir/pic.png', 4)",
+                [],
+            ).unwrap();
+        }
+        sync_path_rename_in_db(&state, "c:\\slashdir\\pic.png", "C:\\SlashDir\\PicRenamed.png");
+        {
+            let conn = state.db_conn.get().unwrap();
+            let new_count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM cache WHERE path = 'C:\\SlashDir\\PicRenamed.png'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(new_count, 1, "スラッシュ区切りの旧パスから cache レコードが新パスへ引き継がれること");
+
+            let rating: i64 = conn
+                .query_row("SELECT rating FROM ratings WHERE path = 'C:\\SlashDir\\PicRenamed.png'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(rating, 4, "スラッシュ区切りの旧パスから ratings レコードが新パスへ引き継がれること");
+        }
+    }
+
+    #[test]
+    fn test_get_file_index_by_path() {
+        let state = create_test_app_state("C:\\index_test");
+        {
+            let mut filt_idx = state.path_to_filtered_idx.write();
+            filt_idx.insert("C:\\index_test\\item1.png".to_string(), 0);
+            filt_idx.insert("C:\\index_test\\item2.png".to_string(), 1);
+        }
+        // UNC パスからの検索検証
+        let unc_path = r"\\?\C:\index_test\item1.png";
+        let clean = normalize_unc_path(unc_path);
+        let filt_idx = state.path_to_filtered_idx.read();
+        let idx_unc = filt_idx.get(unc_path).copied().or_else(|| filt_idx.get(clean.as_ref()).copied());
+        assert_eq!(idx_unc, Some(0), "UNC パスから正規化経由でインデックスが取得できること");
+
+        // ドライブレターケース違いフォールバック検証
+        let lower_path = "c:\\index_test\\item2.png";
+        let lower_clean = normalize_unc_path(lower_path);
+        let mut idx_case = filt_idx.get(lower_path).copied().or_else(|| filt_idx.get(lower_clean.as_ref()).copied());
+        if idx_case.is_none() {
+            let lower = lower_clean.to_lowercase();
+            for (k, &i) in filt_idx.iter() {
+                if k.to_lowercase() == lower {
+                    idx_case = Some(i);
+                    break;
+                }
+            }
+        }
+        assert_eq!(idx_case, Some(1), "ケース違いのパスでもフォールバックでインデックスが取得できること");
     }
 
     #[test]
