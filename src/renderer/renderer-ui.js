@@ -2243,16 +2243,21 @@ class UIManager {
     }
 
     // 2. ファイル一覧テーブル（VirtualList）の該当行を O(1) で即時同期
+    // 次回スクロール再利用時に 0 !== 0 で更新がスキップされないよう、_cachedWidth / _cachedHeight も同時に同期する
     if (this._listDomByPath) {
       const tr = this._listDomByPath.get(filePath);
       if (tr && tr.children && tr.children.length >= 5) {
         const tds = tr.children;
+        tds[2]._cachedWidth = width;
         const newWidth = width.toLocaleString();
         if (tds[2].textContent !== newWidth) tds[2].textContent = newWidth;
 
+        tds[3]._cachedHeight = height;
         const newHeight = height.toLocaleString();
         if (tds[3].textContent !== newHeight) tds[3].textContent = newHeight;
 
+        tds[4]._cachedWidth = width;
+        tds[4]._cachedHeight = height;
         const d = gcd(width, height);
         const rw = width / d;
         const rh = height / d;

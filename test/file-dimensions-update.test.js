@@ -109,4 +109,20 @@ describe('File Dimensions and Aspect Ratio Dynamic Update', () => {
       uiManager.updateFileDimensions('C:\\images\\not_exist.png', 1024, 768);
     }).not.toThrow();
   });
+
+  it('updateFileDimensions 実行時に td の _cachedWidth / _cachedHeight も同期され、DOM Pool 再利用時に古い寸法が残留しないこと', () => {
+    const tds = mockRow.children;
+    // 初回描画（寸法未確定 width=0, height=0）でキャッシュが 0 に設定された状態を再現
+    tds[2]._cachedWidth = 0;
+    tds[3]._cachedHeight = 0;
+    tds[4]._cachedWidth = 0;
+    tds[4]._cachedHeight = 0;
+
+    uiManager.updateFileDimensions('C:\\images\\new_image.png', 1024, 1536);
+
+    expect(tds[2]._cachedWidth).toBe(1024);
+    expect(tds[3]._cachedHeight).toBe(1536);
+    expect(tds[4]._cachedWidth).toBe(1024);
+    expect(tds[4]._cachedHeight).toBe(1536);
+  });
 });

@@ -385,6 +385,15 @@ export function handleCloseViewer() {
   viewerState.paths = [];
   viewerState.currentImagePath = null;
   viewerState.totalImages = 0;
+  viewerState.currentRotation = 0;
+  viewerState.flipX = 1;
+  viewerState.flipY = 1;
+  viewerState.isImmersiveArranged = false;
+  viewerState.isFullscreen = false;
+  viewerState.compensateScale = 1.0;
+  if (viewerState.isMetadataVisible && typeof toggleMetadataOverlay === 'function') {
+    toggleMetadataOverlay(false);
+  }
   isViewerWindowShown = false;
   cleanupCurrentImage();
   clearPreloadCache();
@@ -446,6 +455,15 @@ window.addEventListener('DOMContentLoaded', async () => {
             ? window.SettingsStore.getItem('theme')
             : (typeof localStorage !== 'undefined' ? localStorage.getItem('theme') : null)) === 'light' ? 'light' : 'dark';
           applyViewerTheme(sessionTheme);
+          viewerState.currentRotation = 0;
+          viewerState.flipX = 1;
+          viewerState.flipY = 1;
+          viewerState.isImmersiveArranged = false;
+          viewerState.isFullscreen = false;
+          viewerState.compensateScale = 1.0;
+          if (viewerState.isMetadataVisible && typeof toggleMetadataOverlay === 'function') {
+            toggleMetadataOverlay(false);
+          }
           cleanupCurrentImage();
           clearPreloadCache();
           resetZoomAndFit();
@@ -755,15 +773,15 @@ function getNaturalDimensions() {
 /**
  * ズーム状態とフィット状態を解除し、デフォルトの表示状態に戻します。
  */
-function resetZoomAndFit() {
+export function resetZoomAndFit() {
   viewerState.isZoomed = false;
   viewerState.isFitToWindow = false;
   viewerState.currentScale = 1.0;
   viewerState.currentTranslateX = 0;
   viewerState.currentTranslateY = 0;
-  updateCompensateScale();
   applyFitState();
   updateFullscreenStyles();
+  updateCompensateScale();
 }
 
 /**
@@ -819,6 +837,7 @@ const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserve
     }
     
     updateFullscreenStyles();
+    updateCompensateScale();
 }, CONFIG.RESIZE_THROTTLE)) : null;
 
 if (resizeObserver && typeof resizeObserver.observe === 'function' && typeof document !== 'undefined' && document.body) {
@@ -885,8 +904,10 @@ let _resizePending = false;
 /**
  * 画像の非クライアント領域（影・ボーダー・DPI丸め誤差・タスクバー制約）による
  * 縦横比の微小な不一致を検出し、画像端の黒い隙間（レターボックス）をなくす補正倍率を計算・適用します。
+ * @param {number} [expectedW=0] - リサイズ要求直後で window.innerWidth の更新が未反映な場合の目標幅
+ * @param {number} [expectedH=0] - リサイズ要求直後で window.innerHeight の更新が未反映な場合の目標高さ
  */
-export function updateCompensateScale() {
+export function updateCompensateScale(expectedW = 0, expectedH = 0) {
   if (viewerState.isZoomed || viewerState.isFullscreen || viewerState.isImmersiveArranged) {
     viewerState.compensateScale = 1.0;
     viewerUI.updateImageRendering();
@@ -902,8 +923,17 @@ export function updateCompensateScale() {
   const { width: natW, height: natH } = getNaturalDimensions();
   if (natW <= 0 || natH <= 0) return;
 
-  const actualW = window.innerWidth;
-  const actualH = window.innerHeight;
+  // WebView2 では setWindowSize の Promise 解決時点で window.innerWidth / innerHeight が
+  // まだ旧画像サイズのままの場合があるため、乖離が大きい場合は目標サイズを基準にし、
+  // 実際のビューポート反映時は ResizeObserver から再計算する。
+  let actualW = window.innerWidth;
+  let actualH = window.innerHeight;
+  if (expectedW > 0 && expectedH > 0) {
+    if (Math.abs(actualW - expectedW) > 4 || Math.abs(actualH - expectedH) > 4) {
+      actualW = expectedW;
+      actualH = expectedH;
+    }
+  }
   if (actualW <= 0 || actualH <= 0) return;
 
   const imgAspect = natW / natH;
@@ -926,8 +956,8 @@ export function updateCompensateScale() {
     }
   }
 
-  // 誤差補正は微小範囲（約10%未満のズレ、0.9 < compensate < 1.1）のみオーバースキャン補正として適用
-  if (Math.abs(compensate - 1.0) > 0.0005 && compensate > 0.9 && compensate < 1.1) {
+  // 誤差補正は非クライアント領域・丸め誤差の微小範囲（1.0005 < compensate < 1.025）のみオーバースキャン補正として適用
+  if (compensate > 1.0005 && compensate < 1.025) {
     viewerState.compensateScale = compensate;
   } else {
     viewerState.compensateScale = 1.0;
@@ -983,7 +1013,7 @@ export function resizeWindowToFitImage() {
     window.veloceAPI.setWindowSize(targetWidth, targetHeight).then(() => {
       _resizePending = false;
       debouncedFocusWindow(); // 連続呼び出しによるフォーカス外れを防ぐためデバウンス処理を行う
-      updateCompensateScale();
+      updateCompensateScale(targetWidth, targetHeight);
     }).catch(() => {
       _resizePending = false;
     });
@@ -1034,8 +1064,14 @@ function swapImageElement(newImg, sequenceId) {
       }
     }
     currentlyVisibleImg = newImg;
+    viewerUI.elements.viewerImg = newImg;
     newImg.id = 'viewer-img';
     newImg.style.display = '';
+    setZoomState(viewerState.isZoomed);
+    viewerUI.updateImageRendering();
+    if (newImg.tagName === 'VIDEO' ? newImg.videoWidth > 0 : (isAudioPlaceholderMedia(newImg) || newImg.naturalWidth > 0)) {
+      resizeWindowToFitImage();
+    }
     if (newImg && newImg.tagName === 'VIDEO') {
       applyPlayModeToMedia(newImg, 'video');
       applyVolumeSettingsToMedia(newImg, true);
@@ -1109,7 +1145,19 @@ function swapImageElement(newImg, sequenceId) {
 
     setZoomState(viewerState.isZoomed);
     viewerUI.updateImageRendering();
-    resizeWindowToFitImage();
+    if (newImg.tagName === 'IMG' && !isAudioPlaceholderMedia(newImg) && (!newImg.naturalWidth || !newImg.naturalHeight)) {
+      // decode() が失敗または未完了の状態で makeVisible が呼ばれた場合、
+      // naturalWidth=0 のまま 1x1 へウィンドウが縮小されるのを防ぎ、load 完了時にリサイズを実行する
+      newImg.addEventListener('load', () => {
+        if (currentlyVisibleImg === newImg) {
+          setZoomState(viewerState.isZoomed);
+          viewerUI.updateImageRendering();
+          resizeWindowToFitImage();
+        }
+      }, { once: true });
+    } else {
+      resizeWindowToFitImage();
+    }
 
     if (newImg.dataset && newImg.dataset.audioPath) {
       stopAndDiscardAudio();
@@ -2090,7 +2138,9 @@ window.addEventListener('keydown', async (e) => {
       }
 
       if (window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
-        window.veloceAPI.resizeViewerWindow(targetW, targetH);
+        Promise.resolve(window.veloceAPI.resizeViewerWindow(targetW, targetH))
+          .then(() => updateCompensateScale(targetW, targetH))
+          .catch(() => {});
       }
 
       resetZoomAndFit();
@@ -2102,7 +2152,9 @@ window.addEventListener('keydown', async (e) => {
       const { width: natW, height: natH } = getNaturalDimensions();
 
       if (window.veloceAPI && window.veloceAPI.resizeViewerWindow) {
-        window.veloceAPI.resizeViewerWindow(natW, natH);
+        Promise.resolve(window.veloceAPI.resizeViewerWindow(natW, natH))
+          .then(() => updateCompensateScale(natW, natH))
+          .catch(() => {});
       }
 
       resetZoomAndFit();

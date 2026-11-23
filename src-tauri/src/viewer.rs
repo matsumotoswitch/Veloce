@@ -263,9 +263,11 @@ pub async fn open_viewer(
                 },
             );
             
-            let _ = pool_win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                width: win_width,
-                height: win_height,
+            let _ = pool_win.set_always_on_top(false);
+            let _ = pool_win.set_fullscreen(false);
+            let _ = pool_win.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: win_width as f64,
+                height: win_height as f64,
             }));
             let _ = pool_win.center();
             let _ = pool_win.unminimize();
@@ -324,6 +326,8 @@ pub async fn open_viewer(
     )
     .title("Veloce Viewer")
     .inner_size(win_width as f64, win_height as f64)
+    .min_inner_size(300.0, 300.0)
+    .center()
     .data_directory(data_dir)
     .decorations(false)
     .visible(false)
@@ -403,6 +407,8 @@ pub fn show_window(window: tauri::Window) {
 pub fn close_viewer_window(window: tauri::Window, state: tauri::State<'_, AppState>) {
     let label = window.label().to_string();
     let _ = window.emit("close-viewer", label.clone());
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_fullscreen(false);
     if label == "viewer_pool_0" {
         let _ = window.hide();
     } else {

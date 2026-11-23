@@ -4131,9 +4131,11 @@ fn main() {
                         let state = event.window().state::<AppState>();
                         shutdown_app(Some(&state));
                     } else if label == "viewer_pool_0" {
-                        // プール用のウィンドウは破棄せず非表示にする
+                        // プール用のウィンドウは破棄せず非表示にする（整列時の最前面固定やフルスクリーン状態を解除）
                         api.prevent_close();
                         let _ = event.window().emit("close-viewer", label.clone());
+                        let _ = event.window().set_always_on_top(false);
+                        let _ = event.window().set_fullscreen(false);
                         let _ = event.window().hide();
                         let state = event.window().state::<AppState>();
                         state.viewer_paths.write().remove(&label);
