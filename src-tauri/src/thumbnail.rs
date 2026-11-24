@@ -151,6 +151,8 @@ pub(crate) fn advance_thumbnail_batch_epoch() -> u64 {
 
 /// 複数ファイルのサムネイルを Rayon で並列生成し、新規生成分を単一トランザクションで一括保存する。
 ///
+/// - キャッシュ確認は BLOB 本体を読み出さない存在確認（`thumbnail_cache_exists`）のみを行い、
+///   ヒット時は DB から bytes を読まずに URL を組み立てて返す。
 /// - `is_cancelled` が `true` を返したアイテムは生成を行わず、`cancelled: true` の結果として返す。
 /// - キャッシュヒット時は DB への書き込みを行わない。
 /// - 返却 URL には PRIMARY KEY 直接参照用の `hash` パラメータが付与される。
@@ -170,10 +172,7 @@ pub(crate) fn compute_thumbnail_batch(
             }
             let clean_path = normalize_unc_path(&file_path).into_owned();
             let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
-            let (bytes, pending) = generate_thumbnail_compute_only(&file_path, mtime, Some(&hash_key), db_conn);
-            let url = if bytes.is_empty() {
-                String::new()
-            } else {
+            let build_url = || {
                 let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
                 format!(
                     "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}",
@@ -183,6 +182,18 @@ pub(crate) fn compute_thumbnail_batch(
                     hash_key,
                     token_param
                 )
+            };
+
+            if thumbnail_cache_exists(db_conn, &file_path, mtime, Some(&hash_key)) {
+                let url = build_url();
+                return (ThumbnailResult { path: file_path, url, cancelled: false }, None);
+            }
+
+            let (bytes, pending) = build_generated_thumbnail_with_pending(&file_path, mtime, Some(&hash_key));
+            let url = if bytes.is_empty() {
+                String::new()
+            } else {
+                build_url()
             };
             (ThumbnailResult { path: file_path, url, cancelled: false }, pending)
         })
@@ -815,8 +826,81 @@ pub(crate) fn commit_pending_thumbnails_batch(
     Ok(pending_writes.len())
 }
 
+/// DB 内に有効なサムネイルキャッシュ（BLOB が NULL でなく length > 0）が存在するかを確認する。
+/// BLOB 本体は読み出さず、direct hash → UNC 正規化 → プレフィックス除去 → raw パスの順で `SELECT 1` のみ実行する。
+pub(crate) fn thumbnail_cache_exists(
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    file_path: &str,
+    mtime: u64,
+    direct_hash: Option<&str>,
+) -> bool {
+    let Ok(conn) = db_conn.get() else {
+        return false;
+    };
+
+    // 1. direct_hash が指定されていれば最優先で直撃確認
+    if let Some(hash) = direct_hash {
+        if !hash.is_empty() {
+            if let Ok(mut stmt) = conn.prepare_cached(
+                "SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND length(thumbnail) > 0",
+            ) {
+                if stmt.exists([hash]).unwrap_or(false) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 2. UNC 正規化パス・プレフィックス除去パス・raw パスの候補ハッシュキーで確認
+    if !file_path.is_empty() {
+        let norm_unc = normalize_unc_path(file_path).into_owned();
+        let stripped = if file_path.starts_with(r"\\?\") { &file_path[4..] } else { file_path };
+        let hash_norm = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
+        let hash_strip = crate::utils::hash_path_mtime_hex(stripped, mtime);
+        let hash_raw = crate::utils::hash_path_mtime_hex(file_path, mtime);
+
+        if let Ok(mut stmt) = conn.prepare_cached(
+            "SELECT 1 FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL AND length(thumbnail) > 0 LIMIT 1",
+        ) {
+            if stmt.exists([&hash_norm, &hash_strip, &hash_raw]).unwrap_or(false) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// サムネイルを同期生成し、生成成功時はバイト列と未コミット書き込み情報を返す。
+fn build_generated_thumbnail_with_pending(
+    file_path: &str,
+    mtime: u64,
+    direct_hash: Option<&str>,
+) -> (Vec<u8>, Option<PendingThumbnailWrite>) {
+    let generated = generate_media_thumbnail_sync(file_path);
+
+    if let Some(bytes) = generated {
+        let clean_path = normalize_unc_path(file_path).into_owned();
+        let hash_key = direct_hash
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| crate::utils::hash_path_mtime_hex(&clean_path, mtime));
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        let pending = PendingThumbnailWrite {
+            hash_key,
+            clean_path,
+            mtime,
+            bytes: bytes.clone(),
+            now,
+        };
+        return (bytes, Some(pending));
+    }
+
+    (Vec::new(), None)
+}
+
 /// キャッシュ済みサムネイルをDBから検索し、キャッシュミス時は同期生成してバイト列と未コミット書き込み情報を返す。
-/// バッチ生成時には呼び出し元で一括トランザクションコミットを行うため、この関数内ではDB書き込みを行わない。
+/// 単体経路（bytes を必要とする経路）向けの実装。
 pub(crate) fn generate_thumbnail_compute_only(
     file_path: &str,
     mtime: u64,
@@ -855,26 +939,7 @@ pub(crate) fn generate_thumbnail_compute_only(
         }
     }
 
-    let generated = generate_media_thumbnail_sync(file_path);
-
-    if let Some(bytes) = generated {
-        let clean_path = normalize_unc_path(file_path).into_owned();
-        let hash_key = direct_hash
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| crate::utils::hash_path_mtime_hex(&clean_path, mtime));
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
-        let pending = PendingThumbnailWrite {
-            hash_key,
-            clean_path,
-            mtime,
-            bytes: bytes.clone(),
-            now,
-        };
-        return (bytes, Some(pending));
-    }
-
-    (Vec::new(), None)
+    build_generated_thumbnail_with_pending(file_path, mtime, direct_hash)
 }
 
 /// キャッシュ済みサムネイル（または即時抽出可能な動画サムネイル）をDBから取得する。
@@ -2111,6 +2176,121 @@ mod tests {
             assert_eq!(mtime1, 67890);
             assert_eq!(mtime2, 99999);
         }
+    }
+
+    #[test]
+    fn test_thumbnail_cache_exists_candidate_hashes_and_batch_url_format() {
+        use image::{Rgb, RgbImage};
+
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    path TEXT DEFAULT '',
+                    mtime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cached_path = temp_dir.path().join("cached_unc.png");
+        let cached_str = cached_path.to_str().unwrap();
+        let raw_unc_path = format!(r"\\?\{}", cached_str);
+        let norm_unc = normalize_unc_path(&raw_unc_path).into_owned();
+        let mtime = 55555u64;
+        let norm_hash = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
+        let wrong_direct_hash = "0000000000000000";
+
+        // UNC正規化形のハッシュキーでキャッシュ行を保存（実ファイルは作らない → 生成経路には進めない状態）
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, ?, ?, ?)",
+                rusqlite::params![&norm_hash, vec![1u8, 2, 3, 4], &norm_unc, mtime, 100],
+            ).unwrap();
+        }
+
+        // 1. direct_hash が外れても候補ハッシュ側（UNC正規化形）で見つけられること
+        assert!(
+            thumbnail_cache_exists(&pool, &raw_unc_path, mtime, Some(wrong_direct_hash)),
+            "候補ハッシュ側（UNC正規化形）で保存されたキャッシュ行を検出できること"
+        );
+
+        // 2. 0バイトBLOBは無効（false）として扱われること
+        let empty_blob_path = r"\\?\C:\test\empty_blob.png";
+        let empty_norm = normalize_unc_path(empty_blob_path).into_owned();
+        let empty_hash = crate::utils::hash_path_mtime_hex(&empty_norm, mtime);
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, ?, ?, ?)",
+                rusqlite::params![&empty_hash, Vec::<u8>::new(), &empty_norm, mtime, 100],
+            ).unwrap();
+        }
+        assert!(
+            !thumbnail_cache_exists(&pool, empty_blob_path, mtime, Some(&empty_hash)),
+            "0バイトBLOBはキャッシュ存在とみなさないこと"
+        );
+
+        // 3. キャッシュが無い場合は false を返し、compute_thumbnail_batch で生成経路に進むこと
+        let gen_path = temp_dir.path().join("needs_gen.png");
+        let gen_str = gen_path.to_str().unwrap().to_string();
+        let mut img = RgbImage::new(32, 32);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([10, 120, 220]);
+        }
+        img.save_with_format(&gen_path, image::ImageFormat::Png).unwrap();
+        let gen_mtime = 77777u64;
+        let gen_clean = normalize_unc_path(&gen_str).into_owned();
+        let gen_hash = crate::utils::hash_path_mtime_hex(&gen_clean, gen_mtime);
+
+        assert!(
+            !thumbnail_cache_exists(&pool, &gen_str, gen_mtime, Some(&gen_hash)),
+            "未キャッシュ時は false を返すこと"
+        );
+
+        // 4. compute_thumbnail_batch の結果URLが従来と同一形式であり、生成分のみDBへ保存されること
+        let port = 45678u16;
+        let token = "tok123";
+        let results = compute_thumbnail_batch(
+            vec![(raw_unc_path.clone(), mtime), (gen_str.clone(), gen_mtime)],
+            &pool,
+            port,
+            token,
+            &|| false,
+        );
+        assert_eq!(results.len(), 2);
+
+        let expected_cached_url = format!(
+            "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}&token={}",
+            port,
+            urlencoding::encode(&raw_unc_path),
+            mtime,
+            norm_hash,
+            token
+        );
+        let expected_gen_url = format!(
+            "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}&token={}",
+            port,
+            urlencoding::encode(&gen_str),
+            gen_mtime,
+            gen_hash,
+            token
+        );
+
+        assert_eq!(results[0].url, expected_cached_url);
+        assert!(!results[0].cancelled);
+        assert_eq!(results[1].url, expected_gen_url);
+        assert!(!results[1].cancelled);
+        assert!(thumbnail_cache_exists(&pool, &gen_str, gen_mtime, Some(&gen_hash)));
     }
 
 }
