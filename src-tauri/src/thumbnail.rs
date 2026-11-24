@@ -916,32 +916,35 @@ pub(crate) fn thumbnail_cache_exists(
     false
 }
 
-/// サムネイルを同期生成し、生成成功時はバイト列と未コミット書き込み情報を返す。
-fn build_generated_thumbnail_with_pending(
+/// サムネイルを同期生成し、生成したバイト列を複製せずに `PendingThumbnailWrite` へムーブして返す。
+/// 生成失敗時または空バイト時は `None` を返す。
+fn generate_pending_thumbnail_no_clone(
     file_path: &str,
     mtime: u64,
     direct_hash: Option<&str>,
-) -> (Vec<u8>, Option<PendingThumbnailWrite>) {
-    let generated = generate_media_thumbnail_sync(file_path);
-
-    if let Some(bytes) = generated {
-        let clean_path = normalize_unc_path(file_path).into_owned();
-        let hash_key = direct_hash
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| crate::utils::hash_path_mtime_hex(&clean_path, mtime));
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
-        let pending = PendingThumbnailWrite {
-            hash_key,
-            clean_path,
-            mtime,
-            bytes: bytes.clone(),
-            now,
-        };
-        return (bytes, Some(pending));
+) -> Option<PendingThumbnailWrite> {
+    let bytes = generate_media_thumbnail_sync(file_path)?;
+    if bytes.is_empty() {
+        return None;
     }
 
-    (Vec::new(), None)
+    let clean_path = normalize_unc_path(file_path).into_owned();
+    let hash_key = direct_hash
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| crate::utils::hash_path_mtime_hex(&clean_path, mtime));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    Some(PendingThumbnailWrite {
+        hash_key,
+        clean_path,
+        mtime,
+        bytes,
+        now,
+    })
 }
 
 /// キャッシュ済みサムネイルをDBから検索し、キャッシュミス時は同期生成してバイト列と未コミット書き込み情報を返す。
@@ -984,7 +987,12 @@ pub(crate) fn generate_thumbnail_compute_only(
         }
     }
 
-    build_generated_thumbnail_with_pending(file_path, mtime, direct_hash)
+    if let Some(pending) = generate_pending_thumbnail_no_clone(file_path, mtime, direct_hash) {
+        let bytes = pending.bytes.clone();
+        (bytes, Some(pending))
+    } else {
+        (Vec::new(), None)
+    }
 }
 
 /// キャッシュ済みサムネイル（または即時抽出可能な動画サムネイル）をDBから取得する。
@@ -2436,6 +2444,62 @@ mod tests {
         assert!(results[0].url.contains(&format!("hash={}", cached_hash)));
         assert!(!results[1].url.is_empty());
         assert!(results[2].url.is_empty());
+    }
+
+    #[test]
+    fn test_generate_pending_thumbnail_no_clone_roundtrip_and_failure() {
+        use image::{Rgb, RgbImage};
+
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    path TEXT DEFAULT '',
+                    mtime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let img_path = temp_dir.path().join("no_clone_test.png");
+        let img_str = img_path.to_str().unwrap();
+        let mut img = RgbImage::new(48, 32);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([40, 160, 210]);
+        }
+        img.save_with_format(&img_path, image::ImageFormat::Png).unwrap();
+
+        let mtime = 88888u64;
+        let clean_path = normalize_unc_path(img_str).into_owned();
+        let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+
+        // 1. 生成 → pending 構築 → コミット → 再読み出しで bytes が完全一致すること
+        let pending = generate_pending_thumbnail_no_clone(img_str, mtime, Some(&hash_key))
+            .expect("有効な画像からPendingThumbnailWriteが生成されること");
+        assert_eq!(pending.hash_key, hash_key);
+        assert_eq!(pending.clean_path, clean_path);
+        assert_eq!(pending.mtime, mtime);
+        assert!(!pending.bytes.is_empty());
+
+        let expected_bytes = pending.bytes.clone();
+        let committed = commit_pending_thumbnails_batch(&pool, &[pending]).unwrap();
+        assert_eq!(committed, 1);
+
+        let reloaded = generate_thumbnail_inner_with_hash(img_str, mtime, Some(&hash_key), &pool);
+        assert_eq!(reloaded, expected_bytes, "コミット後の再読み出しbytesが生成時と一致すること");
+
+        // 2. 生成失敗時（存在しないファイル）には pending が作られないこと
+        let missing_path = temp_dir.path().join("nonexistent.png");
+        let missing_res = generate_pending_thumbnail_no_clone(missing_path.to_str().unwrap(), 999, None);
+        assert!(missing_res.is_none(), "生成失敗時はPendingThumbnailWriteが作られないこと");
     }
 
 }
