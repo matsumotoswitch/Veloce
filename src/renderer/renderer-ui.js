@@ -29,6 +29,9 @@ const CHUNK_SIZE = 100;
 // 破損MP4動画用のフォールバックSVGを事前にBase64化し、onerrorでの都度エンコードとGC発生を排除
 export const BROKEN_MP4_FALLBACK_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiBmaWxsPSJub25lIiBzdHJva2U9IiM0NDQiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgcng9IjIiIHJ5PSIyIj48L3JlY3Q+PGNpcmNsZSBjeD0iOC41IiBjeT0iOC41IiByPSIxLjUiPjwvY2lyY2xlPjxwb2x5bGluZSBwb2ludHM9IjIxIDE1IDE2IDEwIDUgMjEiPjwvcG9seWxpbmU+PC9zdmc+';
 
+// 1x1 透過GIFプレースホルダ（DOM再利用時の初期化および破損アイコン防止用）
+export const PLACEHOLDER_GIF_URL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 export { AUDIO_PLACEHOLDER_URL };
 
 let dragCache = { element: null, midX: 0 };
@@ -2035,10 +2038,6 @@ class UIManager {
             if (wrapper.dataset.filepath === file.path) {
               img.classList.remove('loading');
               wrapper.classList.remove('loading');
-              if (img.naturalWidth === 0 && !img.src.startsWith('data:image/svg+xml')) {
-                // Force onerror logic if broken
-                img.dispatchEvent(new Event('error'));
-              }
             }
           } else {
             img.onload = function() {
@@ -2051,30 +2050,37 @@ class UIManager {
               if (wrapper.dataset.filepath !== file.path) return;
               this.classList.remove('loading');
               wrapper.classList.remove('loading');
-              let fallback;
               if (file.path.toLowerCase().endsWith('.mp4')) {
-                fallback = BROKEN_MP4_FALLBACK_URL;
+                this.src = BROKEN_MP4_FALLBACK_URL;
+                if (window.appState && window.appState.thumbnailUrls) {
+                  window.appState.thumbnailUrls.set(file.path, BROKEN_MP4_FALLBACK_URL);
+                }
               } else if (isAudioFile(file.path)) {
-                fallback = AUDIO_PLACEHOLDER_URL;
+                this.src = AUDIO_PLACEHOLDER_URL;
                 this.classList.add('audio-placeholder');
+                if (window.appState && window.appState.thumbnailUrls) {
+                  window.appState.thumbnailUrls.set(file.path, AUDIO_PLACEHOLDER_URL);
+                }
               } else {
-                fallback = getStreamUrl(file.path, window.veloceAPI.convertFileSrc(file.path));
-              }
-              if (this.src !== fallback) {
-                const isStaticFallback = isAudioFile(file.path) || file.path.toLowerCase().endsWith('.mp4');
-                if (isStaticFallback || (!this.src.startsWith('asset://') && !isLocalMediaServerUrl(this.src))) {
-                  if (window.appState && window.appState.thumbnailUrls) {
-                    window.appState.thumbnailUrls.set(file.path, fallback);
-                    if (window.evictThumbnailCache) window.evictThumbnailCache();
-                  }
-                  this.src = fallback;
+                // 静止画像の場合、破損URLをキャッシュから削除し、ブラウザ破損アイコン表示を防ぐため
+                // プレースホルダにリセットした上で再生成キューへ委譲する
+                this.src = PLACEHOLDER_GIF_URL;
+                if (window.appState && window.appState.thumbnailUrls) {
+                  window.appState.thumbnailUrls.delete(file.path);
+                }
+                if (window.thumbnailManager) {
+                  window.thumbnailManager.enqueuePriority(file.path);
                 }
               }
             };
-            if (img.complete && img.naturalWidth > 0) {
-              if (wrapper.dataset.filepath === file.path) {
-                img.classList.remove('loading');
-                wrapper.classList.remove('loading');
+            if (img.complete) {
+              if (img.naturalWidth > 0) {
+                if (wrapper.dataset.filepath === file.path) {
+                  img.classList.remove('loading');
+                  wrapper.classList.remove('loading');
+                }
+              } else if (!img.src.startsWith('data:image/svg+xml')) {
+                img.onerror();
               }
             }
           }
@@ -2114,10 +2120,14 @@ class UIManager {
                 window.thumbnailManager.enqueuePriority(file.path);
               }
             };
-            if (img.complete && img.naturalWidth > 0) {
-              if (wrapper.dataset.filepath === file.path) {
-                img.classList.remove('loading');
-                wrapper.classList.remove('loading');
+            if (img.complete) {
+              if (img.naturalWidth > 0) {
+                if (wrapper.dataset.filepath === file.path) {
+                  img.classList.remove('loading');
+                  wrapper.classList.remove('loading');
+                }
+              } else if (!img.src.startsWith('data:image/svg+xml')) {
+                img.onerror();
               }
             }
           }

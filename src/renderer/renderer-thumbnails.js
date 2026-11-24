@@ -21,7 +21,7 @@
 // ============================================================================
 
 import { appState, thumbnailState } from './renderer-state.js';
-import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL, AUDIO_PLACEHOLDER_URL } from './renderer-ui.js';
+import { UIManager, uiManager, BROKEN_MP4_FALLBACK_URL, AUDIO_PLACEHOLDER_URL, PLACEHOLDER_GIF_URL } from './renderer-ui.js';
 import { getStreamUrl, debounce, isVideoFile, isAudioFile } from '../common/utils.js';
 export { isVideoFile, isAudioFile };
 
@@ -1735,15 +1735,20 @@ export class ThumbnailQueueManager {
               }
               return;
             }
+            if (window.appState && window.appState.thumbnailUrls) {
+              window.appState.thumbnailUrls.delete(filePath);
+            }
+            if (appState && appState.thumbnailUrls) {
+              appState.thumbnailUrls.delete(filePath);
+            }
             const fallback = window.veloceAPI.convertFileSrc(filePath);
             if (this.src !== fallback && !this.src.startsWith('asset://')) {
-              if (window.appState && window.appState.thumbnailUrls) {
-                window.appState.thumbnailUrls.set(filePath, fallback);
-              }
               this.src = fallback;
+            } else {
+              this.src = PLACEHOLDER_GIF_URL;
             }
             if (typeof scheduleThumbnailSelfHealing === 'function') {
-              scheduleThumbnailSelfHealing(2000);
+              scheduleThumbnailSelfHealing(1000);
             }
           };
           if (img.complete && img.naturalWidth > 0 && isMatch()) {
@@ -1767,7 +1772,7 @@ window.resetThumbnailPreloader = resetThumbnailPreloader;
 
 // サムネイルの自己修復（Self-healing）監視プロセス
 // 画面に表示されている要素（_domByPath）を定期的に検査し、ロード中のままスタックしているか、
-// SVGフォールバックのエラー状態のまま放置されているサムネイルを検知して自動的に再キューする。
+// SVGフォールバックのエラー状態のまま放置されているサムネイル、幅0の破損画像を検知して自動的に再キューする。
 export function checkThumbnailSelfHealing() {
   const state = window.appState || appState;
   if (state && state.dragState && state.dragState.isAppDragging) return 0;
@@ -1780,8 +1785,11 @@ export function checkThumbnailSelfHealing() {
   // 優先キューに既にタスクが積まれている場合は、現在キュー処理中であるため早期リターン
   if (tm.priorityQueue && tm.priorityQueue.length > 0) return 0;
 
-  // 全可視サムネイルが既に正常URLを保持しており、かつ未解決タスクがないアイドル時はDOM走査をスキップ
   const urls = (state && state.thumbnailUrls) || (appState && appState.thumbnailUrls);
+  const PLACEHOLDER_GIF_PREFIX = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP';
+
+  // 全可視サムネイルが既に正常URLを保持しており、かつ未解決タスクがないアイドル時はDOM走査をスキップ
+  // （DOMのchildrenへのアクセスを行わずに早期リターンし、アイドル時の不要Reflow/GCを根絶）
   if (urls && (!tm.preloadQueue || tm.preloadQueue.length === 0) && tm.activeTasks && tm.activeTasks.size === 0) {
     let allHealthy = true;
     for (const path of window.uiManager._domByPath.keys()) {
@@ -1795,7 +1803,6 @@ export function checkThumbnailSelfHealing() {
   }
 
   let retryCount = 0;
-  const PLACEHOLDER_GIF_PREFIX = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP';
   for (const [path, wrapper] of window.uiManager._domByPath.entries()) {
     const img = wrapper.children[0];
     if (!img) continue;
@@ -1805,11 +1812,18 @@ export function checkThumbnailSelfHealing() {
     const isSvgFallback = !isAudioPlaceholder && img.src && img.src.startsWith('data:image/svg+xml');
     const hasRegisteredUrl = Boolean(urls && urls.has(path));
     const isGifPlaceholder = !hasRegisteredUrl && Boolean(img.src && img.src.startsWith(PLACEHOLDER_GIF_PREFIX));
+    const isBrokenImage = img.complete && img.naturalWidth === 0 && Boolean(img.src && !img.src.startsWith(PLACEHOLDER_GIF_PREFIX));
 
-    if (isStuckLoading || isSvgFallback || isGifPlaceholder) {
+    if (isStuckLoading || isSvgFallback || isGifPlaceholder || isBrokenImage) {
       if (!tm.activeTasks || !tm.activeTasks.has(path)) {
         if (window.appState && window.appState.thumbnailUrls) {
           window.appState.thumbnailUrls.delete(path);
+        }
+        if (appState && appState.thumbnailUrls) {
+          appState.thumbnailUrls.delete(path);
+        }
+        if (isBrokenImage && typeof PLACEHOLDER_GIF_URL !== 'undefined') {
+          img.src = PLACEHOLDER_GIF_URL;
         }
         tm.enqueuePriority(path);
         retryCount++;
