@@ -505,21 +505,25 @@ pub(crate) fn should_continue_metadata_bg_task(
     task_epoch == latest_epoch && current_dir == target_path
 }
 
-/// スマートフォルダの先頭200件に対して同期的なファイル存在確認（`is_file()`）を行い、
+/// スマートフォルダの先頭200件に対して Rayon 並列でファイル存在確認（`is_file()`）を行い、
 /// 消失ファイル（`head_missing`）を返却対象の `arcs` 自体から即座に除外する。
-/// 戻り値は `(除外後の全件リスト, 初期チャンク用先頭最大200件, DBパージ対象の消失パス一覧, バックグラウンド検証対象パス一覧)`。
-pub(crate) fn filter_smart_folder_head_missing(
+/// バックグラウンドパージ用パス一覧はここでは構築せず、検証済み有効件数（`verified_valid_count`）のみを返す。
+pub(crate) fn filter_smart_folder_head_missing_core(
     mut arcs: Vec<std::sync::Arc<ImageFile>>,
-) -> (Vec<std::sync::Arc<ImageFile>>, Vec<ImageFile>, Vec<String>, Vec<String>) {
+) -> (Vec<std::sync::Arc<ImageFile>>, Vec<ImageFile>, Vec<String>, usize) {
+    use rayon::prelude::*;
     let check_len = std::cmp::min(arcs.len(), 200);
-    let mut head_missing = Vec::new();
-
-    for f in &arcs[..check_len] {
-        let clean = strip_unc_prefix(&f.path).unwrap_or(&f.path);
-        if !std::path::Path::new(clean).is_file() {
-            head_missing.push(f.path.clone());
-        }
-    }
+    let head_missing: Vec<String> = arcs[..check_len]
+        .par_iter()
+        .filter_map(|f| {
+            let clean = strip_unc_prefix(&f.path).unwrap_or(&f.path);
+            if !std::path::Path::new(clean).is_file() {
+                Some(f.path.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
 
     let verified_valid_count = check_len.saturating_sub(head_missing.len());
 
@@ -532,11 +536,38 @@ pub(crate) fn filter_smart_folder_head_missing(
     let valid_head_len = std::cmp::min(arcs.len(), 200);
     let head_valid: Vec<ImageFile> = arcs[..valid_head_len].iter().map(|f| (**f).clone()).collect();
 
-    // バックグラウンドパージ用: 未検証領域のパス一覧（除外後の arcs から組み立て）
-    let mut all_paths_for_bg_purge = Vec::with_capacity(arcs.len().saturating_sub(verified_valid_count));
-    for f in &arcs[verified_valid_count..] {
+    (arcs, head_valid, head_missing, verified_valid_count)
+}
+
+/// バックグラウンドパージの実行が確定した場合（`should_run == true`）のみ、
+/// 未検証領域（`verified_valid_count..`）のパス一覧を構築して返す。
+/// スキップ時（`should_run == false`）は `None` を返し、不要な全件 `String::clone()` を回避する。
+pub(crate) fn collect_bg_purge_paths_if_needed(
+    should_run: bool,
+    files: &[std::sync::Arc<ImageFile>],
+    verified_valid_count: usize,
+) -> Option<Vec<String>> {
+    if !should_run || verified_valid_count >= files.len() {
+        return None;
+    }
+    let mut all_paths_for_bg_purge = Vec::with_capacity(files.len() - verified_valid_count);
+    for f in &files[verified_valid_count..] {
         all_paths_for_bg_purge.push(f.path.clone());
     }
+    Some(all_paths_for_bg_purge)
+}
+
+/// スマートフォルダの先頭200件に対してファイル存在確認（`is_file()`）を行い、
+/// 消失ファイル（`head_missing`）を返却対象の `arcs` 自体から即座に除外する。
+/// 戻り値は `(除外後の全件リスト, 初期チャンク用先頭最大200件, DBパージ対象の消失パス一覧, バックグラウンド検証対象パス一覧)`。
+#[allow(dead_code)]
+pub(crate) fn filter_smart_folder_head_missing(
+    arcs: Vec<std::sync::Arc<ImageFile>>,
+) -> (Vec<std::sync::Arc<ImageFile>>, Vec<ImageFile>, Vec<String>, Vec<String>) {
+    let (arcs, head_valid, head_missing, verified_valid_count) =
+        filter_smart_folder_head_missing_core(arcs);
+    let all_paths_for_bg_purge =
+        collect_bg_purge_paths_if_needed(true, &arcs, verified_valid_count).unwrap_or_default();
 
     (arcs, head_valid, head_missing, all_paths_for_bg_purge)
 }
@@ -667,7 +698,8 @@ fn load_directory(
                 let sort_sf = current_sort.clone();
                 let ratings_map_sf = ratings_map_opt.take().unwrap_or_default();
 
-                let (mut files, head_valid, head_missing, all_paths_for_bg_purge) = tokio::task::spawn_blocking(move || {
+                let (mut files, head_valid, head_missing, verified_valid_count, sql_ms, sort_ms, head_check_ms) = tokio::task::spawn_blocking(move || {
+                    let t_sql = std::time::Instant::now();
                     let mut arcs = query_smart_folder_image_files(
                         &rule_sf,
                         &db_conn_for_query,
@@ -675,7 +707,9 @@ fn load_directory(
                         sort_sf.asc,
                         None,
                     );
+                    let sql_ms = t_sql.elapsed().as_millis();
 
+                    let t_sort = std::time::Instant::now();
                     // SQL の ORDER BY はバイト順であるため、名前順ソート時のみ自然順ソートを適用
                     if sort_sf.key == "name" {
                         sort_files_by_natural_name(&mut arcs, sort_sf.asc);
@@ -714,15 +748,28 @@ fn load_directory(
                             }
                         });
                     }
+                    let sort_ms = t_sort.elapsed().as_millis();
 
+                    let t_head = std::time::Instant::now();
                     // --- ハイブリッド即時表示フェーズ ---
-                    // ソート後の先頭200件（初期表示チャンク）のみ同期的に is_file() を判定し、
+                    // ソート後の先頭200件（初期表示チャンク）のみ並列に is_file() を判定し、
                     // 消失ファイルは返却する arcs 自体からも即座に除外して state と初期チャンクの整合性を保つ
-                    filter_smart_folder_head_missing(arcs)
-                }).await.unwrap_or_else(|_| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    let (arcs, head_valid, head_missing, verified_valid_count) =
+                        filter_smart_folder_head_missing_core(arcs);
+                    let head_check_ms = t_head.elapsed().as_millis();
 
-                println!("[Veloce: PERF] Smart folder query+sort for {} completed in {}ms (items: {})",
-                    path_for_spawn, t_smart_start.elapsed().as_millis(), files.len());
+                    (arcs, head_valid, head_missing, verified_valid_count, sql_ms, sort_ms, head_check_ms)
+                }).await.unwrap_or_else(|_| (Vec::new(), Vec::new(), Vec::new(), 0, 0, 0, 0));
+
+                println!(
+                    "[Veloce: PERF] Smart folder query+sort for {} completed in {}ms (items: {}, sql: {}ms, sort: {}ms, head_check: {}ms)",
+                    path_for_spawn,
+                    t_smart_start.elapsed().as_millis(),
+                    files.len(),
+                    sql_ms,
+                    sort_ms,
+                    head_check_ms
+                );
 
                 // タブ切り替えチェック: ユーザーが別フォルダに移動していない場合のみ AppState 更新・emit
                 if let Some(state) = app_clone.try_state::<AppState>() {
@@ -867,7 +914,7 @@ fn load_directory(
                     let settings_pool_purge = settings_db_clone.clone();
                     let app_handle_for_purge = app_clone.clone();
                     let head_missing_to_purge = head_missing;
-                    let remaining_paths = all_paths_for_bg_purge;
+                    let total_all_files_count = state.all_files.read().len();
                     let purge_start_epoch = current_thumbnail_batch_epoch();
                     let smart_uri_for_purge = path_clone.clone();
 
@@ -897,7 +944,7 @@ fn load_directory(
                         }
 
                         // 2. 残りの全件スイープ（前回の完了から一定間隔が経過している場合のみ実行）
-                        if remaining_paths.is_empty() {
+                        if verified_valid_count >= total_all_files_count {
                             return;
                         }
 
@@ -922,9 +969,24 @@ fn load_directory(
                             .unwrap_or_default()
                             .as_millis() as u64;
 
-                        if !should_run_smart_purge(last_run_ms, current_time_ms, SMART_PURGE_MIN_INTERVAL_MS) {
+                        let should_run = should_run_smart_purge(last_run_ms, current_time_ms, SMART_PURGE_MIN_INTERVAL_MS);
+                        if !should_run || current_thumbnail_batch_epoch() != purge_start_epoch {
                             return;
                         }
+
+                        // パージ実行が確定した時点でのみ未検証領域のパス一覧を構築（スキップ時は一切アロケーションしない）
+                        let remaining_paths = if let Some(state) = app_handle_for_purge.try_state::<AppState>() {
+                            if *state.current_dir.read() != smart_uri_for_purge {
+                                return;
+                            }
+                            let all_lock = state.all_files.read();
+                            match collect_bg_purge_paths_if_needed(should_run, &all_lock, verified_valid_count) {
+                                Some(paths) => paths,
+                                None => return,
+                            }
+                        } else {
+                            return;
+                        };
 
                         // 実行中の負荷を抑制: 最大2スレッドのRayonプールを使用し、チャンク間に150msの待機を入れる
                         let sweep_pool = rayon::ThreadPoolBuilder::new()
@@ -9506,6 +9568,37 @@ mod viewer_tests {
         assert_eq!(head_valid.len(), 1);
         assert_eq!(head_valid[0].path, existing_file.to_string_lossy());
         assert!(bg_purge.is_empty());
+
+        // 200件超（先頭200件内に欠損あり）での並列存在確認と、should_run=false 時のパージ用リスト非構築を検証
+        let mut many_arcs = Vec::with_capacity(210);
+        for i in 0..210usize {
+            let p = if i == 5 || i == 150 {
+                temp_dir.path().join(format!("missing_{}.png", i))
+            } else {
+                existing_file.clone()
+            };
+            let mut entry = (*make_entry(&p)).clone();
+            if i != 5 && i != 150 {
+                entry.name = format!("exists_{}.png", i);
+            }
+            many_arcs.push(Arc::new(entry));
+        }
+        let (filtered_many, head_valid_many, head_missing_many, verified_valid_count) =
+            filter_smart_folder_head_missing_core(many_arcs);
+        assert_eq!(head_missing_many.len(), 2, "先頭200件内の2件の消失ファイルが並列検出されること");
+        assert_eq!(filtered_many.len(), 208);
+        assert_eq!(head_valid_many.len(), 200);
+        assert_eq!(verified_valid_count, 198);
+
+        // should_run = false（24時間間隔内）ではパージ用パス一覧を構築しない（None）こと
+        assert!(
+            collect_bg_purge_paths_if_needed(false, &filtered_many, verified_valid_count).is_none(),
+            "should_run=false 時はパージ用パス配列を構築しないこと"
+        );
+        // should_run = true の場合のみ未検証領域（208 - 198 = 10件）のパス一覧が構築されること
+        let built_paths = collect_bg_purge_paths_if_needed(true, &filtered_many, verified_valid_count)
+            .expect("should_run=true 時は未検証領域のパス一覧が返ること");
+        assert_eq!(built_paths.len(), 10);
     }
 
     #[test]
