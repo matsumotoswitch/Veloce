@@ -54,33 +54,10 @@ pub(crate) fn is_listed_media_extension(ext_lower: &str) -> bool {
 
 
 
-fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String> {
-    let mut db_path =
-        get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
-    if !db_path.exists() {
-        let _ = std::fs::create_dir_all(&db_path);
-    }
-    db_path.push("veloce_cache.db");
-
-    let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path)
-        .with_init(|conn| {
-            conn.execute_batch(
-                "PRAGMA journal_mode = WAL;
-                 PRAGMA synchronous = NORMAL;
-                 PRAGMA mmap_size = 268435456;
-                 PRAGMA cache_size = -4000;
-                 PRAGMA temp_store = MEMORY;
-                 PRAGMA busy_timeout = 5000;"
-            )
-        });
-
-    let pool = r2d2::Pool::builder()
-        .max_size(16)
-        .build(manager)
-        .map_err(|e| e.to_string())?;
-
-    let conn = pool.get().map_err(|e| e.to_string())?;
-
+/// `cache` / `ratings` テーブルとインデックスの起動時 DDL を適用する。
+/// 冗長な旧インデックス（`idx_cache_mtime` / `idx_cache_smart_cover_mtime` / `idx_cache_smart_cover`）は除去し、
+/// カバリングインデックス（`idx_cache_smart_cover_mtime_v3` / `idx_cache_smart_cover_v2`）を維持する。
+pub(crate) fn init_cache_schema_ddl(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS cache (
             hash_key TEXT PRIMARY KEY,
@@ -108,12 +85,12 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path ON cache (path)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_path_nocase ON cache (path COLLATE NOCASE)", []).map_err(|e| e.to_string())?;
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_mtime ON cache (mtime)", []).map_err(|e| e.to_string())?;
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_mtime ON cache (mtime DESC, path, size, ctime, width, height, hash_key)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_mtime_v3 ON cache (mtime DESC, path, size, ctime, width, height, hash_key, (thumbnail IS NOT NULL))", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_last_accessed ON cache (last_accessed DESC)", []).map_err(|e| e.to_string())?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings (rating)", []).map_err(|e| e.to_string())?;
     let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover", []);
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_mtime", []);
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover_mtime", []);
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)", []).map_err(|e| e.to_string())?;
 
     // マイグレーション（カラムが存在しない場合は無視される）
@@ -129,6 +106,37 @@ fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String>
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN metadata_source TEXT DEFAULT ''", []);
     // 過去の古い形式の metadata_source の再解析・修正は、起動時のフルテーブルスキャン（数秒のブロッキング）を
     // 回避するため、ファイルアクセス時のオンデマンド自己修復（get_full_metadata_for_path_with_stat_inner）に委譲する。
+
+    Ok(())
+}
+
+fn init_db() -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, String> {
+    let mut db_path =
+        get_veloce_data_dir().unwrap_or_else(|| std::path::PathBuf::from(".veloce_cache"));
+    if !db_path.exists() {
+        let _ = std::fs::create_dir_all(&db_path);
+    }
+    db_path.push("veloce_cache.db");
+
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path)
+        .with_init(|conn| {
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;
+                 PRAGMA mmap_size = 268435456;
+                 PRAGMA cache_size = -4000;
+                 PRAGMA temp_store = MEMORY;
+                 PRAGMA busy_timeout = 5000;"
+            )
+        });
+
+    let pool = r2d2::Pool::builder()
+        .max_size(16)
+        .build(manager)
+        .map_err(|e| e.to_string())?;
+
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    init_cache_schema_ddl(&conn)?;
 
     // --- FTS5 Setup ---
     let mut needs_fts_rebuild = false;
@@ -9823,5 +9831,59 @@ mod viewer_tests {
             Some(r"C:\art"),
         );
         assert!(should_update, "ファイル退去後の新リストが当該フォルダのビューアーへ配信対象と判定されること");
+    }
+
+    #[test]
+    fn test_init_cache_schema_ddl_drops_redundant_indexes_and_keeps_covering_indexes() {
+        let index_exists = |conn: &rusqlite::Connection, name: &str| -> bool {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    rusqlite::params![name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            count > 0
+        };
+
+        // 1. 新規DBに対して起動時 DDL を実行した場合
+        let fresh_conn = rusqlite::Connection::open_in_memory().unwrap();
+        init_cache_schema_ddl(&fresh_conn).unwrap();
+
+        assert!(!index_exists(&fresh_conn, "idx_cache_mtime"), "新規DBに idx_cache_mtime が作成されないこと");
+        assert!(!index_exists(&fresh_conn, "idx_cache_smart_cover_mtime"), "新規DBに idx_cache_smart_cover_mtime が作成されないこと");
+        assert!(index_exists(&fresh_conn, "idx_cache_smart_cover_mtime_v3"), "idx_cache_smart_cover_mtime_v3 が維持されること");
+        assert!(index_exists(&fresh_conn, "idx_cache_smart_cover_v2"), "idx_cache_smart_cover_v2 が維持されること");
+        assert!(index_exists(&fresh_conn, "idx_cache_path_nocase"), "idx_cache_path_nocase が維持されること");
+
+        // 2. 既存DBを模した状態（対象2インデックスが存在する状態）から起動時 DDL を実行した場合
+        let legacy_conn = rusqlite::Connection::open_in_memory().unwrap();
+        legacy_conn.execute(
+            "CREATE TABLE cache (
+                hash_key TEXT PRIMARY KEY,
+                thumbnail BLOB,
+                metadata TEXT,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                size INTEGER DEFAULT 0,
+                mtime INTEGER DEFAULT 0,
+                ctime INTEGER DEFAULT 0,
+                last_accessed INTEGER,
+                metadata_source TEXT DEFAULT ''
+            )",
+            [],
+        ).unwrap();
+        legacy_conn.execute("CREATE INDEX idx_cache_mtime ON cache (mtime)", []).unwrap();
+        legacy_conn.execute("CREATE INDEX idx_cache_smart_cover_mtime ON cache (mtime DESC, path, size, ctime, width, height, hash_key)", []).unwrap();
+        assert!(index_exists(&legacy_conn, "idx_cache_mtime"));
+        assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_mtime"));
+
+        init_cache_schema_ddl(&legacy_conn).unwrap();
+
+        assert!(!index_exists(&legacy_conn, "idx_cache_mtime"), "既存DBの idx_cache_mtime がドロップされること");
+        assert!(!index_exists(&legacy_conn, "idx_cache_smart_cover_mtime"), "既存DBの idx_cache_smart_cover_mtime がドロップされること");
+        assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_mtime_v3"));
+        assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_v2"));
     }
 }
