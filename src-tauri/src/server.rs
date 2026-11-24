@@ -121,6 +121,34 @@ pub fn get_video_server_token(state: tauri::State<'_, AppState>) -> String {
     state.video_server_token.clone()
 }
 
+/// バイナリメディア（サムネイル / カバー画像）の HTTP GET 応答バイト列（ヘッダ＋本文）を単一バッファに構築する。
+pub(crate) fn build_media_get_response(
+    mimetype: &str,
+    cache_control: &str,
+    close_connection: bool,
+    body: &[u8],
+) -> Vec<u8> {
+    use std::fmt::Write;
+    let mut header = String::with_capacity(192);
+    header.push_str("HTTP/1.1 200 OK\r\n");
+    header.push_str("Content-Type: ");
+    header.push_str(mimetype);
+    header.push_str("\r\n");
+    header.push_str("Access-Control-Allow-Origin: *\r\n");
+    header.push_str("Cache-Control: ");
+    header.push_str(cache_control);
+    header.push_str("\r\n");
+    if close_connection {
+        header.push_str("Connection: close\r\n");
+    }
+    let _ = write!(header, "Content-Length: {}\r\n\r\n", body.len());
+
+    let mut response = Vec::with_capacity(header.len() + body.len());
+    response.extend_from_slice(header.as_bytes());
+    response.extend_from_slice(body);
+    response
+}
+
 /// POST /save-thumbnail において実ファイルの stat を優先し、AppState のキャッシュと同期した最新の mtime を解決する。
 pub(crate) fn resolve_save_thumbnail_mtime_with_state(
     state_opt: Option<&AppState>,
@@ -403,15 +431,8 @@ pub fn start_local_video_server(
                             } else {
                                 "image/jpeg"
                             };
-                            let mut headers = String::new();
-                            headers.push_str("HTTP/1.1 200 OK\r\n");
-                            headers.push_str(&format!("Content-Type: {}\r\n", mimetype));
-                            headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                            headers.push_str("Cache-Control: public, max-age=3600\r\n");
-                            headers.push_str("Connection: close\r\n");
-                            headers.push_str(&format!("Content-Length: {}\r\n\r\n", cover_bytes.len()));
-                            let _ = reader.get_mut().write_all(headers.as_bytes());
-                            let _ = reader.get_mut().write_all(&cover_bytes[..]);
+                            let response = build_media_get_response(mimetype, "public, max-age=3600", true, &cover_bytes);
+                            let _ = reader.get_mut().write_all(&response);
                             let _ = reader.get_mut().flush();
                         } else {
                             let not_found = "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
@@ -473,16 +494,8 @@ pub fn start_local_video_server(
                                 "image/jpeg"
                             };
 
-                            let mut headers = String::new();
-                            headers.push_str("HTTP/1.1 200 OK\r\n");
-                            headers.push_str(&format!("Content-Type: {}\r\n", mimetype));
-                            headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                            headers.push_str("Cache-Control: public, max-age=3600\r\n");
-                            headers.push_str("Connection: close\r\n");
-                            headers.push_str(&format!("Content-Length: {}\r\n\r\n", cache_bytes.len()));
-
-                            let _ = reader.get_mut().write_all(headers.as_bytes());
-                            let _ = reader.get_mut().write_all(&cache_bytes);
+                            let response = build_media_get_response(mimetype, "public, max-age=3600", true, &cache_bytes);
+                            let _ = reader.get_mut().write_all(&response);
                             let _ = reader.get_mut().flush();
                         } else {
                             let not_found = "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
@@ -749,5 +762,28 @@ mod tests {
         let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, resolved_mtime);
         let expected_hash = crate::utils::hash_path_mtime_hex(&file_path_str, real_mtime);
         assert_eq!(hash_key, expected_hash, "正規化されたパスと最新 mtime からのハッシュキーが一致すること");
+    }
+
+    #[test]
+    fn test_build_media_get_response_matches_legacy_bytes() {
+        let thumb_body = b"\xFF\xD8\xFF\xE0TEST_THUMB";
+        let actual_thumb = build_media_get_response("image/jpeg", "public, max-age=3600", true, thumb_body);
+        let mut expected_thumb = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=3600\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            thumb_body.len()
+        )
+        .into_bytes();
+        expected_thumb.extend_from_slice(thumb_body);
+        assert_eq!(actual_thumb, expected_thumb, "サムネイルGET応答バイト列が変更前と完全一致すること");
+
+        let cover_body = b"\x89PNG\r\n\x1A\nCOVER";
+        let actual_cover = build_media_get_response("image/png", "public, max-age=3600", true, cover_body);
+        let mut expected_cover = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=3600\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            cover_body.len()
+        )
+        .into_bytes();
+        expected_cover.extend_from_slice(cover_body);
+        assert_eq!(actual_cover, expected_cover, "カバーGET応答バイト列が変更前と完全一致すること");
     }
 }
