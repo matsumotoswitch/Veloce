@@ -34,6 +34,8 @@ pub struct AppState {
     pub view_params_mutex: Mutex<()>,
     pub viewer_pool_ready: AtomicBool,
     pub viewer_pool_spawned: AtomicBool,
+    /// 表示中スマートフォルダの検索用テキスト（prompt / negative_prompt / source / unified_search_text）充填済みフラグ
+    pub smart_search_hydrated: AtomicBool,
     pub db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     pub settings_db_conn: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     pub settings_db_existed: Mutex<bool>,
@@ -74,6 +76,7 @@ impl AppState {
             view_params_mutex: Mutex::new(()),
             viewer_pool_ready: AtomicBool::new(false),
             viewer_pool_spawned: AtomicBool::new(false),
+            smart_search_hydrated: AtomicBool::new(false),
             db_conn,
             settings_db_conn,
             settings_db_existed: Mutex::new(settings_db_existed),

@@ -638,6 +638,11 @@ fn load_directory(
     state.path_to_filtered_idx.write().clear();
     state.path_to_mtime.write().clear();
     *state.current_dir.write() = path_clone.clone();
+    if is_smart_target {
+        state
+            .smart_search_hydrated
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
 
     tauri::async_runtime::spawn(async move {
         let path_for_spawn = path_clone.clone();
@@ -661,7 +666,7 @@ fn load_directory(
                 let sort_sf = current_sort.clone();
                 let ratings_map_sf = ratings_map_opt.take().unwrap_or_default();
 
-                let (files, head_valid, head_missing, all_paths_for_bg_purge) = tokio::task::spawn_blocking(move || {
+                let (mut files, head_valid, head_missing, all_paths_for_bg_purge) = tokio::task::spawn_blocking(move || {
                     let mut arcs = query_smart_folder_image_files(
                         &rule_sf,
                         &db_conn_for_query,
@@ -735,6 +740,12 @@ fn load_directory(
                     let rating_op = state.rating_filter_op.lock().clone();
 
                     let has_filter = !search_terms.is_empty() || rating_val > 0;
+                    if !search_terms.is_empty() {
+                        crate::smart_folder::hydrate_smart_folder_search_text(&mut files, &db_conn_sf);
+                        state
+                            .smart_search_hydrated
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
 
                     let filtered = if !has_filter {
                         // フィルタなし（標準ケース）: files をそのまま filtered_files に共有
@@ -807,6 +818,46 @@ fn load_directory(
 
                     println!("[Veloce: PERF] Smart folder load for {} completed in {}ms (total files: {})",
                         path_clone, t_smart_start.elapsed().as_millis(), total_count);
+
+                    // --- スマートフォルダ検索テキスト遅延充填（directory-loaded 送信後）---
+                    // サムネイル初期描画を優先するため 600ms 遅延後に cache_fts（BLOB非含有）から
+                    // prompt / negative_prompt / source / unified_search_text / meta_loaded を復元する
+                    if !state.smart_search_hydrated.load(std::sync::atomic::Ordering::Acquire) {
+                        let app_for_hydrate = app_clone.clone();
+                        let path_for_hydrate = path_clone.clone();
+                        let hydrate_epoch = metadata_bg_epoch;
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                            let updated_opt = tokio::task::spawn_blocking(move || {
+                                if let Some(state) = app_for_hydrate.try_state::<AppState>() {
+                                    if state.smart_search_hydrated.load(std::sync::atomic::Ordering::Acquire) {
+                                        return (app_for_hydrate, None);
+                                    }
+                                    let res = crate::smart_folder::hydrate_smart_folder_search_text_for_state(
+                                        &state,
+                                        Some((hydrate_epoch, &path_for_hydrate)),
+                                    );
+                                    (app_for_hydrate, res)
+                                } else {
+                                    (app_for_hydrate, None)
+                                }
+                            })
+                            .await
+                            .ok();
+
+                            if let Some((app_handle, Some(updated))) = updated_opt {
+                                if updated > 0 {
+                                    let _ = app_handle.emit_all(
+                                        "metadata-batch-updated",
+                                        MetadataBatchUpdatedPayload {
+                                            processed: updated,
+                                            total: updated,
+                                        },
+                                    );
+                                }
+                            }
+                        });
+                    }
 
                     // --- 非同期バックグラウンドパージフェーズ（Self-Healing）---
                     // 画面表示後、裏側の非同期タスクで残りの全件を静かに存在確認し、
@@ -1635,9 +1686,16 @@ pub fn should_update_viewer_list(
 }
 
 pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
+    let search_query = state.search_query.read().clone();
+    if !search_query.trim().is_empty()
+        && state.current_dir.read().starts_with("smart://")
+        && !state.smart_search_hydrated.load(std::sync::atomic::Ordering::Acquire)
+    {
+        crate::smart_folder::hydrate_smart_folder_search_text_for_state(state, None);
+    }
+
     let all_files = state.all_files.read();
     let sort_config = state.sort_config.read().clone();
-    let search_query = state.search_query.read().clone();
 
     let mut filtered: Vec<std::sync::Arc<ImageFile>> = if search_query.trim().is_empty() {
         all_files.clone()
@@ -1806,6 +1864,7 @@ pub(crate) fn set_view_params_inner(
         return state.filtered_files.read().len();
     }
 
+    let has_search_query = !search_query.trim().is_empty();
     *state.sort_config.write() = SortConfig { key: sort_key, asc };
     *state.search_query.write() = search_query;
     *state.rating_filter_val.lock() = rating_filter_val;
@@ -1813,6 +1872,12 @@ pub(crate) fn set_view_params_inner(
     if skip_sort {
         state.filtered_files.read().len()
     } else {
+        if has_search_query
+            && state.current_dir.read().starts_with("smart://")
+            && !state.smart_search_hydrated.load(std::sync::atomic::Ordering::Acquire)
+        {
+            crate::smart_folder::hydrate_smart_folder_search_text_for_state(state, None);
+        }
         apply_filters_and_sort(app, state)
     }
 }
@@ -4095,6 +4160,7 @@ fn main() {
             view_params_mutex: parking_lot::Mutex::new(()),
             viewer_pool_ready: std::sync::atomic::AtomicBool::new(false),
             viewer_pool_spawned: std::sync::atomic::AtomicBool::new(false),
+            smart_search_hydrated: std::sync::atomic::AtomicBool::new(false),
             db_conn,
             settings_db_conn,
             settings_db_existed: parking_lot::Mutex::new(settings_db_existed),
@@ -4323,6 +4389,7 @@ pub(crate) fn create_test_app_state(current_dir: &str) -> crate::state::AppState
         view_params_mutex: parking_lot::Mutex::new(()),
         viewer_pool_ready: std::sync::atomic::AtomicBool::new(false),
         viewer_pool_spawned: std::sync::atomic::AtomicBool::new(false),
+        smart_search_hydrated: std::sync::atomic::AtomicBool::new(false),
         db_conn: db_conn.clone(),
         settings_db_conn: db_conn,
         settings_db_existed: parking_lot::Mutex::new(true),
@@ -9871,5 +9938,92 @@ mod viewer_tests {
         assert!(!index_exists(&legacy_conn, "idx_cache_smart_cover_mtime"), "既存DBの idx_cache_smart_cover_mtime がドロップされること");
         assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_mtime_v3"));
         assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_v2"));
+    }
+
+    #[test]
+    fn test_smart_folder_ondemand_hydration_on_set_view_params_and_epoch_cancel() {
+        let state = create_test_app_state("smart://all_art");
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache_fts (hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["h_star", "1girl, starry sky", "bad hands", "novelai v5"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache_fts (hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["h_sea", "1girl, ocean waves", "lowres", "novelai v4"],
+            )
+            .unwrap();
+        }
+
+        let make_unhydrated = |name: &str, path: &str, hash_key: &str| {
+            std::sync::Arc::new(ImageFile {
+                name: name.to_string(),
+                ext: compact_str::CompactString::from(".png"),
+                path: path.to_string(),
+                size: 1024,
+                mtime: 1000,
+                ctime: 1000,
+                has_thumbnail_cache: true,
+                width: 832,
+                height: 1216,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: name.to_lowercase(),
+                hash_key: compact_str::CompactString::from(hash_key),
+            })
+        };
+
+        let files = vec![
+            make_unhydrated("img1.png", r"C:\art\img1.png", "h_star"),
+            make_unhydrated("img2.png", r"C:\art\img2.png", "h_sea"),
+        ];
+        *state.all_files.write() = files.clone();
+        *state.filtered_files.write() = files.clone();
+        state.rebuild_all_and_filtered_indices(&files);
+
+        // 1. エポック不一致時は適用されず打ち切られること（フラグ・ファイルとも未変更）
+        let current_epoch = advance_metadata_bg_epoch();
+        let stale_epoch = current_epoch.saturating_sub(1);
+        let cancelled = crate::smart_folder::hydrate_smart_folder_search_text_for_state(
+            &state,
+            Some((stale_epoch, "smart://all_art")),
+        );
+        assert!(cancelled.is_none(), "エポック不一致で充填が打ち切られること");
+        assert!(!state.smart_search_hydrated.load(std::sync::atomic::Ordering::Acquire));
+        assert!(state.all_files.read()[0].prompt.is_empty());
+
+        // 2. フラグ false の状態で set_view_params_inner にプロンプト語を指定すると、
+        //    オンデマンド充填が走って該当ファイルがヒットすること
+        let epoch = state.view_params_epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let hit_count = set_view_params_inner(
+            None,
+            &state,
+            epoch,
+            "name".to_string(),
+            true,
+            "starry sky".to_string(),
+            0,
+            "gte".to_string(),
+            false,
+        );
+        assert_eq!(hit_count, 1, "オンデマンド充填によりプロンプト語でヒットすること");
+        assert!(state.smart_search_hydrated.load(std::sync::atomic::Ordering::Acquire));
+        let filtered = state.filtered_files.read();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].path, r"C:\art\img1.png");
+        assert_eq!(filtered[0].prompt, "1girl, starry sky");
+        assert_eq!(filtered[0].negative_prompt, "bad hands");
+        assert_eq!(filtered[0].source, "novelai v5");
+        assert!(filtered[0].meta_loaded);
     }
 }

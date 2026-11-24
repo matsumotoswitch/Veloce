@@ -577,6 +577,193 @@ pub(crate) fn query_smart_folder_image_files(
     files
 }
 
+/// `cache_fts`（存在しない環境では `cache` の 900 件分割 `IN` クエリ）から、
+/// 指定 `target_hashes` に一致する検索用テキスト `(searchable_prompt, searchable_negative_prompt, searchable_source)` を取得する。
+pub(crate) fn fetch_smart_folder_search_texts(
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    target_hashes: &std::collections::HashSet<String>,
+) -> std::collections::HashMap<String, (String, String, String)> {
+    let mut map = std::collections::HashMap::new();
+    if target_hashes.is_empty() {
+        return map;
+    }
+    let Ok(conn) = db_conn.get() else {
+        return map;
+    };
+
+    // 1. BLOB を一切含まない独立した FTS5 テーブル `cache_fts` を 1 パスで読み取る
+    let fts_sql = "SELECT hash_key, IFNULL(searchable_prompt, ''), IFNULL(searchable_negative_prompt, ''), IFNULL(searchable_source, '') FROM cache_fts";
+    if let Ok(mut stmt) = conn.prepare(fts_sql) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }) {
+            for r in rows.flatten() {
+                if target_hashes.contains(&r.0) {
+                    map.insert(r.0, (r.1, r.2, r.3));
+                }
+            }
+        }
+        return map;
+    }
+
+    // 2. フォールバック: `cache_fts` テーブルが存在しない環境（テスト DB 等）のみ `cache` から 900 件分割で取得
+    let keys: Vec<&String> = target_hashes.iter().collect();
+    for chunk in keys.chunks(900) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let query = format!(
+            "SELECT hash_key, IFNULL(searchable_prompt, ''), IFNULL(searchable_negative_prompt, ''), IFNULL(searchable_source, '') FROM cache WHERE hash_key IN ({})",
+            placeholders
+        );
+        if let Ok(mut stmt) = conn.prepare(&query) {
+            let params: Vec<&dyn rusqlite::ToSql> =
+                chunk.iter().map(|s| *s as &dyn rusqlite::ToSql).collect();
+            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            }) {
+                for r in rows.flatten() {
+                    map.insert(r.0, (r.1, r.2, r.3));
+                }
+            }
+        }
+    }
+
+    map
+}
+
+/// 指定した `ImageFile` スライスに対して、`cache_fts`（またはフォールバック `cache`）から
+/// `prompt` / `negative_prompt` / `source` / `unified_search_text` / `meta_loaded` を復元する。
+pub(crate) fn hydrate_smart_folder_search_text(
+    files: &mut [std::sync::Arc<ImageFile>],
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+) -> usize {
+    let target_hashes: std::collections::HashSet<String> = files
+        .iter()
+        .filter(|f| !f.hash_key.is_empty())
+        .map(|f| f.hash_key.to_string())
+        .collect();
+    if target_hashes.is_empty() {
+        return 0;
+    }
+
+    let search_map = fetch_smart_folder_search_texts(db_conn, &target_hashes);
+    if search_map.is_empty() {
+        return 0;
+    }
+
+    let mut updated = 0usize;
+    for f_arc in files.iter_mut() {
+        if let Some((sp, snp, ss)) = search_map.get(f_arc.hash_key.as_str()) {
+            let f = std::sync::Arc::make_mut(f_arc);
+            let name_lower = f.name.to_lowercase();
+            f.unified_search_text = format!("{} {} {} {}", name_lower, sp, snp, ss);
+            f.meta_loaded = !sp.is_empty() || !snp.is_empty() || !ss.is_empty();
+            f.prompt = sp.clone();
+            f.negative_prompt = snp.clone();
+            f.source = ss.clone();
+            updated += 1;
+        }
+    }
+
+    updated
+}
+
+/// `AppState` 上の表示中スマートフォルダに対して検索用テキストを充填する。
+/// `expected_epoch_and_dir` が指定された場合は、DB 読み取り前後で世代番号とカレントディレクトリを検証し、
+/// フォルダ移動・タブ切替で世代が変わっていれば適用せずに打ち切る。
+/// 戻り値は `Some(更新件数)`（適用完了）または `None`（世代不一致による打ち切り）。
+pub(crate) fn hydrate_smart_folder_search_text_for_state(
+    state: &AppState,
+    expected_epoch_and_dir: Option<(u64, &str)>,
+) -> Option<usize> {
+    let check_epoch = || -> bool {
+        if let Some((expected_epoch, expected_dir)) = expected_epoch_and_dir {
+            let cur_dir = state.current_dir.read();
+            crate::should_continue_metadata_bg_task(
+                expected_epoch,
+                crate::current_metadata_bg_epoch(),
+                &cur_dir,
+                expected_dir,
+            )
+        } else {
+            state.current_dir.read().starts_with("smart://")
+        }
+    };
+
+    if !check_epoch() {
+        return None;
+    }
+
+    // 1. 短時間の読み取りロックで対象 hash_key 集合だけ抽出して即座にロックを解放
+    let target_hashes: std::collections::HashSet<String> = {
+        let all_files = state.all_files.read();
+        all_files
+            .iter()
+            .filter(|f| !f.hash_key.is_empty())
+            .map(|f| f.hash_key.to_string())
+            .collect()
+    };
+
+    // 2. ロックを保持せずに DB（cache_fts 優先）から検索テキストを一括取得
+    let search_map = fetch_smart_folder_search_texts(&state.db_conn, &target_hashes);
+
+    // 3. DB 読み取り後に世代・カレントディレクトリを再検証（移動済みなら適用せず打ち切り）
+    if !check_epoch() {
+        return None;
+    }
+
+    if search_map.is_empty() {
+        state.smart_search_hydrated.store(true, std::sync::atomic::Ordering::Release);
+        return Some(0);
+    }
+
+    // 4. all_files を更新し、更新済み Arc を記録してから filtered_files へ同期（AB-BA デッドロック回避）
+    let mut updated_by_hash: std::collections::HashMap<String, std::sync::Arc<ImageFile>> =
+        std::collections::HashMap::with_capacity(search_map.len());
+    {
+        let mut all_files = state.all_files.write();
+        if !check_epoch() {
+            return None;
+        }
+        for f_arc in all_files.iter_mut() {
+            if let Some((sp, snp, ss)) = search_map.get(f_arc.hash_key.as_str()) {
+                let f = std::sync::Arc::make_mut(f_arc);
+                let name_lower = f.name.to_lowercase();
+                f.unified_search_text = format!("{} {} {} {}", name_lower, sp, snp, ss);
+                f.meta_loaded = !sp.is_empty() || !snp.is_empty() || !ss.is_empty();
+                f.prompt = sp.clone();
+                f.negative_prompt = snp.clone();
+                f.source = ss.clone();
+                updated_by_hash.insert(f.hash_key.to_string(), std::sync::Arc::clone(f_arc));
+            }
+        }
+    }
+
+    if !updated_by_hash.is_empty() {
+        let mut filtered_files = state.filtered_files.write();
+        if !check_epoch() {
+            return None;
+        }
+        for f_arc in filtered_files.iter_mut() {
+            if let Some(updated_arc) = updated_by_hash.get(f_arc.hash_key.as_str()) {
+                *f_arc = std::sync::Arc::clone(updated_arc);
+            }
+        }
+    }
+
+    state.smart_search_hydrated.store(true, std::sync::atomic::Ordering::Release);
+    Some(updated_by_hash.len())
+}
+
 pub(crate) fn get_smart_folder_paths(
     folder_type: &str,
     ratings_map: &std::collections::HashMap<String, u8>,
@@ -1962,5 +2149,109 @@ mod tests {
         let legacy = &items[1];
         assert_eq!(legacy.name, "legacy_empty.jpg");
         assert!(!legacy.meta_loaded, "レガシー空キャッシュ行は meta_loaded = false のまま維持されること");
+    }
+
+    #[test]
+    fn test_hydrate_smart_folder_search_text_from_fts_and_fallback() {
+        let make_bare_file = |name: &str, path: &str, hash_key: &str| {
+            std::sync::Arc::new(ImageFile {
+                name: name.to_string(),
+                ext: CompactString::from(".png"),
+                path: path.to_string(),
+                size: 100,
+                mtime: 1000,
+                ctime: 1000,
+                has_thumbnail_cache: true,
+                width: 512,
+                height: 512,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: false,
+                search_text: String::new(),
+                unified_search_text: name.to_lowercase(),
+                hash_key: CompactString::from(hash_key),
+            })
+        };
+
+        // 1. cache_fts あり環境: FTS から prompt / negative_prompt / source / unified_search_text / meta_loaded が復元され、
+        //    FTS に無いファイルは空のままであること
+        let pool_fts = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        {
+            let conn = pool_fts.get().unwrap();
+            conn.execute(
+                "CREATE VIRTUAL TABLE cache_fts USING fts5(hash_key UNINDEXED, searchable_prompt, searchable_negative_prompt, searchable_source)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache_fts (hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["h_found", "1girl, silver hair", "lowres", "novelai v5"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache_fts (hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?1, '', '', '')",
+                rusqlite::params!["h_empty_fts"],
+            )
+            .unwrap();
+        }
+
+        let mut files = vec![
+            make_bare_file("Alice.png", r"C:\art\Alice.png", "h_found"),
+            make_bare_file("EmptyFts.png", r"C:\art\EmptyFts.png", "h_empty_fts"),
+            make_bare_file("Missing.png", r"C:\art\Missing.png", "h_missing"),
+        ];
+
+        let updated = hydrate_smart_folder_search_text(&mut files, &pool_fts);
+        assert_eq!(updated, 2);
+
+        assert_eq!(files[0].prompt, "1girl, silver hair");
+        assert_eq!(files[0].negative_prompt, "lowres");
+        assert_eq!(files[0].source, "novelai v5");
+        assert_eq!(files[0].unified_search_text, "alice.png 1girl, silver hair lowres novelai v5");
+        assert!(files[0].meta_loaded);
+
+        assert_eq!(files[1].prompt, "");
+        assert!(!files[1].meta_loaded, "searchable が全て空なら meta_loaded = false のまま");
+
+        assert_eq!(files[2].prompt, "");
+        assert_eq!(files[2].unified_search_text, "missing.png");
+        assert!(!files[2].meta_loaded, "FTS に無いファイルは空のままであること");
+
+        // 2. cache_fts テーブルが存在しない環境: cache.searchable_* フォールバックで復元されること
+        let pool_fallback = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        {
+            let conn = pool_fallback.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    searchable_prompt TEXT DEFAULT '',
+                    searchable_negative_prompt TEXT DEFAULT '',
+                    searchable_source TEXT DEFAULT ''
+                )",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, searchable_prompt, searchable_negative_prompt, searchable_source) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["h_fb", "mecha, cockpit", "blurry", "sdxl"],
+            )
+            .unwrap();
+        }
+
+        let mut fb_files = vec![make_bare_file("Robot.png", r"C:\art\Robot.png", "h_fb")];
+        let fb_updated = hydrate_smart_folder_search_text(&mut fb_files, &pool_fallback);
+        assert_eq!(fb_updated, 1);
+        assert_eq!(fb_files[0].prompt, "mecha, cockpit");
+        assert_eq!(fb_files[0].negative_prompt, "blurry");
+        assert_eq!(fb_files[0].source, "sdxl");
+        assert_eq!(fb_files[0].unified_search_text, "robot.png mecha, cockpit blurry sdxl");
+        assert!(fb_files[0].meta_loaded);
     }
 }
