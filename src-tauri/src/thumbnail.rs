@@ -149,10 +149,45 @@ pub(crate) fn advance_thumbnail_batch_epoch() -> u64 {
     THUMBNAIL_BATCH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1
 }
 
+/// 複数の direct `hash_key` について、有効なサムネイル BLOB が存在するキー集合を DB から一括取得する。
+/// SQLite のバインド変数上限を回避するため 900 件単位で `IN (...)` クエリを分割実行する。
+pub(crate) fn fetch_cached_thumbnail_hashes(
+    db_conn: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    direct_hashes: &[String],
+) -> std::collections::HashSet<String> {
+    let mut cached = std::collections::HashSet::new();
+    if direct_hashes.is_empty() {
+        return cached;
+    }
+    let Ok(conn) = db_conn.get() else {
+        return cached;
+    };
+
+    for chunk in direct_hashes.chunks(900) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let query = format!(
+            "SELECT hash_key FROM cache WHERE hash_key IN ({}) AND thumbnail IS NOT NULL AND length(thumbnail) > 0",
+            placeholders
+        );
+        if let Ok(mut stmt) = conn.prepare(&query) {
+            let params: Vec<&dyn rusqlite::ToSql> =
+                chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| row.get::<_, String>(0)) {
+                for hash in rows.flatten() {
+                    cached.insert(hash);
+                }
+            }
+        }
+    }
+
+    cached
+}
+
 /// 複数ファイルのサムネイルを Rayon で並列生成し、新規生成分を単一トランザクションで一括保存する。
 ///
-/// - キャッシュ確認は BLOB 本体を読み出さない存在確認（`thumbnail_cache_exists`）のみを行い、
-///   ヒット時は DB から bytes を読まずに URL を組み立てて返す。
+/// - 冒頭で全ファイル分の direct `hash_key` を一括照会（`fetch_cached_thumbnail_hashes`）し、
+///   ヒットしたファイルは並列処理内での DB アクセスなしで URL を組み立てて返す。
+/// - 一括照会に無いファイルのみ `thumbnail_cache_exists`（候補ハッシュ照合）→ 生成の順に進む。
 /// - `is_cancelled` が `true` を返したアイテムは生成を行わず、`cancelled: true` の結果として返す。
 /// - キャッシュヒット時は DB への書き込みを行わない。
 /// - 返却 URL には PRIMARY KEY 直接参照用の `hash` パラメータが付与される。
@@ -164,14 +199,25 @@ pub(crate) fn compute_thumbnail_batch(
     is_cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Vec<ThumbnailResult> {
     use rayon::prelude::*;
-    let computed: Vec<(ThumbnailResult, Option<PendingThumbnailWrite>)> = files_to_process
-        .into_par_iter()
+
+    let items_with_hash: Vec<(String, u64, String)> = files_to_process
+        .into_iter()
         .map(|(file_path, mtime)| {
+            let clean_path = normalize_unc_path(&file_path).into_owned();
+            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+            (file_path, mtime, hash_key)
+        })
+        .collect();
+
+    let all_hashes: Vec<String> = items_with_hash.iter().map(|(_, _, h)| h.clone()).collect();
+    let cached_hashes = fetch_cached_thumbnail_hashes(db_conn, &all_hashes);
+
+    let computed: Vec<(ThumbnailResult, Option<PendingThumbnailWrite>)> = items_with_hash
+        .into_par_iter()
+        .map(|(file_path, mtime, hash_key)| {
             if is_cancelled() {
                 return (ThumbnailResult { path: file_path, url: String::new(), cancelled: true }, None);
             }
-            let clean_path = normalize_unc_path(&file_path).into_owned();
-            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
             let build_url = || {
                 let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
                 format!(
@@ -184,18 +230,17 @@ pub(crate) fn compute_thumbnail_batch(
                 )
             };
 
-            if thumbnail_cache_exists(db_conn, &file_path, mtime, Some(&hash_key)) {
+            if cached_hashes.contains(&hash_key) || thumbnail_cache_exists(db_conn, &file_path, mtime, Some(&hash_key)) {
                 let url = build_url();
                 return (ThumbnailResult { path: file_path, url, cancelled: false }, None);
             }
 
-            let (bytes, pending) = build_generated_thumbnail_with_pending(&file_path, mtime, Some(&hash_key));
-            let url = if bytes.is_empty() {
-                String::new()
+            if let Some(pending) = generate_pending_thumbnail_no_clone(&file_path, mtime, Some(&hash_key)) {
+                let url = build_url();
+                (ThumbnailResult { path: file_path, url, cancelled: false }, Some(pending))
             } else {
-                build_url()
-            };
-            (ThumbnailResult { path: file_path, url, cancelled: false }, pending)
+                (ThumbnailResult { path: file_path, url: String::new(), cancelled: false }, None)
+            }
         })
         .collect();
 
@@ -2291,6 +2336,106 @@ mod tests {
         assert_eq!(results[1].url, expected_gen_url);
         assert!(!results[1].cancelled);
         assert!(thumbnail_cache_exists(&pool, &gen_str, gen_mtime, Some(&gen_hash)));
+    }
+
+    #[test]
+    fn test_fetch_cached_thumbnail_hashes_mixed_and_chunked_over_900() {
+        use image::{Rgb, RgbImage};
+
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "CREATE TABLE cache (
+                    hash_key TEXT PRIMARY KEY,
+                    thumbnail BLOB,
+                    path TEXT DEFAULT '',
+                    mtime INTEGER DEFAULT 0,
+                    last_accessed INTEGER
+                )",
+                [],
+            ).unwrap();
+        }
+
+        // 1. 950件（900件超）の hash_key を生成し、偶数番号のみ有効 BLOB、一部を 0 バイト・NULL として登録
+        let mut all_keys = Vec::with_capacity(950);
+        let mut expected_present = std::collections::HashSet::new();
+        {
+            let mut conn = pool.get().unwrap();
+            let tx = conn.transaction().unwrap();
+            for i in 0..950usize {
+                let key = format!("hash_{:04}", i);
+                all_keys.push(key.clone());
+                if i == 0 {
+                    // 0バイトBLOB
+                    tx.execute(
+                        "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, '', 1, 1)",
+                        rusqlite::params![&key, Vec::<u8>::new()],
+                    ).unwrap();
+                } else if i == 2 {
+                    // NULL BLOB
+                    tx.execute(
+                        "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, NULL, '', 1, 1)",
+                        rusqlite::params![&key],
+                    ).unwrap();
+                } else if i % 2 == 0 {
+                    tx.execute(
+                        "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, '', 1, 1)",
+                        rusqlite::params![&key, vec![0xAAu8, 0xBB]],
+                    ).unwrap();
+                    expected_present.insert(key);
+                }
+            }
+            tx.commit().unwrap();
+        }
+
+        let fetched = fetch_cached_thumbnail_hashes(&pool, &all_keys);
+        assert_eq!(fetched, expected_present, "901件超の分割クエリでも有効BLOBを持つhash_keyのみ正確に返ること");
+
+        // 2. compute_thumbnail_batch で direct hash ヒット・未キャッシュ生成・存在しないファイルが混在する場合の整合性
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cached_path = temp_dir.path().join("direct_cached.png");
+        let cached_str = cached_path.to_str().unwrap().to_string();
+        let cached_mtime = 11111u64;
+        let cached_hash = crate::utils::hash_path_mtime_hex(&normalize_unc_path(&cached_str), cached_mtime);
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, ?, ?, 10)",
+                rusqlite::params![&cached_hash, vec![9u8, 8, 7], &cached_str, cached_mtime],
+            ).unwrap();
+        }
+
+        let gen_path = temp_dir.path().join("batch_gen.png");
+        let gen_str = gen_path.to_str().unwrap().to_string();
+        let mut img = RgbImage::new(32, 32);
+        for pixel in img.pixels_mut() {
+            *pixel = Rgb([200, 80, 40]);
+        }
+        img.save_with_format(&gen_path, image::ImageFormat::Png).unwrap();
+        let gen_mtime = 22222u64;
+
+        let missing_str = temp_dir.path().join("missing.png").to_str().unwrap().to_string();
+
+        let results = compute_thumbnail_batch(
+            vec![
+                (cached_str.clone(), cached_mtime),
+                (gen_str.clone(), gen_mtime),
+                (missing_str.clone(), 33333u64),
+            ],
+            &pool,
+            45678,
+            "tok",
+            &|| false,
+        );
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].url.contains(&format!("hash={}", cached_hash)));
+        assert!(!results[1].url.is_empty());
+        assert!(results[2].url.is_empty());
     }
 
 }
