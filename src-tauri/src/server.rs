@@ -121,6 +121,16 @@ pub fn get_video_server_token(state: tauri::State<'_, AppState>) -> String {
     state.video_server_token.clone()
 }
 
+/// `hash=` パラメータの有無に応じて GET メディア応答の `Cache-Control` ヘッダ値を決定する。
+/// `hash=` 付き URL は path+mtime 依存で内容不変のため `immutable` を付与する。
+pub(crate) fn select_media_cache_control(has_hash: bool) -> &'static str {
+    if has_hash {
+        "public, max-age=86400, immutable"
+    } else {
+        "public, max-age=3600"
+    }
+}
+
 /// バイナリメディア（サムネイル / カバー画像）の HTTP GET 応答バイト列（ヘッダ＋本文）を単一バッファに構築する。
 pub(crate) fn build_media_get_response(
     mimetype: &str,
@@ -431,7 +441,8 @@ pub fn start_local_video_server(
                             } else {
                                 "image/jpeg"
                             };
-                            let response = build_media_get_response(mimetype, "public, max-age=3600", true, &cover_bytes);
+                            let cache_control = select_media_cache_control(!hash_param.is_empty());
+                            let response = build_media_get_response(mimetype, cache_control, true, &cover_bytes);
                             let _ = reader.get_mut().write_all(&response);
                             let _ = reader.get_mut().flush();
                         } else {
@@ -494,7 +505,8 @@ pub fn start_local_video_server(
                                 "image/jpeg"
                             };
 
-                            let response = build_media_get_response(mimetype, "public, max-age=3600", true, &cache_bytes);
+                            let cache_control = select_media_cache_control(!hash_param.is_empty());
+                            let response = build_media_get_response(mimetype, cache_control, true, &cache_bytes);
                             let _ = reader.get_mut().write_all(&response);
                             let _ = reader.get_mut().flush();
                         } else {
@@ -785,5 +797,79 @@ mod tests {
         .into_bytes();
         expected_cover.extend_from_slice(cover_body);
         assert_eq!(actual_cover, expected_cover, "カバーGET応答バイト列が変更前と完全一致すること");
+    }
+
+    #[test]
+    fn test_hash_query_cache_control_immutable_header() {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        assert_eq!(select_media_cache_control(true), "public, max-age=86400, immutable");
+        assert_eq!(select_media_cache_control(false), "public, max-age=3600");
+
+        let (db_tx, _db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
+        let state = crate::create_test_app_state("C:\\");
+        let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let token = "cache_hdr_tok";
+
+        let path_str = "C:\\test\\cache_header_check.png";
+        let mtime = 12345u64;
+        let hash_key = crate::utils::hash_path_mtime_hex(path_str, mtime);
+        let dummy_jpeg: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46, 0xFF, 0xD9];
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![&hash_key, &dummy_jpeg, path_str, mtime],
+            )
+            .unwrap();
+        }
+
+        let port = start_local_video_server(db_tx, app_handle_slot, state.db_conn.clone(), token.to_string());
+
+        // 1. hash= 付き GET -> Cache-Control: public, max-age=86400, immutable
+        let mut s_with_hash = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s_with_hash.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let req_with_hash = format!(
+            "GET /?path={}&mtime={}&thumb=1&hash={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+            urlencoding::encode(path_str),
+            mtime,
+            hash_key,
+            token,
+            port
+        );
+        s_with_hash.write_all(req_with_hash.as_bytes()).unwrap();
+        let mut resp_with_hash = Vec::new();
+        s_with_hash.read_to_end(&mut resp_with_hash).unwrap();
+        let resp_str_hash = String::from_utf8_lossy(&resp_with_hash);
+        assert!(resp_str_hash.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(
+            resp_str_hash.contains("Cache-Control: public, max-age=86400, immutable\r\n"),
+            "hash付きGETの応答ヘッダに max-age=86400, immutable が含まれること: {}",
+            resp_str_hash
+        );
+
+        // 2. hash= 無し GET -> 従来の Cache-Control: public, max-age=3600
+        let mut s_no_hash = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s_no_hash.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let req_no_hash = format!(
+            "GET /?path={}&mtime={}&thumb=1&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+            urlencoding::encode(path_str),
+            mtime,
+            token,
+            port
+        );
+        s_no_hash.write_all(req_no_hash.as_bytes()).unwrap();
+        let mut resp_no_hash = Vec::new();
+        s_no_hash.read_to_end(&mut resp_no_hash).unwrap();
+        let resp_str_no_hash = String::from_utf8_lossy(&resp_no_hash);
+        assert!(resp_str_no_hash.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(
+            resp_str_no_hash.contains("Cache-Control: public, max-age=3600\r\n"),
+            "hash無しGETの応答ヘッダが従来どおり max-age=3600 であること: {}",
+            resp_str_no_hash
+        );
+        assert!(!resp_str_no_hash.contains("immutable"));
     }
 }
