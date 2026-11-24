@@ -7892,7 +7892,7 @@ mod viewer_tests {
         stream1.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut reader1 = BufReader::new(stream1);
 
-        // 1回目: クライアントが Connection: keep-alive を送っても、サーバーは Connection: close で応答して切断する
+        // 1回目: Keep-Alive リクエストでは Connection: close を返さず接続を維持すること
         let req1 = format!(
             "GET /?path={}&mtime={}&thumb=1&hash={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: keep-alive\r\n\r\n",
             urlencoding::encode(cached_path),
@@ -7909,7 +7909,6 @@ mod viewer_tests {
 
         let mut content_len1 = 0usize;
         let mut saw_connection_close = false;
-        let mut saw_keep_alive = false;
         loop {
             let mut line = String::new();
             reader1.read_line(&mut line).unwrap();
@@ -7920,51 +7919,35 @@ mod viewer_tests {
             let lower = trimmed.to_ascii_lowercase();
             if lower.starts_with("content-length:") {
                 content_len1 = lower["content-length:".len()..].trim().parse().unwrap();
-            } else if lower.starts_with("connection:") {
-                if lower.contains("close") {
-                    saw_connection_close = true;
-                }
-                if lower.contains("keep-alive") {
-                    saw_keep_alive = true;
-                }
-            } else if lower.starts_with("keep-alive:") {
-                saw_keep_alive = true;
+            } else if lower.starts_with("connection:") && lower.contains("close") {
+                saw_connection_close = true;
             }
         }
-        assert!(saw_connection_close, "Connection: close ヘッダが返却されること");
-        assert!(!saw_keep_alive, "Keep-Alive ヘッダが返却されないこと");
+        assert!(!saw_connection_close, "Keep-Alive継続時は Connection: close ヘッダが付かないこと");
         assert_eq!(content_len1, dummy_jpeg.len());
         let mut body1 = vec![0u8; content_len1];
         reader1.read_exact(&mut body1).unwrap();
         assert_eq!(body1, dummy_jpeg);
 
-        // 1リクエスト応答後に接続が閉じられていること（EOF = 0 バイト読み取り）
-        let mut trailing = [0u8; 1];
-        let eof_read = reader1.read(&mut trailing).unwrap_or(0);
-        assert_eq!(eof_read, 0, "1 リクエスト完了後にサーバー側で接続が閉じられること");
-
-        // 2回目: 新規 TCP 接続で未キャッシュサムネイル GET（404）を要求しても Connection: close で正常応答すること
-        let stream2 = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream2.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        let mut reader2 = BufReader::new(stream2);
+        // 2回目: 同一 TCP 接続上で未キャッシュサムネイル GET（404）を Connection: close 指定で要求し、応答後に接続が閉じること
         let req2 = format!(
             "GET /?path={}&mtime=1&thumb=1&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
             urlencoding::encode("C:\\test\\missing_second.png"),
             test_token,
             port
         );
-        reader2.get_mut().write_all(req2.as_bytes()).unwrap();
+        reader1.get_mut().write_all(req2.as_bytes()).unwrap();
 
         let mut status2 = String::new();
-        reader2.read_line(&mut status2).unwrap();
+        reader1.read_line(&mut status2).unwrap();
         assert!(
             status2.starts_with("HTTP/1.1 404 Not Found"),
-            "新規 TCP 接続上の 2 回目のリクエストも正常に 404 応答されること"
+            "同一 TCP 接続上の 2 回目のリクエストも正常に 404 応答されること"
         );
         let mut saw_close2 = false;
         loop {
             let mut line = String::new();
-            reader2.read_line(&mut line).unwrap();
+            reader1.read_line(&mut line).unwrap();
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 break;
@@ -7974,7 +7957,10 @@ mod viewer_tests {
                 saw_close2 = true;
             }
         }
-        assert!(saw_close2, "404 応答でも Connection: close が返却されること");
+        assert!(saw_close2, "Connection: close 指定時は 404 応答でも Connection: close が返却されること");
+        let mut trailing = [0u8; 1];
+        let eof_read = reader1.read(&mut trailing).unwrap_or(0);
+        assert_eq!(eof_read, 0, "Connection: close 応答後にサーバー側で接続が閉じられること");
     }
 
     #[test]

@@ -219,391 +219,400 @@ pub fn start_local_video_server(
                 http_pool.spawn(move || {
                     const MAX_HEADER_LINE_BYTES: u64 = 8192;
                     const MAX_HEADER_LINES: usize = 64;
+                    const MAX_KEEP_ALIVE_REQUESTS: usize = 100;
 
                     let mut reader = BufReader::new(stream);
+                    let mut request_count: usize = 0;
 
-                    let mut request_line = String::new();
-                    if read_line_bounded(&mut reader, &mut request_line, MAX_HEADER_LINE_BYTES).is_err()
-                        || request_line.is_empty()
-                    {
-                        return;
-                    }
-
-                    let parts: Vec<&str> = request_line.split_whitespace().collect();
-                    if parts.len() < 2 {
-                        return;
-                    }
-                    let method = parts[0];
-                    let uri = parts[1];
-
-                    if method == "OPTIONS" {
-                        for _ in 0..MAX_HEADER_LINES {
-                            let mut header_line = String::new();
-                            if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
-                                break;
-                            }
-                            if header_line.trim().is_empty() {
-                                break;
-                            }
+                    loop {
+                        if request_count > 0 {
+                            // 2リクエスト目以降の待機ではアイドルタイムアウトを3秒に短縮し、スレッドプール長期占有を防ぐ
+                            let _ = reader.get_mut().set_read_timeout(Some(std::time::Duration::from_secs(3)));
                         }
-                        let mut headers = String::new();
-                        headers.push_str("HTTP/1.1 200 OK\r\n");
-                        headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                        headers.push_str("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
-                        headers.push_str("Access-Control-Allow-Headers: Range, Content-Type, Content-Length, Access-Control-Request-Private-Network\r\n");
-                        headers.push_str("Access-Control-Allow-Private-Network: true\r\n");
-                        headers.push_str("Access-Control-Max-Age: 86400\r\n");
-                        headers.push_str("Content-Length: 0\r\n");
-                        headers.push_str("Connection: close\r\n\r\n");
-                        let _ = reader.get_mut().write_all(headers.as_bytes());
-                        let _ = reader.get_mut().flush();
-                        return;
-                    }
+                        request_count += 1;
 
-                    // トークン認証: 外部Webサイトや他プロセスからの不正リクエストを即座に遮断する
-                    if !token.is_empty() {
-                        let mut req_token = "";
-                        if let Some(query) = uri.split('?').nth(1) {
-                            for pair in query.split('&') {
-                                if pair.starts_with("token=") {
-                                    req_token = &pair[6..];
-                                }
-                            }
-                        }
-                        if !constant_time_eq(req_token.as_bytes(), token.as_bytes()) {
-                            let resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nForbidden";
-                            let _ = reader.get_mut().write_all(resp.as_bytes());
+                        let mut request_line = String::new();
+                        if read_line_bounded(&mut reader, &mut request_line, MAX_HEADER_LINE_BYTES).is_err()
+                            || request_line.is_empty()
+                        {
                             return;
                         }
-                    }
 
-                    // POST /save-thumbnail?path=...[&mtime=...]
-                    // 生のバイナリBlobを直接受け取り、Base64デコードのオーバーヘッドなしでSQLiteへ非同期投入する
-                    if method == "POST" && uri.starts_with("/save-thumbnail") {
+                        let parts: Vec<&str> = request_line.split_whitespace().collect();
+                        if parts.len() < 2 {
+                            return;
+                        }
+                        let method = parts[0];
+                        let uri = parts[1];
+
+                        if method == "OPTIONS" {
+                            for _ in 0..MAX_HEADER_LINES {
+                                let mut header_line = String::new();
+                                if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
+                                    break;
+                                }
+                                if header_line.trim().is_empty() {
+                                    break;
+                                }
+                            }
+                            let mut headers = String::new();
+                            headers.push_str("HTTP/1.1 200 OK\r\n");
+                            headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                            headers.push_str("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
+                            headers.push_str("Access-Control-Allow-Headers: Range, Content-Type, Content-Length, Access-Control-Request-Private-Network\r\n");
+                            headers.push_str("Access-Control-Allow-Private-Network: true\r\n");
+                            headers.push_str("Access-Control-Max-Age: 86400\r\n");
+                            headers.push_str("Content-Length: 0\r\n");
+                            headers.push_str("Connection: close\r\n\r\n");
+                            let _ = reader.get_mut().write_all(headers.as_bytes());
+                            let _ = reader.get_mut().flush();
+                            return;
+                        }
+
+                        // トークン認証: 外部Webサイトや他プロセスからの不正リクエストをリクエストごとに毎回遮断する
+                        if !token.is_empty() {
+                            let mut req_token = "";
+                            if let Some(query) = uri.split('?').nth(1) {
+                                for pair in query.split('&') {
+                                    if pair.starts_with("token=") {
+                                        req_token = &pair[6..];
+                                    }
+                                }
+                            }
+                            if !constant_time_eq(req_token.as_bytes(), token.as_bytes()) {
+                                let resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nForbidden";
+                                let _ = reader.get_mut().write_all(resp.as_bytes());
+                                return;
+                            }
+                        }
+
+                        // POST /save-thumbnail?path=...[&mtime=...]
+                        // 生のバイナリBlobを直接受け取り、Base64デコードのオーバーヘッドなしでSQLiteへ非同期投入する（1リクエストで終了）
+                        if method == "POST" && uri.starts_with("/save-thumbnail") {
+                            let mut path_str = String::new();
+                            let mut mtime: u64 = 0;
+                            if let Some(query) = uri.split('?').nth(1) {
+                                for pair in query.split('&') {
+                                    if pair.starts_with("path=") {
+                                        path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                                    } else if pair.starts_with("mtime=") {
+                                        mtime = pair[6..].parse().unwrap_or(0);
+                                    }
+                                }
+                            }
+
+                            if path_str.is_empty() {
+                                let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                                return;
+                            }
+
+                            let mut content_length: usize = 0;
+                            for _ in 0..MAX_HEADER_LINES {
+                                let mut header_line = String::new();
+                                if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
+                                    break;
+                                }
+                                let trimmed = header_line.trim();
+                                if trimmed.is_empty() {
+                                    break;
+                                }
+                                let lower = trimmed.to_lowercase();
+                                if lower.starts_with("content-length:") {
+                                    content_length = lower["content-length:".len()..].trim().parse().unwrap_or(0);
+                                }
+                            }
+
+                            // サムネイルバイナリは最大10MBを上限として安全確認
+                            if content_length == 0 || content_length > 10 * 1024 * 1024 {
+                                let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                                return;
+                            }
+
+                            let mut body = vec![0u8; content_length];
+                            if reader.read_exact(&mut body).is_err() {
+                                let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                                return;
+                            }
+
+                            if mtime == 0 {
+                                use tauri::Manager;
+                                if let Ok(handle_guard) = app_handle_slot.lock() {
+                                    if let Some(app_handle) = handle_guard.as_ref() {
+                                        let state = app_handle.state::<AppState>();
+                                        mtime = resolve_save_thumbnail_mtime_with_state(Some(&state), &path_str, mtime);
+                                    } else {
+                                        mtime = resolve_save_thumbnail_mtime_with_state(None, &path_str, mtime);
+                                    }
+                                } else {
+                                    mtime = resolve_save_thumbnail_mtime_with_state(None, &path_str, mtime);
+                                }
+                            }
+
+                            let clean_path = crate::utils::normalize_unc_path(&path_str).into_owned();
+                            let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
+                            let hash_key_for_url = hash_key.clone();
+
+                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                            if db_tx
+                                .try_send(DbMsg::SaveThumbnail {
+                                    hash_key,
+                                    path: clean_path.clone(),
+                                    mtime,
+                                    bytes: body,
+                                    now,
+                                })
+                                .is_err()
+                            {
+                                // チャネル満杯・切断時はブロックせず 503 を返し、フロントエンド側の IPC フォールバック保存へ委譲する
+                                let resp = "HTTP/1.1 503 Service Unavailable\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                                let _ = reader.get_mut().write_all(resp.as_bytes());
+                                let _ = reader.get_mut().flush();
+                                return;
+                            }
+
+                            // AppState のメモリ上キャッシュフラグを即時反映（キューへの投入が成功した場合のみ）
+                            {
+                                use tauri::Manager;
+                                if let Ok(handle_guard) = app_handle_slot.lock() {
+                                    if let Some(app_handle) = handle_guard.as_ref() {
+                                        let state = app_handle.state::<AppState>();
+                                        state.mark_thumbnail_cached(&path_str);
+                                    }
+                                }
+                            }
+
+                            let token_param = if token.is_empty() { String::new() } else { format!("&token={}", *token) };
+                            let saved_url = format!(
+                                "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}",
+                                port,
+                                urlencoding::encode(&path_str),
+                                mtime,
+                                hash_key_for_url,
+                                token_param
+                            );
+                            let mut resp = String::new();
+                            resp.push_str("HTTP/1.1 200 OK\r\n");
+                            resp.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+                            resp.push_str("Access-Control-Allow-Origin: *\r\n");
+                            resp.push_str(&format!("Content-Length: {}\r\n", saved_url.len()));
+                            resp.push_str("Connection: close\r\n\r\n");
+                            resp.push_str(&saved_url);
+                            let _ = reader.get_mut().write_all(resp.as_bytes());
+                            let _ = reader.get_mut().flush();
+                            return;
+                        }
+
                         let mut path_str = String::new();
+                        let mut is_thumb = false;
+                        let mut is_cover = false;
                         let mut mtime: u64 = 0;
+                        let mut hash_param = String::new();
                         if let Some(query) = uri.split('?').nth(1) {
                             for pair in query.split('&') {
                                 if pair.starts_with("path=") {
                                     path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
+                                } else if pair.starts_with("thumb=1") {
+                                    is_thumb = true;
+                                } else if pair.starts_with("cover=1") {
+                                    is_cover = true;
                                 } else if pair.starts_with("mtime=") {
                                     mtime = pair[6..].parse().unwrap_or(0);
+                                } else if pair.starts_with("hash=") {
+                                    hash_param = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
                                 }
                             }
                         }
 
-                        if path_str.is_empty() {
+                        if path_str.is_empty() && hash_param.is_empty() {
                             let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                             return;
                         }
 
-                        let mut content_length: usize = 0;
+                        let mut range_header = None;
+                        let mut client_wants_close = false;
                         for _ in 0..MAX_HEADER_LINES {
                             let mut header_line = String::new();
                             if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
-                                break;
+                                return;
                             }
                             let trimmed = header_line.trim();
                             if trimmed.is_empty() {
                                 break;
                             }
-                            let lower = trimmed.to_lowercase();
-                            if lower.starts_with("content-length:") {
-                                content_length = lower["content-length:".len()..].trim().parse().unwrap_or(0);
+                            let lower = trimmed.to_ascii_lowercase();
+                            if lower.starts_with("connection:")
+                                && lower["connection:".len()..].split(',').any(|v| v.trim() == "close")
+                            {
+                                client_wants_close = true;
+                            } else if !is_cover && !is_thumb && lower.starts_with("range:") {
+                                range_header = Some(trimmed[6..].trim().to_string());
                             }
                         }
 
-                        // サムネイルバイナリは最大10MBを上限として安全確認
-                        if content_length == 0 || content_length > 10 * 1024 * 1024 {
-                            let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                            return;
-                        }
+                        let close_connection = client_wants_close || request_count >= MAX_KEEP_ALIVE_REQUESTS;
 
-                        let mut body = vec![0u8; content_length];
-                        if reader.read_exact(&mut body).is_err() {
-                            let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                            return;
-                        }
+                        if is_cover {
+                            if !crate::audio::is_audio_path(&path_str) {
+                                let _ = reader.get_mut().write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                                return;
+                            }
 
-                        if mtime == 0 {
-                            use tauri::Manager;
-                            if let Ok(handle_guard) = app_handle_slot.lock() {
-                                if let Some(app_handle) = handle_guard.as_ref() {
-                                    let state = app_handle.state::<AppState>();
-                                    mtime = resolve_save_thumbnail_mtime_with_state(Some(&state), &path_str, mtime);
+                            let write_ok = if let Some(cover_bytes) = crate::audio::extract_audio_cover_cached(&path_str) {
+                                let mimetype = if cover_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                                    "image/png"
                                 } else {
-                                    mtime = resolve_save_thumbnail_mtime_with_state(None, &path_str, mtime);
-                                }
+                                    "image/jpeg"
+                                };
+                                let cache_control = select_media_cache_control(!hash_param.is_empty());
+                                let response = build_media_get_response(mimetype, cache_control, close_connection, &cover_bytes);
+                                reader.get_mut().write_all(&response).is_ok() && reader.get_mut().flush().is_ok()
                             } else {
-                                mtime = resolve_save_thumbnail_mtime_with_state(None, &path_str, mtime);
+                                let not_found = if close_connection {
+                                    "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+                                } else {
+                                    "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\n\r\n"
+                                };
+                                reader.get_mut().write_all(not_found.as_bytes()).is_ok() && reader.get_mut().flush().is_ok()
+                            };
+
+                            if !write_ok || close_connection {
+                                return;
                             }
+                            continue;
                         }
 
-                        let clean_path = crate::utils::normalize_unc_path(&path_str).into_owned();
-                        let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
-                        let hash_key_for_url = hash_key.clone();
+                        if is_thumb {
+                            let mut cache_bytes = Vec::new();
+                            if let Ok(conn) = db_conn.get() {
+                                // 1. hash_param が指定されていれば PRIMARY KEY (hash_key) で O(1) 直撃取得（最速パス）
+                                if !hash_param.is_empty() {
+                                    if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
+                                        if let Ok(thumb) = stmt.query_row([&hash_param], |row| row.get::<_, Vec<u8>>(0)) {
+                                            cache_bytes = thumb;
+                                        }
+                                    }
+                                }
 
-                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-                        if db_tx
-                            .try_send(DbMsg::SaveThumbnail {
-                                hash_key,
-                                path: clean_path.clone(),
-                                mtime,
-                                bytes: body,
-                                now,
-                            })
-                            .is_err()
-                        {
-                            // チャネル満杯・切断時はブロックせず 503 を返し、フロントエンド側の IPC フォールバック保存へ委譲する
-                            let resp = "HTTP/1.1 503 Service Unavailable\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-                            let _ = reader.get_mut().write_all(resp.as_bytes());
-                            let _ = reader.get_mut().flush();
-                            return;
-                        }
+                                // 2. hash_param 未指定またはミス時は、正規化された UNC パス等から算出した複数ハッシュキー候補で検索
+                                if cache_bytes.is_empty() && !path_str.is_empty() {
+                                    let norm_unc = normalize_unc_path(&path_str).into_owned();
+                                    let stripped = if path_str.starts_with(r"\\?\") { &path_str[4..] } else { path_str.as_str() };
+                                    let hash_norm = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
+                                    let hash_strip = crate::utils::hash_path_mtime_hex(stripped, mtime);
+                                    let hash_raw = crate::utils::hash_path_mtime_hex(&path_str, mtime);
 
-                        // AppState のメモリ上キャッシュフラグを即時反映（キューへの投入が成功した場合のみ）
-                        {
-                            use tauri::Manager;
-                            if let Ok(handle_guard) = app_handle_slot.lock() {
-                                if let Some(app_handle) = handle_guard.as_ref() {
-                                    let state = app_handle.state::<AppState>();
-                                    state.mark_thumbnail_cached(&path_str);
+                                    if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
+                                        if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {
+                                            cache_bytes = thumb;
+                                        }
+                                    }
                                 }
                             }
+
+                            // 未キャッシュの場合、同期生成でHTTPスレッドをブロックせず即座に404を返す。
+                            // フロントエンド側の img.onerror から通常の OffscreenCanvas Web Worker へ安全にフォールバックされる
+                            let write_ok = if !cache_bytes.is_empty() {
+                                let mimetype = if cache_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                                    "image/png"
+                                } else if cache_bytes.starts_with(b"RIFF") && cache_bytes.len() >= 12 && &cache_bytes[8..12] == b"WEBP" {
+                                    "image/webp"
+                                } else if cache_bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || cache_bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
+                                    "image/svg+xml"
+                                } else {
+                                    "image/jpeg"
+                                };
+
+                                let cache_control = select_media_cache_control(!hash_param.is_empty());
+                                let response = build_media_get_response(mimetype, cache_control, close_connection, &cache_bytes);
+                                reader.get_mut().write_all(&response).is_ok() && reader.get_mut().flush().is_ok()
+                            } else {
+                                let not_found = if close_connection {
+                                    "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+                                } else {
+                                    "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\n\r\n"
+                                };
+                                reader.get_mut().write_all(not_found.as_bytes()).is_ok() && reader.get_mut().flush().is_ok()
+                            };
+
+                            if !write_ok || close_connection {
+                                return;
+                            }
+                            continue;
                         }
 
-                        let token_param = if token.is_empty() { String::new() } else { format!("&token={}", *token) };
-                        let saved_url = format!(
-                            "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}",
-                            port,
-                            urlencoding::encode(&path_str),
-                            mtime,
-                            hash_key_for_url,
-                            token_param
-                        );
-                        let mut resp = String::new();
-                        resp.push_str("HTTP/1.1 200 OK\r\n");
-                        resp.push_str("Content-Type: text/plain; charset=utf-8\r\n");
-                        resp.push_str("Access-Control-Allow-Origin: *\r\n");
-                        resp.push_str(&format!("Content-Length: {}\r\n", saved_url.len()));
-                        resp.push_str("Connection: close\r\n\r\n");
-                        resp.push_str(&saved_url);
-                        let _ = reader.get_mut().write_all(resp.as_bytes());
-                        let _ = reader.get_mut().flush();
-                        return;
-                    }
-
-                    let mut path_str = String::new();
-                    let mut is_thumb = false;
-                    let mut is_cover = false;
-                    let mut mtime: u64 = 0;
-                    let mut hash_param = String::new();
-                    if let Some(query) = uri.split('?').nth(1) {
-                        for pair in query.split('&') {
-                            if pair.starts_with("path=") {
-                                path_str = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
-                            } else if pair.starts_with("thumb=1") {
-                                is_thumb = true;
-                            } else if pair.starts_with("cover=1") {
-                                is_cover = true;
-                            } else if pair.starts_with("mtime=") {
-                                mtime = pair[6..].parse().unwrap_or(0);
-                            } else if pair.starts_with("hash=") {
-                                hash_param = urlencoding::decode(&pair[5..]).unwrap_or(std::borrow::Cow::Borrowed("")).into_owned();
-                            }
-                        }
-                    }
-
-                    if path_str.is_empty() && hash_param.is_empty() {
-                        let _ = reader.get_mut().write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                        return;
-                    }
-
-                    if is_cover {
-                        for _ in 0..MAX_HEADER_LINES {
-                            let mut header_line = String::new();
-                            if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
-                                break;
-                            }
-                            if header_line.trim().is_empty() {
-                                break;
-                            }
-                        }
-
-                        if !crate::audio::is_audio_path(&path_str) {
+                        let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        // 動画・アニメーション・音声配信対象の拡張子ホワイトリスト検証
+                        let is_audio = crate::audio::is_audio_extension(&ext);
+                        if !is_audio && !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
                             let _ = reader.get_mut().write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                             return;
                         }
 
-                        if let Some(cover_bytes) = crate::audio::extract_audio_cover_cached(&path_str) {
-                            let mimetype = if cover_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
-                                "image/png"
-                            } else {
-                                "image/jpeg"
-                            };
-                            let cache_control = select_media_cache_control(!hash_param.is_empty());
-                            let response = build_media_get_response(mimetype, cache_control, true, &cover_bytes);
-                            let _ = reader.get_mut().write_all(&response);
-                            let _ = reader.get_mut().flush();
-                        } else {
-                            let not_found = "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-                            let _ = reader.get_mut().write_all(not_found.as_bytes());
-                            let _ = reader.get_mut().flush();
-                        }
-                        return;
-                    }
-
-                    if is_thumb {
-                        // リクエストヘッダを空行まで消費してから 1 接続 1 リクエストで応答・切断する
-                        for _ in 0..MAX_HEADER_LINES {
-                            let mut header_line = String::new();
-                            if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
-                                break;
-                            }
-                            if header_line.trim().is_empty() {
-                                break;
-                            }
-                        }
-
-                        let mut cache_bytes = Vec::new();
-                        if let Ok(conn) = db_conn.get() {
-                            // 1. hash_param が指定されていれば PRIMARY KEY (hash_key) で O(1) 直撃取得（最速パス）
-                            if !hash_param.is_empty() {
-                                if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL") {
-                                    if let Ok(thumb) = stmt.query_row([&hash_param], |row| row.get::<_, Vec<u8>>(0)) {
-                                        cache_bytes = thumb;
+                        let mut stream = reader.into_inner();
+                        if let Ok(mut file) = File::open(&path_str) {
+                            if let Ok(metadata) = file.metadata() {
+                                let file_size = metadata.len();
+                                let max_chunk: u64 = 2 * 1024 * 1024;
+                                let content_type = if is_audio {
+                                    crate::audio::audio_content_type(&ext)
+                                } else {
+                                    match ext.as_str() {
+                                        "webm" => "video/webm",
+                                        "gif" => "image/gif",
+                                        _ => "video/mp4",
                                     }
-                                }
-                            }
+                                };
 
-                            // 2. hash_param 未指定またはミス時は、正規化された UNC パス等から算出した複数ハッシュキー候補で検索
-                            if cache_bytes.is_empty() && !path_str.is_empty() {
-                                let norm_unc = normalize_unc_path(&path_str).into_owned();
-                                let stripped = if path_str.starts_with(r"\\?\") { &path_str[4..] } else { path_str.as_str() };
-                                let hash_norm = crate::utils::hash_path_mtime_hex(&norm_unc, mtime);
-                                let hash_strip = crate::utils::hash_path_mtime_hex(stripped, mtime);
-                                let hash_raw = crate::utils::hash_path_mtime_hex(&path_str, mtime);
-
-                                if let Ok(mut stmt) = conn.prepare_cached("SELECT thumbnail FROM cache WHERE (hash_key = ? OR hash_key = ? OR hash_key = ?) AND thumbnail IS NOT NULL LIMIT 1") {
-                                    if let Ok(thumb) = stmt.query_row([&hash_norm, &hash_strip, &hash_raw], |row| row.get::<_, Vec<u8>>(0)) {
-                                        cache_bytes = thumb;
-                                    }
-                                }
-                            }
-                        }
-
-                        // 未キャッシュの場合、同期生成でHTTPスレッドをブロックせず即座に404を返す。
-                        // フロントエンド側の img.onerror から通常の OffscreenCanvas Web Worker へ安全にフォールバックされる
-                        if !cache_bytes.is_empty() {
-                            let mimetype = if cache_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
-                                "image/png"
-                            } else if cache_bytes.starts_with(b"RIFF") && cache_bytes.len() >= 12 && &cache_bytes[8..12] == b"WEBP" {
-                                "image/webp"
-                            } else if cache_bytes.starts_with(&[0x3C, 0x3F, 0x78, 0x6D, 0x6C]) || cache_bytes.starts_with(&[0x3C, 0x73, 0x76, 0x67]) {
-                                "image/svg+xml"
-                            } else {
-                                "image/jpeg"
-                            };
-
-                            let cache_control = select_media_cache_control(!hash_param.is_empty());
-                            let response = build_media_get_response(mimetype, cache_control, true, &cache_bytes);
-                            let _ = reader.get_mut().write_all(&response);
-                            let _ = reader.get_mut().flush();
-                        } else {
-                            let not_found = "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-                            let _ = reader.get_mut().write_all(not_found.as_bytes());
-                            let _ = reader.get_mut().flush();
-                        }
-                        return;
-                    }
-
-                    let mut range_header = None;
-                    for _ in 0..MAX_HEADER_LINES {
-                        let mut header_line = String::new();
-                        if read_line_bounded(&mut reader, &mut header_line, MAX_HEADER_LINE_BYTES).is_err() {
-                            break;
-                        }
-                        let trimmed = header_line.trim();
-                        if trimmed.is_empty() {
-                            break;
-                        }
-                        let lower = trimmed.to_lowercase();
-                        if lower.starts_with("range:") {
-                            range_header = Some(trimmed[6..].trim().to_string());
-                        }
-                    }
-
-                    let ext = std::path::Path::new(&path_str).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                    // 動画・アニメーション・音声配信対象の拡張子ホワイトリスト検証
-                    let is_audio = crate::audio::is_audio_extension(&ext);
-                    if !is_audio && !matches!(ext.as_str(), "mp4" | "webm" | "gif" | "avi" | "mkv" | "mov") {
-                        let _ = reader.get_mut().write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                        return;
-                    }
-
-                    let mut stream = reader.into_inner();
-                    if let Ok(mut file) = File::open(&path_str) {
-                        if let Ok(metadata) = file.metadata() {
-                            let file_size = metadata.len();
-                            let max_chunk: u64 = 2 * 1024 * 1024;
-                            let content_type = if is_audio {
-                                crate::audio::audio_content_type(&ext)
-                            } else {
-                                match ext.as_str() {
-                                    "webm" => "video/webm",
-                                    "gif" => "image/gif",
-                                    _ => "video/mp4",
-                                }
-                            };
-
-                            match calculate_range(range_header.as_deref(), file_size, max_chunk) {
-                                RangeSpec::EmptyFile => {
-                                    let mut headers = String::new();
-                                    headers.push_str("HTTP/1.1 200 OK\r\n");
-                                    headers.push_str(&format!("Content-Type: {}\r\n", content_type));
-                                    headers.push_str("Content-Length: 0\r\n");
-                                    headers.push_str("Accept-Ranges: bytes\r\n");
-                                    headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                                    headers.push_str("Connection: close\r\n\r\n");
-                                    let _ = stream.write_all(headers.as_bytes());
-                                    return;
-                                }
-                                RangeSpec::NotSatisfiable => {
-                                    let mut headers = String::new();
-                                    headers.push_str("HTTP/1.1 416 Range Not Satisfiable\r\n");
-                                    headers.push_str(&format!("Content-Range: bytes */{}\r\n", file_size));
-                                    headers.push_str("Content-Length: 0\r\n");
-                                    headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                                    headers.push_str("Connection: close\r\n\r\n");
-                                    let _ = stream.write_all(headers.as_bytes());
-                                    return;
-                                }
-                                RangeSpec::Satisfiable { start, end, chunk_size, is_partial } => {
-                                    let mut headers = String::new();
-                                    if is_partial {
-                                        headers.push_str("HTTP/1.1 206 Partial Content\r\n");
-                                        headers.push_str(&format!("Content-Range: bytes {}-{}/{}\r\n", start, end, file_size));
-                                    } else {
+                                match calculate_range(range_header.as_deref(), file_size, max_chunk) {
+                                    RangeSpec::EmptyFile => {
+                                        let mut headers = String::new();
                                         headers.push_str("HTTP/1.1 200 OK\r\n");
+                                        headers.push_str(&format!("Content-Type: {}\r\n", content_type));
+                                        headers.push_str("Content-Length: 0\r\n");
+                                        headers.push_str("Accept-Ranges: bytes\r\n");
+                                        headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                                        headers.push_str("Connection: close\r\n\r\n");
+                                        let _ = stream.write_all(headers.as_bytes());
+                                        return;
                                     }
-                                    headers.push_str(&format!("Content-Type: {}\r\n", content_type));
-                                    headers.push_str("Accept-Ranges: bytes\r\n");
-                                    headers.push_str("Access-Control-Allow-Origin: *\r\n");
-                                    headers.push_str(&format!("Content-Length: {}\r\n", chunk_size));
-                                    headers.push_str("Connection: close\r\n\r\n");
-
-                                    if stream.write_all(headers.as_bytes()).is_ok() {
-                                        if file.seek(SeekFrom::Start(start)).is_ok() {
-                                            let mut handle = file.take(chunk_size);
-                                            let _ = std::io::copy(&mut handle, &mut stream);
+                                    RangeSpec::NotSatisfiable => {
+                                        let mut headers = String::new();
+                                        headers.push_str("HTTP/1.1 416 Range Not Satisfiable\r\n");
+                                        headers.push_str(&format!("Content-Range: bytes */{}\r\n", file_size));
+                                        headers.push_str("Content-Length: 0\r\n");
+                                        headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                                        headers.push_str("Connection: close\r\n\r\n");
+                                        let _ = stream.write_all(headers.as_bytes());
+                                        return;
+                                    }
+                                    RangeSpec::Satisfiable { start, end, chunk_size, is_partial } => {
+                                        let mut headers = String::new();
+                                        if is_partial {
+                                            headers.push_str("HTTP/1.1 206 Partial Content\r\n");
+                                            headers.push_str(&format!("Content-Range: bytes {}-{}/{}\r\n", start, end, file_size));
+                                        } else {
+                                            headers.push_str("HTTP/1.1 200 OK\r\n");
                                         }
+                                        headers.push_str(&format!("Content-Type: {}\r\n", content_type));
+                                        headers.push_str("Accept-Ranges: bytes\r\n");
+                                        headers.push_str("Access-Control-Allow-Origin: *\r\n");
+                                        headers.push_str(&format!("Content-Length: {}\r\n", chunk_size));
+                                        headers.push_str("Connection: close\r\n\r\n");
+
+                                        if stream.write_all(headers.as_bytes()).is_ok() {
+                                            if file.seek(SeekFrom::Start(start)).is_ok() {
+                                                let mut handle = file.take(chunk_size);
+                                                let _ = std::io::copy(&mut handle, &mut stream);
+                                            }
+                                        }
+                                        return;
                                     }
-                                    return;
                                 }
                             }
                         }
+                        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        return;
                     }
-                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                 });
             }
         }
@@ -871,5 +880,124 @@ mod tests {
             resp_str_no_hash
         );
         assert!(!resp_str_no_hash.contains("immutable"));
+    }
+
+    #[test]
+    fn test_keep_alive_multiple_gets_and_post_closes_connection() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        let (db_tx, _db_rx) = tokio::sync::mpsc::channel::<DbMsg>(16);
+        let state = crate::create_test_app_state("C:\\");
+        let app_handle_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let token = "keepalive_tok";
+
+        let path1 = "C:\\test\\ka_1.png";
+        let path2 = "C:\\test\\ka_2.png";
+        let mtime = 55555u64;
+        let hash1 = crate::utils::hash_path_mtime_hex(path1, mtime);
+        let hash2 = crate::utils::hash_path_mtime_hex(path2, mtime);
+        let body1: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02, 0xFF, 0xD9];
+        let body2: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01];
+        {
+            let conn = state.db_conn.get().unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![&hash1, &body1, path1, mtime],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![&hash2, &body2, path2, mtime],
+            )
+            .unwrap();
+        }
+
+        let port = start_local_video_server(db_tx, app_handle_slot, state.db_conn.clone(), token.to_string());
+
+        // 1. 1つの接続で GET を2回続けて送り、両方とも正しい応答が返ること（2回目には Connection: close を指定して閉じる）
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut reader = BufReader::new(stream);
+
+        let read_get_response = |reader: &mut BufReader<TcpStream>| -> (String, usize, bool, Vec<u8>) {
+            let mut status = String::new();
+            reader.read_line(&mut status).unwrap();
+            let mut content_len = 0usize;
+            let mut has_close = false;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    break;
+                }
+                let lower = trimmed.to_ascii_lowercase();
+                if lower.starts_with("content-length:") {
+                    content_len = lower["content-length:".len()..].trim().parse().unwrap();
+                } else if lower.starts_with("connection:") && lower.contains("close") {
+                    has_close = true;
+                }
+            }
+            let mut resp_body = vec![0u8; content_len];
+            reader.read_exact(&mut resp_body).unwrap();
+            (status, content_len, has_close, resp_body)
+        };
+
+        let req1 = format!(
+            "GET /?path={}&mtime={}&thumb=1&hash={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n",
+            urlencoding::encode(path1),
+            mtime,
+            hash1,
+            token,
+            port
+        );
+        reader.get_mut().write_all(req1.as_bytes()).unwrap();
+        let (st1, len1, close1, got1) = read_get_response(&mut reader);
+        assert!(st1.starts_with("HTTP/1.1 200 OK"));
+        assert!(!close1, "継続応答では Connection: close ヘッダを付けないこと");
+        assert_eq!(len1, body1.len());
+        assert_eq!(got1, body1);
+
+        let req2 = format!(
+            "GET /?path={}&mtime={}&thumb=1&hash={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+            urlencoding::encode(path2),
+            mtime,
+            hash2,
+            token,
+            port
+        );
+        reader.get_mut().write_all(req2.as_bytes()).unwrap();
+        let (st2, len2, close2, got2) = read_get_response(&mut reader);
+        assert!(st2.starts_with("HTTP/1.1 200 OK"));
+        assert!(close2, "Connection: close 指定時は応答にも Connection: close が付くこと");
+        assert_eq!(len2, body2.len());
+        assert_eq!(got2, body2);
+
+        let mut eof_buf = [0u8; 1];
+        assert_eq!(reader.read(&mut eof_buf).unwrap_or(0), 0, "Connection: close 応答後は接続が閉じること");
+
+        // 2. POST /save-thumbnail は従来どおり動作し、1リクエストで接続が閉じること
+        let post_stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        post_stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut post_reader = BufReader::new(post_stream);
+        let post_payload = b"SAVED_BYTES";
+        let post_req = format!(
+            "POST /save-thumbnail?path={}&mtime={}&token={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\n\r\n",
+            urlencoding::encode("C:\\test\\ka_post.png"),
+            mtime,
+            token,
+            port,
+            post_payload.len()
+        );
+        post_reader.get_mut().write_all(post_req.as_bytes()).unwrap();
+        post_reader.get_mut().write_all(post_payload).unwrap();
+
+        let (pst, plen, pclose, pbody) = read_get_response(&mut post_reader);
+        assert!(pst.starts_with("HTTP/1.1 200 OK"));
+        assert!(pclose, "POST /save-thumbnail は Connection: close を返すこと");
+        assert!(plen > 0 && String::from_utf8_lossy(&pbody).contains("thumb=1"));
+        assert_eq!(post_reader.read(&mut eof_buf).unwrap_or(0), 0, "POST /save-thumbnail 後に接続が閉じること");
     }
 }
