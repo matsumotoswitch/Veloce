@@ -55,8 +55,8 @@ pub(crate) fn is_listed_media_extension(ext_lower: &str) -> bool {
 
 
 /// `cache` / `ratings` テーブルとインデックスの起動時 DDL を適用する。
-/// 冗長な旧インデックス（`idx_cache_mtime` / `idx_cache_smart_cover_mtime` / `idx_cache_smart_cover`）は除去し、
-/// カバリングインデックス（`idx_cache_smart_cover_mtime_v3` / `idx_cache_smart_cover_v2`）を維持する。
+/// 冗長な旧インデックス（`idx_cache_mtime` / `idx_cache_smart_cover_mtime` / `idx_cache_smart_cover` / `idx_cache_smart_cover_v2`）を除去し、
+/// カバリングインデックス（`idx_cache_smart_cover_mtime_v3` / `idx_cache_smart_cover_path_v3`）を維持する。
 pub(crate) fn init_cache_schema_ddl(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS cache (
@@ -91,7 +91,8 @@ pub(crate) fn init_cache_schema_ddl(conn: &rusqlite::Connection) -> Result<(), S
     let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_mtime", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover_mtime", []);
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)", []).map_err(|e| e.to_string())?;
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_cache_smart_cover_v2", []);
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_smart_cover_path_v3 ON cache (path, mtime DESC, size, ctime, width, height, hash_key, (thumbnail IS NOT NULL))", []).map_err(|e| e.to_string())?;
 
     // マイグレーション（カラムが存在しない場合は無視される）
     let _ = conn.execute("ALTER TABLE cache ADD COLUMN width INTEGER DEFAULT 0", []);
@@ -9905,11 +9906,12 @@ mod viewer_tests {
 
         assert!(!index_exists(&fresh_conn, "idx_cache_mtime"), "新規DBに idx_cache_mtime が作成されないこと");
         assert!(!index_exists(&fresh_conn, "idx_cache_smart_cover_mtime"), "新規DBに idx_cache_smart_cover_mtime が作成されないこと");
+        assert!(!index_exists(&fresh_conn, "idx_cache_smart_cover_v2"), "新規DBに idx_cache_smart_cover_v2 が作成されないこと");
         assert!(index_exists(&fresh_conn, "idx_cache_smart_cover_mtime_v3"), "idx_cache_smart_cover_mtime_v3 が維持されること");
-        assert!(index_exists(&fresh_conn, "idx_cache_smart_cover_v2"), "idx_cache_smart_cover_v2 が維持されること");
+        assert!(index_exists(&fresh_conn, "idx_cache_smart_cover_path_v3"), "idx_cache_smart_cover_path_v3 が作成されること");
         assert!(index_exists(&fresh_conn, "idx_cache_path_nocase"), "idx_cache_path_nocase が維持されること");
 
-        // 2. 既存DBを模した状態（対象2インデックスが存在する状態）から起動時 DDL を実行した場合
+        // 2. 既存DBを模した状態（旧インデックス mtime / cover_mtime / cover_v2 が存在する状態）から起動時 DDL を実行した場合
         let legacy_conn = rusqlite::Connection::open_in_memory().unwrap();
         legacy_conn.execute(
             "CREATE TABLE cache (
@@ -9929,15 +9931,99 @@ mod viewer_tests {
         ).unwrap();
         legacy_conn.execute("CREATE INDEX idx_cache_mtime ON cache (mtime)", []).unwrap();
         legacy_conn.execute("CREATE INDEX idx_cache_smart_cover_mtime ON cache (mtime DESC, path, size, ctime, width, height, hash_key)", []).unwrap();
+        legacy_conn.execute("CREATE INDEX idx_cache_smart_cover_v2 ON cache (path, mtime DESC, size, ctime, width, height)", []).unwrap();
         assert!(index_exists(&legacy_conn, "idx_cache_mtime"));
         assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_mtime"));
+        assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_v2"));
 
         init_cache_schema_ddl(&legacy_conn).unwrap();
 
         assert!(!index_exists(&legacy_conn, "idx_cache_mtime"), "既存DBの idx_cache_mtime がドロップされること");
         assert!(!index_exists(&legacy_conn, "idx_cache_smart_cover_mtime"), "既存DBの idx_cache_smart_cover_mtime がドロップされること");
+        assert!(!index_exists(&legacy_conn, "idx_cache_smart_cover_v2"), "既存DBの idx_cache_smart_cover_v2 がドロップされること");
         assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_mtime_v3"));
-        assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_v2"));
+        assert!(index_exists(&legacy_conn, "idx_cache_smart_cover_path_v3"));
+
+        // 3. under_folder 条件クエリの EXPLAIN 検証（idx_cache_smart_cover_path_v3 が使われ、idx_cache_path と INTEGER PRIMARY KEY が出ないこと）
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        {
+            let mut conn = pool.get().unwrap();
+            init_cache_schema_ddl(&conn).unwrap();
+            let tx = conn.transaction().unwrap();
+            {
+                let mut stmt = tx
+                    .prepare("INSERT INTO cache (hash_key, path, mtime, size, ctime, width, height) VALUES (?1, ?2, ?3, 1024, ?3, 832, 1216)")
+                    .unwrap();
+                for i in 0..500usize {
+                    stmt.execute(rusqlite::params![
+                        format!("other_{:05}", i),
+                        format!("d:\\archive\\batch_{:02}\\img_{:05}.png", i % 10, i),
+                        i as i64
+                    ])
+                    .unwrap();
+                }
+                for i in 0..5usize {
+                    stmt.execute(rusqlite::params![
+                        format!("pixiv_{}", i),
+                        format!("e:\\pixiv\\sub\\target_{}.png", i),
+                        10_000 + i as i64
+                    ])
+                    .unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        }
+
+        let under_rule = SmartFolderRule {
+            id: "under_path_v3".to_string(),
+            name: "under_path_v3".to_string(),
+            match_type: "all".to_string(),
+            conditions: vec![crate::models::SmartFolderCondition {
+                r#type: "path".to_string(),
+                operator: "under_folder".to_string(),
+                value: r"e:\pixiv".to_string(),
+            }],
+        };
+
+        let (q, params) = crate::smart_folder::build_smart_folder_query_with_sort(
+            &under_rule,
+            false,
+            false,
+            Some("mtime"),
+            false,
+            None,
+        );
+        let details: Vec<String> = {
+            let conn = pool.get().unwrap();
+            let _guard = crate::smart_folder::CaseSensitiveLikeGuard::new(&conn);
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {}", q)).unwrap();
+            stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, String>(3))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert!(
+            details.iter().any(|d| d.contains("idx_cache_smart_cover_path_v3")),
+            "under_folder 計画に idx_cache_smart_cover_path_v3 が現れること: {:?}",
+            details
+        );
+        assert!(
+            !details.iter().any(|d| d.contains("idx_cache_path")),
+            "under_folder 計画に idx_cache_path が現れないこと: {:?}",
+            details
+        );
+        assert!(
+            !details.iter().any(|d| d.contains("USING INTEGER PRIMARY KEY")),
+            "under_folder 計画に USING INTEGER PRIMARY KEY が現れないこと: {:?}",
+            details
+        );
+
+        let items = crate::smart_folder::query_smart_folder_image_files(&under_rule, &pool, Some("mtime"), false, None);
+        assert_eq!(items.len(), 5);
+        assert_eq!(items[0].hash_key.as_str(), "pixiv_4");
     }
 
     #[test]
