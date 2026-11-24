@@ -260,28 +260,48 @@ pub(crate) fn compute_thumbnail_batch(
     results
 }
 
+pub(crate) fn generate_thumbnail_batch_inner(
+    state: &AppState,
+    file_paths: Vec<String>,
+    start_epoch: u64,
+) -> Vec<ThumbnailResult> {
+    if file_paths.is_empty() {
+        return Vec::new();
+    }
+    let files_to_process = resolve_and_sync_file_mtimes_batch(state, &file_paths, false);
+    if files_to_process.is_empty() {
+        return Vec::new();
+    }
+    let is_cancelled = move || current_thumbnail_batch_epoch() != start_epoch;
+    compute_thumbnail_batch(
+        files_to_process,
+        &state.db_conn,
+        state.video_server_port,
+        &state.video_server_token,
+        &is_cancelled,
+    )
+}
+
 #[tauri::command]
 pub(crate) async fn generate_thumbnail_batch(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     file_paths: Vec<String>,
 ) -> Result<Vec<ThumbnailResult>, String> {
-    let db_conn = state.db_conn.clone();
-
-    // 実ファイルの最新 mtime を優先取得して path_to_mtime も同期（stat 失敗時のみメモリ値をフォールバック利用）
-    let files_to_process = resolve_and_sync_file_mtimes_batch(&state, &file_paths, false);
-
-    if files_to_process.is_empty() {
+    if file_paths.is_empty() {
         return Ok(Vec::new());
     }
 
-    let video_port = state.video_server_port;
-    let video_token = state.video_server_token.clone();
     // 呼び出し時点の世代を記録し、フォルダ切り替え後は未着手アイテムの生成を打ち切る
     let start_epoch = current_thumbnail_batch_epoch();
+    let app_handle = app.clone();
     let results = tokio::task::spawn_blocking(move || {
-        let is_cancelled = move || current_thumbnail_batch_epoch() != start_epoch;
-        compute_thumbnail_batch(files_to_process, &db_conn, video_port, &video_token, &is_cancelled)
-    }).await.map_err(|e| e.to_string())?;
+        use tauri::Manager;
+        let state = app_handle.state::<AppState>();
+        generate_thumbnail_batch_inner(&state, file_paths, start_epoch)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     for item in &results {
         if !item.url.is_empty() {
@@ -292,47 +312,79 @@ pub(crate) async fn generate_thumbnail_batch(
     Ok(results)
 }
 
-/// キャッシュ済みサムネイルのみをDBから取得する（生成は行わない）。
-/// `hasThumbnailCache == true` のファイルを即時表示するためのファストパス。
-#[tauri::command]
-pub(crate) async fn get_cached_thumbnail_batch(
-    state: tauri::State<'_, AppState>,
+pub(crate) fn get_cached_thumbnail_batch_inner(
+    state: &AppState,
     file_paths: Vec<String>,
-) -> Result<Vec<ThumbnailResult>, String> {
-    let db_conn = state.db_conn.clone();
-
-    // 実ファイルの最新 mtime を優先取得して path_to_mtime も同期（stat 失敗時のみメモリ値をフォールバック利用）
-    let files_with_mtime = resolve_and_sync_file_mtimes_batch(&state, &file_paths, true);
-
+) -> Vec<ThumbnailResult> {
+    use rayon::prelude::*;
+    if file_paths.is_empty() {
+        return Vec::new();
+    }
+    let files_with_mtime = resolve_and_sync_file_mtimes_batch(state, &file_paths, true);
     if files_with_mtime.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
+    let db_conn = &state.db_conn;
     let video_port = state.video_server_port;
-    let video_token = state.video_server_token.clone();
-    let results = tokio::task::spawn_blocking(move || {
-        use rayon::prelude::*;
-        files_with_mtime.into_par_iter().filter_map(|(file_path, mtime)| {
+    let video_token = &state.video_server_token;
+    files_with_mtime
+        .into_par_iter()
+        .filter_map(|(file_path, mtime)| {
             let clean_path = file_path.replace(r"\\?\", "");
             let hash_key = crate::utils::hash_path_mtime_hex(&clean_path, mtime);
 
             // DB のみを参照（生成しない・BLOB全体の読み出しを避け、存在確認のみで高速化）
             if let Ok(conn) = db_conn.get() {
                 if let Ok(mut stmt) = conn.prepare_cached(
-                    "SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND length(thumbnail) > 0"
+                    "SELECT 1 FROM cache WHERE hash_key = ? AND thumbnail IS NOT NULL AND length(thumbnail) > 0",
                 ) {
                     if stmt.exists([&hash_key]).unwrap_or(false) {
-                        let token_param = if video_token.is_empty() { String::new() } else { format!("&token={}", video_token) };
-                        let url = format!("http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}", video_port, urlencoding::encode(&file_path), mtime, hash_key, token_param);
-                        return Some(ThumbnailResult { path: file_path, url, cancelled: false });
+                        let token_param = if video_token.is_empty() {
+                            String::new()
+                        } else {
+                            format!("&token={}", video_token)
+                        };
+                        let url = format!(
+                            "http://127.0.0.1:{}/?path={}&mtime={}&thumb=1&hash={}{}",
+                            video_port,
+                            urlencoding::encode(&file_path),
+                            mtime,
+                            hash_key,
+                            token_param
+                        );
+                        return Some(ThumbnailResult {
+                            path: file_path,
+                            url,
+                            cancelled: false,
+                        });
                     }
                 }
             }
             None // キャッシュなし → JS側で通常キューに回す
-        }).collect::<Vec<_>>()
-    }).await.map_err(|e| e.to_string())?;
+        })
+        .collect::<Vec<_>>()
+}
 
-    Ok(results)
+/// キャッシュ済みサムネイルのみをDBから取得する（生成は行わない）。
+/// `hasThumbnailCache == true` のファイルを即時表示するためのファストパス。
+#[tauri::command]
+pub(crate) async fn get_cached_thumbnail_batch(
+    app: tauri::AppHandle,
+    file_paths: Vec<String>,
+) -> Result<Vec<ThumbnailResult>, String> {
+    if file_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let app_handle = app.clone();
+    tokio::task::spawn_blocking(move || {
+        use tauri::Manager;
+        let state = app_handle.state::<AppState>();
+        get_cached_thumbnail_batch_inner(&state, file_paths)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// 縮小画像（RGB8バッファ）に対して高速なアンシャープマスクを適用し、
@@ -2500,6 +2552,64 @@ mod tests {
         let missing_path = temp_dir.path().join("nonexistent.png");
         let missing_res = generate_pending_thumbnail_no_clone(missing_path.to_str().unwrap(), 999, None);
         assert!(missing_res.is_none(), "生成失敗時はPendingThumbnailWriteが作られないこと");
+    }
+
+    #[test]
+    fn test_batch_inner_reflects_updated_file_mtime_and_fallback() {
+        use image::{Rgb, RgbImage};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let img_path = temp_dir.path().join("mtime_update_target.png");
+        let img_str = img_path.to_str().unwrap().to_string();
+
+        let mut img1 = RgbImage::new(32, 32);
+        for pixel in img1.pixels_mut() {
+            *pixel = Rgb([10, 20, 30]);
+        }
+        img1.save_with_format(&img_path, image::ImageFormat::Png).unwrap();
+
+        let mtime1 = std::fs::metadata(&img_path)
+            .and_then(|m| m.modified())
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let state = crate::create_test_app_state(temp_dir.path().to_str().unwrap());
+        let epoch = current_thumbnail_batch_epoch();
+
+        // 1. 初回バッチ生成（mtime1 で生成・キャッシュ保存される）
+        let res1 = generate_thumbnail_batch_inner(&state, vec![img_str.clone()], epoch);
+        assert_eq!(res1.len(), 1);
+        assert!(res1[0].url.contains(&format!("mtime={}", mtime1)));
+
+        let cached1 = get_cached_thumbnail_batch_inner(&state, vec![img_str.clone()]);
+        assert_eq!(cached1.len(), 1);
+        assert!(cached1[0].url.contains(&format!("mtime={}", mtime1)));
+
+        // 2. 対象ファイルの mtime を更新して上書き保存
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        let mut img2 = RgbImage::new(32, 32);
+        for pixel in img2.pixels_mut() {
+            *pixel = Rgb([200, 150, 50]);
+        }
+        img2.save_with_format(&img_path, image::ImageFormat::Png).unwrap();
+        let mtime2 = std::fs::metadata(&img_path)
+            .and_then(|m| m.modified())
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert_ne!(mtime1, mtime2, "ファイルのmtimeが更新されていること");
+
+        // 旧 mtime1 が state.path_to_mtime に残っていても、新しい mtime2 で処理されること
+        let cached_miss = get_cached_thumbnail_batch_inner(&state, vec![img_str.clone()]);
+        assert!(cached_miss.is_empty(), "新しいmtime2では未キャッシュとなること");
+
+        let res2 = generate_thumbnail_batch_inner(&state, vec![img_str.clone()], epoch);
+        assert_eq!(res2.len(), 1);
+        assert!(res2[0].url.contains(&format!("mtime={}", mtime2)), "新しいmtime2でURLが構築されること");
+        assert_eq!(state.get_mtime(&img_str), Some(mtime2));
     }
 
 }
