@@ -4015,12 +4015,244 @@ fn validate_veloce_protocol_request(uri: &str, expected_token: &str) -> Result<(
     Ok((path_str, query_mtime, hash_param))
 }
 
+/// 単一インスタンス排他用の Win32 名前付き Mutex 名（同一ユーザーセッション内で一意）
+const SINGLE_INSTANCE_MUTEX_NAME: &str = "Local\\com.matsumotoswitch.veloce.single_instance";
+/// 既存インスタンスのメインウィンドウを前面復帰させるための Win32 名前付き Event 名
+const SINGLE_INSTANCE_EVENT_NAME: &str = "Local\\com.matsumotoswitch.veloce.activate";
+
+/// アプリケーションの複数起動を防止し、後発プロセスの起動通知を受けて既存ウィンドウを前面化するガード。
+///
+/// Windows 環境では名前付き Mutex (`CreateMutexW`) により OS カーネルレベルで単一インスタンスを保証する。
+/// プロセスが強制終了された場合でもカーネルが Mutex ハンドルを自動解放するため、ロック残留による起動不能は発生しない。
+/// また、後発プロセスは名前付き自動リセット Event (`OpenEventW` + `SetEvent`) で既存プロセスへ前面化を通知して即終了する。
+struct SingleInstanceGuard {
+    #[cfg(windows)]
+    mutex_handle: isize,
+    #[cfg(windows)]
+    activate_event: Option<isize>,
+    #[cfg(windows)]
+    stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(windows)]
+    listener_thread: parking_lot::Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+impl SingleInstanceGuard {
+    /// 単一インスタンスロックを取得する。
+    ///
+    /// - 初回起動時: `Ok(Some(guard))` を返す。`guard` をプロセス生存期間中保持すること。
+    /// - 既に起動中の場合: 既存プロセスへ前面化イベントを通知し、`Ok(None)` を返す。
+    /// - OS API 呼び出し自体が失敗した場合: `Err(msg)` を返す。
+    #[cfg(windows)]
+    fn acquire(mutex_name: &str, event_name: &str) -> Result<Option<Self>, String> {
+        use windows::core::{HSTRING, PCWSTR};
+        use windows::Win32::Foundation::{CloseHandle, GetLastError, BOOL, ERROR_ALREADY_EXISTS};
+        use windows::Win32::System::Threading::{CreateEventW, CreateMutexW};
+
+        let mutex_hname = HSTRING::from(mutex_name);
+        let handle = unsafe {
+            CreateMutexW(None, BOOL(0), PCWSTR::from_raw(mutex_hname.as_ptr()))
+        }
+        .map_err(|e| format!("CreateMutexW failed: {}", e))?;
+
+        let already_exists = match unsafe { GetLastError() } {
+            Ok(()) => false,
+            Err(e) => e.code() == ERROR_ALREADY_EXISTS.to_hresult(),
+        };
+
+        if already_exists {
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            Self::notify_existing_instance(event_name);
+            return Ok(None);
+        }
+
+        let event_hname = HSTRING::from(event_name);
+        let activate_event = unsafe {
+            CreateEventW(None, BOOL(0), BOOL(0), PCWSTR::from_raw(event_hname.as_ptr()))
+        }
+        .ok()
+        .map(|h| h.0);
+
+        Ok(Some(Self {
+            mutex_handle: handle.0,
+            activate_event,
+            stop_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            listener_thread: parking_lot::Mutex::new(None),
+        }))
+    }
+
+    /// 非 Windows 環境向けのフォールバック（コンパイル互換維持用）
+    #[cfg(not(windows))]
+    fn acquire(_mutex_name: &str, _event_name: &str) -> Result<Option<Self>, String> {
+        Ok(Some(Self {}))
+    }
+
+    /// 後発プロセスから既存プロセスへ前面化を通知する。
+    /// Windows の Foreground Lock Timeout 対策としてフォアグラウンド権委譲を行った上で名前付き Event をシグナルする。
+    #[cfg(windows)]
+    fn notify_existing_instance(event_name: &str) {
+        use windows::core::{HSTRING, PCWSTR};
+        use windows::Win32::Foundation::{CloseHandle, BOOL};
+        use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+        use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+
+        let event_hname = HSTRING::from(event_name);
+        unsafe {
+            let _ = AllowSetForegroundWindow(ASFW_ANY);
+            if let Ok(ev) = OpenEventW(
+                EVENT_MODIFY_STATE,
+                BOOL(0),
+                PCWSTR::from_raw(event_hname.as_ptr()),
+            ) {
+                let _ = SetEvent(ev);
+                let _ = CloseHandle(ev);
+            }
+        }
+    }
+
+    /// 後発プロセスからの前面化イベントをカーネル待機 (`WaitForSingleObject`) で待ち受けるリスナーを起動する。
+    /// ポーリングを一切行わないイベント駆動待機のため、待機中の CPU 負荷は発生しない。
+    #[cfg(windows)]
+    fn start_activation_listener<F>(&self, mut on_activate: F)
+    where
+        F: FnMut() + Send + 'static,
+    {
+        let Some(ev_raw) = self.activate_event else {
+            return;
+        };
+        let mut slot = self.listener_thread.lock();
+        if slot.is_some() {
+            return;
+        }
+        let stop_flag = self.stop_flag.clone();
+        let handle = std::thread::spawn(move || {
+            use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+            use windows::Win32::System::Threading::{WaitForSingleObject, INFINITE};
+
+            loop {
+                let wait_res = unsafe { WaitForSingleObject(HANDLE(ev_raw), INFINITE) };
+                if stop_flag.load(std::sync::atomic::Ordering::Acquire) {
+                    break;
+                }
+                if wait_res == WAIT_OBJECT_0 {
+                    on_activate();
+                } else {
+                    break;
+                }
+            }
+        });
+        *slot = Some(handle);
+    }
+
+    #[cfg(not(windows))]
+    fn start_activation_listener<F>(&self, _on_activate: F)
+    where
+        F: FnMut() + Send + 'static,
+    {
+    }
+}
+
+#[cfg(windows)]
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::System::Threading::SetEvent;
+
+        self.stop_flag.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(ev_raw) = self.activate_event {
+            unsafe {
+                let _ = SetEvent(HANDLE(ev_raw));
+            }
+        }
+        if let Some(jh) = self.listener_thread.lock().take() {
+            let _ = jh.join();
+        }
+        if let Some(ev_raw) = self.activate_event.take() {
+            unsafe {
+                let _ = CloseHandle(HANDLE(ev_raw));
+            }
+        }
+        if self.mutex_handle != 0 {
+            unsafe {
+                let _ = CloseHandle(HANDLE(self.mutex_handle));
+            }
+            self.mutex_handle = 0;
+        }
+    }
+}
+
+/// 既存インスタンスのメインウィンドウを最小化状態から復元し、最前面へアクティブ化する。
+/// 最大化状態のウィンドウに対して `SW_RESTORE` を呼ぶと通常サイズに戻ってしまうため、最小化時のみ復元を実行する。
+fn bring_main_window_to_front(window: &tauri::Window) {
+    if window.is_minimized().unwrap_or(false) {
+        let _ = window.unminimize();
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    #[cfg(windows)]
+    {
+        if let Ok(hwnd_ptr) = window.hwnd() {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                IsIconic, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST,
+                HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+            };
+
+            let hwnd = HWND(hwnd_ptr.0 as isize);
+            unsafe {
+                if IsIconic(hwnd).as_bool() {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                );
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND_NOTOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                );
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
+    }
+}
+
 fn main() {
     // Attach to parent console if running from command line (for debug logs)
     #[cfg(windows)]
     unsafe {
         let _ = windows::Win32::System::Console::AttachConsole(windows::Win32::System::Console::ATTACH_PARENT_PROCESS);
     }
+
+    // 単一インスタンス排他ロックの取得（DB 初期化・HTTP サーバー起動・WebView 生成より前に判定する）
+    let single_instance_guard = match SingleInstanceGuard::acquire(
+        SINGLE_INSTANCE_MUTEX_NAME,
+        SINGLE_INSTANCE_EVENT_NAME,
+    ) {
+        Ok(Some(guard)) => Some(std::sync::Arc::new(guard)),
+        Ok(None) => {
+            println!("[Veloce: INFO] Another instance is already running; focusing existing window and exiting.");
+            return;
+        }
+        Err(e) => {
+            // 万一 OS の排他オブジェクト作成に失敗しても、起動不能に陥らせず継続する
+            println!("[Veloce: WARN] Single-instance guard failed ({}); continuing startup.", e);
+            None
+        }
+    };
+    let single_instance_for_setup = single_instance_guard.clone();
 
     let db_conn = init_db().expect("Failed to initialize SQLite database");
     let (settings_db_conn, settings_db_existed) = init_settings_db().expect("Failed to initialize settings database");
@@ -4272,6 +4504,17 @@ fn main() {
                     .data_directory(data_dir.clone())
                     .min_inner_size(800.0, 600.0)
                     .build()?;
+            }
+
+            // 後発プロセスからの前面化要求を受け取り、既存メインウィンドウを復元・最前面化するリスナーを起動する
+            if let Some(ref guard) = single_instance_for_setup {
+                let app_handle_for_activate = app.handle();
+                guard.start_activation_listener(move || {
+                    use tauri::Manager;
+                    if let Some(main_win) = app_handle_for_activate.get_window("main") {
+                        bring_main_window_to_front(&main_win);
+                    }
+                });
             }
 
             // viewer_pool_0 はメイン画面の初回 directory-loaded 通知を契機に spawn_viewer_pool_once で一度だけ生成する
@@ -10204,5 +10447,72 @@ mod viewer_tests {
         assert_eq!(filtered[0].negative_prompt, "bad hands");
         assert_eq!(filtered[0].source, "novelai v5");
         assert!(filtered[0].meta_loaded);
+    }
+
+    #[test]
+    fn test_single_instance_guard_blocks_second_acquire_and_releases_on_drop() {
+        let pid = std::process::id();
+        let mutex_name = format!("Local\\com.matsumotoswitch.veloce.test_single_lock_{}", pid);
+        let event_name = format!("Local\\com.matsumotoswitch.veloce.test_single_ev_{}", pid);
+
+        let first = SingleInstanceGuard::acquire(&mutex_name, &event_name)
+            .expect("1回目の単一インスタンス取得がエラーなく完了すること")
+            .expect("1回目はロックを取得して Some(guard) を返すこと");
+
+        let second = SingleInstanceGuard::acquire(&mutex_name, &event_name)
+            .expect("2回目の単一インスタンス確認がエラーなく完了すること");
+        assert!(
+            second.is_none(),
+            "1つ目のガードが生存している間は2つ目の取得が None（二重起動検知）を返すこと"
+        );
+
+        drop(first);
+
+        let third = SingleInstanceGuard::acquire(&mutex_name, &event_name)
+            .expect("ガード解放後の再取得がエラーなく完了すること");
+        assert!(
+            third.is_some(),
+            "1つ目のガード解放後は再びロック取得に成功すること"
+        );
+    }
+
+    #[test]
+    fn test_single_instance_second_launch_triggers_activation_listener() {
+        let pid = std::process::id();
+        let mutex_name = format!("Local\\com.matsumotoswitch.veloce.test_activate_lock_{}", pid);
+        let event_name = format!("Local\\com.matsumotoswitch.veloce.test_activate_ev_{}", pid);
+
+        let first = SingleInstanceGuard::acquire(&mutex_name, &event_name)
+            .expect("1回目の取得が成功すること")
+            .expect("初回は Some(guard) を返すこと");
+
+        let (tx, rx) = std::sync::mpsc::channel::<usize>();
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+
+        first.start_activation_listener(move || {
+            let n = counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let _ = tx.send(n);
+        });
+
+        // 後発プロセス相当の acquire が None を返し、既存リスナーへ前面化イベントが届くこと
+        let second = SingleInstanceGuard::acquire(&mutex_name, &event_name).unwrap();
+        assert!(second.is_none(), "2回目の起動は二重起動として拒否されること");
+
+        let first_signal = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("2回目の起動で既存インスタンスの前面化リスナーが通知を受け取ること");
+        assert_eq!(first_signal, 1);
+
+        // 3回目の起動でも同じリスナーが再度発火すること（自動リセット Event の継続待機検証）
+        let third = SingleInstanceGuard::acquire(&mutex_name, &event_name).unwrap();
+        assert!(third.is_none(), "3回目の起動も二重起動として拒否されること");
+
+        let second_signal = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("3回目の起動でも前面化リスナーが再度通知を受け取ること");
+        assert_eq!(second_signal, 2);
+
+        drop(first);
     }
 }
