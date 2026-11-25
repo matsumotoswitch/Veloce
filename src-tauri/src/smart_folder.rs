@@ -515,9 +515,9 @@ pub(crate) fn query_smart_folder_image_files(
     if let Ok(mut stmt) = stmt_result {
         if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
             let raw_path: String = row.get(0)?;
-            let size: u64 = row.get(1)?;
-            let mtime: u64 = row.get(2)?;
-            let ctime: u64 = row.get(3)?;
+            let size: u64 = row.get::<_, i64>(1)? as u64;
+            let mtime: u64 = row.get::<_, i64>(2)? as u64;
+            let ctime: u64 = row.get::<_, i64>(3)? as u64;
             let width: u32 = row.get(4)?;
             let height: u32 = row.get(5)?;
             let has_thumbnail: bool = row.get(6)?;
@@ -784,9 +784,9 @@ pub(crate) fn get_smart_folder_paths(
                 if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
-                        size: row.get(1)?,
-                        mtime: row.get(2)?,
-                        ctime: row.get(3)?,
+                        size: row.get::<_, i64>(1)? as u64,
+                        mtime: row.get::<_, i64>(2)? as u64,
+                        ctime: row.get::<_, i64>(3)? as u64,
                         width: row.get(4)?,
                         height: row.get(5)?,
                         metadata: None,
@@ -826,9 +826,9 @@ pub(crate) fn get_smart_folder_paths(
                             if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
                                 Ok(SmartFolderItem {
                                     path: row.get(0)?,
-                                    size: row.get(1)?,
-                                    mtime: row.get(2)?,
-                                    ctime: row.get(3)?,
+                                    size: row.get::<_, i64>(1)? as u64,
+                                    mtime: row.get::<_, i64>(2)? as u64,
+                                    ctime: row.get::<_, i64>(3)? as u64,
                                     width: row.get(4)?,
                                     height: row.get(5)?,
                                     metadata: None,
@@ -852,9 +852,9 @@ pub(crate) fn get_smart_folder_paths(
                 if let Ok(rows) = stmt.query_map([], |row| {
                     Ok(SmartFolderItem {
                         path: row.get(0)?,
-                        size: row.get(1)?,
-                        mtime: row.get(2)?,
-                        ctime: row.get(3)?,
+                        size: row.get::<_, i64>(1)? as u64,
+                        mtime: row.get::<_, i64>(2)? as u64,
+                        ctime: row.get::<_, i64>(3)? as u64,
                         width: row.get(4)?,
                         height: row.get(5)?,
                         metadata: None,
@@ -913,7 +913,7 @@ pub(crate) fn get_smart_folder_counts_inner(
                         count = map.values().filter(|&&r| r >= 4).count();
                     }
                 } else if rule.id == "history" {
-                    count = conn.query_row("SELECT COUNT(*) FROM cache WHERE path != '' AND path IS NOT NULL", [], |row| row.get::<_, usize>(0)).unwrap_or(0);
+                    count = conn.query_row("SELECT COUNT(*) FROM cache WHERE path != '' AND path IS NOT NULL", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap_or(0);
                     if count > 100 { count = 100; }
                 }
             } else {
@@ -927,7 +927,7 @@ pub(crate) fn get_smart_folder_counts_inner(
                 });
 
                 if let Ok(mut stmt) = stmt_result {
-                    count = stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, usize>(0)).unwrap_or(0);
+                    count = stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap_or(0);
                 }
             }
             result.insert(rule.id, count);
@@ -1698,7 +1698,7 @@ mod tests {
         let eval_count = |rule: &SmartFolderRule| -> usize {
             let (q, params) = build_smart_folder_query(rule, true, false);
             let mut stmt = conn.prepare(&q).unwrap();
-            stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, usize>(0))
+            stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, i64>(0).map(|v| v as usize))
                 .unwrap()
         };
 
@@ -2222,8 +2222,8 @@ mod tests {
         };
         let plan_all = explain(&rule_all);
         assert!(
-            plan_all.iter().any(|d| d.contains("idx_cache_smart_cover_mtime_v3")),
-            "条件なし計画に idx_cache_smart_cover_mtime_v3 が現れること: {:?}",
+            plan_all.iter().any(|d| d.contains("USING COVERING INDEX idx_cache_smart_cover_mtime_v3")),
+            "条件なし計画に USING COVERING INDEX idx_cache_smart_cover_mtime_v3 が現れること: {:?}",
             plan_all
         );
         assert!(
@@ -2422,5 +2422,18 @@ mod tests {
         assert_eq!(fb_files[0].source, "sdxl");
         assert_eq!(fb_files[0].unified_search_text, "robot.png mecha, cockpit blurry sdxl");
         assert!(fb_files[0].meta_loaded);
+    }
+
+    #[test]
+    fn test_sqlite_bundled_version_is_3_54() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let version: String = conn
+            .query_row("SELECT sqlite_version()", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            version.starts_with("3.54"),
+            "同梱 SQLite バージョンが 3.54 系であること（実際: {}）",
+            version
+        );
     }
 }

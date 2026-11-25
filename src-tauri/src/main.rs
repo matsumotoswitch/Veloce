@@ -2647,7 +2647,7 @@ pub fn sync_paths_rename_batch_in_db(state: &AppState, pairs: &[(String, String)
                             if let Some(ref mut stmt) = stmt_select_cache_by_hash {
                                 if let Ok(mut rows) = stmt.query(rusqlite::params![h]) {
                                     if let Ok(Some(row)) = rows.next() {
-                                        let db_mtime: u64 = row.get(0).unwrap_or(0);
+                                        let db_mtime: u64 = row.get::<_, i64>(0).unwrap_or(0) as u64;
                                         let old_hash: String = row.get(1).unwrap_or_default();
                                         cached_info = Some((db_mtime, old_hash));
                                     }
@@ -2661,7 +2661,7 @@ pub fn sync_paths_rename_batch_in_db(state: &AppState, pairs: &[(String, String)
                         if let Some(ref mut stmt) = stmt_select_cache_by_path {
                             if let Ok(mut rows) = stmt.query(rusqlite::params![old_path, old_clean, &old_slash, &old_backslash]) {
                                 if let Ok(Some(row)) = rows.next() {
-                                    let db_mtime: u64 = row.get(0).unwrap_or(0);
+                                    let db_mtime: u64 = row.get::<_, i64>(0).unwrap_or(0) as u64;
                                     let old_hash: String = row.get(1).unwrap_or_default();
                                     cached_info = Some((db_mtime, old_hash));
                                 }
@@ -2673,7 +2673,7 @@ pub fn sync_paths_rename_batch_in_db(state: &AppState, pairs: &[(String, String)
                         let mtime = if *real_mtime > 0 { *real_mtime } else { db_mtime };
                         let new_hash_key = crate::utils::hash_path_mtime_hex(new_clean, mtime);
                         if let Some(ref mut stmt) = stmt_update_cache {
-                            let _ = stmt.execute(rusqlite::params![new_clean, &new_hash_key, mtime, &old_hash_key]);
+                            let _ = stmt.execute(rusqlite::params![new_clean, &new_hash_key, mtime as i64, &old_hash_key]);
                         }
                     }
                 }
@@ -3240,7 +3240,7 @@ pub fn sync_folder_rename_in_db_and_state(state: &AppState, old_path_exact: &str
                 while let Ok(Some(row)) = rows.next() {
                     let old_hash_key: String = row.get(0).unwrap_or_default();
                     let old_path: String = row.get(1).unwrap_or_default();
-                    let mtime: u64 = row.get(2).unwrap_or(0);
+                    let mtime: u64 = row.get::<_, i64>(2).unwrap_or(0) as u64;
 
                     if let Some(new_path) = replace_folder_prefix(&old_path, old_path_exact, new_path_exact) {
                         let new_hash_key = crate::utils::hash_path_mtime_hex(&new_path, mtime);
@@ -3458,7 +3458,7 @@ fn perform_audit_cache<F>(conn: &mut rusqlite::Connection, mut on_progress: F) -
 where
     F: FnMut(usize, usize, usize, usize)
 {
-    let total: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0)).unwrap_or(0);
+    let total: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap_or(0);
     if total == 0 {
         println!("[Veloce: INFO] audit_cache: cache is empty");
         return Ok((0, 0));
@@ -3604,9 +3604,9 @@ where
                         if let Err(e) = upd_stmt.execute(rusqlite::params![
                             new_width,
                             new_height,
-                            new_size,
-                            new_mtime,
-                            new_ctime,
+                            *new_size as i64,
+                            *new_mtime as i64,
+                            *new_ctime as i64,
                             hash_key
                         ]) {
                             println!("[Veloce: ERROR] update properties failed: {}", e);
@@ -3949,7 +3949,7 @@ fn commit_db_batch(
         conn.execute(
             "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed",
-            rusqlite::params![hash_key, path, mtime, bytes, now],
+            rusqlite::params![hash_key, path, *mtime as i64, bytes, now],
         )?;
         Ok(1)
     } else {
@@ -3961,7 +3961,7 @@ fn commit_db_batch(
             )?;
             for msg in batch {
                 let DbMsg::SaveThumbnail { hash_key, path, mtime, bytes, now } = msg;
-                stmt.execute(rusqlite::params![hash_key, path, mtime, bytes, now])?;
+                stmt.execute(rusqlite::params![hash_key, path, *mtime as i64, bytes, now])?;
             }
         }
         tx.commit()?;
@@ -5107,27 +5107,27 @@ mod viewer_tests {
         assert_eq!(deleted, 6, "Should delete 4 non-existent files and the 2 duplicates");
         
         // hash_missing should be removed
-        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_missing'", [], |row| row.get(0)).unwrap();
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_missing'", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(count, 0);
 
         // 移動されたダウンロードファイルレコードがすべて削除されていることを検証
-        let count_d1: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_1'", [], |row| row.get(0)).unwrap();
-        let count_d2: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_2'", [], |row| row.get(0)).unwrap();
-        let count_d3: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_3'", [], |row| row.get(0)).unwrap();
+        let count_d1: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_1'", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap();
+        let count_d2: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_2'", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap();
+        let count_d3: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_moved_download_3'", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(count_d1, 0, "Moved download file 1 should be removed");
         assert_eq!(count_d2, 0, "Moved download file 2 (forward slash) should be removed");
         assert_eq!(count_d3, 0, "Moved download file 3 (UNC prefix) should be removed");
 
         // hash_duplicate should be removed
-        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_duplicate'", [], |row| row.get(0)).unwrap();
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_duplicate'", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(count, 0, "Duplicate should be removed");
 
         // hash_duplicate_2 should be removed
-        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_duplicate_2'", [], |row| row.get(0)).unwrap();
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_duplicate_2'", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(count, 0, "Duplicate 2 should be removed");
         
         // hash_exists should be updated with correct size/mtime (since width/height will fail on Cargo.toml as it's not an image)
-        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_exists'", [], |row| row.get(0)).unwrap();
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM cache WHERE hash_key = 'hash_exists'", [], |row| row.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(count, 1);
         
         let size: i64 = conn.query_row("SELECT size FROM cache WHERE hash_key = 'hash_exists'", [], |row| row.get(0)).unwrap();
@@ -6125,11 +6125,11 @@ mod viewer_tests {
         assert_eq!(deleted, 2, "2件のレコードが削除されること");
 
         // cache テーブルの残り件数確認（実在ファイル1件のみ残る）
-        let remaining_cache: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get(0)).unwrap();
+        let remaining_cache: usize = conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(remaining_cache, 1, "cache テーブルには実在ファイルのみが残ること");
 
         // ratings テーブルの残り件数確認（実在ファイル1件のみ残る）
-        let remaining_ratings: usize = conn.query_row("SELECT COUNT(*) FROM ratings", [], |r| r.get(0)).unwrap();
+        let remaining_ratings: usize = conn.query_row("SELECT COUNT(*) FROM ratings", [], |r| r.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(remaining_ratings, 1, "ratings テーブルからも消失ファイルのレーティングが削除されること");
 
         // クリーンアップ
@@ -6244,18 +6244,18 @@ mod viewer_tests {
             ).unwrap();
 
             for (hash_key, path, mtime, bytes, now) in &msgs {
-                stmt.execute(rusqlite::params![hash_key, path, mtime, bytes, now]).unwrap();
+                stmt.execute(rusqlite::params![hash_key, path, *mtime as i64, bytes, now]).unwrap();
             }
         }
         tx.commit().unwrap();
 
-        let count: usize = tx_conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get(0)).unwrap();
+        let count: usize = tx_conn.query_row("SELECT COUNT(*) FROM cache", [], |r| r.get::<_, i64>(0).map(|v| v as usize)).unwrap();
         assert_eq!(count, 3, "バッチ保存された全レコードがコミットされていること");
 
         let (path, mtime, thumb): (String, u64, Vec<u8>) = tx_conn.query_row(
             "SELECT path, mtime, thumbnail FROM cache WHERE hash_key = ?",
             ["hash_2"],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, r.get(2)?)),
         ).unwrap();
         assert_eq!(path, "C:\\img2.png");
         assert_eq!(mtime, 2000);
@@ -6381,7 +6381,7 @@ mod viewer_tests {
                 let _ = conn.execute(
                     "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?, ?, ?, ?)
                      ON CONFLICT(hash_key) DO UPDATE SET thumbnail = excluded.thumbnail",
-                    rusqlite::params![hash_key, dummy_jpeg, cached_path, mtime],
+                    rusqlite::params![hash_key, dummy_jpeg, cached_path, mtime as i64],
                 );
             }
 
@@ -7295,7 +7295,7 @@ mod viewer_tests {
             let conn = pool.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![old_hash, vec![1u8, 2, 3], old_path, mtime, 100],
+                rusqlite::params![old_hash, vec![1u8, 2, 3], old_path, mtime as i64, 100],
             ).unwrap();
         }
 
@@ -8006,7 +8006,7 @@ mod viewer_tests {
             let conn = state.db_conn.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![&hash_key, &dummy_jpeg, cached_path, mtime],
+                rusqlite::params![&hash_key, &dummy_jpeg, cached_path, mtime as i64],
             )
             .unwrap();
         }
@@ -9192,7 +9192,7 @@ mod viewer_tests {
             let conn = state.db_conn.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, path, mtime, thumbnail) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![&orig_hash, &orig_path_str, real_mtime, &[0x89u8, 0x50u8, 0x4Eu8, 0x47u8][..]],
+                rusqlite::params![&orig_hash, &orig_path_str, real_mtime as i64, &[0x89u8, 0x50u8, 0x4Eu8, 0x47u8][..]],
             ).unwrap();
         }
 
@@ -9785,11 +9785,11 @@ mod viewer_tests {
 
             conn.execute(
                 "INSERT INTO cache (hash_key, path, mtime, width, height) VALUES (?1, ?2, ?3, 512, 512)",
-                rusqlite::params![&old_hash1, old1, mtime1],
+                rusqlite::params![&old_hash1, old1, mtime1 as i64],
             ).unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, path, mtime, width, height) VALUES (?1, ?2, ?3, 1024, 768)",
-                rusqlite::params![&old_hash3, old3, mtime3],
+                rusqlite::params![&old_hash3, old3, mtime3 as i64],
             ).unwrap();
         }
         {
@@ -9877,7 +9877,7 @@ mod viewer_tests {
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, metadata, width, height, path, size, mtime, ctime, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source)
                  VALUES (?1, ?2, ?3, 1024, 1024, ?4, ?5, ?6, ?6, '', '', '', 'None')",
-                rusqlite::params![&hash_key, vec![1u8, 2, 3], legacy_json, &path_str, size, mtime],
+                rusqlite::params![&hash_key, vec![1u8, 2, 3], legacy_json, &path_str, size as i64, mtime as i64],
             ).unwrap();
         }
 

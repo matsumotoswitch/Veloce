@@ -907,7 +907,7 @@ pub(crate) fn commit_pending_thumbnails_batch(
         let p = &pending_writes[0];
         conn.execute(
             sql,
-            rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.mtime, p.now],
+            rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.mtime as i64, p.now],
         )?;
         return Ok(1);
     }
@@ -916,7 +916,7 @@ pub(crate) fn commit_pending_thumbnails_batch(
     {
         let mut stmt = tx.prepare_cached(sql)?;
         for p in pending_writes {
-            stmt.execute(rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.mtime, p.now])?;
+            stmt.execute(rusqlite::params![p.hash_key, p.bytes, p.clean_path, p.mtime as i64, p.now])?;
         }
     }
     tx.commit()?;
@@ -1480,13 +1480,13 @@ mod tests {
         conn.execute(
             "INSERT INTO cache (hash_key, path, mtime, thumbnail, last_accessed) VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(hash_key) DO UPDATE SET thumbnail=excluded.thumbnail, path=excluded.path, mtime=excluded.mtime, last_accessed=excluded.last_accessed",
-            rusqlite::params![&hash_key, &test_path, test_mtime, &thumb_bytes, now],
+            rusqlite::params![&hash_key, &test_path, test_mtime as i64, &thumb_bytes, now],
         ).unwrap();
 
         let (saved_path, saved_mtime, saved_thumb): (String, u64, Vec<u8>) = conn.query_row(
             "SELECT path, mtime, thumbnail FROM cache WHERE hash_key = ?",
             [&hash_key],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, r.get(2)?)),
         ).unwrap();
 
         assert_eq!(saved_path, test_path, "path が空文字ではなく正しく保存されること");
@@ -1508,7 +1508,7 @@ mod tests {
         let count: usize = conn.query_row(
             "SELECT COUNT(*) FROM cache WHERE path = ?",
             [&test_path],
-            |r| r.get(0),
+            |r| r.get::<_, i64>(0).map(|v| v as usize),
         ).unwrap();
         assert_eq!(count, 0, "キャッシュ削除後に該当レコードが0件になること");
     }
@@ -2230,7 +2230,7 @@ mod tests {
             let (mtime, path): (u64, String) = conn.query_row(
                 "SELECT mtime, path FROM cache WHERE hash_key = 'hash1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get::<_, i64>(0)? as u64, row.get(1)?)),
             ).unwrap();
             assert_eq!(mtime, 12345);
             assert_eq!(path, "C:\\test\\1.png");
@@ -2250,7 +2250,7 @@ mod tests {
             let (mtime, bytes): (u64, Vec<u8>) = conn.query_row(
                 "SELECT mtime, thumbnail FROM cache WHERE hash_key = 'hash1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get::<_, i64>(0)? as u64, row.get(1)?)),
             ).unwrap();
             assert_eq!(mtime, 12345, "excluded.mtime = 0 は既存の mtime を保持すべき");
             assert_eq!(bytes, vec![4, 5, 6], "サムネイル内容は更新されるべき");
@@ -2276,8 +2276,8 @@ mod tests {
         assert_eq!(count_batch, 2);
         {
             let conn = pool.get().unwrap();
-            let mtime1: u64 = conn.query_row("SELECT mtime FROM cache WHERE hash_key = 'hash1'", [], |r| r.get(0)).unwrap();
-            let mtime2: u64 = conn.query_row("SELECT mtime FROM cache WHERE hash_key = 'hash2'", [], |r| r.get(0)).unwrap();
+            let mtime1: u64 = conn.query_row("SELECT mtime FROM cache WHERE hash_key = 'hash1'", [], |r| r.get::<_, i64>(0).map(|v| v as u64)).unwrap();
+            let mtime2: u64 = conn.query_row("SELECT mtime FROM cache WHERE hash_key = 'hash2'", [], |r| r.get::<_, i64>(0).map(|v| v as u64)).unwrap();
             assert_eq!(mtime1, 67890);
             assert_eq!(mtime2, 99999);
         }
@@ -2319,7 +2319,7 @@ mod tests {
             let conn = pool.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, ?, ?, ?)",
-                rusqlite::params![&norm_hash, vec![1u8, 2, 3, 4], &norm_unc, mtime, 100],
+                rusqlite::params![&norm_hash, vec![1u8, 2, 3, 4], &norm_unc, mtime as i64, 100],
             ).unwrap();
         }
 
@@ -2337,7 +2337,7 @@ mod tests {
             let conn = pool.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, ?, ?, ?)",
-                rusqlite::params![&empty_hash, Vec::<u8>::new(), &empty_norm, mtime, 100],
+                rusqlite::params![&empty_hash, Vec::<u8>::new(), &empty_norm, mtime as i64, 100],
             ).unwrap();
         }
         assert!(
@@ -2465,7 +2465,7 @@ mod tests {
             let conn = pool.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime, last_accessed) VALUES (?, ?, ?, ?, 10)",
-                rusqlite::params![&cached_hash, vec![9u8, 8, 7], &cached_str, cached_mtime],
+                rusqlite::params![&cached_hash, vec![9u8, 8, 7], &cached_str, cached_mtime as i64],
             ).unwrap();
         }
 

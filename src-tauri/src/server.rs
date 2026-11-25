@@ -830,7 +830,7 @@ mod tests {
             let conn = state.db_conn.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![&hash_key, &dummy_jpeg, path_str, mtime],
+                rusqlite::params![&hash_key, &dummy_jpeg, path_str, mtime as i64],
             )
             .unwrap();
         }
@@ -904,12 +904,12 @@ mod tests {
             let conn = state.db_conn.get().unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![&hash1, &body1, path1, mtime],
+                rusqlite::params![&hash1, &body1, path1, mtime as i64],
             )
             .unwrap();
             conn.execute(
                 "INSERT INTO cache (hash_key, thumbnail, path, mtime) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![&hash2, &body2, path2, mtime],
+                rusqlite::params![&hash2, &body2, path2, mtime as i64],
             )
             .unwrap();
         }

@@ -218,9 +218,9 @@ pub(crate) fn commit_pending_metadata_batch(
                 r.width,
                 r.height,
                 &r.path,
-                r.file_size,
-                r.mtime,
-                r.ctime,
+                r.file_size as i64,
+                r.mtime as i64,
+                r.ctime as i64,
                 r.now,
                 &r.sp,
                 &r.snp,
@@ -244,9 +244,9 @@ pub(crate) fn commit_pending_metadata_batch(
                 r.width,
                 r.height,
                 &r.path,
-                r.file_size,
-                r.mtime,
-                r.ctime,
+                r.file_size as i64,
+                r.mtime as i64,
+                r.ctime as i64,
                 r.now,
                 &r.sp,
                 &r.snp,
@@ -1074,7 +1074,7 @@ pub(crate) fn save_metadata_cache_row_if_needed(
             let _ = conn.execute(
                 "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(hash_key) DO UPDATE SET metadata=excluded.metadata, width=excluded.width, height=excluded.height, path=excluded.path, size=excluded.size, mtime=excluded.mtime, ctime=excluded.ctime, last_accessed=excluded.last_accessed, searchable_prompt=excluded.searchable_prompt, searchable_negative_prompt=excluded.searchable_negative_prompt, searchable_source=excluded.searchable_source, metadata_source=excluded.metadata_source",
-                rusqlite::params![&r.hash_key, &r.json_str, r.width, r.height, &r.path, r.file_size, r.mtime, r.ctime, r.now, &r.sp, &r.snp, &r.ss, &r.metadata_source]
+                rusqlite::params![&r.hash_key, &r.json_str, r.width, r.height, &r.path, r.file_size as i64, r.mtime as i64, r.ctime as i64, r.now, &r.sp, &r.snp, &r.ss, &r.metadata_source]
             );
         }
     }
@@ -2450,9 +2450,9 @@ mod tests {
         let mut rows = stmt.query([&file_path_str]).unwrap();
         let row = rows.next().unwrap().expect("Row should exist");
         
-        let size: u64 = row.get(0).unwrap();
-        let mtime: u64 = row.get(1).unwrap();
-        let ctime: u64 = row.get(2).unwrap();
+        let size: u64 = row.get::<_, i64>(0).unwrap() as u64;
+        let mtime: u64 = row.get::<_, i64>(1).unwrap() as u64;
+        let ctime: u64 = row.get::<_, i64>(2).unwrap() as u64;
         
         assert_eq!(size, test_data.len() as u64); // "dummy test data".len() = 15
         assert!(mtime > 0);
@@ -4361,7 +4361,7 @@ mod tests {
             conn.execute(
                 "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source)
                  VALUES (?, ?, 64, 64, ?, ?, 1000, 1000, 1000, '1girl, ooyodo', '', 'NovelAI', 'PNG Chunks')",
-                rusqlite::params![hash_key, old_meta, png_path.to_str().unwrap(), png_size],
+                rusqlite::params![hash_key, old_meta, png_path.to_str().unwrap(), png_size as i64],
             ).unwrap();
         }
 
@@ -4418,7 +4418,7 @@ mod tests {
             conn.execute(
                 "INSERT INTO cache (hash_key, metadata, width, height, path, size, mtime, ctime, last_accessed, searchable_prompt, searchable_negative_prompt, searchable_source, metadata_source)
                  VALUES (?, ?, 64, 64, ?, ?, 1000, 1000, 1000, '1girl, ooyodo', '', 'NovelAI Diffusion V5', 'JPEG COM')",
-                rusqlite::params![jpg_hash_key, old_jpeg_meta, jpg_path.to_str().unwrap(), jpg_size],
+                rusqlite::params![jpg_hash_key, old_jpeg_meta, jpg_path.to_str().unwrap(), jpg_size as i64],
             ).unwrap();
         }
 
