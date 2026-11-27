@@ -1675,9 +1675,16 @@ table#file-table {
 
 
 /* ツールバー & レイアウト補助 */
+.search-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .rating-filter-wrapper {
   display: flex;
-  gap: 8px;
+  gap: 4px;
 }
 
 /* レーティングドロップダウンの幅設定：「指定なし」「ちょうど」等のラベルが省略されず完全表示される幅を確保 */

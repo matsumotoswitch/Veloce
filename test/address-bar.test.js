@@ -179,11 +179,14 @@ describe('Address Bar & Search Box Split (v1.20.0)', () => {
       expect(layoutCss).toMatch(/\.toolbar\s+#address-bar\s*\{[^}]*flex:\s*1;/);
       expect(layoutCss).toMatch(/\.toolbar\s+#search-container\s*\{[^}]*flex:\s*0 0 260px;/);
       expect(layoutCss).toMatch(/\.address-bar-segment-label\s*\{[^}]*text-overflow:\s*ellipsis;/);
-      // 検索ボックス右側の隙間およびレーティングフィルタ間の隙間を .toolbar の gap (8px) に統一する
+      // 検索ボックス・レーティングフィルタ・クリアボタン間の隙間を 4px に統一する
+      const searchGroupMatch = layoutCss.match(/\.search-controls-group\s*\{([^}]+)\}/);
+      expect(searchGroupMatch).not.toBeNull();
+      expect(searchGroupMatch[1]).toMatch(/gap:\s*4px;/);
       const ratingWrapperMatch = layoutCss.match(/\.rating-filter-wrapper\s*\{([^}]+)\}/);
       expect(ratingWrapperMatch).not.toBeNull();
       expect(ratingWrapperMatch[1]).not.toContain('margin-left');
-      expect(ratingWrapperMatch[1]).toMatch(/gap:\s*8px;/);
+      expect(ratingWrapperMatch[1]).toMatch(/gap:\s*4px;/);
     });
 
     it('renders breadcrumb segments and navigates when a segment is clicked', async () => {
