@@ -67,7 +67,9 @@ import { initResizers, updateResizerToggleStates } from './renderer-resizer.js';
 import {
   updateThumbnailSize,
   setupThumbnailSliderEvents,
-  setupSearchBarEvents
+  setupSearchBarEvents,
+  toggleTagInQuery,
+  resolveChipFilterMode
 } from './renderer-toolbar.js';
 import {
   createSmartFolderNode,
@@ -3161,6 +3163,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   `;
   document.head.appendChild(globalTagStyle);
 
+  // Shift+クリックによるチップ操作時にブラウザ既定のテキスト範囲選択が走らないよう mousedown で抑止する
+  document.body.addEventListener('mousedown', (e) => {
+    if (e.shiftKey && e.target && e.target.closest && e.target.closest('.diff-tag')) {
+      e.preventDefault();
+    }
+  }, true);
+
   let _lastCopiedTags = "";
   document.body.addEventListener('click', async (e) => {
     const tagEl = e.target.closest('.diff-tag');
@@ -3168,6 +3177,45 @@ window.addEventListener('DOMContentLoaded', async () => {
       try {
         const text = tagEl.textContent;
         if (text) {
+          // Shift+クリック: タグを検索ボックスのフィルタ（UCセクションは除外）としてトグルし、コピーは行わない
+          if (e.shiftKey && tagEl.dataset?.nonFilterable !== 'true') {
+            e.preventDefault();
+            if (window.getSelection) {
+              window.getSelection().removeAllRanges();
+            }
+            const tagText = text.trim();
+            if (!tagText) return;
+
+            const mode = resolveChipFilterMode(tagEl);
+            const currentQuery = (uiManager.elements.searchBar ? uiManager.elements.searchBar.value : appState.searchQuery) || '';
+            const prevCount = currentQuery.split(',').map(t => t.trim()).filter(Boolean).length;
+            const nextQuery = toggleTagInQuery(currentQuery, tagText, mode);
+            const nextCount = nextQuery.split(',').map(t => t.trim()).filter(Boolean).length;
+            const isAdded = nextCount > prevCount;
+
+            if (uiManager.elements.searchBar) {
+              uiManager.elements.searchBar.value = nextQuery;
+            }
+            appState.searchQuery = nextQuery;
+            updateFilterIndicator();
+            scheduleRefresh(true);
+
+            const displayTxt = tagText.length > 30 ? tagText.substring(0, 30) + '...' : tagText;
+            const prefix = mode === 'exclude'
+              ? (isAdded ? '除外に追加: ' : '除外から解除: ')
+              : (isAdded ? 'フィルタに追加: ' : 'フィルタから解除: ');
+            if (typeof uiManager !== 'undefined' && uiManager) {
+              uiManager.showToast(prefix + displayTxt, 3000, null, 'success');
+              uiManager.applyGlowEffect(tagEl);
+              if (typeof uiManager.hideCustomTooltip === 'function') {
+                uiManager.hideCustomTooltip();
+              }
+            } else if (typeof showNotification === 'function') {
+              showNotification(prefix + displayTxt, 'success');
+            }
+            return;
+          }
+
           let textToCopy = text;
           let isAppended = false;
           // Ctrl+Click の場合は内部キャッシュをもとにカンマ区切りで追記する

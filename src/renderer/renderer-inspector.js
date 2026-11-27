@@ -18,8 +18,12 @@ import {
   extractMetadataFields,
   highlightSearchTerms,
   buildInspectorSections,
-  createSearchTermsRegex
+  createSearchTermsRegex,
+  isExcludeSectionTitle
 } from '../common/metadata-format.js';
+
+const CHIP_HINT_INCLUDE = 'クリックでコピー / Shift+クリックでフィルタ切替';
+const CHIP_HINT_EXCLUDE = 'クリックでコピー / Shift+クリックで除外切替';
 
 // --- DOM Pool for Inspector ---
 const inspectorSectionPool = [];
@@ -125,7 +129,12 @@ export function resetInspectorPools() {
     sec.box.style.cssText = '';
   }
   for (let i = 0; i < inspectorTagIndex; i++) {
-    inspectorTagPool[i].classList.remove('search-match');
+    const tag = inspectorTagPool[i];
+    tag.classList.remove('search-match');
+    tag.removeAttribute('title');
+    delete tag.dataset.tooltip;
+    delete tag.dataset.filterMode;
+    delete tag.dataset.nonFilterable;
   }
   inspectorSectionIndex = 0;
   inspectorTagIndex = 0;
@@ -203,6 +212,10 @@ export async function renderMultipleSelectionSummary() {
   const tag1 = getInspectorTag();
   tag1.style.cssText = '';
   tag1.className = 'diff-tag common';
+  tag1.removeAttribute('title');
+  delete tag1.dataset.tooltip;
+  delete tag1.dataset.filterMode;
+  tag1.dataset.nonFilterable = 'true';
   tag1.textContent = `選択数: ${count} 件 (フォルダ内 ${total} 件中 ${pct}%)`;
   sec1.box.appendChild(tag1);
 
@@ -227,6 +240,10 @@ export async function renderMultipleSelectionSummary() {
     const tag = getInspectorTag();
     tag.style.cssText = '';
     tag.className = 'diff-tag common';
+    tag.removeAttribute('title');
+    delete tag.dataset.tooltip;
+    delete tag.dataset.filterMode;
+    tag.dataset.nonFilterable = 'true';
     tag.textContent = sc;
     sec2.box.appendChild(tag);
   }
@@ -282,6 +299,11 @@ export function initInspectorDelegation(options = {}) {
     const copyBtn = e.target.closest('.diff-copy-btn');
     if (copyBtn) {
       uiManager.showCustomTooltip('コピー', e.clientX, e.clientY);
+      return;
+    }
+    const chip = e.target.closest('.diff-tag');
+    if (chip && chip.dataset && chip.dataset.tooltip) {
+      uiManager.showCustomTooltip(chip.dataset.tooltip, e.clientX, e.clientY);
     } else {
       uiManager.hideCustomTooltip();
     }
@@ -550,8 +572,18 @@ export async function renderMetadata(file, options = {}) {
         secEl.box.style.cssText = '';
 
         const tags = String(section.value).split(/[,\n\r]+/).map(t => t.trim()).filter(t => t);
+        const isExcludeSection = isExcludeSectionTitle(section.title);
+        const filterMode = isExcludeSection ? 'exclude' : 'include';
+        const chipHint = isExcludeSection ? CHIP_HINT_EXCLUDE : CHIP_HINT_INCLUDE;
+
         for (const t of tags) {
           const tagEl = getInspectorTag();
+          // DOM Pool 再利用時に前回のヒントや属性が残留しないよう描画ごとに明示設定する
+          // ネイティブ title は OS 標準ツールチップが二重表示されるため使用せず、Veloce 共通カスタムツールチップへ委譲する
+          tagEl.removeAttribute('title');
+          tagEl.dataset.tooltip = chipHint;
+          tagEl.dataset.filterMode = filterMode;
+          delete tagEl.dataset.nonFilterable;
 
           if (termsRegex) {
             termsRegex.lastIndex = 0;

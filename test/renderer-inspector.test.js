@@ -275,6 +275,83 @@ describe('renderer-inspector.js', () => {
 
       delete window.veloceAPI;
     });
+
+    it('should highlight chips matching exclude query terms (-tag) and show custom tooltip hints without native title across DOM Pool reuse', async () => {
+      uiManager.elements.searchBar.value = '1girl, -lowres';
+      const showTooltipSpy = vi.spyOn(uiManager, 'showCustomTooltip');
+      const hideTooltipSpy = vi.spyOn(uiManager, 'hideCustomTooltip');
+      window.veloceAPI = {
+        parseMetadata: vi.fn().mockResolvedValue({
+          prompt: '1girl, smile',
+          negativePrompt: 'lowres, blurry'
+        })
+      };
+
+      await renderMetadata({ path: 'C:\\test\\highlight.png', width: 512, height: 512 });
+
+      const container = document.getElementById('inspector-content');
+      const sections = Array.from(container.querySelectorAll('.inspector-section-block'));
+      const promptSec = sections.find(
+        sec => sec.querySelector('.inspector-title-wrapper > span')?.textContent === 'プロンプト'
+      );
+      const ucSec = sections.find(
+        sec => sec.querySelector('.inspector-title-wrapper > span')?.textContent === '除外したい要素'
+      );
+
+      expect(promptSec).toBeDefined();
+      expect(ucSec).toBeDefined();
+
+      const promptChips = Array.from(promptSec.querySelectorAll('.diff-tag'));
+      const ucChips = Array.from(ucSec.querySelectorAll('.diff-tag'));
+
+      expect(promptChips[0].classList.contains('search-match')).toBe(true);
+      expect(promptChips[0].hasAttribute('title')).toBe(false);
+      expect(promptChips[0].dataset.tooltip).toBe('クリックでコピー / Shift+クリックでフィルタ切替');
+      expect(promptChips[0].dataset.filterMode).toBe('include');
+
+      // 除外語 (-lowres) に一致する UC チップもハイライト対象になること
+      expect(ucChips[0].classList.contains('search-match')).toBe(true);
+      expect(ucChips[0].innerHTML).toContain('<mark class="search-highlight">lowres</mark>');
+      expect(ucChips[0].hasAttribute('title')).toBe(false);
+      expect(ucChips[0].dataset.tooltip).toBe('クリックでコピー / Shift+クリックで除外切替');
+      expect(ucChips[0].dataset.filterMode).toBe('exclude');
+
+      // ホバー（mousemove）で Veloce 共通カスタムツールチップが表示されること
+      promptChips[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 120, clientY: 220 }));
+      expect(showTooltipSpy).toHaveBeenCalledWith('クリックでコピー / Shift+クリックでフィルタ切替', 120, 220);
+
+      ucChips[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 140, clientY: 260 }));
+      expect(showTooltipSpy).toHaveBeenCalledWith('クリックでコピー / Shift+クリックで除外切替', 140, 260);
+
+      container.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 10, clientY: 10 }));
+      expect(hideTooltipSpy).toHaveBeenCalled();
+
+      // DOM Pool 再利用時に前のセクションのヒントが残留しないこと
+      uiManager.elements.searchBar.value = '';
+      window.veloceAPI.parseMetadata = vi.fn().mockResolvedValue({
+        prompt: 'solo',
+        negativePrompt: ''
+      });
+      await renderMetadata({ path: 'C:\\test\\reused.png', width: 512, height: 512 });
+
+      const reusedPromptChip = container.querySelector('.inspector-section-block .diff-tag');
+      expect(reusedPromptChip.textContent).toBe('solo');
+      expect(reusedPromptChip.hasAttribute('title')).toBe(false);
+      expect(reusedPromptChip.dataset.tooltip).toBe('クリックでコピー / Shift+クリックでフィルタ切替');
+      expect(reusedPromptChip.dataset.filterMode).toBe('include');
+
+      // 複数選択サマリー描画時はチップのヒントがクリアされていること
+      appState.selection = new Set([0, 1]);
+      await renderMultipleSelectionSummary();
+      const summaryTags = container.querySelectorAll('.diff-tag');
+      summaryTags.forEach(tag => {
+        expect(tag.hasAttribute('title')).toBe(false);
+        expect(tag.dataset.tooltip).toBeUndefined();
+        expect(tag.dataset.nonFilterable).toBe('true');
+      });
+
+      delete window.veloceAPI;
+    });
   });
 
   describe('initInspectorDelegation & Header Path Context Menu', () => {

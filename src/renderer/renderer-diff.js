@@ -6,8 +6,11 @@
 // ============================================================================
 
 import { escapeHtml, isAudioFile, getAudioCoverUrl, AUDIO_PLACEHOLDER_URL } from '../common/utils.js';
-import { extractMetadataFields, parsePromptTags, formatRequestType } from '../common/metadata-format.js';
+import { extractMetadataFields, parsePromptTags, formatRequestType, isExcludeSectionTitle } from '../common/metadata-format.js';
 import { UIManager, uiManager } from './renderer-ui.js';
+
+const CHIP_HINT_INCLUDE = 'クリックでコピー / Shift+クリックでフィルタ切替';
+const CHIP_HINT_EXCLUDE = 'クリックでコピー / Shift+クリックで除外切替';
 
 /**
  * 2つの画像/メディアファイルのメタデータ差分比較モーダルを表示します。
@@ -43,13 +46,17 @@ export function showDiffModal(file1, file2, meta1 = {}, meta2 = {}, uiInstance =
     const hasDiff = tags1.join(',') !== tags2.join(',');
     const titleClass = hasDiff ? 'has-diff' : '';
 
+    const isExcludeSection = isExcludeSectionTitle(title);
+    const filterMode = isExcludeSection ? 'exclude' : 'include';
+    const chipHint = isExcludeSection ? CHIP_HINT_EXCLUDE : CHIP_HINT_INCLUDE;
+
     const renderTags = (tags, otherSet, mode) => {
       if (tags.length === 0 || tags[0] === '-') return '<span class="diff-tag-empty">なし</span>';
       return tags.map(t => {
         let className = 'common';
         if (mode === 'left' && !otherSet.has(t)) className = 'removed';
         if (mode === 'right' && !otherSet.has(t)) className = 'added';
-        return `<span class="diff-tag ${className}">${escapeHtml(t)}</span>`;
+        return `<span class="diff-tag ${className}" data-filter-mode="${filterMode}" data-tooltip="${chipHint}">${escapeHtml(t)}</span>`;
       }).join('');
     };
 
@@ -411,6 +418,26 @@ export function showDiffModal(file1, file2, meta1 = {}, meta2 = {}, uiInstance =
       e.preventDefault();
     });
   });
+
+  if (container.dataset.chipTooltipDelegated !== 'true') {
+    container.dataset.chipTooltipDelegated = 'true';
+    container.addEventListener('mousemove', (e) => {
+      if (e.target.closest('.diff-copy-btn')) return;
+      const chip = e.target.closest('.diff-tag');
+      if (chip && chip.dataset && chip.dataset.tooltip) {
+        if (ui && typeof ui.showCustomTooltip === 'function') {
+          ui.showCustomTooltip(chip.dataset.tooltip, e.clientX, e.clientY);
+        }
+      } else if (ui && typeof ui.hideCustomTooltip === 'function') {
+        ui.hideCustomTooltip();
+      }
+    });
+    container.addEventListener('mouseleave', () => {
+      if (ui && typeof ui.hideCustomTooltip === 'function') {
+        ui.hideCustomTooltip();
+      }
+    });
+  }
 
   modal.classList.add('show');
 

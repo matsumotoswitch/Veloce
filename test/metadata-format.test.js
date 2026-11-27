@@ -39,6 +39,19 @@ describe('Metadata Format Utils', () => {
       const highlighted = highlightSearchTerms(text, ['cat']);
       expect(highlighted).toContain('<mark class="search-highlight">cat</mark>');
     });
+
+    it('should strip leading hyphen from exclude terms when building highlight regex and ignore bare hyphen', () => {
+      expect(createSearchTermsRegex(['-'])).toBeNull();
+      expect(createSearchTermsRegex(['-  ', ''])).toBeNull();
+
+      const regex = createSearchTermsRegex(['1girl', '-lowres', '-bad hands']);
+      expect(regex).toBeInstanceOf(RegExp);
+
+      const highlighted = highlightSearchTerms('1girl, lowres, bad hands, solo', regex);
+      expect(highlighted).toContain('<mark class="search-highlight">1girl</mark>');
+      expect(highlighted).toContain('<mark class="search-highlight">lowres</mark>');
+      expect(highlighted).toContain('<mark class="search-highlight">bad hands</mark>');
+    });
   });
 
   describe('formatMetadataNumber', () => {

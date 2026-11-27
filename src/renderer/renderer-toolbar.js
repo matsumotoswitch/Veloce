@@ -9,8 +9,101 @@ import { appState } from './renderer-state.js';
 import { UIManager, uiManager } from './renderer-ui.js';
 import { debounce } from '../common/utils.js';
 import { setSetting } from '../common/settings-store.js';
+import { isExcludeSectionTitle } from '../common/metadata-format.js';
 
 const DEFAULT_SEARCH_DELAY = 300;
+
+/**
+ * タグ比較用に文字列を正規化する（小文字化、アンダースコアをスペース置換、連続スペースを単一スペース化）。
+ * 検索ボックスへ書き戻す表記自体は改変せず、トグルの在不在判定のみに使用する。
+ * @param {string} value
+ * @returns {string}
+ */
+export function normalizeTagForMatch(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * 検索クエリ文字列に対して指定タグを include または exclude モードでトグル（追加／解除）する純粋関数。
+ * - カンマ区切り・trim した語の列として扱い、対象外の語の表記と順序はそのまま保持する。
+ * - 在不在判定は normalizeTagForMatch による表記ゆれ吸収（大文字小文字・`_` とスペース差）で行う。
+ * - include モードは包含語のみ、exclude モードは除外語（`-` 接頭辞）のみを対象とする。
+ * - 追加時は末尾にチップ元の表記のまま（exclude は `-` を前置して）追加し、`, ` で結合して返す。
+ *
+ * @param {string} query - 現在の検索クエリ文字列
+ * @param {string} tag - トグル対象のチップ文字列
+ * @param {'include'|'exclude'} [mode='include'] - フィルタ種別
+ * @returns {string} 更新後の検索クエリ文字列
+ */
+export function toggleTagInQuery(query, tag, mode = 'include') {
+  const safeQuery = typeof query === 'string' ? query : '';
+  const trimmedTag = typeof tag === 'string' ? tag.trim() : '';
+  if (!trimmedTag) return safeQuery;
+
+  const targetNorm = normalizeTagForMatch(trimmedTag);
+  if (!targetNorm) return safeQuery;
+
+  const isExcludeMode = mode === 'exclude';
+  const rawTerms = safeQuery
+    .split(',')
+    .map(t => t.trim())
+    .filter(Boolean);
+
+  let found = false;
+  const remaining = [];
+
+  for (let i = 0; i < rawTerms.length; i++) {
+    const term = rawTerms[i];
+    const isTermExclude = term.startsWith('-') && term.slice(1).trim() !== '';
+
+    if (isExcludeMode) {
+      if (isTermExclude && normalizeTagForMatch(term.slice(1)) === targetNorm) {
+        found = true;
+        continue;
+      }
+    } else {
+      if (!isTermExclude && normalizeTagForMatch(term) === targetNorm) {
+        found = true;
+        continue;
+      }
+    }
+    remaining.push(term);
+  }
+
+  if (found) {
+    return remaining.join(', ');
+  }
+
+  const appendedTerm = isExcludeMode ? `-${trimmedTag}` : trimmedTag;
+  remaining.push(appendedTerm);
+  return remaining.join(', ');
+}
+
+/**
+ * クリックされたチップ要素（.diff-tag）が除外系セクションに属するか判定し、'exclude' | 'include' を返す。
+ * 描画時に付与された data-filter-mode 属性を優先し、未付与の場合は所属セクションの見出しタイトルから判定する。
+ * @param {HTMLElement|null|undefined} tagEl
+ * @returns {'include'|'exclude'}
+ */
+export function resolveChipFilterMode(tagEl) {
+  if (!tagEl) return 'include';
+  if (tagEl.dataset && (tagEl.dataset.filterMode === 'exclude' || tagEl.dataset.filterMode === 'include')) {
+    return tagEl.dataset.filterMode;
+  }
+  const section = tagEl.closest ? tagEl.closest('.inspector-section, .diff-section') : null;
+  if (!section) return 'include';
+  const titleSpan =
+    section.querySelector('.inspector-title-wrapper > span') ||
+    section.querySelector('h3 > span > span') ||
+    section.querySelector('h3');
+  const titleText = titleSpan ? titleSpan.textContent : '';
+  return isExcludeSectionTitle(titleText) ? 'exclude' : 'include';
+}
 
 /**
  * サムネイルサイズスライダーの値をもとにCSS変数とツールチップを同期更新する

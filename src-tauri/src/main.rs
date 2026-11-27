@@ -628,6 +628,38 @@ pub(crate) fn apply_cached_metadata_to_files(
     }
 }
 
+/// 検索ボックスのクエリ文字列を包含語（includes）と除外語（excludes）に分解する。
+/// カンマ区切りで分割し、各語をトリムおよび小文字化する。
+/// `-` で始まり残りが空でない語は先頭の `-` を除いた文字列を除外語とし、`-` 単独や空語は無視する。
+/// 同一語の重複は出現順を保ったまま除去する。
+pub(crate) fn parse_search_terms(query: &str) -> (Vec<String>, Vec<String>) {
+    let mut includes: Vec<String> = Vec::new();
+    let mut excludes: Vec<String> = Vec::new();
+
+    for raw in query.split(',') {
+        let trimmed = raw.trim().to_lowercase();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix('-') {
+            let excluded = rest.trim();
+            if !excluded.is_empty() && !excludes.iter().any(|existing| existing == excluded) {
+                excludes.push(excluded.to_string());
+            }
+        } else if !includes.iter().any(|existing| existing == &trimmed) {
+            includes.push(trimmed);
+        }
+    }
+
+    (includes, excludes)
+}
+
+/// 検索対象テキストが包含語すべてに部分一致し、かつ除外語のいずれにも部分一致しないかを判定する。
+pub(crate) fn matches_search_terms(text: &str, includes: &[String], excludes: &[String]) -> bool {
+    includes.iter().all(|term| text.contains(term.as_str()))
+        && !excludes.iter().any(|term| text.contains(term.as_str()))
+}
+
 /// 指定されたディレクトリスキャンまたはスマートフォルダ検索をバックグラウンドスレッドで開始する
 /// 走査結果はソートおよびサムネイルキャッシュ一括照会を経て、イベント `dir-load-progress` / `dir-load-complete` でフロントエンドへストリーミング通知される
 #[tauri::command]
@@ -778,17 +810,16 @@ fn load_directory(
                     }
 
                     // 検索クエリおよびレーティングフィルタの確認
-                    let search_terms: Vec<String> = state.search_query.read()
-                        .to_lowercase()
-                        .split(',')
-                        .map(|t| t.trim().to_string())
-                        .filter(|t| !t.is_empty())
-                        .collect();
+                    let (include_terms, exclude_terms) = {
+                        let query_guard = state.search_query.read();
+                        parse_search_terms(&query_guard)
+                    };
+                    let has_search_terms = !include_terms.is_empty() || !exclude_terms.is_empty();
                     let rating_val = *state.rating_filter_val.lock();
                     let rating_op = state.rating_filter_op.lock().clone();
 
-                    let has_filter = !search_terms.is_empty() || rating_val > 0;
-                    if !search_terms.is_empty() {
+                    let has_filter = has_search_terms || rating_val > 0;
+                    if has_search_terms {
                         crate::smart_folder::hydrate_smart_folder_search_text(&mut files, &db_conn_sf);
                         state
                             .smart_search_hydrated
@@ -807,15 +838,19 @@ fn load_directory(
                         files
                     } else {
                         // フィルタあり: 既にソート済みの順序を維持したまま高速並列フィルタリング（再ソート不要）
-                        let mut filtered_vec: Vec<std::sync::Arc<ImageFile>> = if search_terms.is_empty() {
+                        let mut filtered_vec: Vec<std::sync::Arc<ImageFile>> = if !has_search_terms {
                             files.clone()
                         } else {
                             use rayon::prelude::*;
                             files
                                 .par_iter()
                                 .filter(|f| {
-                                    search_terms.iter().all(|term| f.unified_search_text.contains(term))
-                                    })
+                                    matches_search_terms(
+                                        &f.unified_search_text,
+                                        &include_terms,
+                                        &exclude_terms,
+                                    )
+                                })
                                 .cloned()
                                 .collect()
                         };
@@ -1750,7 +1785,9 @@ pub fn should_update_viewer_list(
 
 pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &AppState) -> usize {
     let search_query = state.search_query.read().clone();
-    if !search_query.trim().is_empty()
+    let (include_terms, exclude_terms) = parse_search_terms(&search_query);
+    let has_search_terms = !include_terms.is_empty() || !exclude_terms.is_empty();
+    if has_search_terms
         && state.current_dir.read().starts_with("smart://")
         && !state.smart_search_hydrated.load(std::sync::atomic::Ordering::Acquire)
     {
@@ -1760,21 +1797,13 @@ pub(crate) fn apply_filters_and_sort(app: Option<&tauri::AppHandle>, state: &App
     let all_files = state.all_files.read();
     let sort_config = state.sort_config.read().clone();
 
-    let mut filtered: Vec<std::sync::Arc<ImageFile>> = if search_query.trim().is_empty() {
+    let mut filtered: Vec<std::sync::Arc<ImageFile>> = if !has_search_terms {
         all_files.clone()
     } else {
         use rayon::prelude::*;
-        let terms: Vec<String> = search_query
-            .to_lowercase()
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect();
         all_files
             .par_iter()
-            .filter(|f| {
-                terms.iter().all(|term| f.unified_search_text.contains(term))
-            })
+            .filter(|f| matches_search_terms(&f.unified_search_text, &include_terms, &exclude_terms))
             .cloned()
             .collect()
     };
@@ -1927,7 +1956,8 @@ pub(crate) fn set_view_params_inner(
         return state.filtered_files.read().len();
     }
 
-    let has_search_query = !search_query.trim().is_empty();
+    let (inc_check, exc_check) = parse_search_terms(&search_query);
+    let has_search_query = !inc_check.is_empty() || !exc_check.is_empty();
     *state.sort_config.write() = SortConfig { key: sort_key, asc };
     *state.search_query.write() = search_query;
     *state.rating_filter_val.lock() = rating_filter_val;
@@ -10514,5 +10544,134 @@ mod viewer_tests {
         assert_eq!(second_signal, 2);
 
         drop(first);
+    }
+
+    #[test]
+    fn test_parse_search_terms_variants() {
+        // 包含のみ
+        assert_eq!(
+            parse_search_terms("1girl, smile"),
+            (vec!["1girl".to_string(), "smile".to_string()], Vec::new())
+        );
+
+        // 除外のみ
+        assert_eq!(
+            parse_search_terms("-lowres, -bad anatomy"),
+            (
+                Vec::new(),
+                vec!["lowres".to_string(), "bad anatomy".to_string()]
+            )
+        );
+
+        // 包含・除外の混在
+        assert_eq!(
+            parse_search_terms("1girl, -lowres, solo, -blurry"),
+            (
+                vec!["1girl".to_string(), "solo".to_string()],
+                vec!["lowres".to_string(), "blurry".to_string()]
+            )
+        );
+
+        // `-` 単独・空要素は無視される
+        assert_eq!(
+            parse_search_terms("-, -  , , 1girl, -"),
+            (vec!["1girl".to_string()], Vec::new())
+        );
+        assert_eq!(parse_search_terms("-"), (Vec::new(), Vec::new()));
+
+        // 空白・大文字混じり
+        assert_eq!(
+            parse_search_terms("  Hatsune_Miku ,  -Worst Quality  "),
+            (
+                vec!["hatsune_miku".to_string()],
+                vec!["worst quality".to_string()]
+            )
+        );
+
+        // 重複語（大文字小文字差含む）は順序を保って重複排除される
+        assert_eq!(
+            parse_search_terms("1girl, 1GIRL, solo, -lowres, -LOWRES"),
+            (
+                vec!["1girl".to_string(), "solo".to_string()],
+                vec!["lowres".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn test_matches_search_terms_and_apply_filters_exclude_syntax() {
+        // 述語単体テスト
+        let (inc_only, exc_empty) = parse_search_terms("1girl, smile");
+        assert!(matches_search_terms("1girl, bright smile", &inc_only, &exc_empty));
+        assert!(!matches_search_terms("1girl, serious", &inc_only, &exc_empty));
+
+        let (inc_empty, exc_only) = parse_search_terms("-lowres");
+        assert!(matches_search_terms("1girl, masterpiece", &inc_empty, &exc_only));
+        assert!(!matches_search_terms("1girl, lowres", &inc_empty, &exc_only));
+
+        let (inc_mix, exc_mix) = parse_search_terms("1girl, -lowres");
+        assert!(matches_search_terms("1girl, masterpiece", &inc_mix, &exc_mix));
+        assert!(!matches_search_terms("1girl, lowres", &inc_mix, &exc_mix));
+        assert!(!matches_search_terms("1boy, masterpiece", &inc_mix, &exc_mix));
+
+        // apply_filters_and_sort の実統合テスト（除外のみ・混在・包含のみ）
+        let (db_tx, _db_rx) = tokio::sync::mpsc::channel(1);
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        let state = AppState::new(pool.clone(), pool, false, db_tx, 0, "test_token".to_string());
+        let make_file = |name: &str, text: &str| {
+            std::sync::Arc::new(ImageFile {
+                name: name.to_string(),
+                ext: ".png".into(),
+                path: format!(r"C:\test\{}", name),
+                size: 100,
+                mtime: 1,
+                ctime: 1,
+                width: 512,
+                height: 512,
+                has_thumbnail_cache: false,
+                prompt: String::new(),
+                negative_prompt: String::new(),
+                source: String::new(),
+                meta_loaded: true,
+                search_text: String::new(),
+                unified_search_text: text.to_string(),
+                hash_key: Default::default(),
+            })
+        };
+        *state.all_files.write() = vec![
+            make_file("a.png", "a.png 1girl smile masterpiece"),
+            make_file("b.png", "b.png 1girl lowres bad hands"),
+            make_file("c.png", "c.png 1boy landscape masterpiece"),
+        ];
+
+        // 除外のみのクエリで lowres を含む b.png のみ落ちること
+        *state.search_query.write() = "-lowres".to_string();
+        assert_eq!(apply_filters_and_sort(None, &state), 2);
+        let names: Vec<String> = state
+            .filtered_files
+            .read()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
+        assert_eq!(names, vec!["a.png", "c.png"]);
+
+        // 包含＋除外の混在で a.png のみ残ること
+        *state.search_query.write() = "1girl, -lowres".to_string();
+        assert_eq!(apply_filters_and_sort(None, &state), 1);
+        assert_eq!(state.filtered_files.read()[0].name, "a.png");
+
+        // 包含のみの従来挙動が不変であること
+        *state.search_query.write() = "1girl".to_string();
+        assert_eq!(apply_filters_and_sort(None, &state), 2);
+        let inc_names: Vec<String> = state
+            .filtered_files
+            .read()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
+        assert_eq!(inc_names, vec!["a.png", "b.png"]);
     }
 }

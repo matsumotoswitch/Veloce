@@ -111,12 +111,12 @@ export function extractMetadataFields(file, meta = {}) {
   const p = meta.params || {};
   let requestType = p.request_type || null;
 
-  const isVibeTransfer = 
+  const isVibeTransfer =
     (Array.isArray(p.reference_information_extracted_multiple) && p.reference_information_extracted_multiple.length > 0) ||
     (Array.isArray(p.reference_image_multiple) && p.reference_image_multiple.length > 0) ||
     (Array.isArray(p.reference_strength_multiple) && p.reference_strength_multiple.length > 0);
 
-  const isCharacterReference = 
+  const isCharacterReference =
     (Array.isArray(p.director_reference_strengths) && p.director_reference_strengths.length > 0) ||
     (Array.isArray(p.director_reference_information_extracted) && p.director_reference_information_extracted.length > 0) ||
     (Array.isArray(p.director_reference_images) && p.director_reference_images.length > 0) ||
@@ -159,7 +159,7 @@ export function extractMetadataFields(file, meta = {}) {
     }
   }
   const ap = (p && typeof p.actual_prompts === 'object') ? p.actual_prompts :
-             ((p && typeof p.actualPrompts === 'object') ? p.actualPrompts : null);
+    ((p && typeof p.actualPrompts === 'object') ? p.actualPrompts : null);
 
   const currentPrompt = meta.prompt || (!isAudioMeta && file.prompt) || '';
   let adoptedPrompt = null;
@@ -286,9 +286,9 @@ export function extractMetadataFields(file, meta = {}) {
   data.charPositions = charPositions;
 
   const useCoords = (p && typeof p.use_coords === 'boolean') ? p.use_coords :
-                    (meta && typeof meta.use_coords === 'boolean') ? meta.use_coords :
-                    (file && typeof file.use_coords === 'boolean') ? file.use_coords :
-                    (p && p.v4_prompt && typeof p.v4_prompt.use_coords === 'boolean') ? p.v4_prompt.use_coords : null;
+    (meta && typeof meta.use_coords === 'boolean') ? meta.use_coords :
+      (file && typeof file.use_coords === 'boolean') ? file.use_coords :
+        (p && p.v4_prompt && typeof p.v4_prompt.use_coords === 'boolean') ? p.v4_prompt.use_coords : null;
   data.useCoords = useCoords;
 
   const w = p.width || meta.width || file.width;
@@ -337,14 +337,36 @@ export function parsePromptTags(text) {
 }
 
 /**
+ * セクションタイトルが除外系（UC: 除外したい要素、採用除外したい要素、キャラクター N 除外したい要素等）かを判定します。
+ * パラメータ項目（「除外したい要素の強さ」）は除外します。
+ * @param {string|null|undefined} title
+ * @returns {boolean}
+ */
+export function isExcludeSectionTitle(title) {
+  if (typeof title !== 'string') return false;
+  const trimmed = title.trim();
+  return trimmed === '除外したい要素' || trimmed.endsWith('除外したい要素');
+}
+
+/**
  * 検索語の配列からハイライト用の単一正規表現を生成します。
+ * 除外構文（`-tag`）は先頭の `-` を取り除いてハイライト対象に含め、`-` 単独や空語は無視します。
  * タグごとの重複コンパイルを排除し、パフォーマンスを最適化します。
  * @param {string[]} terms
  * @returns {RegExp|null}
  */
 export function createSearchTermsRegex(terms) {
   if (!terms || !Array.isArray(terms) || terms.length === 0) return null;
-  const validTerms = terms.map(t => String(t).trim()).filter(Boolean);
+  const validTerms = terms
+    .map(t => {
+      const trimmed = String(t).trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('-')) {
+        return trimmed.slice(1).trim();
+      }
+      return trimmed;
+    })
+    .filter(Boolean);
   if (validTerms.length === 0) return null;
   // 特殊文字をエスケープして正規表現パターンを構築
   const escaped = validTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
@@ -547,9 +569,9 @@ function parseComfyUI(file, meta, p) {
       for (let i = 1; i < w.length; i++) {
         if (typeof w[i] === 'number' && Number.isInteger(w[i]) && w[i] > 1) {
           steps = w[i];
-          if (typeof w[i+1] === 'number') cfg = w[i+1];
-          if (typeof w[i+2] === 'string') samplerName = w[i+2];
-          if (typeof w[i+3] === 'string') samplerName += ' ' + w[i+3];
+          if (typeof w[i + 1] === 'number') cfg = w[i + 1];
+          if (typeof w[i + 2] === 'string') samplerName = w[i + 2];
+          if (typeof w[i + 3] === 'string') samplerName += ' ' + w[i + 3];
           break;
         }
       }
@@ -557,7 +579,7 @@ function parseComfyUI(file, meta, p) {
 
     const posNode = traceLink(sampler, 'positive');
     positivePrompt = extractTextFromNode(posNode);
-    
+
     const negNode = traceLink(sampler, 'negative');
     negativePrompt = extractTextFromNode(negNode);
 
@@ -577,7 +599,7 @@ function parseComfyUI(file, meta, p) {
       height = latent.widgets_values[1];
     }
   }
-  
+
   if (!positivePrompt && !negativePrompt) {
     const clips = nodes.filter(n => n.type === 'CLIPTextEncode');
     if (clips.length > 0) {
@@ -619,7 +641,7 @@ function parseComfyUI(file, meta, p) {
  */
 function parseA1111(file, meta, p) {
   const raw = p.rawParameters || '';
-  
+
   let positivePrompt = '';
   let negativePrompt = '';
   const parsedParams = {};
@@ -649,7 +671,7 @@ function parseA1111(file, meta, p) {
 
     // ネガティブプロンプトとポジティブプロンプトの抽出
     let textBeforeParams = lines.slice(0, paramLineIndex).join('\n').trim();
-    
+
     // "Negative prompt: " で分割
     const negIndex = textBeforeParams.indexOf('Negative prompt:');
     if (negIndex !== -1) {
