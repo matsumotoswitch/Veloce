@@ -84,6 +84,13 @@ import {
   setupNavButtonEvents,
   initNavUpButton
 } from './renderer-nav.js';
+import {
+  initAddressBar,
+  renderAddressBar,
+  enterAddressBarEditMode,
+  closeAddressBarMenu,
+  isAddressBarMenuOpen
+} from './renderer-address-bar.js';
 import { getSetting, setSetting, getFolderSort, setFolderSort } from '../common/settings-store.js';
 import { renderFavorites, initBookmarkEvents } from './renderer-bookmarks.js';
 import {
@@ -174,6 +181,15 @@ initNav({
   getTabNameForPath
 });
 
+// アドレスバー連携コールバックの即時初期化
+initAddressBar({
+  refreshFileList,
+  expandTreeToPath,
+  saveTabsState,
+  getTabNameForPath,
+  showNotification
+});
+
 // タブ一覧メニュー
 const tabListMenu = document.createElement('div');
 tabListMenu.id = 'tab-list-menu';
@@ -241,6 +257,7 @@ async function refreshFileList(showToast = false) {
   try {
     appState.pushHistory(appState.currentDirectory);
     updateNavButtons();
+    renderAddressBar();
     // Rust側のバックグラウンド処理をキックする（直前の最新ソート設定を保存のみ反映、再ソートはload_directoryに委ねる）
     if (window.veloceAPI && window.veloceAPI.setViewParams) {
       await appState.setViewParams(true);
@@ -1366,9 +1383,11 @@ const closeAllMenus = (e) => {
   // テキストノードがクリックされた場合は親要素を取得
   if (t && t.nodeType === Node.TEXT_NODE) t = t.parentNode;
 
+  const isChevronClick = Boolean(t && t.closest && t.closest('.address-bar-chevron'));
+
   if (t && t.closest) {
     // メニュー自身をクリックした場合は閉じない
-    if (t.closest('#context-menu') || t.closest('#tab-list-menu') || t.closest('#history-menu') || t.closest('#bookmark-overflow-menu')) return;
+    if (t.closest('#context-menu') || t.closest('#tab-list-menu') || t.closest('#history-menu') || t.closest('#bookmark-overflow-menu') || t.closest('#address-bar-menu')) return;
     // タブリスト展開ボタンは専用のトグル制御があるため無視
     if (t.closest('#titlebar-tab-list')) return;
     // 履歴ボタンでのクリック時は長押しによるメニュー維持を優先するため除外
@@ -1386,6 +1405,9 @@ const closeAllMenus = (e) => {
   if (historyMenu) historyMenu.classList.remove('show');
   const overflowMenu = document.getElementById('bookmark-overflow-menu');
   if (overflowMenu) overflowMenu.classList.remove('show');
+  if (!isChevronClick) {
+    closeAddressBarMenu();
+  }
 
   const tabListBtn = document.getElementById('titlebar-tab-list');
   if (tabListBtn) tabListBtn.classList.remove('open');
@@ -1775,6 +1797,14 @@ export const globalKeydownHandler = async (e) => {
     return;
   }
 
+  // 2.5 アドレスバーのテキスト編集モード起動 (Ctrl + L)
+  if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key.toLowerCase() === 'l' || e.code === 'KeyL')) {
+    if (isModalOrOverlayOpen()) return;
+    e.preventDefault();
+    enterAddressBarEditMode();
+    return;
+  }
+
   // 3. テキスト入力欄フォーカス時は、Escape以外の一般ショートカットを無視
   if ((activeTagName === 'input' || activeTagName === 'textarea') && e.key !== 'Escape') {
     return;
@@ -1821,12 +1851,13 @@ export const globalKeydownHandler = async (e) => {
     }
     const historyMenu = document.getElementById('history-menu');
     const overflowMenu = document.getElementById('bookmark-overflow-menu');
-    if (contextMenu.classList.contains('show') || tabListMenu.classList.contains('show') || (historyMenu && historyMenu.classList.contains('show')) || (overflowMenu && overflowMenu.classList.contains('show'))) {
+    if (contextMenu.classList.contains('show') || tabListMenu.classList.contains('show') || (historyMenu && historyMenu.classList.contains('show')) || (overflowMenu && overflowMenu.classList.contains('show')) || isAddressBarMenuOpen()) {
       e.preventDefault();
       contextMenu.classList.remove('show');
       tabListMenu.classList.remove('show');
       if (historyMenu) historyMenu.classList.remove('show');
       if (overflowMenu) overflowMenu.classList.remove('show');
+      closeAddressBarMenu();
       const overflowBtn = document.getElementById('bookmark-overflow-btn');
       if (overflowBtn) overflowBtn.classList.remove('open');
       const tabListBtn = document.getElementById('titlebar-tab-list');
@@ -2195,7 +2226,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     expandTreeToPath,
     clearMetadataUI,
     updateNavButtons,
-    updateSortIndicators
+    updateSortIndicators,
+    renderAddressBar
   });
 
   initInspectorDelegation({ contextMenuManager });
@@ -2234,6 +2266,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     expandTreeToPath,
     saveTabsState,
     getTabNameForPath
+  });
+
+  initAddressBar({
+    refreshFileList,
+    expandTreeToPath,
+    saveTabsState,
+    getTabNameForPath,
+    showNotification
   });
 
     setupNavButtonEvents('nav-back-btn', -1, '戻る');
@@ -3253,6 +3293,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     uiManager.showToast('フォルダを読み込み中', 0, 'dir-load-progress', 'info');
 
     updateNavButtons();
+    renderAddressBar();
 
     // 起動時のディレクトリ読み込み前にソート条件をバックエンドへ同期させ、initialChunkが正しくソートされるようにする
     if (window.veloceAPI.setViewParams) {

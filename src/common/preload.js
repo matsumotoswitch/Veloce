@@ -28,6 +28,7 @@ const { LogicalSize, LogicalPosition } = tauriWindow;
  * @property {(file: import('./renderer-state.js').ImageFile) => Promise<number>} notifyFileChanged
  * @property {(path: string) => Promise<number>} notifyFileRemoved
  * @property {(dirPath: string) => Promise<Array<{name: string, path: string}>>} getFolders
+ * @property {(dirPath: string) => Promise<Array<{name: string, path: string, hasChildren?: boolean}>>} getSubfolders
  * @property {(filePaths: string[]) => Promise<any[]>} getFullMetadataBatch
  * @property {(filePath: string) => Promise<string>} getThumbnail
  * @property {(filePath: string) => Promise<any>} parseMetadata
@@ -175,6 +176,13 @@ window.veloceAPI = {
    */
   notifyFileRemoved: (path) => invoke('notify_file_removed', { path }),
   notifyFilesBatch: (changedFiles, removedPaths) => invoke('notify_files_batch', { changedFiles, removedPaths }),
+  /**
+   * 指定されたパス直下のサブフォルダ一覧を get_subfolders IPC 経由で直接取得します。
+   * 呼び出し元で取得失敗を画面通知できるよう、エラーは握りつぶさず伝播させます。
+   * @param {string} dirPath - 調査する親ディレクトリのパス。
+   * @returns {Promise<Array<{name: string, path: string, hasChildren?: boolean}>>}
+   */
+  getSubfolders: (dirPath) => invoke('get_subfolders', { dirPath }),
   /**
    * 指定されたパス内のサブフォルダのリストを取得します。
    * Rust側の高速コマンド get_subfolders を優先し、ディレクトリのみ抽出＋子ディレクトリ有無を返却します。

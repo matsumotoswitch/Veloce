@@ -68,7 +68,8 @@ export function initTabHandlers(ctx) {
     expandTreeToPath,
     clearMetadataUI,
     updateNavButtons,
-    updateSortIndicators
+    updateSortIndicators,
+    renderAddressBar
   } = ctx;
 
   window.onTabClick = async (index) => {
@@ -129,6 +130,7 @@ export function initTabHandlers(ctx) {
       appState.savedScrollTopGrid = tab.scrollTop || 0;
 
       updateNavButtons();
+      if (typeof renderAddressBar === 'function') renderAddressBar();
 
       window.veloceAPI.loadDirectory(tab.path);
 
@@ -250,6 +252,7 @@ export function initTabHandlers(ctx) {
           uiManager.renderAll(true);
           clearMetadataUI();
           updateNavButtons();
+          if (typeof renderAddressBar === 'function') renderAddressBar();
           
           if (window.veloceAPI.setViewParams) {
             await appState.setViewParams(true);

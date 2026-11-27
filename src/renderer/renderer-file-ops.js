@@ -12,6 +12,7 @@ import { resetThumbnailPreloader } from './renderer-thumbnails.js';
 import { setSetting } from '../common/settings-store.js';
 import { saveTabsState, getTabNameForPath } from './renderer-tabs.js';
 import { renderFavorites } from './renderer-bookmarks.js';
+import { renderAddressBar } from './renderer-address-bar.js';
 
 export { fileOpsState };
 
@@ -182,6 +183,9 @@ export function syncFolderRenameInRendererState(oldPath, newPath) {
     if (Array.isArray(appState.tabs)) {
       saveTabsState(appState, uiManager);
     }
+    if (result.currentDirChanged) {
+      renderAddressBar();
+    }
   }
 
   return result;
@@ -234,6 +238,9 @@ export function syncFolderDeleteInRendererState(deletedFolderPath) {
     }
     if (Array.isArray(appState.tabs)) {
       saveTabsState(appState, uiManager);
+    }
+    if (result.currentDirChanged) {
+      renderAddressBar();
     }
   }
 

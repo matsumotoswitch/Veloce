@@ -56,9 +56,13 @@
     <button id="nav-reload-btn" class="icon-btn toolbar-btn" title="再読み込み (F5)">
       <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-refresh-cw"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
     </button>
+    <div id="address-bar" class="address-bar">
+      <div id="address-bar-breadcrumbs" class="address-bar-breadcrumbs"></div>
+      <input type="text" id="address-bar-input" class="address-bar-input" spellcheck="false" autocomplete="off" aria-label="フォルダパス">
+    </div>
     <div class="control-divider"></div>
     <div id="search-container">
-      <input type="text" id="search-bar" placeholder="検索 (ファイル名, プロンプト等 / カンマでAND検索)" spellcheck="false">
+      <input type="text" id="search-bar" placeholder="検索（ファイル名・プロンプト等）" spellcheck="false">
     </div>
     <div id="rating-filter-container" class="rating-filter-wrapper">
       <div class="custom-select" id="custom-rating-val-container" tabindex="0" title="レーティング">

@@ -12,6 +12,10 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
 
   beforeAll(async () => {
     document.body.innerHTML = `
+      <div id="address-bar" class="address-bar">
+        <div id="address-bar-breadcrumbs" class="address-bar-breadcrumbs"></div>
+        <input type="text" id="address-bar-input" class="address-bar-input" />
+      </div>
       <input type="text" id="search-input" />
       <div id="center-top"></div>
       <div id="center-bottom">
@@ -188,6 +192,40 @@ describe('Renderer Global Shortcuts & Focus Management', () => {
       expect(preventDefaultSpy).toHaveBeenCalled();
       expect(focusSpy).toHaveBeenCalled();
       expect(selectSpy).toHaveBeenCalled();
+    });
+
+    it('should enter address bar edit mode and select full path on Ctrl+L', async () => {
+      appState.currentDirectory = 'C:\\Users\\Photos';
+      const bar = document.getElementById('address-bar');
+      const addrInput = document.getElementById('address-bar-input');
+      const focusSpy = vi.spyOn(addrInput, 'focus');
+      const selectSpy = vi.spyOn(addrInput, 'select');
+
+      const event = new window.KeyboardEvent('keydown', { key: 'l', ctrlKey: true, cancelable: true });
+      const preventDefaultSpy = vi.spyOn(event, 'preventDefault');
+      await globalKeydownHandler(event);
+
+      expect(preventDefaultSpy).toHaveBeenCalled();
+      expect(bar.classList.contains('editing')).toBe(true);
+      expect(addrInput.value).toBe('C:\\Users\\Photos');
+      expect(focusSpy).toHaveBeenCalled();
+      expect(selectSpy).toHaveBeenCalled();
+      expect(window.veloceAPI.arrangeViewers).not.toHaveBeenCalled();
+
+      // Cleanup back to breadcrumb mode
+      addrInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      expect(bar.classList.contains('editing')).toBe(false);
+    });
+
+    it('should not enter address bar edit mode on Ctrl+L for smart:// or PC', async () => {
+      const bar = document.getElementById('address-bar');
+      appState.currentDirectory = 'smart://fav_5';
+      await globalKeydownHandler(new window.KeyboardEvent('keydown', { key: 'l', ctrlKey: true, cancelable: true }));
+      expect(bar.classList.contains('editing')).toBe(false);
+
+      appState.currentDirectory = 'PC';
+      await globalKeydownHandler(new window.KeyboardEvent('keydown', { key: 'l', ctrlKey: true, cancelable: true }));
+      expect(bar.classList.contains('editing')).toBe(false);
     });
 
     it('should open viewer on Enter with filePath', async () => {

@@ -199,6 +199,12 @@
   border: 1px solid var(--border-color-light);
 }
 
+:root[data-theme="light"] #address-bar {
+  background: var(--sunken-bg);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color-light);
+}
+
 :root[data-theme="light"] .custom-select {
   background-color: #f5f6f8;
 }
@@ -207,6 +213,20 @@
   background: #ffffff;
   border-color: var(--accent-color);
   box-shadow: 0 0 0 2px var(--accent-focus-ring);
+}
+
+:root[data-theme="light"] #address-bar:focus-within,
+:root[data-theme="light"] #address-bar.editing {
+  background: var(--input-focus-bg);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-focus-ring);
+}
+
+:root[data-theme="light"] #address-bar.error,
+:root[data-theme="light"] #address-bar.error:focus-within,
+:root[data-theme="light"] #address-bar.editing.error {
+  border-color: var(--danger-red);
+  box-shadow: 0 0 0 2px rgba(var(--danger-rgb), 0.25);
 }
 
 :root[data-theme="light"] #bookmark-bar {
@@ -706,9 +726,234 @@ body.is-resizing .app-content {
   background-color: var(--top-bar-bg);
 }
 
-.toolbar #search-container {
+.toolbar #address-bar {
   flex: 1;
-  max-width: none;
+  min-width: 0;
+}
+
+#address-bar {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  box-sizing: border-box;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  overflow: hidden;
+  cursor: text;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+#address-bar.readonly {
+  cursor: default;
+}
+
+#address-bar:focus-within,
+#address-bar.editing {
+  background: var(--input-focus-bg);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-hover-tint);
+}
+
+#address-bar.error,
+#address-bar.error:focus-within,
+#address-bar.editing.error {
+  border-color: var(--danger-red);
+  box-shadow: 0 0 0 2px rgba(var(--danger-rgb), 0.25);
+}
+
+.address-bar-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding-right: 20px;
+  box-sizing: border-box;
+  overflow: hidden;
+  gap: 1px;
+}
+
+#address-bar.editing .address-bar-breadcrumbs {
+  display: none;
+}
+
+.address-bar-segment {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.address-bar-segment:hover {
+  background-color: var(--accent-hover-tint);
+  color: var(--text-light);
+}
+
+.address-bar-segment:focus-visible {
+  outline: none;
+  background-color: var(--accent-hover-tint);
+  color: var(--text-light);
+}
+
+.address-bar-segment.virtual {
+  cursor: default;
+}
+
+.address-bar-segment.virtual:hover {
+  background-color: transparent;
+  color: var(--text-color);
+}
+
+.address-bar-segment-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.address-bar-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-color);
+  opacity: 0.7;
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  line-height: 1;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.address-bar-chevron:hover,
+.address-bar-chevron.open {
+  background-color: var(--accent-hover-tint);
+  color: var(--text-light);
+  opacity: 1;
+}
+
+.address-bar-chevron:focus-visible {
+  outline: none;
+  background-color: var(--accent-hover-tint);
+  color: var(--text-light);
+  opacity: 1;
+}
+
+.address-bar-input {
+  display: none;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-color);
+  outline: none;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  padding: 0 2px;
+  box-shadow: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#address-bar.editing .address-bar-input {
+  display: block;
+}
+
+.address-bar-input:focus,
+.address-bar-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+#address-bar-menu {
+  position: fixed;
+  z-index: 10001;
+  min-width: 180px;
+  max-width: 340px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 4px 0;
+  background-color: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--popup-shadow);
+  font-size: var(--font-size-sm);
+  transform-origin: top left;
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.88) translateY(-6px);
+  transition: opacity 0.16s var(--transition-close), transform 0.16s var(--transition-close), visibility 0.16s;
+  pointer-events: none;
+}
+
+#address-bar-menu.show {
+  visibility: visible;
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  transition: opacity 0.22s var(--transition-bounce), transform 0.22s var(--transition-bounce), visibility 0.22s;
+  pointer-events: auto;
+}
+
+.address-bar-menu-item {
+  grid-template-columns: 16px minmax(0, 1fr);
+}
+
+.address-bar-menu-item .menu-item-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.address-bar-menu-item.current {
+  color: var(--text-light);
+  background-color: var(--accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent-color);
+  font-weight: bold;
+}
+
+.address-bar-menu-item.current:hover {
+  background-color: var(--accent-active-tint);
+}
+
+.address-bar-menu-status {
+  padding: 6px 12px;
+  color: var(--text-color);
+  opacity: 0.7;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.toolbar #search-container {
+  flex: 0 0 260px;
+  width: 260px;
+  max-width: 260px;
+  box-sizing: border-box;
 }
 
 #search-container {
@@ -1432,8 +1677,7 @@ table#file-table {
 /* ツールバー & レイアウト補助 */
 .rating-filter-wrapper {
   display: flex;
-  gap: 4px;
-  margin-left: 8px;
+  gap: 8px;
 }
 
 /* レーティングドロップダウンの幅設定：「指定なし」「ちょうど」等のラベルが省略されず完全表示される幅を確保 */
